@@ -1,0 +1,638 @@
+"""Safeer signed feed client: verification, anti-rollback storage and fast matching.
+
+Self-contained (Python standard library only). Uses the ``cryptography`` package for Ed25519 when it
+is installed and falls back to a strict RFC 8032 verifier otherwise. Shared by Safeer Browser for
+Linux and Windows and used by the backend test suite as the reference client.
+
+Security properties
+-------------------
+* A manifest is accepted only if an Ed25519 signature from a trusted key covers its exact bytes.
+* A bundle is accepted only if its size, SHA-256 and its own Ed25519 signature match the manifest.
+* Versions only move forward (anti-rollback); expired manifests are refused.
+* Any failure keeps the last verified bundle in use. Stored bundles are re-verified when loaded.
+"""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import ipaddress
+import json
+import os
+import re
+import tempfile
+import threading
+import urllib.request
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from urllib.parse import urlsplit
+
+SCHEMA_VERSION = 1
+BUNDLE_CONTEXT = b"safeer-bundle-v1\n"
+MANIFEST_CONTEXT = b"safeer-manifest-v1\n"
+MAX_MANIFEST_BYTES = 64 * 1024
+MAX_BUNDLE_BYTES = 48 * 1024 * 1024
+INDICATOR_TYPES = ("domain", "hostname", "url", "ipv4", "ipv6")
+CATEGORIES = ("botnet_c2", "malware", "phishing", "scam", "ads", "tracker")
+FEED_CATEGORIES = {"threats": frozenset({"botnet_c2", "malware", "phishing", "scam"}),
+                   "adblock": frozenset({"ads", "tracker"})}
+SEVERITY = {"botnet_c2": 6, "malware": 5, "phishing": 4, "scam": 3, "tracker": 2, "ads": 1}
+_HEX64 = re.compile(r"^[0-9a-f]{64}$")
+_TIME = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+_HOST = re.compile(r"^(?=.{4,253}$)(?:[a-z0-9_](?:[a-z0-9_-]{0,61}[a-z0-9_])?\.)+(?:[a-z]{2,63}|xn--[a-z0-9-]{1,59})$")
+_URL = re.compile(r"^https?://[\x21\x23-\x5b\x5d-\x7e]+$")
+_IPV6_TEXT = re.compile(r"^[0-9a-f:]{2,39}$")
+
+
+class FeedVerificationError(Exception):
+    """The downloaded data is not acceptable. The previously verified bundle stays in use."""
+
+
+class RollbackError(FeedVerificationError):
+    pass
+
+
+class ExpiredFeedError(FeedVerificationError):
+    pass
+
+
+class UpToDate(Exception):
+    """The server offers the version that is already installed."""
+
+
+# --------------------------------------------------------------------------------------------------
+# Ed25519 verification
+# --------------------------------------------------------------------------------------------------
+
+try:  # pragma: no cover - exercised implicitly where cryptography is installed
+    from cryptography.exceptions import InvalidSignature as _InvalidSignature
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey as _Ed25519PublicKey
+except Exception:  # pragma: no cover
+    _Ed25519PublicKey = None
+
+_P = 2**255 - 19
+_L = 2**252 + 27742317777372353535851937790883648493
+_D = -121665 * pow(121666, _P - 2, _P) % _P
+_SQRT_M1 = pow(2, (_P - 1) // 4, _P)
+
+
+def _point_add(a, b):
+    x1, y1, z1, t1 = a
+    x2, y2, z2, t2 = b
+    aa = (y1 - x1) * (y2 - x2) % _P
+    bb = (y1 + x1) * (y2 + x2) % _P
+    cc = t1 * 2 * _D * t2 % _P
+    dd = z1 * 2 * z2 % _P
+    e, f, g, h = bb - aa, dd - cc, dd + cc, bb + aa
+    return (e * f % _P, g * h % _P, f * g % _P, e * h % _P)
+
+
+def _scalar_mult(scalar, point):
+    result = (0, 1, 1, 0)
+    while scalar:
+        if scalar & 1:
+            result = _point_add(result, point)
+        point = _point_add(point, point)
+        scalar >>= 1
+    return result
+
+
+def _point_equal(a, b):
+    x1, y1, z1, _ = a
+    x2, y2, z2, _ = b
+    return (x1 * z2 - x2 * z1) % _P == 0 and (y1 * z2 - y2 * z1) % _P == 0
+
+
+def _recover_x(y, sign):
+    if y >= _P:
+        return None
+    x2 = (y * y - 1) * pow(_D * y * y + 1, _P - 2, _P) % _P
+    if x2 == 0:
+        return None if sign else 0
+    x = pow(x2, (_P + 3) // 8, _P)
+    if (x * x - x2) % _P != 0:
+        x = x * _SQRT_M1 % _P
+    if (x * x - x2) % _P != 0:
+        return None
+    if (x & 1) != sign:
+        x = _P - x
+    return x
+
+
+def _decode_point(data):
+    y = int.from_bytes(data, "little")
+    sign = y >> 255
+    y &= (1 << 255) - 1
+    x = _recover_x(y, sign)
+    if x is None:
+        return None
+    return (x, y, 1, x * y % _P)
+
+
+_BASE = (
+    15112221349535400772501151409588531511454012693041857206046113283949847762202,
+    46316835694926478169428394003475163141307993866256225615783033603165251855960,
+    1,
+    46827403850823179245072216630277197565144205554125654976674165829533817101731,
+)
+
+
+def _pure_verify(public: bytes, message: bytes, signature: bytes) -> bool:
+    if len(public) != 32 or len(signature) != 64:
+        return False
+    point_a = _decode_point(public)
+    point_r = _decode_point(signature[:32])
+    s = int.from_bytes(signature[32:], "little")
+    if point_a is None or point_r is None or s >= _L:
+        return False
+    k = int.from_bytes(hashlib.sha512(signature[:32] + public + message).digest(), "little") % _L
+    left = _scalar_mult(s, _BASE)
+    right = _point_add(point_r, _scalar_mult(k, point_a))
+    return _point_equal(left, right)
+
+
+def ed25519_verify(public: bytes, message: bytes, signature: bytes) -> bool:
+    if len(public) != 32 or len(signature) != 64:
+        return False
+    if _Ed25519PublicKey is not None:
+        try:
+            _Ed25519PublicKey.from_public_bytes(public).verify(signature, message)
+            return True
+        except (_InvalidSignature, ValueError):
+            return False
+    return _pure_verify(public, message, signature)
+
+
+# --------------------------------------------------------------------------------------------------
+# Canonical JSON and verification
+# --------------------------------------------------------------------------------------------------
+
+def canonical_json(value) -> bytes:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")
+
+
+MAX_SAFE_INTEGER = 2**53 - 1
+MAX_SOURCES = 256
+
+
+_DISALLOWED_BYTE = re.compile(rb"[^\x09\x0a\x0d\x20-\x7e]")
+
+
+def _check_text(data: bytes) -> None:
+    """Only printable ASCII and JSON whitespace; inside strings only the escapes \\" and \\\\."""
+    if _DISALLOWED_BYTE.search(data):
+        raise FeedVerificationError("character outside printable ASCII")
+    # Escapes pair up from the left, exactly like bytes.replace; any backslash left over is another escape.
+    if b"\\" in data.replace(b"\\\\", b"").replace(b'\\"', b""):
+        raise FeedVerificationError("unsupported escape sequence")
+
+
+def _check_values(value, depth=0) -> None:
+    if depth > 8:
+        raise FeedVerificationError("nesting too deep")
+    if isinstance(value, dict):
+        for item in value.values():
+            _check_values(item, depth + 1)
+    elif isinstance(value, list):
+        for item in value:
+            _check_values(item, depth + 1)
+    elif isinstance(value, str):
+        if any(not 0x20 <= ord(ch) <= 0x7E for ch in value):
+            raise FeedVerificationError("string outside printable ASCII")
+    elif isinstance(value, bool) or not isinstance(value, int):
+        raise FeedVerificationError("only objects, arrays, strings and integers are allowed")
+    elif not 0 <= value <= MAX_SAFE_INTEGER:
+        raise FeedVerificationError("integer out of range")
+
+
+def _strict_loads(data: bytes):
+    def no_duplicates(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise FeedVerificationError(f"duplicate key {key!r}")
+            result[key] = value
+        return result
+
+    def no_floats(_):
+        raise FeedVerificationError("floating point numbers are not allowed")
+
+    def unsigned_int(text):
+        if text.startswith("-"):
+            raise FeedVerificationError("signed integers are not allowed")
+        return int(text)
+
+    _check_text(data)
+    try:
+        text = data.decode("ascii")
+        value = json.loads(text, object_pairs_hook=no_duplicates, parse_float=no_floats,
+                           parse_constant=no_floats, parse_int=unsigned_int)
+    except (UnicodeDecodeError, ValueError, RecursionError) as exc:
+        raise FeedVerificationError(f"invalid JSON: {exc.__class__.__name__}") from exc
+    _check_values(value)
+    return value
+
+
+def _b64decode(text) -> bytes:
+    """Standard base64 with padding; decoding and re-encoding must give the same text."""
+    if not isinstance(text, str):
+        raise FeedVerificationError("expected base64 text")
+    try:
+        raw = base64.b64decode(text.encode("ascii"), validate=True)
+    except (ValueError, UnicodeEncodeError) as exc:
+        raise FeedVerificationError("invalid base64") from exc
+    if base64.b64encode(raw).decode("ascii") != text:
+        raise FeedVerificationError("non-canonical base64")
+    return raw
+
+
+def _parse_time(value) -> datetime:
+    if not isinstance(value, str) or not _TIME.match(value) or value[:4] < "1970":
+        raise FeedVerificationError("invalid timestamp")
+    try:
+        return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except ValueError as exc:
+        raise FeedVerificationError("invalid timestamp") from exc
+
+
+def _int(value, name, minimum=0):
+    if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+        raise FeedVerificationError(f"invalid {name}")
+    return value
+
+
+def _signature_shape_ok(entry) -> bool:
+    return (isinstance(entry, dict) and set(entry) == {"alg", "key_id", "sig"}
+            and all(isinstance(entry[name], str) for name in ("alg", "key_id", "sig")))
+
+
+def _signature_ok(entry, trusted_keys, context, data) -> bool:
+    if not _signature_shape_ok(entry) or entry["alg"] != "ed25519":
+        return False
+    public = trusted_keys.get(entry["key_id"])
+    if not public:
+        return False
+    try:
+        return ed25519_verify(_b64decode(public), context + data, _b64decode(entry["sig"]))
+    except FeedVerificationError:
+        return False
+
+
+@dataclass(frozen=True)
+class Manifest:
+    feed_type: str
+    version: int
+    generated_at: datetime
+    expires_at: datetime
+    rule_count: int
+    rules_sha256: str
+    bundle_path: str
+    bundle_size: int
+    bundle_sha256: str
+    bundle_signature: dict
+    raw_envelope: bytes
+
+
+def verify_manifest(envelope_bytes: bytes, trusted_keys: dict, feed_type: str, *, installed_version: int = 0,
+                    now: datetime | None = None, check_expiry: bool = True) -> Manifest:
+    if len(envelope_bytes) > MAX_MANIFEST_BYTES:
+        raise FeedVerificationError("manifest too large")
+    envelope = _strict_loads(envelope_bytes)
+    if not isinstance(envelope, dict) or set(envelope) != {"signed", "signatures"}:
+        raise FeedVerificationError("invalid manifest envelope")
+    signed = _b64decode(envelope["signed"])
+    signatures = envelope["signatures"]
+    if not isinstance(signatures, list) or not 1 <= len(signatures) <= 4:
+        raise FeedVerificationError("invalid signature list")
+    if not any(_signature_ok(entry, trusted_keys, MANIFEST_CONTEXT, signed) for entry in signatures):
+        raise FeedVerificationError("manifest signature is not valid for any trusted key")
+    manifest = _strict_loads(signed)
+    if not isinstance(manifest, dict) or canonical_json(manifest) != signed:
+        raise FeedVerificationError("manifest is not in canonical form")
+    expected = {"schema_version", "type", "feed_type", "version", "generated_at", "expires_at", "rule_count",
+                "rules_sha256", "bundle"}
+    if set(manifest) != expected:
+        raise FeedVerificationError("unexpected manifest fields")
+    if manifest["schema_version"] != SCHEMA_VERSION or manifest["type"] != "safeer-feed-manifest":
+        raise FeedVerificationError("unsupported manifest schema")
+    if manifest["feed_type"] != feed_type:
+        raise FeedVerificationError("manifest is for a different feed")
+    version = _int(manifest["version"], "version", 1)
+    bundle = manifest["bundle"]
+    if (not isinstance(bundle, dict) or set(bundle) != {"path", "size", "sha256", "signature"}
+            or not _signature_shape_ok(bundle["signature"])):
+        raise FeedVerificationError("invalid bundle reference")
+    if bundle["path"] != f"{feed_type}-{version}.json":
+        raise FeedVerificationError("unexpected bundle path")
+    size = _int(bundle["size"], "bundle size", 2)
+    if size > MAX_BUNDLE_BYTES:
+        raise FeedVerificationError("bundle too large")
+    if not isinstance(bundle["sha256"], str) or not _HEX64.match(bundle["sha256"]):
+        raise FeedVerificationError("invalid bundle hash")
+    if not isinstance(manifest["rules_sha256"], str) or not _HEX64.match(manifest["rules_sha256"]):
+        raise FeedVerificationError("invalid rules hash")
+    generated = _parse_time(manifest["generated_at"])
+    expires = _parse_time(manifest["expires_at"])
+    if expires <= generated:
+        raise FeedVerificationError("manifest expires before it was generated")
+    now = now or datetime.now(timezone.utc)
+    if check_expiry and now >= expires:
+        raise ExpiredFeedError("manifest has expired")
+    if version < installed_version:
+        raise RollbackError(f"offered version {version} is older than installed {installed_version}")
+    return Manifest(feed_type, version, generated, expires, _int(manifest["rule_count"], "rule count"),
+                    manifest["rules_sha256"], bundle["path"], size, bundle["sha256"], bundle["signature"],
+                    envelope_bytes)
+
+
+@dataclass(frozen=True)
+class Bundle:
+    manifest: Manifest
+    sources: tuple
+    rules: tuple  # (value, indicator_type, category, source_index)
+
+
+def _valid_rule_value(value: str, kind: str) -> bool:
+    if kind in ("domain", "hostname"):
+        return bool(_HOST.match(value))
+    if kind == "url":
+        return len(value) <= 2048 and bool(_URL.match(value))
+    try:
+        if kind == "ipv4":
+            return str(ipaddress.IPv4Address(value)) == value
+        if kind == "ipv6":  # hexadecimal RFC 5952 text only: no zone, no embedded or mapped IPv4
+            if not _IPV6_TEXT.match(value):
+                return False
+            address = ipaddress.IPv6Address(value)
+            return address.ipv4_mapped is None and address.compressed == value
+    except ValueError:
+        return False
+    return False
+
+
+def verify_bundle(bundle_bytes: bytes, manifest: Manifest, trusted_keys: dict) -> Bundle:
+    if len(bundle_bytes) != manifest.bundle_size:
+        raise FeedVerificationError("bundle size does not match the manifest")
+    if hashlib.sha256(bundle_bytes).hexdigest() != manifest.bundle_sha256:
+        raise FeedVerificationError("bundle SHA-256 does not match the manifest")
+    if not _signature_ok(manifest.bundle_signature, trusted_keys, BUNDLE_CONTEXT, bundle_bytes):
+        raise FeedVerificationError("bundle signature is not valid")
+    payload = _strict_loads(bundle_bytes)
+    if not isinstance(payload, dict) or canonical_json(payload) != bundle_bytes:
+        raise FeedVerificationError("bundle is not in canonical form")
+    expected = {"schema_version", "feed_type", "version", "generated_at", "expires_at", "rule_count", "sha256",
+                "sources", "rules"}
+    if set(payload) != expected or payload["schema_version"] != SCHEMA_VERSION:
+        raise FeedVerificationError("unexpected bundle fields")
+    if (payload["feed_type"] != manifest.feed_type or payload["version"] != manifest.version
+            or _parse_time(payload["expires_at"]) != manifest.expires_at
+            or _parse_time(payload["generated_at"]) != manifest.generated_at):
+        raise FeedVerificationError("bundle metadata does not match the manifest")
+    rules = payload["rules"]
+    sources = payload["sources"]
+    if not isinstance(rules, list) or not isinstance(sources, list) or not 1 <= len(sources) <= MAX_SOURCES:
+        raise FeedVerificationError("invalid rules or sources")
+    if payload["rule_count"] != len(rules) or manifest.rule_count != len(rules):
+        raise FeedVerificationError("rule count mismatch")
+    if payload["sha256"] != manifest.rules_sha256 or hashlib.sha256(canonical_json(rules)).hexdigest() != payload["sha256"]:
+        raise FeedVerificationError("rules SHA-256 mismatch")
+    for source in sources:
+        if (not isinstance(source, dict) or set(source) != {"id", "name", "license", "url"}
+                or not all(isinstance(item, str) for item in source.values())):
+            raise FeedVerificationError("invalid source entry")
+    checked = []
+    allowed_categories = FEED_CATEGORIES.get(manifest.feed_type, frozenset())
+    for rule in rules:
+        if (not isinstance(rule, list) or len(rule) != 4 or not isinstance(rule[0], str)
+                or rule[1] not in INDICATOR_TYPES or rule[2] not in allowed_categories
+                or isinstance(rule[3], bool) or not isinstance(rule[3], int) or not 0 <= rule[3] < len(sources)
+                or not _valid_rule_value(rule[0], rule[1])):
+            raise FeedVerificationError(f"invalid rule {str(rule)[:120]}")
+        checked.append((rule[0], rule[1], rule[2], rule[3]))
+    return Bundle(manifest, tuple(sources), tuple(checked))
+
+
+# --------------------------------------------------------------------------------------------------
+# Matching
+# --------------------------------------------------------------------------------------------------
+
+class ThreatIndex:
+    """Constant-time lookups for the four rule kinds. Immutable after construction."""
+
+    def __init__(self, rules=()):
+        self._suffix = {}
+        self._hosts = {}
+        self._urls = {}
+        for value, kind, category, _source in rules:
+            if kind == "domain":
+                node = self._suffix
+                for label in reversed(value.split(".")):
+                    node = node.setdefault(label, {})
+                node["\0"] = _more_severe(node.get("\0"), category)
+            elif kind in ("hostname", "ipv4", "ipv6"):
+                self._hosts[value] = _more_severe(self._hosts.get(value), category)
+            elif kind == "url":
+                self._urls[value] = _more_severe(self._urls.get(value), category)
+        self.size = len(rules)
+
+    def match_host(self, host: str):
+        """Considers every rule covering the host; the most severe category wins."""
+        host = _normalize_host(host)
+        if not host:
+            return None
+        best = self._hosts.get(host)
+        node = self._suffix
+        for label in reversed(host.split(".")):
+            node = node.get(label)
+            if node is None:
+                break
+            if "\0" in node:
+                best = _more_severe(best, node["\0"])
+        return best
+
+    def match_url(self, url: str):
+        """Considers host rules and the exact URL rule; the most severe category wins."""
+        if not isinstance(url, str) or "://" not in url:
+            return None
+        scheme_end = url.index("://")
+        if url[:scheme_end].lower() in ("http", "https"):
+            url = url[:scheme_end + 3] + url[scheme_end + 3:].replace("\\", "/")  # like browsers do
+        try:
+            parts = urlsplit(url)
+            host = parts.hostname or ""
+            port = parts.port
+        except ValueError:
+            return None
+        best = self.match_host(host)
+        if not self._urls or parts.scheme not in ("http", "https"):
+            return best
+        normalized = _normalize_host(host)
+        if not normalized:
+            return best
+        netloc = f"[{normalized}]" if ":" in normalized else normalized
+        if port is not None and not ((parts.scheme == "http" and port == 80) or (parts.scheme == "https" and port == 443)):
+            netloc = f"{netloc}:{port}"
+        key = f"{parts.scheme}://{netloc}{parts.path or '/'}" + (f"?{parts.query}" if parts.query else "")
+        return _more_severe(best, self._urls.get(key))
+
+
+def _more_severe(current, candidate):
+    if current is None:
+        return candidate
+    if candidate is None:
+        return current
+    return candidate if SEVERITY.get(candidate, 0) > SEVERITY.get(current, 0) else current
+
+
+def _normalize_host(host) -> str:
+    host = (host or "").strip().lower()
+    if host.startswith("[") and host.endswith("]"):
+        host = host[1:-1]
+    host = host.rstrip(".")
+    if ":" in host:
+        try:
+            address = ipaddress.IPv6Address(host)
+        except ValueError:
+            return host
+        if address.ipv4_mapped is not None:  # ::ffff:a.b.c.d reaches the IPv4 address
+            return str(address.ipv4_mapped)
+        return address.compressed
+    return host
+
+
+# --------------------------------------------------------------------------------------------------
+# Storage and updates
+# --------------------------------------------------------------------------------------------------
+
+def _atomic_write(path: Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
+
+
+def _read_limited(url: str, limit: int, timeout: float, opener=None) -> bytes:
+    request = urllib.request.Request(url, headers={"User-Agent": "Safeer", "Accept": "application/json"})
+    opener = opener or urllib.request.build_opener(urllib.request.HTTPSHandler())
+    with opener.open(request, timeout=timeout) as response:
+        status = getattr(response, "status", 200)
+        if status != 200:
+            raise FeedVerificationError(f"HTTP status {status}")
+        declared = response.headers.get("Content-Length")
+        if declared and declared.isdigit() and int(declared) > limit:
+            raise FeedVerificationError("response too large")
+        data = response.read(limit + 1)
+        if len(data) > limit:
+            raise FeedVerificationError("response too large")
+        return data
+
+
+class SignedFeedStore:
+    """Keeps the newest verified bundle of one feed type on disk and in memory."""
+
+    def __init__(self, directory, feed_type: str, trusted_keys: dict, base_urls, timeout: float = 20.0,
+                 fetch=None):
+        self.directory = Path(directory)
+        self.feed_type = feed_type
+        self.trusted_keys = dict(trusted_keys)
+        self.base_urls = [url.rstrip("/") for url in base_urls]
+        self.timeout = timeout
+        self._fetch = fetch or (lambda url, limit: _read_limited(url, limit, timeout))
+        self._lock = threading.Lock()
+        self.bundle = None
+        self.index = ThreatIndex()
+        self.last_error = ""
+
+    def _files(self, version: int):
+        return (self.directory / f"{self.feed_type}-{version}-manifest.json",
+                self.directory / f"{self.feed_type}-{version}-bundle.json")
+
+    @property
+    def _state_path(self):
+        return self.directory / f"{self.feed_type}-state.json"
+
+    def installed_version(self) -> int:
+        try:
+            state = json.loads(self._state_path.read_text("ascii"))
+            value = state.get("version", 0)
+            return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
+        except (OSError, ValueError, AttributeError):
+            return 0
+
+    def load(self) -> bool:
+        """Loads and re-verifies the stored bundle. An expired bundle is still used (better than none)."""
+        version = self.installed_version()
+        if version < 1:
+            self.last_error = "no stored feed"
+            return False
+        manifest_path, bundle_path = self._files(version)
+        try:
+            manifest = verify_manifest(manifest_path.read_bytes(), self.trusted_keys, self.feed_type,
+                                       check_expiry=False)
+            if manifest.version != version:
+                raise FeedVerificationError("stored manifest does not match the recorded version")
+            bundle = verify_bundle(bundle_path.read_bytes(), manifest, self.trusted_keys)
+        except (OSError, FeedVerificationError) as exc:
+            self.last_error = f"stored feed unavailable: {exc}"
+            return False
+        with self._lock:
+            self.bundle = bundle
+            self.index = ThreatIndex(bundle.rules)
+        return True
+
+    def _install(self, manifest: Manifest, manifest_bytes: bytes, bundle_bytes: bytes) -> None:
+        manifest_path, bundle_path = self._files(manifest.version)
+        _atomic_write(bundle_path, bundle_bytes)
+        _atomic_write(manifest_path, manifest_bytes)
+        # The state file is the commit point: until it is replaced, load() keeps using the old files.
+        _atomic_write(self._state_path, json.dumps({"version": manifest.version}).encode("ascii"))
+        for old in self.directory.glob(f"{self.feed_type}-*-*.json"):
+            parts = old.name.split("-")
+            if len(parts) >= 3 and parts[-2].isdigit() and int(parts[-2]) < manifest.version:
+                try:
+                    old.unlink()
+                except OSError:
+                    pass
+
+    def update(self, now: datetime | None = None) -> bool:
+        """Fetches and installs a newer bundle. Returns True when a new version was installed."""
+        installed = self.installed_version()
+        errors = []
+        for base in self.base_urls:
+            try:
+                manifest_bytes = self._fetch(f"{base}/v1/{self.feed_type}/latest.json", MAX_MANIFEST_BYTES)
+                manifest = verify_manifest(manifest_bytes, self.trusted_keys, self.feed_type,
+                                           installed_version=installed, now=now)
+                if manifest.version == installed and self.bundle is not None:
+                    raise UpToDate()
+                bundle_bytes = self._fetch(f"{base}/v1/{self.feed_type}/{manifest.bundle_path}", manifest.bundle_size)
+                bundle = verify_bundle(bundle_bytes, manifest, self.trusted_keys)
+                index = ThreatIndex(bundle.rules)
+                self._install(manifest, manifest_bytes, bundle_bytes)
+                with self._lock:
+                    self.bundle = bundle
+                    self.index = index
+                self.last_error = ""
+                return True
+            except UpToDate:
+                self.last_error = ""
+                return False
+            except Exception as exc:  # network, verification and disk errors keep the current feed
+                errors.append(f"{base}: {exc.__class__.__name__}: {exc}")
+        self.last_error = "; ".join(errors)
+        return False
+
+    def match_url(self, url: str):
+        return self.index.match_url(url)
+
+    def match_host(self, host: str):
+        return self.index.match_host(host)

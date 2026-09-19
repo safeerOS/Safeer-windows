@@ -1,0 +1,27 @@
+app-id: io.github.memelandfaner.SafeerBrowser
+runtime: org.gnome.Platform
+runtime-version: '50'
+sdk: org.gnome.Sdk
+command: safeer
+finish-args:
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=ipc
+  - --device=dri
+  - --share=network
+  - --socket=pulseaudio
+  - --filesystem=xdg-download
+  - --env=GTK_USE_PORTAL=1
+modules:
+  - name: safeer-browser
+    buildsystem: simple
+    build-commands:
+      - bash packaging/install_payload.sh /app io.github.memelandfaner.SafeerBrowser
+    sources:
+      - type: dir
+        path: .
+        skip:
+          - .git
+          - build
+          - dist
+          - .flatpak-builder
