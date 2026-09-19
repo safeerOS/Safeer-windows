@@ -1,0 +1,129 @@
+name: Windows package
+on:
+  push:
+    branches: ['**']
+    tags: ['windows-v*']
+    paths:
+      - 'windows/**'
+      - 'core/adblock.py'
+      - 'core/config.py'
+      - 'core/bookmarks_importer.py'
+      - 'core/reader.py'
+      - 'core/signed_feed.py'
+      - 'core/threat_intel.py'
+      - 'ui/home.*'
+      - 'assets/icon.png'
+      - 'assets/safeer-mark.svg'
+      - '.github/workflows/windows-package.yml'
+  pull_request:
+    paths:
+      - 'windows/**'
+      - 'core/**'
+      - 'ui/home.*'
+      - '.github/workflows/windows-package.yml'
+  release:
+    types: [published]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  windows:
+    runs-on: windows-2022
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    timeout-minutes: 90
+    env:
+      PYTHONUTF8: '1'
+      PYTHONUNBUFFERED: '1'
+      QTWEBENGINE_CHROMIUM_FLAGS: --disable-gpu
+      SAFEER_SMOKE_TIMEOUT: '420'
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: windows/requirements.txt
+      - name: Version
+        id: version
+        run: |
+          $version = (Get-Content windows/VERSION -Raw).Trim()
+          "version=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "Safeer Browser for Windows $version"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r windows/requirements.txt
+          python -c "import PySide6, PyInstaller; from PySide6.QtCore import qVersion; print('PySide6', PySide6.__version__, 'Qt', qVersion(), 'PyInstaller', PyInstaller.__version__)"
+      - name: Unit tests
+        run: python -m unittest discover -s windows/tests -v
+      - name: No Windows Error Reporting dialogs during unattended runs
+        # A crashed exe would otherwise sit in a WerFault window until the job times out.
+        run: |
+          New-Item -Path 'HKCU:\Software\Microsoft\Windows\Windows Error Reporting' -Force | Out-Null
+          Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\Windows Error Reporting' -Name DontShowUI -Value 1 -Type DWord
+          Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\Windows Error Reporting' -Name Disabled -Value 1 -Type DWord
+      - name: Smoke test from source (real window, online checks)
+        run: python windows/build_windows.py smoke-source --online --report build/windows/out/smoke-source.json --screenshot build/windows/out/start-page.png
+      - name: Build SafeerBrowser.exe
+        run: python windows/build_windows.py pyinstaller
+      - name: Smoke test built executable
+        run: python windows/build_windows.py smoke-frozen --online --report build/windows/out/smoke-frozen.json
+      - name: Ensure Inno Setup 6
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup --no-progress -y }
+      - name: Portable ZIP, installer and checksums
+        run: python windows/build_windows.py package
+      - name: Install, launch and uninstall
+        run: python windows/build_windows.py install-test
+      - name: Upload Windows packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: safeer-browser-windows-${{ steps.version.outputs.version }}
+          path: |
+            build/windows/out/*.exe
+            build/windows/out/*.zip
+            build/windows/out/SHA256SUMS
+          if-no-files-found: error
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: safeer-browser-windows-test-reports
+          path: |
+            build/windows/out/*.json
+            build/windows/out/*.png
+            build/windows/out/*.log
+          if-no-files-found: ignore
+  release:
+    if: startsWith(github.ref, 'refs/tags/windows-v')
+    needs: windows
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    concurrency:
+      group: release-${{ github.ref_name }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check tag matches windows/VERSION
+        run: |
+          test "windows-v$(tr -d '[:space:]' < windows/VERSION)" = "${{ github.ref_name }}"
+      - uses: actions/download-artifact@v8
+        with:
+          name: safeer-browser-windows-${{ needs.windows.outputs.version }}
+          path: release
+      - name: Attach Windows packages to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          ls -l release
+          (cd release && sha256sum -c SHA256SUMS)
+          gh release upload "$TAG" release/* --clobber

@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="sl" style="background-color: #101814; color: #f1f5f9;">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Safeer Browser — Linux Mint Edition</title>
+  <style>
+    html, body { background-color: #101814 !important; color: #f1f5f9 !important; margin: 0; }
+  </style>
+  <link rel="stylesheet" href="home.css">
+</head>
+<body style="background-color: #101814; color: #f1f5f9;">
+  <div class="desktop-container">
+
+    <!-- Top Privacy & Shield Banner -->
+    <header class="shield-header">
+      <div class="shield-badge">
+        <img src="../assets/safeer-mark.svg" width="48" height="48" alt="" style="border-radius:12px">
+        <div>
+          <div class="shield-title">Safeer Browser</div>
+          <div class="shield-subtitle" data-i18n="shield_subtitle">Linux Mint Suverena Izdaja</div>
+        </div>
+        <span class="shield-status">Linux Mint</span>
+      </div>
+
+      <div class="shield-metrics">
+        <div class="metric-item">
+          <span class="metric-val text-mint" id="adsCount">0</span>
+          <span class="metric-lbl" id="adsLbl" data-i18n="lbl_rules_active">Aktivnih pravil ščita</span>
+        </div>
+        <div class="metric-divider"></div>
+        <div class="metric-item">
+          <span class="metric-val text-cyan" id="threatsCount">0</span>
+          <span class="metric-lbl" id="threatsLbl" data-i18n="lbl_threat_protection">Zaščita pred grožnjami</span>
+        </div>
+        <div class="lang-pills">
+          <button type="button" class="lang-pill active" data-lang="sl" onclick="changeHomeLanguage('sl')">SL</button>
+          <button type="button" class="lang-pill" data-lang="en" onclick="changeHomeLanguage('en')">EN</button>
+          <button type="button" class="lang-pill" data-lang="de" onclick="changeHomeLanguage('de')">DE</button>
+          <button type="button" class="lang-pill" data-lang="es" onclick="changeHomeLanguage('es')">ES</button>
+          <button type="button" class="lang-pill" data-lang="fr" onclick="changeHomeLanguage('fr')">FR</button>
+          <button type="button" class="lang-pill" data-lang="it" onclick="changeHomeLanguage('it')">IT</button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Center Stage: Clock & Omnibox Search -->
+    <main class="center-stage">
+      <div class="clock-display">
+        <h1 class="clock-time" id="clockTime">12:00</h1>
+        <p class="clock-date" id="clockDate">Nalaganje...</p>
+      </div>
+
+      <form class="search-form" id="searchForm" onsubmit="return handleSearch(event)">
+        <div class="search-bar">
+          <span class="search-icon">🔍</span>
+          <input type="text" id="searchInput" class="search-input" placeholder="Iščite z DuckDuckGo ali vnesite spletni naslov..." autocomplete="off" aria-label="Išči ali vnesi spletni naslov" spellcheck="false" autofocus>
+          <button type="submit" class="search-submit" data-i18n="search_submit">Išči</button>
+        </div>
+
+        <div class="engine-pills">
+          <button type="button" class="pill active" data-engine="duckduckgo" onclick="setEngine('duckduckgo', this)">DuckDuckGo</button>
+          <button type="button" class="pill" data-engine="google" onclick="setEngine('google', this)">Google</button>
+          <button type="button" class="pill" data-engine="brave" onclick="setEngine('brave', this)">Brave</button>
+          <button type="button" class="pill" data-engine="youtube" onclick="setEngine('youtube', this)">YouTube</button>
+        </div>
+      </form>
+      <div class="shortcut-hints">
+        <span><kbd>Ctrl L</kbd><span data-i18n="hint_address">Spletni naslov</span></span>
+        <span><kbd>Ctrl T</kbd><span data-i18n="hint_tab">Nov zavihek</span></span>
+        <span><kbd>Ctrl F</kbd><span data-i18n="hint_find">Najdi na strani</span></span>
+      </div>
+    </main>
+
+    <!-- Quick Integrations Bar -->
+    <div class="integrations-quick-bar">
+      <span class="quick-lbl" data-i18n="quick_lbl">Hitre možnosti:</span>
+      <button class="quick-chip" onclick="openSidebar('messenger')">💬 Facebook Messenger</button>
+      <button class="quick-chip" onclick="openSidebar('gmail')">✉️ Gmail</button>
+      <button class="quick-chip" onclick="openSidebar('customizer')" data-i18n="quick_customizer">🎨 Izgled brskalnika</button>
+      <button class="quick-chip highlight" onclick="openSidebar('settings')" data-i18n="quick_toolbar">⚙️ Nastavitve</button>
+      <button class="quick-chip" onclick="setDefaultBrowser()" title="Nastavi Safeer kot privzeti sistemski brskalnik" style="color:#87cf3e; border-color:rgba(135,207,62,0.4);">🌐 Privzeti brskalnik</button>
+    </div>
+
+    <!-- My Portals / Moje Strani -->
+    <section class="portals-section">
+      <div class="portals-head">
+        <div style="display:flex; align-items:center; gap:12px;">
+          <h2 class="section-title" data-i18n="section_portals">Priljubljene strani in multimedija</h2>
+          <span class="portals-note" data-i18n="portals_note">Brez oglasov • Zasebno • Hitro</span>
+        </div>
+        <div class="portals-actions">
+          <button type="button" class="portals-btn" onclick="openSidebar('import_bookmarks')" title="Uvozi zaznamke iz Firefoxa ali Chroma" data-i18n="btn_import" data-i18n-title="btn_import_title">📥 Uvozi zaznamke</button>
+          <button type="button" class="portals-btn" onclick="openSidebar('edit_portals')" title="Upravljaj priljubljene strani" data-i18n="btn_edit" data-i18n-title="btn_edit_title">⚙️ Uredi</button>
+          <button type="button" class="portals-btn highlight" onclick="openSidebar('add_portal')" title="Dodaj novo bližnjico" data-i18n="btn_add" data-i18n-title="btn_add_title">➕ Dodaj stran</button>
+        </div>
+      </div>
+
+      <div class="portals-grid" id="portalsGrid">
+        <!-- Injected via JavaScript -->
+      </div>
+    </section>
+
+    <!-- Security Layer & Slogan Bar -->
+    <div class="security-disclaimer-bar">
+      <span class="shield-badge-mini">🛡️</span>
+      <span class="disclaimer-text" data-i18n="security_disclaimer"><strong>Safeer is a security layer, not a guarantee against all online threats.</strong> Lokalni zaščitni sloj pred botneti, zlonamerno kodo in sledilci.</span>
+      <span class="slogan-pill" data-i18n="slogan_safe">Varnejši na spletu. Brez oglasov.</span>
+    </div>
+
+  </div>
+
+  <script src="home.js"></script>
+</body>
+</html>

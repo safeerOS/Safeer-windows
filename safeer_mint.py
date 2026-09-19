@@ -1,0 +1,5948 @@
+#!/usr/bin/env python3
+"""
+Safeer Browser — Linux Mint Edition
+Desktop-optimized browser with Modular Sidebar (Messenger, Gmail, Custom sites),
+YouTube Zero-Ad & Background Audio engine, Cyber Threat Shield, and Persistent Sessions.
+"""
+
+import os
+import sys
+import json
+import uuid
+import socket
+import threading
+import subprocess
+import warnings
+import urllib.parse
+from datetime import datetime
+import gi
+
+# Suppress specific non-critical PyGObject deprecation warnings while keeping runtime errors visible
+warnings.filterwarnings("ignore", category=DeprecationWarning, module=r"gi\..*")
+
+# 🎵 Gladko predvajanje zvoka brez prekinitev (PipeWire / PulseAudio 120ms varnostni medpomnilnik)
+os.environ.setdefault("PULSE_LATENCY_MSEC", "120")
+os.environ.setdefault("GST_PULSE_BUFFER_MS", "120")
+
+gi.require_version('Gtk', '3.0')
+gi.require_version('WebKit2', '4.1')
+from gi.repository import Gtk, Gdk, WebKit2, GLib, Gio, Pango
+
+# Explicitly set application & program name for Linux Mint window manager & taskbar
+GLib.set_prgname("safeer-browser")
+GLib.set_application_name("Safeer Browser")
+
+# Import core modules
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, BASE_DIR)
+
+from core.runtime_safety import install_main_thread_gc, collect_closed_views
+from core.config import CONFIG_DIR, ConfigManager, SEARCH_ENGINES, normalize_web_url
+from core.doh_proxy import get_doh_proxy, DOH_PROVIDERS
+from core.i18n import t, set_language, get_current_language, SUPPORTED_LANGUAGES
+from core.adblock import (
+    YOUTUBE_ADBLOCK_SCRIPT,
+    YOUTUBE_KEEP_WATCHING_SCRIPT,
+    HOOKSHOT_INSERTS_SCRIPT,
+    ADGUARD_PROTECTION_SCRIPT,
+    GENERIC_COSMETIC_SCRIPT,
+    GPC_AND_DNT_SCRIPT,
+    ANTI_CLICKJACKING_SCRIPT,
+    TAB_THROTTLER_SCRIPT,
+    strip_tracking_parameters,
+    is_threat_domain,
+    is_ad_domain,
+    FORCE_DARK_MODE_CSS,
+    AUTH_SCRIPT_EXCLUSIONS,
+    is_passthrough_host
+)
+from core.reader import READER_MODE_JS
+from core.network_errors import NetworkErrorHandler
+from core.default_browser import is_default_browser as system_is_default_browser, set_default_browser
+
+# Use WebKitGTK's maintained browser identity consistently across redirects.
+USER_AGENT = None
+APP_VERSION = "1.0.19"
+DOCK_WIDTH = 54
+
+
+def is_safe_web_url(url: str) -> bool:
+    """Verifies that an external or navigation URL uses an authorized protocol."""
+    if not url:
+        return False
+    u = url.strip()
+    if u in ("safeer://home", "about:blank", "about:srcdoc"):
+        return True
+    if u.startswith("file://") and "/ui/" in u:
+        return True
+    try:
+        parsed = urllib.parse.urlparse(u)
+        scheme = parsed.scheme.lower()
+        if scheme in ("http", "https"):
+            return bool(parsed.netloc or parsed.hostname)
+        return False
+    except Exception:
+        return False
+
+
+
+class SafeerMintBrowser(Gtk.Window):
+    def __init__(self, initial_url=None):
+        install_main_thread_gc()
+        super().__init__()
+        self.config = ConfigManager()
+
+        # Style the native window before creating or loading any web views.
+        # Keep this preference local to Safeer; never change the desktop theme.
+        gtk_settings = Gtk.Settings.get_default()
+        if gtk_settings:
+            gtk_settings.set_property("gtk-application-prefer-dark-theme", True)
+        self.apply_css()
+
+        # Initialize configured interface language
+        configured_lang = self.config.get("language", "auto")
+        set_language(configured_lang)
+        self.set_title(f"{t('app_title')} — Linux Mint Edition")
+
+        # Restore remembered window geometry or use 1280x820
+        win_w = self.config.get("window_width", 1280)
+        win_h = self.config.get("window_height", 820)
+        self.set_default_size(win_w, win_h)
+        self.set_position(Gtk.WindowPosition.CENTER)
+
+        # Set WM_CLASS and prgname so Linux Mint panel associates the window with safeer-browser.desktop
+        try:
+            GLib.set_prgname("safeer-browser")
+            self.set_wmclass("safeer-browser", "safeer-browser")
+        except Exception:
+            pass
+
+        # Set official window & taskbar icon using system theme name and direct fallback file
+        Gtk.Window.set_default_icon_name("safeer-browser")
+        self.set_icon_name("safeer-browser")
+        icon_path = os.path.join(BASE_DIR, "assets", "icon.png")
+        if os.path.exists(icon_path):
+            try:
+                self.set_icon_from_file(icon_path)
+                Gtk.Window.set_default_icon_from_file(icon_path)
+            except Exception as e:
+                print(f"[Icon] Opozorilo pri nalaganju ikone: {e}")
+
+        self.active_sidebar_service = None
+        self.dock_buttons = {}
+        self.dark_style_sheet = None
+
+        # Multi-tab state management
+        self.tabs = []
+        self.closed_tabs_stack = []
+        self.active_tab_id = None
+        self.tab_counter = 0
+        self._paned_debounce_timer = None
+
+        # Downloads & History state
+        self.downloads = []
+        self.history_file = os.path.join(self.config.config_dir, "history.json")
+        self._is_fullscreen = False
+
+        # 🛡️ Shields counter — koliko groženj/sledilcev je blokirano v tej seji
+        self._shields_blocked = 0  # seje counter (se resetira ob zagonu)
+
+        # Configure Persistent Cookie, LocalStorage & IndexedDB Storage
+        self.setup_persistent_storage()
+        self.setup_network_security_and_proxy()
+        self.setup_downloads_handling()
+        self.setup_ipc_socket()
+
+        self.setup_ui(initial_url=initial_url)
+
+        # Ponudi obnovo prejšnje seje zavihkov (samo če ni bil podan direkten URL)
+        if not initial_url:
+            GLib.idle_add(self.restore_session)
+
+        # Ob prvem zagonu ponudi čarovnik za uvoz in nastavitve, sicer preveri privzeti brskalnik
+        if not self.config.get("first_run_completed", False):
+            GLib.idle_add(self.open_first_run_wizard)
+        else:
+            GLib.idle_add(self.check_default_browser_banner)
+
+        # Connect F4 keyboard shortcut to toggle sidebar
+        self.connect("key-press-event", self.on_global_key_press)
+        # Connect delete-event to remember window size on exit
+        self.connect("delete-event", self.on_delete_event)
+
+    def show_initial_window(self):
+        """Reveal a local home only after WebKit has produced its first frame."""
+        view = self.get_active_webview()
+        uri = view.get_uri() if view else ""
+        is_home = view is not None and (not uri or "ui/home.html" in uri)
+        if not is_home:
+            self.show_all()
+            return
+
+        self.set_opacity(0.0)
+        state = {"shown": False, "snapshot": False, "handler": None, "timeout": None}
+
+        def reveal():
+            if state["shown"]:
+                return False
+            state["shown"] = True
+            if state["handler"] is not None:
+                view.disconnect(state["handler"])
+            if state["timeout"] is not None:
+                GLib.source_remove(state["timeout"])
+                state["timeout"] = None
+            self.set_opacity(1.0)
+            return False
+
+        def frame_ready(webview, result, _data):
+            try:
+                webview.get_snapshot_finish(result)
+            except GLib.Error:
+                pass  # A failed local load must still leave a usable window.
+            reveal()
+
+        def request_frame():
+            if not state["shown"] and not state["snapshot"]:
+                state["snapshot"] = True
+                view.get_snapshot(WebKit2.SnapshotRegion.VISIBLE,
+                                  WebKit2.SnapshotOptions.NONE, None, frame_ready, None)
+            return False
+
+        def loaded(webview, event):
+            if event == WebKit2.LoadEvent.FINISHED:
+                GLib.idle_add(request_frame)
+
+        state["handler"] = view.connect("load-changed", loaded)
+        self.show_all()  # Allocate and paint while the initial window is transparent.
+        state["timeout"] = GLib.timeout_add(1800, reveal)
+        if not view.is_loading():
+            GLib.idle_add(request_frame)
+
+    def on_delete_event(self, widget, event):
+        """Zapomni si velikost okna, shrani sejo zavihkov in počisti IPC socket ob zaprtju."""
+        if hasattr(self, "_paned_debounce_timer") and self._paned_debounce_timer:
+            try:
+                GLib.source_remove(self._paned_debounce_timer)
+                self._paned_debounce_timer = None
+                self.config.save_settings()
+            except Exception:
+                pass
+        try:
+            w, h = self.get_size()
+            if w >= 800 and h >= 600:
+                self.config.set("window_width", w)
+                self.config.set("window_height", h)
+        except Exception:
+            pass
+        # Shrani sejo zavihkov za obnovo ob naslednjem zagonu
+        self.save_session()
+        try:
+            if hasattr(self, "lock_fd") and self.lock_fd:
+                import fcntl
+                try:
+                    fcntl.flock(self.lock_fd, fcntl.LOCK_UN)
+                    self.lock_fd.close()
+                except Exception:
+                    pass
+            sock_path = os.path.join(self.config.config_dir, "safeer.sock")
+            if os.path.exists(sock_path):
+                os.remove(sock_path)
+            if getattr(self, "ipc_server_sock", None) is not None:
+                try:
+                    self.ipc_server_sock.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+                self.ipc_server_sock.close()
+                self.ipc_server_sock = None
+            # Ustavi lokalni DoH posrednik, če je aktiven
+            get_doh_proxy(enabled=False)
+        except Exception:
+            pass
+        return False
+
+    def save_session(self):
+        """Shrani URL-je vseh odprtih zavihkov v session.json za obnovo ob naslednjem zagonu."""
+        try:
+            session_urls = []
+            active_id = self.active_tab_id
+            for tab in self.tabs:
+                wv = tab.get("webview")
+                uri = (wv.get_uri() if wv else None) or tab.get("uri", "")
+                # Ne shranjuj lokalnih home strani ali praznih
+                if uri and not uri.startswith("file://") and uri not in ("safeer://home", "about:blank", ""):
+                    session_urls.append({
+                        "url": uri,
+                        "title": tab.get("title", ""),
+                        "active": (tab["id"] == active_id)
+                    })
+            session_path = os.path.join(self.config.config_dir, "session.json")
+            with open(session_path, "w", encoding="utf-8") as f:
+                json.dump({"version": 1, "tabs": session_urls}, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"[Session] Opozorilo pri shranjevanju seje: {e}")
+
+    def restore_session(self):
+        """Ob zagonu ponudi obnovo prejšnje seje zavihkov."""
+        try:
+            session_path = os.path.join(self.config.config_dir, "session.json")
+            if not os.path.exists(session_path):
+                return
+            with open(session_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            tabs = data.get("tabs", [])
+            if not tabs:
+                return
+            # Izbrišemo session po branju, da ne ponujamo dvakrat
+            try:
+                os.remove(session_path)
+            except Exception:
+                pass
+            count = len(tabs)
+            dialog = Gtk.MessageDialog(
+                transient_for=self,
+                flags=0,
+                message_type=Gtk.MessageType.QUESTION,
+                buttons=Gtk.ButtonsType.NONE,
+                text=f"🔄 Obnovi prejšnjo sejo?"
+            )
+            dialog.format_secondary_text(
+                f"Safeer je shranil {count} zavihek{'ov' if count != 1 else ''} iz prejšnje seje.\n"
+                "Ali jih želite obnoviti?"
+            )
+            dialog.add_button("Začni znova", Gtk.ResponseType.CANCEL)
+            btn_restore = dialog.add_button(f"Obnovi {count} zavihk{'ov' if count != 1 else 'ek'}", Gtk.ResponseType.OK)
+            btn_restore.get_style_context().add_class("suggested-action")
+            response = dialog.run()
+            dialog.destroy()
+            if response == Gtk.ResponseType.OK:
+                active_url = None
+                for tab_data in tabs:
+                    url = tab_data.get("url", "")
+                    if url and is_safe_web_url(url):
+                        is_active = tab_data.get("active", False)
+                        if is_active:
+                            active_url = url
+                        self.new_tab(url=url, switch=False, defer=True)
+                # Preklopi na aktivni zavihek
+                if active_url:
+                    for tab in self.tabs:
+                        wv = tab.get("webview")
+                        uri = (wv.get_uri() if wv else None) or tab.get("uri", "")
+                        if uri == active_url:
+                            self.switch_to_tab(tab["id"])
+                            break
+                elif self.tabs:
+                    self.switch_to_tab(self.tabs[-1]["id"])
+        except Exception as e:
+            print(f"[Session] Opozorilo pri obnovi seje: {e}")
+
+    def setup_ipc_socket(self):
+        """Lokalni Unix socket za vodenje ene same instance z atomskim fcntl zaklepom."""
+        sock_path = os.path.join(self.config.config_dir, "safeer.sock")
+        lock_path = os.path.join(self.config.config_dir, "safeer.lock")
+        try:
+            import fcntl
+            os.makedirs(self.config.config_dir, exist_ok=True)
+            self.lock_fd = open(lock_path, "w")
+            try:
+                fcntl.flock(self.lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except (BlockingIOError, OSError):
+                # Druga instanca že teče in drži zaklep
+                print("[IPC Socket] Druga instanca Safeer že teče; socket upravlja primarni proces.")
+                return
+
+            if os.path.exists(sock_path):
+                try:
+                    os.remove(sock_path)
+                except Exception:
+                    pass
+            server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            server.bind(sock_path)
+            try:
+                os.chmod(sock_path, 0o600)
+            except Exception:
+                pass
+            server.listen(5)
+            self.ipc_server_sock = server
+
+            def socket_listener():
+                while True:
+                    try:
+                        conn, _ = server.accept()
+                        raw_data = conn.recv(4096).decode("utf-8", errors="ignore").strip()
+                        if raw_data:
+                            parts = raw_data.split(" ", 1)
+                            cmd = parts[0]
+                            arg = parts[1] if len(parts) > 1 else ""
+                            if cmd == "OPEN" and arg:
+                                GLib.idle_add(self.open_url_from_external, arg)
+                            elif cmd == "FOCUS":
+                                GLib.idle_add(self.present)
+                        conn.sendall(b"OK\n")
+                        conn.close()
+                    except Exception:
+                        break
+
+            sock_thread = threading.Thread(target=socket_listener, daemon=True)
+            sock_thread.start()
+        except Exception as e:
+            print(f"[IPC Socket] Opozorilo pri inicializaciji socketa: {e}")
+
+    def open_url_from_external(self, url):
+        """Odpri povezavo iz zunanjega programa v novem zavihku (z varnostnim filtrom protokola)."""
+        self.present()
+        if not url:
+            return
+        url_clean = url.strip()
+        if not url_clean:
+            return
+        if url_clean == "safeer://home":
+            self.new_tab(url="safeer://home", switch=True)
+            return
+
+        norm_url = normalize_web_url(url_clean)
+        if norm_url and is_safe_web_url(norm_url):
+            self.new_tab(url=norm_url, switch=True)
+        else:
+            print(f"[IPC Varnost] Zavrnjen neveljaven ali nevaren URL: {url_clean}")
+
+    def setup_persistent_storage(self):
+        """Omogoči trajne seje, LocalStorage in IndexedDB za Messenger, Gmail, YouTube itd."""
+        try:
+            data_dir = os.path.join(self.config.config_dir, "web-data")
+            os.makedirs(data_dir, exist_ok=True)
+            self.website_data_manager = WebKit2.WebsiteDataManager(
+                base_data_directory=data_dir,
+                base_cache_directory=os.path.join(data_dir, "cache"),
+                disk_cache_directory=os.path.join(data_dir, "cache"),
+                indexeddb_directory=os.path.join(data_dir, "indexeddb"),
+                local_storage_directory=os.path.join(data_dir, "localstorage"),
+                websql_directory=os.path.join(data_dir, "websql")
+            )
+            # Pametno upravljanje pomnilnika: redno čiščenje odvečnih medpomnilnikov in JS Garbage Collection
+            try:
+                mps = WebKit2.MemoryPressureSettings()
+                mps.set_conservative_threshold(0.35)  # Sproži GC in sprosti slike pri 35% RAM-a
+                mps.set_strict_threshold(0.55)        # Agresivno sprosti nepotrebne medpomnilnike pri 55% RAM-a
+                mps.set_kill_threshold(0.95)
+                mps.set_poll_interval(2)
+                WebKit2.WebsiteDataManager.set_memory_pressure_settings(mps)
+            except Exception as e:
+                print(f"[Memory] Opozorilo pri MemoryPressureSettings: {e}")
+
+            self.web_context = WebKit2.WebContext.new_with_website_data_manager(self.website_data_manager)
+            self.web_context.set_sandbox_enabled(True)
+
+            # Reuse scripts, images and styles between real websites and song changes.
+            # DOCUMENT_BROWSER is intended for a series of local documents.
+            try:
+                self.web_context.set_cache_model(WebKit2.CacheModel.WEB_BROWSER)
+            except Exception as e:
+                print(f"[Memory] Opozorilo pri nastavitvi CacheModel: {e}")
+
+            cookie_mgr = self.website_data_manager.get_cookie_manager()
+            cookie_path = os.path.join(self.config.config_dir, "cookies.sqlite")
+            cookie_mgr.set_persistent_storage(cookie_path, WebKit2.CookiePersistentStorage.SQLITE)
+            cookie_mgr.set_accept_policy(WebKit2.CookieAcceptPolicy.ALWAYS)
+            self.cookie_mgr = cookie_mgr
+        except Exception as e:
+            print(f"[Storage] Opozorilo pri nastavitvi shrambe: {e}")
+            self.web_context = WebKit2.WebContext.get_default()
+            self.web_context.set_sandbox_enabled(True)
+            try:
+                self.web_context.set_cache_model(WebKit2.CacheModel.WEB_BROWSER)
+            except Exception:
+                pass
+
+    def setup_network_security_and_proxy(self):
+        """Konfigurira šifriran DNS (DoH) ali šifriran tunel (Tor / varen proxy) na WebKit2 ravni."""
+        try:
+            if not hasattr(self, "web_context") or not self.web_context:
+                return
+
+            proxy_mode = self.config.get("secure_proxy_mode", "disabled")
+            if proxy_mode not in ("disabled", "custom"):
+                proxy_mode = "disabled"
+                self.config.set("secure_proxy_mode", "disabled")
+            doh_enabled = self.config.get("doh_enabled", True)
+            doh_provider = self.config.get("doh_provider", "cloudflare")
+            custom_doh_url = self.config.get("custom_doh_url", "https://1.1.1.1/dns-query")
+
+            # Izjeme za lokalna omrežja (bypassi)
+            ignore_hosts = ["localhost", "127.0.0.1", "10.*", "192.168.*", "172.16.*", "172.17.*", "172.18.*", "172.19.*", "172.2*"]
+
+            if proxy_mode == "custom":
+                custom_url = self.config.get("secure_proxy_url", "").strip()
+                if custom_url:
+                    proxy_settings = WebKit2.NetworkProxySettings.new(custom_url, ignore_hosts)
+                    self.web_context.set_network_proxy_settings(WebKit2.NetworkProxyMode.CUSTOM, proxy_settings)
+                    print(f"[Network Security] 🔒 Šifriran proxy aktiviran: {custom_url}")
+                    get_doh_proxy(enabled=False)
+                    return
+                else:
+                    self.web_context.set_network_proxy_settings(WebKit2.NetworkProxyMode.DEFAULT, None)
+                    proxy_mode = "disabled"
+
+            if proxy_mode == "disabled":
+                if doh_enabled and doh_provider != "disabled":
+                    # Vgrajen lokalni DoH posrednik
+                    doh_proxy = get_doh_proxy(provider=doh_provider, custom_url=custom_doh_url, enabled=True)
+                    if doh_proxy and doh_proxy.actual_port > 0:
+                        local_proxy_url = f"http://127.0.0.1:{doh_proxy.actual_port}"
+                        proxy_settings = WebKit2.NetworkProxySettings.new(local_proxy_url, ignore_hosts)
+                        self.web_context.set_network_proxy_settings(WebKit2.NetworkProxyMode.CUSTOM, proxy_settings)
+                        prov_label = custom_doh_url if doh_provider == "custom" else doh_provider
+                        print(f"[Network Security] 🛡️ Šifriran DNS (DoH: {prov_label}) aktiviran prek {local_proxy_url}")
+                    else:
+                        self.web_context.set_network_proxy_settings(WebKit2.NetworkProxyMode.DEFAULT, None)
+                else:
+                    # Privzeta neposredna povezava
+                    self.web_context.set_network_proxy_settings(WebKit2.NetworkProxyMode.DEFAULT, None)
+                    get_doh_proxy(enabled=False)
+                    print("[Network Security] Uporabljam privzeto neposredno omrežno povezavo.")
+        except Exception as e:
+            print(f"[Network Security] Napaka pri nastavljanju proxy/DoH: {e}")
+
+    def setup_ui(self, initial_url=None):
+        # Main Vertical Box
+        self.main_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.add(self.main_vbox)
+
+        # 1. Top Navigation Bar
+        self.create_top_bar()
+        self.main_vbox.pack_start(self.top_bar, False, False, 0)
+
+        # 2. Main Horizontal Content Area (Sidebar + Web)
+        self.content_paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
+        self.main_vbox.pack_start(self.content_paned, True, True, 0)
+
+        # Left Dock / Sidebar
+        self.create_sidebar()
+        self.content_paned.pack1(self.sidebar_box, False, False)
+
+        # Right Main Web Area
+        self.create_main_webview()
+        self.content_paned.pack2(self.webview_container, True, False)
+
+        # 3. Bottom Optional Virtual Keyboard (Hidden by default!)
+        self.create_keyboard_panel()
+        self.main_vbox.pack_end(self.keyboard_box, False, False, 0)
+
+        # 4. Find-in-Page Bar (Ctrl+F) — skrita po privzetku
+        self.create_find_bar()
+        self.main_vbox.pack_end(self.find_bar, False, False, 0)
+
+        # Set initial divider position (dock width only)
+        self.content_paned.set_position(DOCK_WIDTH)
+
+        # Check permanent sidebar setting
+        if not self.config.get("sidebar_enabled", True):
+            self.sidebar_box.hide()
+            self.content_paned.set_position(0)
+
+        # Connect paned divider moved signal to remember custom width
+        self.content_paned.connect("notify::position", self.on_paned_moved)
+
+        # Create first initial tab
+        self.new_tab(url=initial_url or "safeer://home", switch=True)
+
+    def apply_css(self):
+        if not hasattr(self, 'css_provider'):
+            self.css_provider = Gtk.CssProvider()
+            Gtk.StyleContext.add_provider_for_screen(
+                Gdk.Screen.get_default(),
+                self.css_provider,
+                Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+            )
+
+        theme = self.config.get("theme", "midnight")
+        if theme == "mint":
+            bg_base = "#141c15"
+            bg_card = "#1c2b1f"
+            bg_tab_active = "#243b28"
+            accent = "#87cf3e"
+            fg_main = "#f0fdf4"
+        elif theme == "neon":
+            bg_base = "#090d16"
+            bg_card = "#111827"
+            bg_tab_active = "#1e293b"
+            accent = "#00d2ff"
+            fg_main = "#f0fdfa"
+        elif theme == "amoled":
+            bg_base = "#000000"
+            bg_card = "#0e0e0e"
+            bg_tab_active = "#181818"
+            accent = "#38bdf8"
+            fg_main = "#ffffff"
+        else: # midnight
+            bg_base = "#1c1b22"
+            bg_card = "#2b2a33"
+            bg_tab_active = "#2b2a33"
+            accent = "#0060df"
+            fg_main = "#fbfbfe"
+
+        font_choice = self.config.get("font_family", "system")
+        if font_choice == "sans":
+            font_family_css = '"Ubuntu", "Ubuntu Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+        elif font_choice == "serif":
+            font_family_css = '"Noto Serif", "DejaVu Serif", "Times New Roman", serif'
+        elif font_choice == "monospace":
+            font_family_css = '"Fira Code", "JetBrains Mono", "DejaVu Sans Mono", monospace'
+        else:
+            font_family_css = 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+
+        css_data = f"""
+        * {{
+            font-family: {font_family_css};
+        }}
+        window, paned, box, .view, WebKitWebView {{
+            background-color: {bg_base};
+            background: {bg_base};
+            color: {fg_main};
+        }}
+
+        /* 1. Firefox Proton Tab Row */
+        .tab-toolbar {{
+            background-color: {bg_base};
+            background: {bg_base};
+            padding: 5px 12px 0px 12px;
+            min-height: 40px;
+        }}
+        .firefox-tab {{
+            border-radius: 10px 10px 0 0;
+            padding: 5px 12px;
+            min-width: 170px;
+            transition: all 120ms ease;
+        }}
+        .firefox-tab.active-tab {{
+            background-color: {bg_tab_active};
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            border-bottom: none;
+        }}
+        .firefox-tab.inactive-tab {{
+            background-color: rgba(255, 255, 255, 0.04);
+            border: 1px solid transparent;
+            border-bottom: none;
+        }}
+        .firefox-tab.inactive-tab:hover {{
+            background-color: rgba(255, 255, 255, 0.08);
+        }}
+        .firefox-tab.inactive-tab .tab-title {{
+            color: #9ca3af;
+        }}
+        .firefox-tab.active-tab .tab-title {{
+            color: {fg_main};
+        }}
+        .history-tree {{
+            background-color: {bg_card};
+            color: {fg_main};
+            font-size: 13.5px;
+        }}
+        .history-tree:selected {{
+            background-color: {accent};
+            color: #ffffff;
+        }}
+        .tab-icon {{
+            font-size: 16px;
+            color: {fg_main};
+            margin-right: 4px;
+        }}
+        .tab-title {{
+            color: {fg_main};
+            font-size: 14px;
+            font-weight: 600;
+            margin: 0 4px;
+        }}
+        .tab-close-btn {{
+            background: transparent;
+            border: none;
+            border-radius: 4px;
+            color: #9ca3af;
+            padding: 2px 6px;
+            font-size: 13px;
+        }}
+        .tab-close-btn:hover {{
+            background: rgba(255, 255, 255, 0.18);
+            color: #ffffff;
+        }}
+        .new-tab-btn {{
+            background: transparent;
+            border: none;
+            border-radius: 6px;
+            color: #cfcfd8;
+            padding: 2px 10px;
+            font-size: 20px;
+            font-weight: 500;
+            margin-left: 6px;
+        }}
+        .new-tab-btn:hover {{
+            background: rgba(255, 255, 255, 0.1);
+            color: #ffffff;
+        }}
+
+        /* 2. Firefox Proton Nav Toolbar */
+        .nav-toolbar {{
+            background-color: {bg_base};
+            background: {bg_base};
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            padding: 7px 12px 9px 12px;
+        }}
+        .ff-nav-btn {{
+            background: transparent;
+            border: none;
+            border-radius: 6px;
+            color: #e0e0e6;
+            padding: 6px 10px;
+            font-size: 16px;
+            font-weight: 600;
+            margin-right: 2px;
+            transition: all 100ms ease;
+        }}
+        .ff-nav-btn:hover {{
+            background: rgba(255, 255, 255, 0.1);
+            color: #ffffff;
+        }}
+        .ff-nav-btn.active {{
+            background: {accent};
+            color: #ffffff;
+        }}
+
+        /* 3. Firefox Awesomebar / URL Entry */
+        .ff-url-container {{
+            background-color: {bg_card};
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 8px;
+            padding: 2px 12px;
+            min-height: 46px;
+        }}
+        .ff-url-entry:focus {{
+            border-color: {accent};
+            box-shadow: inset 0 -2px {accent};
+        }}
+        .ff-shield-btn {{
+            background: transparent;
+            border: none;
+            padding: 2px 6px;
+            font-size: 16px;
+        }}
+        .ff-security-icon {{
+            font-size: 15px;
+            color: #38bdf8;
+            margin-right: 4px;
+        }}
+        .ff-url-entry {{
+            background: transparent;
+            background-color: transparent;
+            border: none;
+            box-shadow: none;
+            color: #ffffff;
+            font-size: 16px;
+            font-weight: 600;
+            padding: 6px 8px;
+        }}
+        .ff-action-btn {{
+            background: transparent;
+            border: none;
+            border-radius: 6px;
+            color: #9ca3af;
+            padding: 3px 6px;
+            font-size: 15px;
+            margin-left: 2px;
+            transition: all 120ms ease;
+        }}
+        .ff-action-btn:hover {{
+            background: rgba(255, 255, 255, 0.12);
+            color: #ffffff;
+        }}
+        .ff-action-btn.active-star {{
+            color: #eab308;
+            font-size: 16px;
+        }}
+        .ff-action-btn.reader-active {{
+            color: #38bdf8;
+            background: rgba(56, 189, 248, 0.2);
+        }}
+        .tab-audio-btn {{
+            background: transparent;
+            border: none;
+            border-radius: 4px;
+            padding: 2px 4px;
+            font-size: 12px;
+            color: #38bdf8;
+            transition: all 100ms ease;
+        }}
+        .tab-audio-btn:hover {{
+            background: rgba(255, 255, 255, 0.15);
+            color: #ffffff;
+        }}
+
+        /* 2b. Bookmarks Toolbar */
+        .bookmarks-toolbar {{
+            background-color: {bg_base};
+            background: {bg_base};
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            padding: 2px 10px 4px 10px;
+            min-height: 32px;
+        }}
+        .bookmark-chip {{
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 6px;
+            color: #d1d5db;
+            padding: 2px 8px;
+            font-size: 13px;
+            font-weight: 500;
+            margin-right: 4px;
+            transition: all 100ms ease;
+        }}
+        .bookmark-chip:hover {{
+            background: rgba(255, 255, 255, 0.12);
+            color: #ffffff;
+            border-color: rgba(255, 255, 255, 0.2);
+        }}
+        .bookmark-chip-action {{
+            background: transparent;
+            border: none;
+            border-radius: 4px;
+            color: #9ca3af;
+            padding: 2px 6px;
+            font-size: 13px;
+            margin-left: 2px;
+        }}
+        .bookmark-chip-action:hover {{
+            background: rgba(255, 255, 255, 0.1);
+            color: #ffffff;
+        }}
+
+        /* Bookmarks Popover */
+        .bookmarks-popover {{
+            background-color: {bg_card};
+            background: {bg_card};
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 10px;
+        }}
+        .bookmark-search-entry {{
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 6px;
+            color: #ffffff;
+            font-size: 13.5px;
+            padding: 4px 8px;
+        }}
+        .bookmark-popover-row {{
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 6px;
+            padding: 2px 4px;
+            transition: background 80ms ease;
+        }}
+        .bookmark-popover-row:hover {{
+            background: rgba(255, 255, 255, 0.08);
+        }}
+        .bookmark-open-btn {{
+            background: transparent;
+            border: none;
+            color: #f3f4f6;
+            font-size: 13.5px;
+            font-weight: 500;
+            padding: 4px 6px;
+        }}
+        .bookmark-row-action {{
+            background: transparent;
+            border: none;
+            color: #9ca3af;
+            padding: 2px 6px;
+            font-size: 13px;
+            border-radius: 4px;
+        }}
+        .bookmark-row-action:hover {{
+            background: rgba(255, 255, 255, 0.15);
+            color: #ffffff;
+        }}
+        .btn-curr-bookmark {{
+            background: rgba(0, 96, 223, 0.2);
+            border: 1px solid rgba(0, 96, 223, 0.4);
+            border-radius: 6px;
+            color: #38bdf8;
+            font-weight: 600;
+            padding: 6px 10px;
+        }}
+        .btn-curr-bookmark:hover {{
+            background: rgba(0, 96, 223, 0.35);
+            color: #ffffff;
+        }}
+
+        /* 4. Left Dock and Sidebar */
+        .dock-bar {{
+            background-color: {bg_base};
+            border-right: 1px solid rgba(255, 255, 255, 0.08);
+            padding: 8px 4px;
+        }}
+        .dock-btn {{
+            background: transparent;
+            border: none;
+            border-radius: 8px;
+            padding: 8px 6px;
+            font-size: 18px;
+            color: #9ca3af;
+            margin-bottom: 4px;
+            transition: all 120ms ease;
+        }}
+        .dock-btn:hover {{
+            background: rgba(255, 255, 255, 0.08);
+            color: #ffffff;
+        }}
+        .dock-btn.active {{
+            background: rgba(0, 221, 255, 0.15);
+            border-left: 3px solid {accent};
+            color: {accent};
+        }}
+        .drawer-box {{
+            background-color: {bg_base};
+            border-right: 1px solid rgba(255, 255, 255, 0.1);
+        }}
+        .drawer-header-bar {{
+            background: {bg_card};
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            padding: 8px 14px;
+            min-height: 44px;
+        }}
+        .btn-delete {{
+            background: rgba(239, 68, 68, 0.15);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: #ef4444;
+            border-radius: 6px;
+            padding: 4px 10px;
+            font-size: 12px;
+            font-weight: 600;
+        }}
+        .btn-delete:hover {{
+            background: #ef4444;
+            color: #ffffff;
+        }}
+        .code-editor {{
+            font-family: "JetBrains Mono", "Courier New", monospace;
+            background-color: #11141d;
+            color: #38bdf8;
+            font-size: 13px;
+        }}
+
+        /* 5. Customizer Studio Dialog & Modern Component Styling */
+        .customizer-dialog {{
+            background-color: {bg_base};
+            color: {fg_main};
+        }}
+        .customizer-banner {{
+            background: linear-gradient(135deg, rgba(0, 96, 223, 0.22) 0%, rgba(135, 207, 62, 0.16) 100%);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 12px;
+            padding: 12px 18px;
+            margin-bottom: 6px;
+        }}
+        .banner-icon {{
+            font-size: 26px;
+        }}
+        .customizer-notebook {{
+            background-color: transparent;
+            border: none;
+        }}
+        .customizer-notebook tab {{
+            background-color: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 10px 10px 0 0;
+            padding: 8px 16px;
+            color: #94a3b8;
+            font-size: 13.5px;
+            font-weight: 600;
+            margin-right: 6px;
+            transition: all 120ms ease;
+        }}
+        .customizer-notebook tab:hover {{
+            background-color: rgba(255, 255, 255, 0.07);
+            color: #ffffff;
+        }}
+        .customizer-notebook tab:checked {{
+            background-color: {bg_card};
+            border-color: rgba(255, 255, 255, 0.14);
+            border-bottom: 2px solid {accent};
+            color: #ffffff;
+        }}
+        .theme-card-box {{
+            background-color: {bg_card};
+            border: 1.5px solid rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            padding: 14px 16px;
+            transition: all 120ms ease;
+        }}
+        .theme-card-box:hover {{
+            border-color: rgba(255, 255, 255, 0.24);
+            background-color: rgba(255, 255, 255, 0.06);
+        }}
+        .theme-card-box.active-theme {{
+            border: 2px solid {accent};
+            background-color: rgba(0, 96, 223, 0.09);
+        }}
+        .theme-badge {{
+            background: rgba(255, 255, 255, 0.08);
+            color: #94a3b8;
+            border-radius: 6px;
+            padding: 3px 8px;
+            font-size: 11px;
+            font-weight: 600;
+        }}
+        .theme-badge.active-badge {{
+            background: {accent};
+            color: #ffffff;
+        }}
+        .snippet-chip {{
+            background-color: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 8px;
+            color: #e2e8f0;
+            padding: 6px 12px;
+            font-size: 12.5px;
+            font-weight: 600;
+            transition: all 100ms ease;
+        }}
+        .snippet-chip:hover {{
+            background-color: rgba(0, 210, 255, 0.15);
+            border-color: #00d2ff;
+            color: #00d2ff;
+        }}
+        .item-card-row {{
+            background-color: {bg_card};
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 10px;
+            padding: 10px 14px;
+            transition: all 100ms ease;
+        }}
+        .item-card-row:hover {{
+            border-color: rgba(255, 255, 255, 0.18);
+            background-color: rgba(255, 255, 255, 0.05);
+        }}
+        .btn-primary-glow {{
+            background: linear-gradient(135deg, {accent}, #0284c7);
+            border: none;
+            border-radius: 8px;
+            color: #ffffff;
+            font-weight: 700;
+            padding: 8px 18px;
+        }}
+        .btn-primary-glow:hover {{
+            opacity: 0.9;
+        }}
+        .customizer-close-btn {{
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 8px;
+            color: #f1f5f9;
+            font-weight: 600;
+            padding: 7px 22px;
+        }}
+        .customizer-close-btn:hover {{
+            background: rgba(255, 255, 255, 0.16);
+            color: #ffffff;
+        }}
+        /* ===== Find Bar ===== */
+        .find-bar {{
+            background: rgba(15, 20, 30, 0.97);
+            border-top: 1px solid rgba(135, 207, 62, 0.3);
+            padding: 4px 8px;
+        }}
+        .find-bar-label {{
+            color: #87cf3e;
+            font-weight: 600;
+            font-size: 13px;
+        }}
+        .find-bar-entry {{
+            background: rgba(255,255,255,0.08);
+            border: 1px solid rgba(135,207,62,0.4);
+            border-radius: 6px;
+            color: #f1f5f9;
+            padding: 4px 8px;
+            font-size: 13px;
+            min-width: 240px;
+        }}
+        .find-bar-entry:focus {{
+            border-color: #87cf3e;
+            background: rgba(135,207,62,0.08);
+        }}
+        .find-bar-result {{
+            color: #94a3b8;
+            font-size: 12px;
+        }}
+        .find-nav-btn, .find-close-btn {{
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 5px;
+            color: #f1f5f9;
+            padding: 2px 8px;
+            font-size: 12px;
+        }}
+        .find-nav-btn:hover, .find-close-btn:hover {{
+            background: rgba(135,207,62,0.18);
+            border-color: rgba(135,207,62,0.5);
+        }}
+        .default-browser-infobar {{
+            background-color: rgba(15, 23, 42, 0.95);
+            border-bottom: 1px solid rgba(135, 207, 62, 0.4);
+            padding: 4px 12px;
+        }}
+        .default-browser-infobar button {{
+            font-size: 12px;
+            padding: 4px 10px;
+            border-radius: 6px;
+        }}
+        """
+
+        custom_css = self.config.get("custom_css", "")
+        if custom_css:
+            css_data += "\n/* Uporabniški lasten CSS */\n" + custom_css
+
+        self.css_provider.load_from_data(css_data.encode("utf-8"))
+
+    def apply_font_family(self, font_choice=None):
+        if font_choice is None:
+            font_choice = self.config.get("font_family", "system")
+        font_name = "sans-serif"
+        if font_choice == "sans":
+            font_name = "sans-serif"
+        elif font_choice == "serif":
+            font_name = "serif"
+        elif font_choice == "monospace":
+            font_name = "monospace"
+        elif font_choice == "system":
+            font_name = "system-ui"
+
+        for tab_id, tab_info in getattr(self, "tabs", {}).items():
+            wv = tab_info.get("webview")
+            if wv:
+                settings = wv.get_settings()
+                if settings:
+                    try:
+                        settings.set_default_font_family(font_name)
+                        if font_choice == "serif":
+                            settings.set_serif_font_family(font_name)
+                        elif font_choice == "monospace":
+                            settings.set_monospace_font_family(font_name)
+                        else:
+                            settings.set_sans_serif_font_family(font_name)
+                    except Exception as e:
+                        logger.debug(f"apply_font_family error: {e}")
+        self.apply_css()
+
+    def apply_brave_mode(self, enabled=None):
+        if enabled is None:
+            enabled = self.config.get("brave_mode_enabled", True)
+        b_str = "true" if enabled else "false"
+        js = f"if (window.setBraveMode) {{ window.setBraveMode({b_str}); }}"
+        for tab_id, tab_info in getattr(self, "tabs", {}).items():
+            wv = tab_info.get("webview")
+            uri = tab_info.get("uri", "")
+            if wv and ("ui/home.html" in uri or uri == "safeer://home"):
+                wv.run_javascript(js, None, None, None)
+
+    def on_global_key_press(self, widget, event):
+        ctrl = (event.state & Gdk.ModifierType.CONTROL_MASK) != 0
+        alt = (event.state & Gdk.ModifierType.MOD1_MASK) != 0
+        shift = (event.state & Gdk.ModifierType.SHIFT_MASK) != 0
+
+        # Ctrl + Shift + Delete opens Clear Browsing Data dialog (Universal standard)
+        if ctrl and shift and event.keyval in (Gdk.KEY_Delete, Gdk.KEY_KP_Delete):
+            self.open_clear_data_dialog()
+            return True
+
+        # F11 toggles Fullscreen
+        if event.keyval == Gdk.KEY_F11:
+            self.toggle_fullscreen()
+            return True
+
+        # Ctrl + L, Ctrl + K, or F6 focuses URL bar & selects text (Universal browser standard)
+        if (ctrl and not alt and not shift and event.keyval in (Gdk.KEY_l, Gdk.KEY_L, Gdk.KEY_k, Gdk.KEY_K)) or event.keyval == Gdk.KEY_F6:
+            self.url_entry.grab_focus()
+            self.url_entry.select_region(0, -1)
+            return True
+
+        # Ctrl + Tab / Ctrl + Shift + Tab / Ctrl + PageUp / Ctrl + PageDown: Preklapljanje med odprtimi zavihki
+        if ctrl and not alt and event.keyval in (Gdk.KEY_Tab, Gdk.KEY_ISO_Left_Tab, Gdk.KEY_Page_Up, Gdk.KEY_KP_Page_Up, Gdk.KEY_Page_Down, Gdk.KEY_KP_Page_Down):
+            if shift or event.keyval in (Gdk.KEY_ISO_Left_Tab, Gdk.KEY_Page_Up, Gdk.KEY_KP_Page_Up):
+                self.switch_to_prev_tab()
+            else:
+                self.switch_to_next_tab()
+            return True
+
+        # Ctrl + 1..8: Hitri neposredni skok na zavihke 1-8; Ctrl + 9: Skok na zadnji odprti zavihek
+        if ctrl and not shift and not alt:
+            num_keys = {
+                Gdk.KEY_1: 0, Gdk.KEY_KP_1: 0,
+                Gdk.KEY_2: 1, Gdk.KEY_KP_2: 1,
+                Gdk.KEY_3: 2, Gdk.KEY_KP_3: 2,
+                Gdk.KEY_4: 3, Gdk.KEY_KP_4: 3,
+                Gdk.KEY_5: 4, Gdk.KEY_KP_5: 4,
+                Gdk.KEY_6: 5, Gdk.KEY_KP_6: 5,
+                Gdk.KEY_7: 6, Gdk.KEY_KP_7: 6,
+                Gdk.KEY_8: 7, Gdk.KEY_KP_8: 7,
+            }
+            if event.keyval in num_keys:
+                self.switch_to_tab_index(num_keys[event.keyval])
+                return True
+            if event.keyval in (Gdk.KEY_9, Gdk.KEY_KP_9):
+                self.switch_to_last_tab()
+                return True
+
+        # Escape while URL bar has focus restores URL and returns focus to webview
+        if event.keyval == Gdk.KEY_Escape and self.url_entry.has_focus():
+            wv = self.get_active_webview()
+            cur_uri = wv.get_uri() if wv else ""
+            self.url_entry.set_text(self.format_clean_url(cur_uri))
+            if wv:
+                wv.grab_focus()
+            return True
+
+        # Zoom in: Ctrl + Plus / Ctrl + = / Ctrl + KP_Add
+        if ctrl and event.keyval in (Gdk.KEY_plus, Gdk.KEY_equal, Gdk.KEY_KP_Add):
+            self.zoom_in()
+            return True
+
+        # Zoom out: Ctrl + Minus / Ctrl + KP_Subtract
+        if ctrl and event.keyval in (Gdk.KEY_minus, Gdk.KEY_KP_Subtract):
+            self.zoom_out()
+            return True
+
+        # Reset zoom: Ctrl + 0 / Ctrl + KP_0
+        if ctrl and event.keyval in (Gdk.KEY_0, Gdk.KEY_KP_0):
+            self.zoom_reset()
+            return True
+
+        # F4 toggles sidebar
+        if event.keyval == Gdk.KEY_F4:
+            self.toggle_sidebar_visibility()
+            return True
+
+        # Ctrl + Shift + T: Ponovno odpri nazadnje zaprti zavihek
+        elif ctrl and shift and not alt and event.keyval in (Gdk.KEY_t, Gdk.KEY_T):
+            self.restore_closed_tab()
+            return True
+
+        # Ctrl + T: Nov zavihek
+        elif ctrl and not shift and not alt and event.keyval in (Gdk.KEY_t, Gdk.KEY_T):
+            self.new_tab()
+            return True
+
+        # Ctrl + W: Close tab
+        elif ctrl and event.keyval in (Gdk.KEY_w, Gdk.KEY_W):
+            if self.active_tab_id:
+                self.close_tab(self.active_tab_id)
+            return True
+
+        # Ctrl + H: History
+        elif ctrl and event.keyval in (Gdk.KEY_h, Gdk.KEY_H):
+            self.open_history_dialog()
+            return True
+
+        # Ctrl + J: Downloads
+        elif ctrl and event.keyval in (Gdk.KEY_j, Gdk.KEY_J):
+            self.open_downloads_dialog()
+            return True
+
+        # Ctrl + Shift + D: Toggle Dark Mode
+        elif ctrl and shift and event.keyval in (Gdk.KEY_d, Gdk.KEY_D):
+            self.toggle_dark_mode()
+            return True
+
+        # Ctrl + Alt + R or Alt + R: Reader Mode (Distraction-Free)
+        elif (ctrl and alt and event.keyval in (Gdk.KEY_r, Gdk.KEY_R)) or (alt and event.keyval in (Gdk.KEY_r, Gdk.KEY_R)):
+            self.toggle_reader_mode()
+            return True
+
+        # Ctrl + M: Toggle Mute Audio on Active Tab
+        elif ctrl and not alt and not shift and event.keyval in (Gdk.KEY_m, Gdk.KEY_M):
+            self.toggle_active_tab_mute()
+            return True
+
+        # Ctrl + D: Bookmark current page to Portals / Favorites
+        elif ctrl and not shift and event.keyval in (Gdk.KEY_d, Gdk.KEY_D):
+            self.bookmark_current_page()
+            return True
+
+        # Ctrl + Shift + B: Toggle Bookmarks Toolbar (Universal standard)
+        elif ctrl and shift and event.keyval in (Gdk.KEY_b, Gdk.KEY_B):
+            self.toggle_bookmarks_bar()
+            return True
+
+        # Ctrl + B: Open Favorites / Bookmarks Popover Menu
+        elif ctrl and not shift and event.keyval in (Gdk.KEY_b, Gdk.KEY_B):
+            self.toggle_bookmarks_popover()
+            return True
+
+        # Ctrl + R or F5: Reload
+        elif (ctrl and event.keyval in (Gdk.KEY_r, Gdk.KEY_R)) or event.keyval == Gdk.KEY_F5:
+            wv = self.get_active_webview()
+            if wv:
+                wv.reload()
+            return True
+
+        # Alt + Left: Back
+        elif alt and event.keyval == Gdk.KEY_Left:
+            wv = self.get_active_webview()
+            if wv:
+                wv.go_back()
+            return True
+
+        # Alt + Right: Forward
+        elif alt and event.keyval == Gdk.KEY_Right:
+            wv = self.get_active_webview()
+            if wv:
+                wv.go_forward()
+            return True
+
+        # Alt + Home: Domača stran
+        elif alt and event.keyval in (Gdk.KEY_Home, Gdk.KEY_KP_Home):
+            self.load_homepage()
+            return True
+
+        # Ctrl + F: Find in Page — prikaži find bar
+        elif ctrl and event.keyval in (Gdk.KEY_f, Gdk.KEY_F):
+            self.show_find_bar()
+            return True
+
+        # Ctrl + P: Natisni / Shrani kot PDF
+        elif ctrl and event.keyval in (Gdk.KEY_p, Gdk.KEY_P):
+            self.print_current_page()
+            return True
+
+        return False
+
+    def zoom_in(self):
+        wv = self.get_active_webview()
+        if wv:
+            cur = wv.get_zoom_level()
+            wv.set_zoom_level(min(cur + 0.1, 3.0))
+
+    def zoom_out(self):
+        wv = self.get_active_webview()
+        if wv:
+            cur = wv.get_zoom_level()
+            wv.set_zoom_level(max(cur - 0.1, 0.4))
+
+    def zoom_reset(self):
+        wv = self.get_active_webview()
+        if wv:
+            def_zoom = float(self.config.get("default_zoom", 1.0))
+            wv.set_zoom_level(def_zoom)
+
+    def print_current_page(self):
+        """Natisni trenutno stran ali shrani kot PDF prek GTK Print dialoga."""
+        wv = self.get_active_webview()
+        if not wv:
+            return
+        try:
+            print_op = WebKit2.PrintOperation.new(wv)
+            # Nastavi privzete nastavitve tiskanja
+            settings = Gtk.PrintSettings.new()
+            settings.set(Gtk.PRINT_SETTINGS_OUTPUT_FILE_FORMAT, "pdf")
+            # Privzeti izhod v Downloads mapo
+            downloads_dir = self.get_default_downloads_dir()
+            title = wv.get_title() or "safeer-stran"
+            # Sanitizacija naslova za ime datoteke
+            safe_title = "".join(c for c in title if c.isalnum() or c in (" ", "-", "_")).strip()[:60]
+            safe_title = safe_title or "safeer-stran"
+            output_path = os.path.join(downloads_dir, f"{safe_title}.pdf")
+            settings.set(Gtk.PRINT_SETTINGS_OUTPUT_URI, f"file://{output_path}")
+            print_op.set_print_settings(settings)
+            # Odpri GTK Print Dialog (tiskanje ali PDF export)
+            result = print_op.run_dialog(self)
+            if result == WebKit2.PrintOperationResponse.PRINT:
+                print(f"[Print] Tiskanje strani: {wv.get_uri()}")
+        except Exception as e:
+            # Fallback: GTK print dialog brez privzetih nastavitev
+            try:
+                print_op = WebKit2.PrintOperation.new(wv)
+                print_op.run_dialog(self)
+            except Exception as e2:
+                print(f"[Print] Napaka pri tiskanju: {e2}")
+
+    def toggle_fullscreen(self):
+        if getattr(self, "_is_fullscreen", False):
+            self.unfullscreen()
+            self._is_fullscreen = False
+        else:
+            self.fullscreen()
+            self._is_fullscreen = True
+
+    def bookmark_current_page(self):
+        self.toggle_bookmark_current_page()
+
+    def toggle_bookmark_current_page(self, btn=None):
+        """Doda trenutno stran med priljubljene portale (Speed Dial) ali odpre urejanje."""
+        wv = self.get_active_webview()
+        if not wv:
+            return
+        uri = wv.get_uri() or ""
+        title = wv.get_title() or "Priljubljena stran"
+        if not uri or "home.html" in uri or uri == "safeer://home":
+            return
+        portals = self.config.get_portals()
+        norm_uri = uri.rstrip("/")
+        existing = next((p for p in portals if p.get("url", "").rstrip("/") == norm_uri), None)
+        if existing:
+            self.open_portal_editor_dialog(existing, on_saved=self.update_star_status)
+        else:
+            self.open_portal_editor_dialog(None, prefill={"title": title, "url": uri}, on_saved=self.update_star_status)
+
+    def toggle_reader_mode(self, btn=None):
+        """Preklopi aktivno stran v bralni način (Reader Mode) ali nazaj."""
+        wv = self.get_active_webview()
+        if not wv:
+            return
+        uri = wv.get_uri() or ""
+        if not uri or uri.startswith("safeer://") or "home.html" in uri:
+            return
+        wv.run_javascript(READER_MODE_JS, None, None, None)
+
+    def toggle_pip(self, btn=None):
+        """Preklopi video v sliko v sliki (Picture-in-Picture)."""
+        wv = self.get_active_webview()
+        if not wv:
+            return
+        js = """
+        (function() {
+            const v = document.querySelector('video');
+            if (v) {
+                if (document.pictureInPictureElement) {
+                    document.exitPictureInPicture().catch(console.error);
+                } else if (v.requestPictureInPicture) {
+                    v.requestPictureInPicture().catch(console.error);
+                }
+            }
+        })();
+        """
+        wv.run_javascript(js, None, None, None)
+
+    def toggle_active_tab_mute(self):
+        """Utiša ali odtiša zvok v aktivnem zavihku."""
+        wv = self.get_active_webview()
+        if wv:
+            muted = not wv.get_property("is-muted")
+            wv.set_is_muted(muted)
+
+    def update_star_status(self):
+        """Posodobi videz zvezdice in orodij v naslovni vrstici."""
+        if not hasattr(self, 'btn_star'):
+            return
+        wv = self.get_active_webview()
+        if not wv:
+            return
+        uri = wv.get_uri() or ""
+        if not uri or uri.startswith("safeer://") or "home.html" in uri:
+            self.btn_star.hide()
+            if hasattr(self, 'btn_reader'): self.btn_reader.hide()
+            if hasattr(self, 'btn_pip'): self.btn_pip.hide()
+            return
+
+        self.btn_star.show()
+        if hasattr(self, 'btn_reader'): self.btn_reader.show()
+        if hasattr(self, 'btn_pip'): self.btn_pip.show()
+
+        portals = self.config.get_portals()
+        norm_uri = uri.rstrip("/")
+        is_saved = any(p.get("url", "").rstrip("/") == norm_uri for p in portals)
+        ctx = self.btn_star.get_style_context()
+        if is_saved:
+            self.btn_star.set_label("⭐")
+            ctx.add_class("active-star")
+            self.btn_star.set_tooltip_text(f"{t('page_bookmarked')}")
+        else:
+            self.btn_star.set_label("☆")
+            ctx.remove_class("active-star")
+            self.btn_star.set_tooltip_text(f"{t('bookmark_page')} (Ctrl + D)")
+
+    def load_url(self, url):
+        """Naloži podani URL v aktivni zavihek ali ustvari novega, če ni aktivnega."""
+        if not url:
+            return
+        if url == "safeer://home":
+            self.load_homepage()
+            return
+        if not url.startswith("http://") and not url.startswith("https://") and not url.startswith("file://") and not url.startswith("safeer://"):
+            url = "https://" + url
+        wv = self.get_active_webview()
+        if wv:
+            wv.load_uri(url)
+        else:
+            self.new_tab(url=url, switch=True)
+
+    def toggle_bookmarks_bar(self):
+        """Vklopi ali izklopi prikaz vodoravne vrstice z zaznamki."""
+        if not hasattr(self, 'bookmarks_bar'):
+            return
+        is_visible = not self.bookmarks_bar.get_visible()
+        if is_visible:
+            self.populate_bookmarks_bar()
+            self.bookmarks_bar.show_all()
+        else:
+            self.bookmarks_bar.hide()
+        self.config.set("show_bookmarks_bar", is_visible)
+
+    def populate_bookmarks_bar(self):
+        """Napolni vodoravno vrstico z zaznamki s hitrimi ploščicami priljubljenih strani."""
+        if not hasattr(self, 'bookmarks_bar'):
+            return
+        for child in self.bookmarks_bar.get_children():
+            self.bookmarks_bar.remove(child)
+
+        portals = self.config.get_portals()
+        for p in portals:
+            p_id = p.get("id")
+            p_url = (p.get("url") or "").strip()
+            p_title = (p.get("title") or p.get("name") or "").strip()
+            p_mark = (p.get("mark") or p.get("icon") or "🌐").strip()
+
+            # Prefer friendly name or clean domain if title is identical to raw URL
+            if not p_title or p_title == p_url or p_title.startswith("http://") or p_title.startswith("https://"):
+                if p.get("name") and p.get("name").strip() != p_url:
+                    p_title = p.get("name").strip()
+                elif p.get("title") and not (p.get("title").startswith("http://") or p.get("title").startswith("https://")):
+                    p_title = p.get("title").strip()
+                else:
+                    try:
+                        parsed = urllib.parse.urlparse(p_url)
+                        domain = parsed.netloc.replace("www.", "")
+                        if domain:
+                            p_title = domain
+                    except Exception:
+                        pass
+
+            if not p_title:
+                p_title = p_url
+
+            if p_mark in ("🌐", "") and p.get("icon"):
+                p_mark = p.get("icon").strip()
+
+            btn_chip = Gtk.Button(label=f"{p_mark} {p_title}")
+            btn_chip.get_style_context().add_class("bookmark-chip")
+
+            # Avoid duplicated tooltip lines when title equals or contains full URL
+            if p_title and p_title != p_url:
+                btn_chip.set_tooltip_text(f"{p_title}\n{p_url}")
+            else:
+                btn_chip.set_tooltip_text(p_url)
+
+            # Left click opens in active tab
+            btn_chip.connect("clicked", lambda b, u=p_url: self.load_url(u))
+
+            # Mouse button press (middle click = new tab, right click = context menu)
+            def on_chip_button_press(widget, event, portal=p):
+                if event.button == 2: # Middle click
+                    self.new_tab(url=portal.get("url", ""), switch=True)
+                    return True
+                elif event.button == 3: # Right click
+                    menu = Gtk.Menu()
+
+                    item_open = Gtk.MenuItem(label=t("open", "Odpri"))
+                    item_open.connect("activate", lambda m, u=portal.get("url", ""): self.load_url(u))
+                    menu.append(item_open)
+
+                    item_newtab = Gtk.MenuItem(label=t("open_in_new_tab", "Odpri v novem zavihku"))
+                    item_newtab.connect("activate", lambda m, u=portal.get("url", ""): self.new_tab(url=u, switch=True))
+                    menu.append(item_newtab)
+
+                    menu.append(Gtk.SeparatorMenuItem())
+
+                    item_edit = Gtk.MenuItem(label=f"✏️ {t('edit', 'Uredi')}...")
+                    item_edit.connect("activate", lambda m, prt=portal: self.open_portal_editor_dialog(prt, on_saved=self.broadcast_portals_update))
+                    menu.append(item_edit)
+
+                    item_del = Gtk.MenuItem(label=f"🗑️ {t('delete', 'Odstrani')}")
+                    def on_del_chip(m, pid=portal.get("id")):
+                        self.config.delete_portal(pid)
+                        self.broadcast_portals_update()
+                    item_del.connect("activate", on_del_chip)
+                    menu.append(item_del)
+
+                    menu.show_all()
+                    menu.popup_at_pointer(event)
+                    return True
+                return False
+
+            btn_chip.connect("button-press-event", on_chip_button_press)
+            self.bookmarks_bar.pack_start(btn_chip, False, False, 0)
+
+        # End action buttons: ➕ Add bookmark, ⚙️ Manage bookmarks
+        btn_add = Gtk.Button(label="➕")
+        btn_add.get_style_context().add_class("bookmark-chip-action")
+        btn_add.set_tooltip_text(t("add_new_bookmark"))
+        btn_add.connect("clicked", lambda b: self.open_portal_editor_dialog(None, on_saved=self.broadcast_portals_update))
+        self.bookmarks_bar.pack_end(btn_add, False, False, 0)
+
+        btn_manage = Gtk.Button(label="⚙️")
+        btn_manage.get_style_context().add_class("bookmark-chip-action")
+        btn_manage.set_tooltip_text(t("manage_bookmarks"))
+        btn_manage.connect("clicked", lambda b: self.open_portals_dialog())
+        self.bookmarks_bar.pack_end(btn_manage, False, False, 0)
+
+        self.bookmarks_bar.show_all()
+        if not self.config.get("show_bookmarks_bar", True):
+            self.bookmarks_bar.hide()
+
+    def toggle_bookmarks_popover(self, widget=None):
+        """Odpre ali zapre moderen plavajoči meni za hiter dostop in urejanje priljubljenih strani."""
+        if hasattr(self, '_bookmarks_popover') and self._bookmarks_popover:
+            if self._bookmarks_popover.is_visible():
+                self._bookmarks_popover.popdown()
+                return
+
+        popover = Gtk.Popover.new(self.btn_bookmarks)
+        popover.set_position(Gtk.PositionType.BOTTOM)
+        popover.get_style_context().add_class("bookmarks-popover")
+        self._bookmarks_popover = popover
+
+        main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        main_box.set_margin_top(8)
+        main_box.set_margin_bottom(8)
+        main_box.set_margin_start(10)
+        main_box.set_margin_end(10)
+        main_box.set_size_request(380, -1)
+
+        # Header with actions
+        head_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        lbl_head = Gtk.Label(label=f"<b>⭐ {GLib.markup_escape_text(t('bookmarks_menu'))}</b>")
+        lbl_head.set_use_markup(True)
+        lbl_head.set_xalign(0.0)
+        head_box.pack_start(lbl_head, True, True, 0)
+
+        btn_add_new = Gtk.Button(label="➕")
+        btn_add_new.get_style_context().add_class("nav-btn")
+        btn_add_new.set_tooltip_text(t("add_new_bookmark"))
+        def on_add_new_click(b):
+            popover.popdown()
+            self.open_portal_editor_dialog(None, on_saved=self.broadcast_portals_update)
+        btn_add_new.connect("clicked", on_add_new_click)
+        head_box.pack_end(btn_add_new, False, False, 0)
+
+        btn_manage = Gtk.Button(label="⚙️")
+        btn_manage.get_style_context().add_class("nav-btn")
+        btn_manage.set_tooltip_text(t("manage_bookmarks"))
+        def on_manage_click(b):
+            popover.popdown()
+            self.open_portals_dialog()
+        btn_manage.connect("clicked", on_manage_click)
+        head_box.pack_end(btn_manage, False, False, 0)
+        main_box.pack_start(head_box, False, False, 0)
+
+        # Quick action: Bookmark/Edit current page
+        wv = self.get_active_webview()
+        cur_uri = wv.get_uri() if wv else ""
+        cur_title = wv.get_title() if wv else ""
+        if cur_uri and not cur_uri.startswith("safeer://") and "home.html" not in cur_uri:
+            portals = self.config.get_portals()
+            norm_uri = cur_uri.rstrip("/")
+            existing = next((p for p in portals if p.get("url", "").rstrip("/") == norm_uri), None)
+            if existing:
+                btn_curr = Gtk.Button(label=f"✏️ {t('edit')} »{existing.get('title', '')}«")
+                btn_curr.get_style_context().add_class("btn-curr-bookmark")
+                def on_edit_curr(b):
+                    popover.popdown()
+                    self.open_portal_editor_dialog(existing, on_saved=self.broadcast_portals_update)
+                btn_curr.connect("clicked", on_edit_curr)
+            else:
+                btn_curr = Gtk.Button(label=f"⭐ {t('add_current_page')}")
+                btn_curr.get_style_context().add_class("btn-curr-bookmark")
+                def on_add_curr(b):
+                    popover.popdown()
+                    self.open_portal_editor_dialog(None, prefill={"title": cur_title, "url": cur_uri}, on_saved=self.broadcast_portals_update)
+                btn_curr.connect("clicked", on_add_curr)
+            main_box.pack_start(btn_curr, False, False, 0)
+
+        # Search filter
+        search_entry = Gtk.SearchEntry()
+        search_entry.set_placeholder_text(t("search_bookmarks_placeholder"))
+        search_entry.get_style_context().add_class("bookmark-search-entry")
+        main_box.pack_start(search_entry, False, False, 0)
+
+        # Scrollable list of bookmarks
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_min_content_height(260)
+        scroll.set_max_content_height(380)
+
+        list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        scroll.add(list_box)
+        main_box.pack_start(scroll, True, True, 0)
+
+        def populate_popover_list(query=""):
+            for c in list_box.get_children():
+                list_box.remove(c)
+            portals = self.config.get_portals()
+            q = query.lower().strip()
+            filtered = [p for p in portals if not q or q in p.get("title", "").lower() or q in p.get("url", "").lower()]
+
+            if not filtered:
+                lbl_empty = Gtk.Label(label="Ni najdenih zaznamkov.")
+                lbl_empty.get_style_context().add_class("text-muted")
+                lbl_empty.set_margin_top(12)
+                list_box.pack_start(lbl_empty, False, False, 0)
+            else:
+                for p in filtered:
+                    p_id = p.get("id")
+                    p_title = p.get("title", "")
+                    p_url = p.get("url", "")
+                    p_mark = p.get("mark", "🌐")
+
+                    row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+                    row.get_style_context().add_class("bookmark-popover-row")
+
+                    btn_open = Gtk.Button(label=f"{p_mark}  {p_title}")
+                    btn_open.set_tooltip_text(p_url)
+                    btn_open.set_halign(Gtk.Align.FILL)
+                    lbl_child = btn_open.get_child()
+                    if lbl_child and hasattr(lbl_child, "set_xalign"):
+                        lbl_child.set_xalign(0.0)
+                    btn_open.get_style_context().add_class("bookmark-open-btn")
+                    def on_open(b, u=p_url):
+                        popover.popdown()
+                        self.load_url(u)
+                    btn_open.connect("clicked", on_open)
+                    row.pack_start(btn_open, True, True, 0)
+
+                    btn_edit = Gtk.Button(label="✏️")
+                    btn_edit.get_style_context().add_class("bookmark-row-action")
+                    btn_edit.set_tooltip_text(t("edit"))
+                    def on_edit_item(b, prt=p):
+                        popover.popdown()
+                        self.open_portal_editor_dialog(prt, on_saved=self.broadcast_portals_update)
+                    btn_edit.connect("clicked", on_edit_item)
+                    row.pack_start(btn_edit, False, False, 0)
+
+                    btn_del = Gtk.Button(label="🗑️")
+                    btn_del.get_style_context().add_class("bookmark-row-action")
+                    btn_del.set_tooltip_text(t("delete"))
+                    def on_del_item(b, pid=p_id):
+                        self.config.delete_portal(pid)
+                        self.broadcast_portals_update()
+                        populate_popover_list(search_entry.get_text())
+                    btn_del.connect("clicked", on_del_item)
+                    row.pack_start(btn_del, False, False, 0)
+
+                    list_box.pack_start(row, False, False, 0)
+
+            list_box.show_all()
+
+        populate_popover_list()
+        search_entry.connect("search-changed", lambda e: populate_popover_list(e.get_text()))
+
+        # Bottom toggle for Bookmarks Bar
+        bottom_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        chk_bar = Gtk.CheckButton(label=t("toggle_bookmarks_bar"))
+        chk_bar.set_active(self.config.get("show_bookmarks_bar", True))
+        def on_toggle_chk(b):
+            self.toggle_bookmarks_bar()
+        chk_bar.connect("toggled", on_toggle_chk)
+        bottom_box.pack_start(chk_bar, True, True, 0)
+        main_box.pack_start(bottom_box, False, False, 0)
+
+        popover.add(main_box)
+        popover.show_all()
+        popover.popup()
+
+    def create_top_bar(self):
+        # Master header container (Tabs + Navigation bar in Firefox Proton layout)
+        self.top_bar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+
+        # 1. Tier 1: Firefox Tab Strip
+        self.tab_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        self.tab_bar.get_style_context().add_class("tab-toolbar")
+
+        # Dynamic tabs container
+        self.tabs_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        self.tab_bar.pack_start(self.tabs_box, False, False, 0)
+
+        # New Tab Button (+)
+        self.btn_new_tab = Gtk.Button(label="+")
+        self.btn_new_tab.get_style_context().add_class("new-tab-btn")
+        self.btn_new_tab.set_tooltip_text(f"{t('new_tab')} (Ctrl + T)")
+        self.btn_new_tab.connect("clicked", lambda b: self.new_tab())
+        self.tab_bar.pack_start(self.btn_new_tab, False, False, 0)
+
+        self.top_bar.pack_start(self.tab_bar, False, False, 0)
+
+        # 2. Tier 2: Firefox Navigation Bar
+        self.nav_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        self.nav_bar.get_style_context().add_class("nav-toolbar")
+
+        # Sidebar button (▤)
+        self.btn_sidebar = Gtk.Button(label="▤")
+        self.btn_sidebar.get_style_context().add_class("ff-nav-btn")
+        self.btn_sidebar.set_tooltip_text(f"{t('sidebar_display')} (F4)")
+        self.btn_sidebar.connect("clicked", lambda b: self.toggle_sidebar_visibility())
+        self.nav_bar.pack_start(self.btn_sidebar, False, False, 0)
+
+        # Back (←)
+        self.btn_back = Gtk.Button(label="←")
+        self.btn_back.get_style_context().add_class("ff-nav-btn")
+        self.btn_back.set_tooltip_text(f"{t('back')} (Alt + ←)")
+        self.btn_back.connect("clicked", lambda b: self.get_active_webview() and self.get_active_webview().go_back())
+        self.nav_bar.pack_start(self.btn_back, False, False, 0)
+
+        # Forward (→)
+        self.btn_forward = Gtk.Button(label="→")
+        self.btn_forward.get_style_context().add_class("ff-nav-btn")
+        self.btn_forward.set_tooltip_text(f"{t('forward')} (Alt + →)")
+        self.btn_forward.connect("clicked", lambda b: self.get_active_webview() and self.get_active_webview().go_forward())
+        self.nav_bar.pack_start(self.btn_forward, False, False, 0)
+
+        # Reload (↻)
+        self.btn_reload = Gtk.Button(label="↻")
+        self.btn_reload.get_style_context().add_class("ff-nav-btn")
+        self.btn_reload.set_tooltip_text(f"{t('reload')} (F5 / Ctrl + R)")
+        self.btn_reload.connect("clicked", lambda b: self.get_active_webview() and self.get_active_webview().reload())
+        self.nav_bar.pack_start(self.btn_reload, False, False, 0)
+
+        # Home (🏠)
+        self.btn_home = Gtk.Button(label="🏠")
+        self.btn_home.get_style_context().add_class("ff-nav-btn")
+        self.btn_home.set_tooltip_text(f"{t('home')} (Alt + Home)")
+        self.btn_home.connect("clicked", lambda b: self.load_homepage())
+        self.nav_bar.pack_start(self.btn_home, False, False, 0)
+
+        # Bookmarks / Favorites Menu (⭐)
+        self.btn_bookmarks = Gtk.Button(label="⭐")
+        self.btn_bookmarks.get_style_context().add_class("ff-nav-btn")
+        self.btn_bookmarks.set_tooltip_text(f"{t('bookmarks_menu')} (Ctrl + B)")
+        self.btn_bookmarks.connect("clicked", self.toggle_bookmarks_popover)
+        self.nav_bar.pack_start(self.btn_bookmarks, False, False, 0)
+
+        # 3. Firefox Awesomebar / URL Box
+        self.url_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        self.url_box.get_style_context().add_class("ff-url-container")
+
+        # Tracking protection shield inside URL bar
+        self.btn_shield = Gtk.Button(label="🛡️")
+        self.btn_shield.get_style_context().add_class("ff-shield-btn")
+        self.btn_shield.set_tooltip_text(f"{t('app_title')} Cyber Shield: {t('adblock_active')}")
+        self.btn_shield.connect("clicked", lambda b: self.show_shield_status_dialog())
+        self.update_shield_button_label()
+        self.url_box.pack_start(self.btn_shield, False, False, 0)
+
+        # Security tune sliders icon
+        self.security_icon = Gtk.Label(label="🎚️")
+        self.security_icon.get_style_context().add_class("ff-security-icon")
+        self.url_box.pack_start(self.security_icon, False, False, 0)
+
+        # Clean URL Entry with large Ubuntu font
+        self.url_entry = Gtk.Entry()
+        self.url_entry.get_style_context().add_class("ff-url-entry")
+        self.url_entry.set_placeholder_text(t('search_placeholder'))
+        self.url_entry.connect("activate", self.on_url_activate)
+        self.url_entry.connect("focus-in-event", self.on_url_focus_in)
+        self.url_entry.connect("focus-out-event", self.on_url_focus_out)
+        self.url_box.pack_start(self.url_entry, True, True, 0)
+
+        # Reader Mode Button (📖)
+        self.btn_reader = Gtk.Button(label="📖")
+        self.btn_reader.get_style_context().add_class("ff-action-btn")
+        self.btn_reader.set_tooltip_text(t('reader_mode'))
+        self.btn_reader.connect("clicked", lambda b: self.toggle_reader_mode())
+        self.url_box.pack_start(self.btn_reader, False, False, 0)
+
+        # Picture-in-Picture Button (⧉)
+        self.btn_pip = Gtk.Button(label="⧉")
+        self.btn_pip.get_style_context().add_class("ff-action-btn")
+        self.btn_pip.set_tooltip_text(f"{t('pip_video')}")
+        self.btn_pip.connect("clicked", lambda b: self.toggle_pip())
+        self.url_box.pack_start(self.btn_pip, False, False, 0)
+
+        # Speed Dial / Bookmark Star Button (⭐ / ☆)
+        self.btn_star = Gtk.Button(label="☆")
+        self.btn_star.get_style_context().add_class("ff-action-btn")
+        self.btn_star.set_tooltip_text(f"{t('bookmark_page')} (Ctrl + D)")
+        self.btn_star.connect("clicked", self.toggle_bookmark_current_page)
+        self.url_box.pack_start(self.btn_star, False, False, 0)
+
+        self.nav_bar.pack_start(self.url_box, True, True, 4)
+
+        # Force Dark Mode Toggle Button (🌙 / ☀️)
+        is_dark = self.config.get("force_dark_mode", True)
+        self.btn_dark_mode = Gtk.Button(label="🌙" if is_dark else "☀️")
+        self.btn_dark_mode.get_style_context().add_class("ff-nav-btn")
+        if is_dark:
+            self.btn_dark_mode.get_style_context().add_class("active")
+        self.btn_dark_mode.set_tooltip_text(f"{t('force_dark_mode')}")
+        self.btn_dark_mode.connect("clicked", self.toggle_dark_mode)
+        self.nav_bar.pack_start(self.btn_dark_mode, False, False, 0)
+
+        # Downloads Button (📥)
+        self.btn_downloads = Gtk.Button(label="📥")
+        self.btn_downloads.get_style_context().add_class("ff-nav-btn")
+        self.btn_downloads.set_tooltip_text(f"{t('downloads')} (Ctrl + J)")
+        self.btn_downloads.connect("clicked", lambda b: self.open_downloads_dialog())
+        self.nav_bar.pack_start(self.btn_downloads, False, False, 0)
+
+        # History Button (🕒)
+        self.btn_history = Gtk.Button(label="🕒")
+        self.btn_history.get_style_context().add_class("ff-nav-btn")
+        self.btn_history.set_tooltip_text(f"{t('history')} (Ctrl + H)")
+        self.btn_history.connect("clicked", lambda b: self.open_history_dialog())
+        self.nav_bar.pack_start(self.btn_history, False, False, 0)
+
+        # Customizer & Scripts Button (🧩)
+        self.btn_customizer = Gtk.Button(label="🧩")
+        self.btn_customizer.get_style_context().add_class("ff-nav-btn")
+        self.btn_customizer.set_tooltip_text(f"{t('customizer_title')}")
+        self.btn_customizer.connect("clicked", lambda b: self.open_customizer_dialog())
+        self.nav_bar.pack_start(self.btn_customizer, False, False, 0)
+
+        self.top_bar.pack_start(self.nav_bar, False, False, 0)
+
+        # 3. Tier 3: Bookmarks Toolbar (Vrstica priljubljenih strani)
+        self.bookmarks_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        self.bookmarks_bar.get_style_context().add_class("bookmarks-toolbar")
+        self.top_bar.pack_start(self.bookmarks_bar, False, False, 0)
+        self.populate_bookmarks_bar()
+        if not self.config.get("show_bookmarks_bar", True):
+            self.bookmarks_bar.hide()
+
+    def show_shield_status_dialog(self):
+        """Prikaže podrobno varnostno poročilo ščita."""
+        dialog = Gtk.MessageDialog(
+            transient_for=self,
+            flags=0,
+            message_type=Gtk.MessageType.INFO,
+            buttons=Gtk.ButtonsType.OK,
+            text="🛡️ Safeer Cyber Shield — Linux Mint Aktivna Zaščita"
+        )
+        ads = self.config.get("total_ads_blocked", 0)
+        threats = self.config.get("total_threats_blocked", 0)
+        msg = (
+            f"📊 Statistika zaščite v živo:\n"
+            f"  • Aktivnih pravil ščita: 350.000+\n"
+            f"  • Blokirani oglasi & sledilci: {ads:,}\n"
+            f"  • Preprečene botnet / C2 grožnje: {threats:,}\n\n"
+            "✓ YouTube Adblock: Zero-ad hitro preskakovanje oglasov aktivno.\n"
+            "✓ YouTube Background Audio: Predvajanje se nemoteno nadaljuje ob menjavi zavihkov.\n"
+            "✓ Ambient Mode: Odstranjena zamegljenost in neželeni sivi okvirji.\n"
+            "✓ abuse.ch Botnet Shield: Aktivno blokiranje C2 strežnikov in phishing domen.\n"
+            "✓ Čista prijava: Zaščita ne posega v obrazce za prijavo (Facebook, Google, Messenger)."
+        )
+        dialog.format_secondary_text(msg)
+        dialog.run()
+        dialog.destroy()
+
+    def toggle_sidebar_visibility(self):
+        """Začasno skrije ali prikaže celotno stransko orodno vrstico."""
+        if self.sidebar_box.is_visible():
+            self.sidebar_box.hide()
+            self.content_paned.set_position(0)
+            self.btn_sidebar.get_style_context().remove_class("active")
+        else:
+            self.sidebar_box.show()
+            self.icon_dock.show_all()
+            if self.active_sidebar_service:
+                self.sidebar_drawer.show()
+                for c in self.sidebar_drawer.get_children():
+                    c.show_all()
+                drawer_w = self.config.get("sidebar_width", 420)
+                if drawer_w > 650 or drawer_w < 300:
+                    drawer_w = 420
+                target_w = DOCK_WIDTH + drawer_w
+                self.content_paned.set_position(target_w)
+            else:
+                self.sidebar_drawer.hide()
+                self.content_paned.set_position(DOCK_WIDTH)
+            self.btn_sidebar.get_style_context().add_class("active")
+
+    def create_sidebar(self):
+        # Outer sidebar box: icon dock strip + slide-out webview drawer
+        self.sidebar_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+
+        # 1. Left Icon Dock
+        self.icon_dock = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self.icon_dock.get_style_context().add_class("dock-bar")
+        self.sidebar_box.pack_start(self.icon_dock, False, False, 0)
+
+        # 2. Slide-out Panel (Drawer)
+        self.sidebar_drawer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.sidebar_drawer.get_style_context().add_class("drawer-box")
+        self.sidebar_drawer.set_size_request(380, -1)
+        self.sidebar_drawer.set_no_show_all(True)
+        self.sidebar_drawer.hide()
+
+        # Drawer Header
+        self.drawer_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        self.drawer_header.get_style_context().add_class("drawer-header-bar")
+        
+        self.drawer_title = Gtk.Label(label="Stranska integracija")
+        self.drawer_title.set_halign(Gtk.Align.START)
+        self.drawer_header.pack_start(self.drawer_title, True, True, 6)
+
+        # Back button in drawer
+        self.btn_back_drawer = Gtk.Button(label="◀")
+        self.btn_back_drawer.set_tooltip_text("Nazaj v stranski integraciji")
+        self.btn_back_drawer.get_style_context().add_class("nav-btn")
+        self.btn_back_drawer.connect("clicked", lambda b: self.sidebar_webview.go_back())
+        self.drawer_header.pack_start(self.btn_back_drawer, False, False, 0)
+
+        # Reload button in drawer
+        self.btn_reload_drawer = Gtk.Button(label="⟳")
+        self.btn_reload_drawer.set_tooltip_text("Osveži stransko integracijo")
+        self.btn_reload_drawer.get_style_context().add_class("nav-btn")
+        self.btn_reload_drawer.connect("clicked", lambda b: self.sidebar_webview.reload())
+        self.drawer_header.pack_start(self.btn_reload_drawer, False, False, 0)
+
+        # Open in Main Tab button (↗️)
+        self.btn_popout = Gtk.Button(label="↗️")
+        self.btn_popout.set_tooltip_text("Odpri to stran v glavnem oknu brskalnika")
+        self.btn_popout.get_style_context().add_class("nav-btn")
+        self.btn_popout.connect("clicked", self.popout_sidebar_to_main)
+        self.drawer_header.pack_start(self.btn_popout, False, False, 0)
+
+        # Expand / Shrink drawer width toggle (↔️)
+        self.btn_expand_drawer = Gtk.Button(label="↔️")
+        self.btn_expand_drawer.set_tooltip_text("Razširi predal (720px) za sočasen celovit pogled klepeta ali skrči (420px)")
+        self.btn_expand_drawer.get_style_context().add_class("nav-btn")
+        self.btn_expand_drawer.connect("clicked", self.toggle_drawer_width)
+        self.drawer_header.pack_start(self.btn_expand_drawer, False, False, 0)
+
+        # Close button in drawer
+        self.btn_close_drawer = Gtk.Button(label="✕")
+        self.btn_close_drawer.set_tooltip_text("Zapri stranski zavihek")
+        self.btn_close_drawer.get_style_context().add_class("nav-btn")
+        self.btn_close_drawer.connect("clicked", lambda b: self.close_sidebar_panel())
+        self.drawer_header.pack_start(self.btn_close_drawer, False, False, 0)
+
+        self.sidebar_drawer.pack_start(self.drawer_header, False, False, 0)
+
+        # Drawer WebView: uses shared persistent web_context
+        self.sidebar_webview = WebKit2.WebView.new_with_context(self.web_context)
+        self.setup_webview_settings(self.sidebar_webview)
+        self.sidebar_webview.connect("create", self.on_create_webview)
+        self.sidebar_webview.connect("decide-policy", self.on_decide_policy)
+
+        self.sidebar_drawer.pack_start(self.sidebar_webview, True, True, 0)
+
+        self.sidebar_box.pack_start(self.sidebar_drawer, True, True, 0)
+
+        # Populate icon dock with current integrations
+        self.rebuild_icon_dock()
+
+    def rebuild_icon_dock(self):
+        """Dinamično ponovno zgradi ikone v stranski orodni vrstici."""
+        for child in self.icon_dock.get_children():
+            self.icon_dock.remove(child)
+
+        self.dock_buttons = {}
+        integrations = self.config.get("integrations", {})
+        for s_id, s_data in integrations.items():
+            if s_data.get("enabled", True):
+                btn = Gtk.Button(label=s_data.get("icon", "🌐"))
+                s_name = s_data.get('name', 'Stran').strip()
+                s_url = s_data.get('url', '').strip()
+                if s_name and s_url and s_name != s_url:
+                    btn.set_tooltip_text(f"{s_name}\n{s_url}")
+                else:
+                    btn.set_tooltip_text(s_name or s_url)
+                btn.get_style_context().add_class("dock-btn")
+                if self.active_sidebar_service == s_id:
+                    btn.get_style_context().add_class("active")
+                btn.connect("clicked", lambda b, sid=s_id: self.toggle_sidebar_panel(sid))
+                self.icon_dock.pack_start(btn, False, False, 0)
+                self.dock_buttons[s_id] = btn
+
+        # Spacer to push action buttons to bottom
+        spacer = Gtk.Box()
+        self.icon_dock.pack_start(spacer, True, True, 0)
+
+        # Quick Add Page button (+)
+        self.btn_add_sidebar = Gtk.Button(label="➕")
+        self.btn_add_sidebar.set_tooltip_text("Dodaj poljubno spletno stran v stransko vrstico")
+        self.btn_add_sidebar.get_style_context().add_class("dock-btn")
+        self.btn_add_sidebar.connect("clicked", lambda b: self.open_add_page_dialog())
+        self.icon_dock.pack_start(self.btn_add_sidebar, False, False, 0)
+
+        # Settings Button (⚙️)
+        self.btn_settings_sidebar = Gtk.Button(label="⚙️")
+        self.btn_settings_sidebar.set_tooltip_text("Nastavitve in urejanje stranske vrstice")
+        self.btn_settings_sidebar.get_style_context().add_class("dock-btn")
+        self.btn_settings_sidebar.connect("clicked", lambda b: self.open_settings_dialog())
+        self.icon_dock.pack_start(self.btn_settings_sidebar, False, False, 0)
+
+        self.icon_dock.show_all()
+
+    def popout_sidebar_to_main(self, widget=None):
+        uri = self.sidebar_webview.get_uri()
+        if uri:
+            wv = self.get_active_webview()
+            if wv:
+                wv.load_uri(uri)
+            self.close_sidebar_panel()
+
+    def toggle_drawer_width(self, widget=None):
+        """Preklopi med polno (680px) in kompaktno (420px) širino predala."""
+        current_w = self.config.get("sidebar_width", 680)
+        if current_w >= 600:
+            new_w = 420
+            self.btn_expand_drawer.set_label("↔️")
+        else:
+            new_w = 680
+            self.btn_expand_drawer.set_label("◀▶")
+        self.config.set("sidebar_width", new_w)
+        self.content_paned.set_position(DOCK_WIDTH + new_w)
+
+    def toggle_sidebar_panel(self, service_id: str):
+        # If clicking the currently open service, toggle it closed
+        if self.active_sidebar_service == service_id and self.sidebar_drawer.is_visible():
+            self.close_sidebar_panel()
+            return
+
+        integrations = self.config.get("integrations", {})
+        if service_id in integrations:
+            service = integrations[service_id]
+            self.drawer_title.set_text(f"{service.get('icon', '')} {service.get('name', '')}")
+            
+            # Load URL if different or not loaded
+            cur_uri = self.sidebar_webview.get_uri() or ""
+            target_url = service.get("url", "")
+            if target_url and (cur_uri != target_url and not cur_uri.startswith(target_url)):
+                self.sidebar_webview.load_uri(target_url)
+
+            # Show drawer and expand divider to comfortable desktop width
+            self.sidebar_drawer.show()
+            for c in self.sidebar_drawer.get_children():
+                c.show_all()
+            drawer_w = self.config.get("sidebar_width", 680)
+            drawer_w = max(350, min(950, drawer_w))
+            target_width = DOCK_WIDTH + drawer_w
+            self.content_paned.set_position(target_width)
+            self.active_sidebar_service = service_id
+
+            # Update active dock button styling
+            for sid, btn in self.dock_buttons.items():
+                if sid == service_id:
+                    btn.get_style_context().add_class("active")
+                else:
+                    btn.get_style_context().remove_class("active")
+
+    def close_sidebar_panel(self):
+        self.sidebar_drawer.hide()
+        self.active_sidebar_service = None
+        self.content_paned.set_position(DOCK_WIDTH)
+        for btn in self.dock_buttons.values():
+            btn.get_style_context().remove_class("active")
+
+    def on_paned_moved(self, paned, param):
+        pos = paned.get_position()
+        if self.sidebar_drawer.is_visible() and pos > DOCK_WIDTH + 100:
+            drawer_w = pos - DOCK_WIDTH
+            if 350 <= drawer_w <= 950:
+                self.config.settings["sidebar_width"] = drawer_w
+                if hasattr(self, "_paned_debounce_timer") and self._paned_debounce_timer:
+                    GLib.source_remove(self._paned_debounce_timer)
+                self._paned_debounce_timer = GLib.timeout_add(400, self._save_config_debounced)
+
+    def _save_config_debounced(self):
+        self._paned_debounce_timer = None
+        self.config.save_settings()
+        return False
+
+    def is_download_url(self, url: str) -> bool:
+        """Ugotovi, ali URL vodi neposredno do prenosljive datoteke (arhiv, namestitveni paket, ISO itd.)."""
+        if not url:
+            return False
+        try:
+            parsed = urllib.parse.urlparse(url)
+            path = urllib.parse.unquote(parsed.path.lower())
+            DOWNLOAD_EXTS = (
+                ".tar.gz", ".tgz", ".tar.bz2", ".tar.xz", ".tar.zst", ".tar",
+                ".zip", ".7z", ".rar", ".gz", ".bz2", ".xz", ".zst",
+                ".deb", ".rpm", ".apk", ".dmg", ".exe", ".msi", ".appimage",
+                ".iso", ".img", ".bin", ".torrent"
+            )
+            return any(path.endswith(ext) for ext in DOWNLOAD_EXTS)
+        except Exception:
+            return False
+
+    def start_direct_download(self, uri: str):
+        """Nemudoma sproži prenos datoteke preko WebContext brez odpiranja odvečnih praznih zavihkov."""
+        try:
+            if hasattr(self, "web_context") and self.web_context:
+                print(f"[Safeer Download] Samodejni prenos povezave: {uri}")
+                self.web_context.download_uri(uri)
+                if hasattr(self, "btn_downloads"):
+                    self.btn_downloads.set_label("⬇️ 0%")
+                    self.btn_downloads.get_style_context().add_class("active")
+        except Exception as e:
+            print(f"[Safeer Download] Napaka pri zagonu neposrednega prenosa: {e}")
+
+    def cleanup_download_tab_if_transient(self, webview):
+        """Če se je za prenos datoteke odprl nov začasni zavihek, ga samodejno zapremo, da uporabnik ne ostane na safeer://home."""
+        try:
+            if not hasattr(self, "tabs") or len(self.tabs) <= 1:
+                return
+            for tab_item in list(self.tabs):
+                if tab_item.get("webview") == webview:
+                    bf = webview.get_back_forward_list()
+                    has_history = bool(bf and bf.get_back_item())
+                    if not has_history:
+                        print(f"[Safeer Download] Samodejno zapiram prazen začasni zavihek prenosa: {tab_item['id']}")
+                        GLib.idle_add(self.close_tab, tab_item["id"])
+                    break
+        except Exception as e:
+            print(f"[Safeer Download] Opozorilo pri čiščenju zavihka: {e}")
+
+    def on_create_webview(self, webview, navigation_action):
+        """Obravnava klice window.open ali povezave target=_blank."""
+        try:
+            req = navigation_action.get_request()
+            uri = req.get_uri() if req else ""
+            if uri:
+                if is_passthrough_host(uri):
+                    tab_id = self.new_tab(switch=False, related_view=webview)
+                    return next(tab["webview"] for tab in self.tabs if tab["id"] == tab_id)
+                if not is_safe_web_url(uri):
+                    print(f"[Create WebView Security] Zavrnjen nevaren protokol: {uri}")
+                    return None
+                if self.config.get("adblock_enabled", True) and is_ad_domain(uri) and not is_threat_domain(uri):
+                    self.config.increment_ads_blocked(1)
+                    return None
+                if is_threat_domain(uri):
+                    self.show_threat_warning(uri)
+                    return None
+                if self.is_download_url(uri):
+                    self.start_direct_download(uri)
+                    return None
+            # WebKit must own the new navigation (including POST body and opener).
+            # A separately loaded tab breaks window.open, postMessage and OAuth callbacks.
+            tab_id = self.new_tab(switch=False, related_view=webview)
+            return next(tab["webview"] for tab in self.tabs if tab["id"] == tab_id)
+        except Exception as e:
+            print(f"[Create WebView] Napaka: {e}")
+        return None
+
+    def on_decide_policy(self, webview, decision, decision_type):
+        """Obravnava zahteve za nova okna (target=_blank), navigacijo in prenose z dosledno sanitizacijo protokolov."""
+        if decision_type == WebKit2.PolicyDecisionType.NEW_WINDOW_ACTION:
+            try:
+                nav_action = decision.get_navigation_action()
+                req = nav_action.get_request()
+                uri = req.get_uri() if req else ""
+                if uri:
+                    if not is_safe_web_url(uri):
+                        print(f"[Policy Security] Blokiran nedovoljen protokol za novo okno: {uri}")
+                        decision.ignore()
+                        return True
+                    if self.config.get("adblock_enabled", True) and is_ad_domain(uri) and not is_threat_domain(uri):
+                        self.config.increment_ads_blocked(1)
+                        decision.ignore()
+                        return True
+                    if is_threat_domain(uri):
+                        self.config.increment_threats_blocked(1)
+                        self.show_threat_warning(uri)
+                        decision.ignore()
+                        return True
+                    if self.is_download_url(uri):
+                        self.start_direct_download(uri)
+                        decision.ignore()
+                        return True
+                decision.use()
+                return True
+            except Exception as e:
+                print(f"[Policy] Napaka pri novem oknu: {e}")
+        elif decision_type == WebKit2.PolicyDecisionType.NAVIGATION_ACTION:
+            try:
+                nav_action = decision.get_navigation_action()
+                req = nav_action.get_request()
+                uri = req.get_uri() if req else ""
+                if uri:
+                    if is_passthrough_host(uri):
+                        # Popoln passthrough za Cloudflare Turnstile in xAI/Grok prijavo (brez motenj)
+                        pass
+                    else:
+                        if not is_safe_web_url(uri):
+                            print(f"[Policy Security] Blokiran nedovoljen protokol navigacije: {uri}")
+                            decision.ignore()
+                            return True
+                        if self.config.get("adblock_enabled", True) and is_ad_domain(uri) and not is_threat_domain(uri):
+                            self.config.increment_ads_blocked(1)
+                            decision.ignore()
+                            return True
+                        if is_threat_domain(uri):
+                            self.config.increment_threats_blocked(1)
+                            self.show_threat_warning(uri)
+                            decision.ignore()
+                            return True
+
+                        if self.is_download_url(uri):
+                            self.start_direct_download(uri)
+                            decision.ignore()
+                            return True
+
+                        # Only clean explicit GET link clicks. Replaying forms or redirects
+                        # with load_uri would discard POST bodies and break sign-in state.
+                        if (self.config.get("tracking_protection_enabled", True)
+                                and nav_action.get_navigation_type() == WebKit2.NavigationType.LINK_CLICKED
+                                and not nav_action.is_redirect()
+                                and req.get_http_method() == "GET"):
+                            clean_uri = strip_tracking_parameters(uri)
+                            if clean_uri != uri:
+                                decision.ignore()
+                                webview.load_uri(clean_uri)
+                                return True
+
+                    nav_type = nav_action.get_navigation_type()
+                    mouse_btn = nav_action.get_mouse_button()
+                    modifiers = nav_action.get_modifiers()
+                    # Srednji klik ali Ctrl + klik odpre zavihek v ozadju SAMO ob dejanskem kliku na povezavo!
+                    if nav_type == WebKit2.NavigationType.LINK_CLICKED and (mouse_btn == 2 or (modifiers & Gdk.ModifierType.CONTROL_MASK)):
+                        self.new_tab(url=uri, switch=False)
+                        decision.ignore()
+                        return True
+            except Exception as e:
+                print(f"[Policy Navigation] Napaka: {e}")
+            try:
+                if hasattr(decision, "use_with_policies") and hasattr(WebKit2, "WebsitePolicies"):
+                    policies = WebKit2.WebsitePolicies(autoplay=WebKit2.AutoplayPolicy.ALLOW)
+                    decision.use_with_policies(policies)
+                    return True
+            except Exception:
+                pass
+            decision.use()
+            return True
+        elif decision_type == WebKit2.PolicyDecisionType.RESPONSE:
+            try:
+                if hasattr(decision, "is_mime_type_supported") and not decision.is_mime_type_supported():
+                    decision.download()
+                    self.cleanup_download_tab_if_transient(webview)
+                    return True
+            except Exception as e:
+                print(f"[Policy Response] Napaka: {e}")
+        return False
+
+    def open_add_page_dialog(self):
+        """Dialog za hitro dodajanje nove strani v stransko orodno vrstico."""
+        dialog = Gtk.Dialog(
+            title=f"➕ {t('add_portal', 'Dodaj stran')} — Safeer",
+            transient_for=self,
+            flags=0
+        )
+        dialog.get_style_context().add_class("customizer-dialog")
+        btn_cancel = dialog.add_button(t("cancel", "Prekliči"), Gtk.ResponseType.CANCEL)
+        btn_cancel.get_style_context().add_class("customizer-close-btn")
+        btn_add = dialog.add_button(f"➕ {t('add_portal', 'Dodaj')}", Gtk.ResponseType.OK)
+        btn_add.get_style_context().add_class("btn-primary-glow")
+        dialog.set_default_size(420, 260)
+
+        box = dialog.get_content_area()
+        box.set_spacing(10)
+        box.set_margin_top(16)
+        box.set_margin_bottom(16)
+        box.set_margin_start(16)
+        box.set_margin_end(16)
+
+        lbl_name = Gtk.Label(label="Ime spletne strani (npr. Discord, WhatsApp, ChatGPT):")
+        lbl_name.set_halign(Gtk.Align.START)
+        entry_name = Gtk.Entry()
+        entry_name.set_placeholder_text("Vnesite ime...")
+        box.pack_start(lbl_name, False, False, 0)
+        box.pack_start(entry_name, False, False, 0)
+
+        lbl_url = Gtk.Label(label="Spletni naslov (URL):")
+        lbl_url.set_halign(Gtk.Align.START)
+        entry_url = Gtk.Entry()
+        entry_url.set_placeholder_text("https://...")
+        box.pack_start(lbl_url, False, False, 0)
+        box.pack_start(entry_url, False, False, 0)
+
+        lbl_icon = Gtk.Label(label="Ikona ali emoji (npr. 💬, 🤖, 🎧, ✉️, 🌐):")
+        lbl_icon.set_halign(Gtk.Align.START)
+        entry_icon = Gtk.Entry()
+        entry_icon.set_text("🌐")
+        box.pack_start(lbl_icon, False, False, 0)
+        box.pack_start(entry_icon, False, False, 0)
+
+        dialog.show_all()
+        response = dialog.run()
+
+        if response == Gtk.ResponseType.OK:
+            name = entry_name.get_text().strip()
+            url = entry_url.get_text().strip()
+            icon = entry_icon.get_text().strip() or "🌐"
+
+            if name and url:
+                new_id = self.config.add_integration(name, url, icon)
+                self.rebuild_icon_dock()
+                self.toggle_sidebar_panel(new_id)
+
+        dialog.destroy()
+
+    def open_settings_dialog(self):
+        """Sodoben, pregleden in večjezični studio za nastavitve brskalnika Safeer."""
+        dialog = Gtk.Dialog(
+            title=f"⚙️ {t('settings')} — Safeer",
+            transient_for=self,
+            flags=0
+        )
+        dialog.set_default_size(780, 640)
+        dialog.set_resizable(True)
+        dialog.set_position(Gtk.WindowPosition.CENTER)
+        dialog.get_style_context().add_class("customizer-dialog")
+
+        btn_close = dialog.add_button(t("close", "Zapri"), Gtk.ResponseType.CLOSE)
+        btn_close.get_style_context().add_class("customizer-close-btn")
+
+        content = dialog.get_content_area()
+        content.set_spacing(10)
+        content.set_margin_top(12)
+        content.set_margin_bottom(12)
+        content.set_margin_start(16)
+        content.set_margin_end(16)
+
+        # -------------------------------------------------------------
+        # Hero Header Banner
+        # -------------------------------------------------------------
+        banner = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=14)
+        banner.get_style_context().add_class("customizer-banner")
+
+        icon_lbl = Gtk.Label(label="⚙️")
+        icon_lbl.get_style_context().add_class("banner-icon")
+        banner.pack_start(icon_lbl, False, False, 2)
+
+        title_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        lbl_head = Gtk.Label(label=f"<b><span size='13000'>{GLib.markup_escape_text(t('settings'))}</span></b>")
+        lbl_head.set_use_markup(True)
+        lbl_head.set_xalign(0.0)
+
+        lbl_sub = Gtk.Label(label=f"<span color='#94a3b8'>{GLib.markup_escape_text(t('settings_subtitle'))}</span>")
+        lbl_sub.set_use_markup(True)
+        lbl_sub.set_xalign(0.0)
+
+        title_vbox.pack_start(lbl_head, False, False, 0)
+        title_vbox.pack_start(lbl_sub, False, False, 0)
+        banner.pack_start(title_vbox, True, True, 0)
+        content.pack_start(banner, False, False, 0)
+
+        notebook = Gtk.Notebook()
+        notebook.get_style_context().add_class("customizer-notebook")
+        notebook.set_vexpand(True)
+        notebook.set_hexpand(True)
+        content.pack_start(notebook, True, True, 0)
+
+        # =============================================================
+        # ZAVIHEK 1: 🌐 Splošno (General)
+        # =============================================================
+        tab1_scroll = Gtk.ScrolledWindow()
+        tab1_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        tab1_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
+        tab1_box.set_margin_top(14)
+        tab1_box.set_margin_bottom(14)
+        tab1_box.set_margin_start(8)
+        tab1_box.set_margin_end(8)
+        tab1_scroll.add(tab1_box)
+
+        # Kartica 1.0: Privzeti spletni brskalnik
+        card_default = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        card_default.get_style_context().add_class("theme-card-box")
+
+        lbl_c_def = Gtk.Label(label="<b><span size='11500'>🖥️ Privzeti spletni brskalnik</span></b>")
+        lbl_c_def.set_use_markup(True)
+        lbl_c_def.set_xalign(0.0)
+        card_default.pack_start(lbl_c_def, False, False, 0)
+
+        row_def = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        is_def = self.is_default_browser()
+
+        lbl_def_status = Gtk.Label()
+        lbl_def_status.set_xalign(0.0)
+        if is_def:
+            lbl_def_status.set_markup("<span color='#87cf3e'>✓ Safeer je vaš privzeti spletni brskalnik v sistemu Linux.</span>")
+        else:
+            lbl_def_status.set_markup("<span color='#94a3b8'>Safeer trenutno ni nastavljen kot privzeti brskalnik.</span>")
+        row_def.pack_start(lbl_def_status, True, True, 0)
+
+        btn_make_def = Gtk.Button(label="Nastavi kot privzetega")
+        btn_make_def.get_style_context().add_class("customizer-save-btn")
+        if is_def:
+            btn_make_def.set_sensitive(False)
+            btn_make_def.set_label("✓ Že privzeto")
+
+        def on_make_default_clicked(b):
+            ok = self.set_as_default_browser(show_dialog=True)
+            if ok:
+                lbl_def_status.set_markup("<span color='#87cf3e'>✓ Safeer je vaš privzeti spletni brskalnik v sistemu Linux.</span>")
+                btn_make_def.set_sensitive(False)
+                btn_make_def.set_label("✓ Že privzeto")
+
+        btn_make_def.connect("clicked", on_make_default_clicked)
+        row_def.pack_end(btn_make_def, False, False, 0)
+        card_default.pack_start(row_def, False, False, 2)
+
+        tab1_box.pack_start(card_default, False, False, 0)
+
+        # Kartica 1.1: Jezik & Iskalnik
+        card_lang = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        card_lang.get_style_context().add_class("theme-card-box")
+
+        lbl_c_lang = Gtk.Label(label=f"<b><span size='11500'>🌐 {GLib.markup_escape_text(t('card_lang_search'))}</span></b>")
+        lbl_c_lang.set_use_markup(True)
+        lbl_c_lang.set_xalign(0.0)
+        card_lang.pack_start(lbl_c_lang, False, False, 0)
+
+        # Vrstica za jezik
+        row_lang = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        lbl_lang_name = Gtk.Label(label=t('language'))
+        lbl_lang_name.set_xalign(0.0)
+        row_lang.pack_start(lbl_lang_name, True, True, 0)
+
+        combo_lang = Gtk.ComboBoxText()
+        combo_lang.append("auto", f"🌐 {t('lang_auto')}")
+        for code, name in SUPPORTED_LANGUAGES.items():
+            combo_lang.append(code, f"{name} ({code.upper()})")
+        cur_lang_cfg = self.config.get("language", "auto")
+        combo_lang.set_active_id(cur_lang_cfg)
+
+        def on_lang_changed(cb):
+            sel_id = cb.get_active_id() or "auto"
+            self.config.set("language", sel_id)
+            set_language(sel_id)
+            self.update_ui_language()
+
+        combo_lang.connect("changed", on_lang_changed)
+        row_lang.pack_end(combo_lang, False, False, 0)
+        card_lang.pack_start(row_lang, False, False, 2)
+
+        # Vrstica za iskalnik
+        row_eng = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        lbl_eng_name = Gtk.Label(label=t('search_engine_lbl'))
+        lbl_eng_name.set_xalign(0.0)
+        row_eng.pack_start(lbl_eng_name, True, True, 0)
+
+        combo_engine = Gtk.ComboBoxText()
+        for eid, einfo in SEARCH_ENGINES.items():
+            combo_engine.append(eid, f"{einfo['icon']} {einfo['name']}")
+        cur_engine = self.config.get("search_engine", "google")
+        combo_engine.set_active_id(cur_engine)
+
+        def on_engine_changed(cb):
+            sel_eng = cb.get_active_id() or "google"
+            self.config.set("search_engine", sel_eng)
+            self.broadcast_search_engine_update()
+
+        combo_engine.connect("changed", on_engine_changed)
+        row_eng.pack_end(combo_engine, False, False, 0)
+        card_lang.pack_start(row_eng, False, False, 2)
+
+        tab1_box.pack_start(card_lang, False, False, 0)
+
+        # Kartica 1.2: Možnosti prenosa in vnosa
+        card_input = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        card_input.get_style_context().add_class("theme-card-box")
+
+        lbl_c_input = Gtk.Label(label=f"<b><span size='11500'>📥 {GLib.markup_escape_text(t('card_downloads_input'))}</span></b>")
+        lbl_c_input.set_use_markup(True)
+        lbl_c_input.set_xalign(0.0)
+        card_input.pack_start(lbl_c_input, False, False, 0)
+
+        dl_check = Gtk.CheckButton(label=t('always_ask_download_chk'))
+        dl_check.set_active(self.config.get("always_ask_download_dir", False))
+        dl_check.connect("toggled", lambda b: self.config.set("always_ask_download_dir", b.get_active()))
+        card_input.pack_start(dl_check, False, False, 2)
+
+        kb_check = Gtk.CheckButton(label=t('virtual_keyboard_chk'))
+        kb_check.set_active(self.config.get("virtual_keyboard_enabled", False))
+        kb_check.connect("toggled", lambda b: self.toggle_virtual_keyboard())
+        card_input.pack_start(kb_check, False, False, 2)
+
+        tab1_box.pack_start(card_input, False, False, 0)
+
+        lbl_tab1 = Gtk.Label(label=f"🌐 {t('tab_general')}")
+        notebook.append_page(tab1_scroll, lbl_tab1)
+
+        # =============================================================
+        # ZAVIHEK 2: 🛡️ Zasebnost & Šifriranje (Privacy & Security)
+        # =============================================================
+        tab2_scroll = Gtk.ScrolledWindow()
+        tab2_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        tab2_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
+        tab2_box.set_margin_top(14)
+        tab2_box.set_margin_bottom(14)
+        tab2_box.set_margin_start(8)
+        tab2_box.set_margin_end(8)
+        tab2_scroll.add(tab2_box)
+
+        # Kartica 2.1: Zaščita vsebine
+        card_protect = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        card_protect.get_style_context().add_class("theme-card-box")
+
+        lbl_c_protect = Gtk.Label(label=f"<b><span size='11500'>🛡️ {GLib.markup_escape_text(t('card_protection_title'))}</span></b>")
+        lbl_c_protect.set_use_markup(True)
+        lbl_c_protect.set_xalign(0.0)
+        card_protect.pack_start(lbl_c_protect, False, False, 0)
+
+        adguard_check = Gtk.CheckButton(label=t('adguard_protection_chk'))
+        adguard_check.set_active(self.config.get("adguard_protection_enabled", True))
+        adguard_check.connect("toggled", lambda b: self.config.set("adguard_protection_enabled", b.get_active()))
+        card_protect.pack_start(adguard_check, False, False, 0)
+
+        lbl_adguard_sub = Gtk.Label(label=f"<span color='#94a3b8' size='9500'>    {GLib.markup_escape_text(t('adguard_desc'))}</span>")
+        lbl_adguard_sub.set_use_markup(True)
+        lbl_adguard_sub.set_xalign(0.0)
+        card_protect.pack_start(lbl_adguard_sub, False, False, 0)
+
+        tab2_box.pack_start(card_protect, False, False, 0)
+
+        # Kartica 2.2: Šifriran DNS (DoH)
+        card_doh = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        card_doh.get_style_context().add_class("theme-card-box")
+
+        lbl_c_doh = Gtk.Label(label=f"<b><span size='11500'>🔒 {GLib.markup_escape_text(t('card_doh_title'))}</span></b>")
+        lbl_c_doh.set_use_markup(True)
+        lbl_c_doh.set_xalign(0.0)
+        card_doh.pack_start(lbl_c_doh, False, False, 0)
+
+        lbl_doh_sub = Gtk.Label(label=f"<span color='#94a3b8'>{GLib.markup_escape_text(t('doh_provider_lbl'))}</span>")
+        lbl_doh_sub.set_use_markup(True)
+        lbl_doh_sub.set_xalign(0.0)
+        card_doh.pack_start(lbl_doh_sub, False, False, 0)
+
+        combo_doh = Gtk.ComboBoxText()
+        combo_doh.append("quad9", t('doh_quad9'))
+        combo_doh.append("adguard", t('doh_adguard'))
+        combo_doh.append("cloudflare", t('doh_cloudflare'))
+        combo_doh.append("google", t('doh_google'))
+        combo_doh.append("custom", t('doh_custom'))
+        combo_doh.append("disabled", t('doh_disabled'))
+
+        cur_doh = self.config.get("doh_provider", "cloudflare")
+        if not self.config.get("doh_enabled", True):
+            cur_doh = "disabled"
+        combo_doh.set_active_id(cur_doh)
+
+        entry_custom_doh = Gtk.Entry()
+        entry_custom_doh.set_placeholder_text("https://1.1.1.1/dns-query")
+        entry_custom_doh.set_text(self.config.get("custom_doh_url", "https://1.1.1.1/dns-query"))
+        entry_custom_doh.set_visible(cur_doh == "custom")
+        entry_custom_doh.get_style_context().add_class("item-card-row")
+
+        def on_custom_doh_changed(entry):
+            self.config.set("custom_doh_url", entry.get_text().strip())
+            if combo_doh.get_active_id() == "custom":
+                self.setup_network_security_and_proxy()
+
+        entry_custom_doh.connect("changed", on_custom_doh_changed)
+
+        def on_doh_changed(cb):
+            sel = cb.get_active_id() or "cloudflare"
+            if sel == "disabled":
+                self.config.set("doh_enabled", False)
+                self.config.set("doh_provider", "disabled")
+            else:
+                self.config.set("doh_enabled", True)
+                self.config.set("doh_provider", sel)
+            entry_custom_doh.set_visible(sel == "custom")
+            self.setup_network_security_and_proxy()
+
+        combo_doh.connect("changed", on_doh_changed)
+        card_doh.pack_start(combo_doh, False, False, 0)
+        card_doh.pack_start(entry_custom_doh, False, False, 2)
+
+        tab2_box.pack_start(card_doh, False, False, 0)
+
+        # Kartica 2.3: Šifriran tunel / Proxy
+        card_proxy = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        card_proxy.get_style_context().add_class("theme-card-box")
+
+        lbl_c_proxy = Gtk.Label(label=f"<b><span size='11500'>🧅 {GLib.markup_escape_text(t('card_proxy_title'))}</span></b>")
+        lbl_c_proxy.set_use_markup(True)
+        lbl_c_proxy.set_xalign(0.0)
+        card_proxy.pack_start(lbl_c_proxy, False, False, 0)
+
+        lbl_proxy_sub = Gtk.Label(label=f"<span color='#94a3b8'>{GLib.markup_escape_text(t('proxy_mode_lbl'))}</span>")
+        lbl_proxy_sub.set_use_markup(True)
+        lbl_proxy_sub.set_xalign(0.0)
+        card_proxy.pack_start(lbl_proxy_sub, False, False, 0)
+
+        combo_tun = Gtk.ComboBoxText()
+        combo_tun.append("disabled", t('proxy_disabled'))
+        combo_tun.append("custom", t('proxy_custom'))
+
+        cur_tun = self.config.get("secure_proxy_mode", "disabled")
+        if cur_tun not in ("disabled", "custom"):
+            cur_tun = "disabled"
+            self.config.set("secure_proxy_mode", "disabled")
+        combo_tun.set_active_id(cur_tun)
+
+        entry_proxy_url = Gtk.Entry()
+        entry_proxy_url.set_placeholder_text("http://127.0.0.1:8080 ali socks5://127.0.0.1:1080")
+        entry_proxy_url.set_text(self.config.get("secure_proxy_url", "http://127.0.0.1:8080"))
+        entry_proxy_url.set_visible(cur_tun == "custom")
+        entry_proxy_url.get_style_context().add_class("item-card-row")
+
+        def on_proxy_url_changed(entry):
+            self.config.set("secure_proxy_url", entry.get_text().strip())
+            if combo_tun.get_active_id() == "custom":
+                self.setup_network_security_and_proxy()
+
+        entry_proxy_url.connect("changed", on_proxy_url_changed)
+
+        def on_tun_changed(cb):
+            sel = cb.get_active_id() or "disabled"
+            self.config.set("secure_proxy_mode", sel)
+            entry_proxy_url.set_visible(sel == "custom")
+            self.setup_network_security_and_proxy()
+
+        combo_tun.connect("changed", on_tun_changed)
+        card_proxy.pack_start(combo_tun, False, False, 0)
+        card_proxy.pack_start(entry_proxy_url, False, False, 2)
+
+        tab2_box.pack_start(card_proxy, False, False, 0)
+
+        # Kartica 2.4: Čiščenje podatkov brskanja
+        card_cleanup = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        card_cleanup.get_style_context().add_class("theme-card-box")
+
+        btn_clear_data = Gtk.Button(label=t('btn_clear_browsing_data'))
+        btn_clear_data.get_style_context().add_class("btn-delete")
+        btn_clear_data.connect("clicked", lambda b: [dialog.destroy(), self.open_clear_data_dialog()])
+        card_cleanup.pack_start(btn_clear_data, False, False, 0)
+
+        tab2_box.pack_start(card_cleanup, False, False, 0)
+
+        lbl_tab2 = Gtk.Label(label=f"🛡️ {t('tab_privacy_sec')}")
+        notebook.append_page(tab2_scroll, lbl_tab2)
+
+        # =============================================================
+        # ZAVIHEK 3: 📑 Stranska vrstica (Sidebar)
+        # =============================================================
+        tab3_scroll = Gtk.ScrolledWindow()
+        tab3_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        tab3_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
+        tab3_box.set_margin_top(14)
+        tab3_box.set_margin_bottom(14)
+        tab3_box.set_margin_start(8)
+        tab3_box.set_margin_end(8)
+        tab3_scroll.add(tab3_box)
+
+        # Kartica 3.1: Prikaz stranske vrstice
+        card_sb = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        card_sb.get_style_context().add_class("theme-card-box")
+
+        lbl_c_sb = Gtk.Label(label=f"<b><span size='11500'>📑 {GLib.markup_escape_text(t('sidebar_display'))}</span></b>")
+        lbl_c_sb.set_use_markup(True)
+        lbl_c_sb.set_xalign(0.0)
+        card_sb.pack_start(lbl_c_sb, False, False, 0)
+
+        sb_check = Gtk.CheckButton(label=t('sidebar_enable_chk'))
+        sb_check.set_active(self.config.get("sidebar_enabled", True))
+
+        def on_sb_toggled(btn):
+            enabled = btn.get_active()
+            self.config.set("sidebar_enabled", enabled)
+            if enabled:
+                self.sidebar_box.show()
+                self.icon_dock.show_all()
+                self.content_paned.set_position(DOCK_WIDTH)
+            else:
+                self.sidebar_box.hide()
+                self.content_paned.set_position(0)
+
+        sb_check.connect("toggled", on_sb_toggled)
+        card_sb.pack_start(sb_check, False, False, 0)
+        tab3_box.pack_start(card_sb, False, False, 0)
+
+        # Kartica 3.2: Upravljanje spletnih aplikacij
+        card_apps = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        card_apps.get_style_context().add_class("theme-card-box")
+
+        lbl_c_apps = Gtk.Label(label=f"<b><span size='11500'>🌐 {GLib.markup_escape_text(t('sidebar_items'))}</span></b>")
+        lbl_c_apps.set_use_markup(True)
+        lbl_c_apps.set_xalign(0.0)
+        card_apps.pack_start(lbl_c_apps, False, False, 0)
+
+        items_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        card_apps.pack_start(items_vbox, False, False, 0)
+
+        integrations = self.config.get("integrations", {})
+        for k, v in list(integrations.items()):
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+            row.get_style_context().add_class("item-card-row")
+
+            check = Gtk.CheckButton(label=f"{v.get('icon', '🌐')}  {v.get('name', '')}")
+            check.set_active(v.get("enabled", True))
+            check.set_tooltip_text(v.get("url", ""))
+
+            def on_item_toggled(btn, item_key=k):
+                self.config.settings["integrations"][item_key]["enabled"] = btn.get_active()
+                self.config.save_settings()
+                self.rebuild_icon_dock()
+
+            check.connect("toggled", on_item_toggled)
+            row.pack_start(check, True, True, 0)
+
+            btn_del = Gtk.Button(label=t('btn_delete'))
+            btn_del.get_style_context().add_class("btn-delete")
+
+            def on_item_deleted(btn, item_key=k, row_box=row):
+                self.config.remove_integration(item_key)
+                items_vbox.remove(row_box)
+                self.rebuild_icon_dock()
+                if self.active_sidebar_service == item_key:
+                    self.close_sidebar_panel()
+
+            btn_del.connect("clicked", on_item_deleted)
+            row.pack_end(btn_del, False, False, 0)
+            items_vbox.pack_start(row, False, False, 0)
+
+        # Gumb Dodaj v stransko vrstico
+        btn_add_inline = Gtk.Button(label=t('btn_add_sidebar'))
+        btn_add_inline.get_style_context().add_class("nav-btn")
+        btn_add_inline.connect("clicked", lambda b: [dialog.destroy(), self.open_add_page_dialog()])
+        card_apps.pack_start(btn_add_inline, False, False, 6)
+
+        tab3_box.pack_start(card_apps, False, False, 0)
+
+        lbl_tab3 = Gtk.Label(label=f"📑 {t('tab_sidebar')}")
+        notebook.append_page(tab3_scroll, lbl_tab3)
+
+        # =============================================================
+        # ZAVIHEK 4: 🎨 Izgled brskalnika (Browser Appearance)
+        # =============================================================
+        tab4_scroll = Gtk.ScrolledWindow()
+        tab4_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        tab4_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
+        tab4_box.set_margin_top(14)
+        tab4_box.set_margin_bottom(14)
+        tab4_box.set_margin_start(8)
+        tab4_box.set_margin_end(8)
+        tab4_scroll.add(tab4_box)
+
+        # Kartica 4.1: Izbira teme brskalnika & Temni način
+        card_theme = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        card_theme.get_style_context().add_class("theme-card-box")
+
+        lbl_c_theme = Gtk.Label(label=f"<b><span size='11500'>🎨 {GLib.markup_escape_text(t('choose_theme', 'Izbira teme brskalnika & Temni način'))}</span></b>")
+        lbl_c_theme.set_use_markup(True)
+        lbl_c_theme.set_xalign(0.0)
+        card_theme.pack_start(lbl_c_theme, False, False, 0)
+
+        theme_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        lbl_th_choice = Gtk.Label(label=t('theme_lbl', 'Slog teme:'))
+        lbl_th_choice.set_xalign(0.0)
+        theme_row.pack_start(lbl_th_choice, False, False, 0)
+
+        combo_theme = Gtk.ComboBoxText()
+        combo_theme.append("mint", "🍃 Linux Mint Emerald (Privzeto)")
+        combo_theme.append("midnight", "🌙 Firefox Midnight (Temna)")
+        combo_theme.append("neon", "⚡ Cyberpunk Neon (Visok kontrast)")
+        combo_theme.append("amoled", "🖤 Pure AMOLED Black (Črna)")
+        cur_th = self.config.get("theme", "mint")
+        combo_theme.set_active_id(cur_th)
+
+        def on_theme_changed(cb):
+            new_th = cb.get_active_id() or "mint"
+            self.config.set("theme", new_th)
+            self.apply_css()
+
+        combo_theme.connect("changed", on_theme_changed)
+        theme_row.pack_start(combo_theme, True, True, 0)
+        card_theme.pack_start(theme_row, False, False, 2)
+
+        dark_check = Gtk.CheckButton(label=f"🌙 {t('force_dark_mode')}")
+        dark_check.set_active(self.config.get("force_dark_mode", True))
+        dark_check.connect("toggled", lambda b: self.toggle_dark_mode())
+        card_theme.pack_start(dark_check, False, False, 4)
+
+        lbl_dark_sub = Gtk.Label(label="<span color='#94a3b8' size='9500'>    Avtomatsko prilagodi svetle spletne strani v temni način za manjše naprezanje oči.</span>")
+        lbl_dark_sub.set_use_markup(True)
+        lbl_dark_sub.set_xalign(0.0)
+        card_theme.pack_start(lbl_dark_sub, False, False, 0)
+
+        tab4_box.pack_start(card_theme, False, False, 0)
+
+        # Kartica 4.2: Izbor pisave & Povečava strani
+        card_font_zoom = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        card_font_zoom.get_style_context().add_class("theme-card-box")
+
+        lbl_c_font_zoom = Gtk.Label(label=f"<b><span size='11500'>🔤 {GLib.markup_escape_text('Pisava & Povečava strani')}</span></b>")
+        lbl_c_font_zoom.set_use_markup(True)
+        lbl_c_font_zoom.set_xalign(0.0)
+        card_font_zoom.pack_start(lbl_c_font_zoom, False, False, 0)
+
+        # Vrstica: Izbor pisave
+        font_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        lbl_ft_choice = Gtk.Label(label=t('font_family_lbl', 'Slog pisave:'))
+        lbl_ft_choice.set_xalign(0.0)
+        font_row.pack_start(lbl_ft_choice, False, False, 0)
+
+        combo_font = Gtk.ComboBoxText()
+        combo_font.append("system", f"🖥️ {t('font_system', 'Sistemska pisava (Privzeto)')}")
+        combo_font.append("sans", f"🔤 {t('font_sans', 'Brezserifna (Sans-serif: Inter, Roboto)')}")
+        combo_font.append("serif", f"📖 {t('font_serif', 'Serifna (Serif: Noto Serif)')}")
+        combo_font.append("monospace", f"💻 {t('font_monospace', 'Enakomerna (Monospace / Koda)')}")
+        cur_font = self.config.get("font_family", "system")
+        combo_font.set_active_id(cur_font)
+
+        def on_font_changed(cb):
+            new_f = cb.get_active_id() or "system"
+            self.config.set("font_family", new_f)
+            self.apply_font_family(new_f)
+
+        combo_font.connect("changed", on_font_changed)
+        font_row.pack_start(combo_font, True, True, 0)
+        card_font_zoom.pack_start(font_row, False, False, 2)
+
+        # Vrstica: Povečava strani
+        zoom_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        lbl_zm_choice = Gtk.Label(label="Privzeta povečava:")
+        lbl_zm_choice.set_xalign(0.0)
+        zoom_row.pack_start(lbl_zm_choice, False, False, 0)
+
+        combo_zoom = Gtk.ComboBoxText()
+        combo_zoom.append("0.85", "85% (Kompaktno)")
+        combo_zoom.append("1.0", "100% (Običajno)")
+        combo_zoom.append("1.15", "115% (Udobno)")
+        combo_zoom.append("1.25", "125% (Večje)")
+        combo_zoom.append("1.5", "150% (Veliko)")
+        cur_zoom = str(self.config.get("default_zoom", 1.0))
+        if cur_zoom not in ("0.85", "1.0", "1.15", "1.25", "1.5"):
+            cur_zoom = "1.0"
+        combo_zoom.set_active_id(cur_zoom)
+
+        def on_zoom_changed(cb):
+            val_str = cb.get_active_id() or "1.0"
+            try:
+                val = float(val_str)
+                self.config.set("default_zoom", val)
+                wv = self.get_current_webview()
+                if wv:
+                    wv.set_zoom_level(val)
+            except Exception:
+                pass
+
+        combo_zoom.connect("changed", on_zoom_changed)
+        zoom_row.pack_start(combo_zoom, True, True, 0)
+        card_font_zoom.pack_start(zoom_row, False, False, 2)
+
+        tab4_box.pack_start(card_font_zoom, False, False, 0)
+
+        # Kartica 4.3: Brave način (Brave Shield stil začetne strani)
+        card_brave = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        card_brave.get_style_context().add_class("theme-card-box")
+
+        lbl_c_brave = Gtk.Label(label=f"<b><span size='11500'>🦁 {GLib.markup_escape_text(t('brave_mode_title', 'Brave način'))}</span></b>")
+        lbl_c_brave.set_use_markup(True)
+        lbl_c_brave.set_xalign(0.0)
+        card_brave.pack_start(lbl_c_brave, False, False, 0)
+
+        brave_check = Gtk.CheckButton(label=t('brave_mode_chk', '🦁 Brave način (Brave Shield začetna stran, statistika in ura)'))
+        brave_check.set_active(self.config.get("brave_mode_enabled", True))
+        def on_brave_toggled(btn):
+            val = btn.get_active()
+            self.config.set("brave_mode_enabled", val)
+            self.apply_brave_mode(val)
+        brave_check.connect("toggled", on_brave_toggled)
+        card_brave.pack_start(brave_check, False, False, 4)
+
+        lbl_brave_sub = Gtk.Label(label=f"<span color='#94a3b8' size='9500'>    {GLib.markup_escape_text(t('brave_mode_desc', 'Ob izklopu začetna stran deluje v čistem minimalističnem načinu zgolj z iskalnikom in priljubljenimi zaznamki.'))}</span>")
+        lbl_brave_sub.set_use_markup(True)
+        lbl_brave_sub.set_xalign(0.0)
+        lbl_brave_sub.set_line_wrap(True)
+        card_brave.pack_start(lbl_brave_sub, False, False, 0)
+
+        tab4_box.pack_start(card_brave, False, False, 0)
+
+        # Kartica 4.4: Napredno prilagajanje (Uporabniški CSS in Tampermonkey)
+        card_custom = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        card_custom.get_style_context().add_class("theme-card-box")
+
+        lbl_c_custom = Gtk.Label(label=f"<b><span size='11500'>🧩 {GLib.markup_escape_text(t('customizer_title'))}</span></b>")
+        lbl_c_custom.set_use_markup(True)
+        lbl_c_custom.set_xalign(0.0)
+        card_custom.pack_start(lbl_c_custom, False, False, 0)
+
+        lbl_custom_sub = Gtk.Label(label=f"<span color='#94a3b8'>{GLib.markup_escape_text(t('customizer_tab_desc'))}</span>")
+        lbl_custom_sub.set_use_markup(True)
+        lbl_custom_sub.set_xalign(0.0)
+        lbl_custom_sub.set_line_wrap(True)
+        card_custom.pack_start(lbl_custom_sub, False, False, 0)
+
+        btn_custom = Gtk.Button(label=t('btn_open_customizer'))
+        btn_custom.get_style_context().add_class("btn-primary-glow")
+        btn_custom.connect("clicked", lambda b: [dialog.destroy(), self.open_customizer_dialog()])
+        card_custom.pack_start(btn_custom, False, False, 8)
+
+        tab4_box.pack_start(card_custom, False, False, 0)
+
+        lbl_tab4 = Gtk.Label(label=f"🎨 {t('tab_appearance_tools', 'Izgled brskalnika')}")
+        notebook.append_page(tab4_scroll, lbl_tab4)
+
+        dialog.show_all()
+        dialog.run()
+        dialog.destroy()
+
+    def create_main_webview(self):
+        self.webview_container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.webview_stack = Gtk.Stack()
+        self.webview_stack.set_transition_type(Gtk.StackTransitionType.NONE)
+        self.webview_container.pack_start(self.webview_stack, True, True, 0)
+
+    def setup_webview_settings(self, webview):
+        # Set dark canvas background color instantly to eliminate white flashbang on load
+        dark_bg = Gdk.RGBA()
+        dark_bg.parse("#101814")
+        webview.set_background_color(dark_bg)
+
+        try:
+            def_zoom = float(self.config.get("default_zoom", 1.0))
+            if def_zoom != 1.0:
+                webview.set_zoom_level(def_zoom)
+        except Exception:
+            pass
+
+        settings = webview.get_settings()
+        try:
+            font_choice = self.config.get("font_family", "system")
+            if font_choice == "sans":
+                settings.set_default_font_family("sans-serif")
+                settings.set_sans_serif_font_family("sans-serif")
+            elif font_choice == "serif":
+                settings.set_default_font_family("serif")
+                settings.set_serif_font_family("serif")
+            elif font_choice == "monospace":
+                settings.set_default_font_family("monospace")
+                settings.set_monospace_font_family("monospace")
+            elif font_choice == "system":
+                settings.set_default_font_family("system-ui")
+        except Exception:
+            pass
+
+        settings.set_enable_developer_extras(True)
+        settings.set_enable_webaudio(True)
+        settings.set_enable_webgl(True)
+        settings.set_enable_media_stream(True)
+        settings.set_enable_smooth_scrolling(True)
+        settings.set_enable_html5_local_storage(True)
+        settings.set_enable_html5_database(True)
+        settings.set_enable_javascript(True)
+        settings.set_javascript_can_open_windows_automatically(True)
+        settings.set_enable_javascript_markup(True)
+        settings.set_allow_modal_dialogs(True)
+        settings.set_enable_encrypted_media(True)
+        if USER_AGENT is not None:
+            settings.set_user_agent(USER_AGENT)
+
+        # Strojno pospeševanje & stabilno renderiranje (WebKitGTK ON_DEMAND)
+        try:
+            if hasattr(WebKit2, "HardwareAccelerationPolicy"):
+                hw_pref = self.config.get("hardware_acceleration", "on_demand")
+                if hw_pref == "always":
+                    settings.set_hardware_acceleration_policy(WebKit2.HardwareAccelerationPolicy.ALWAYS)
+                elif hw_pref == "never":
+                    settings.set_hardware_acceleration_policy(WebKit2.HardwareAccelerationPolicy.NEVER)
+                else:
+                    settings.set_hardware_acceleration_policy(WebKit2.HardwareAccelerationPolicy.ON_DEMAND)
+            if hasattr(settings, "set_enable_accelerated_2d_canvas"):
+                settings.set_enable_accelerated_2d_canvas(True)
+            if hasattr(settings, "set_enable_mediasource"):
+                settings.set_enable_mediasource(True)
+            if hasattr(settings, "set_enable_back_forward_navigation_gestures"):
+                settings.set_enable_back_forward_navigation_gestures(True)
+            # Onemogoči ohranjanje preteklih strani v RAM-u (prepreči kopičenje odvečnega pomnilnika)
+            if hasattr(settings, "set_enable_page_cache"):
+                settings.set_enable_page_cache(False)
+            # Onemogoči zlonamerno sledenje povezavam (<a ping>) in DNS vohljanje
+            if hasattr(settings, "set_enable_hyperlink_auditing"):
+                settings.set_enable_hyperlink_auditing(False)
+            if hasattr(settings, "set_enable_dns_prefetching"):
+                settings.set_enable_dns_prefetching(False)
+        except Exception:
+            pass
+
+        # Obravnava zahtev za dovoljenja (kamera, mikrofon, geolokacija)
+        webview.connect("permission-request", self.on_permission_request)
+
+    def on_permission_request(self, webview, request):
+        """Obravnava zahteve za dostop do kamere, mikrofona ali geolokacije z možnostjo privolitve uporabnika."""
+        try:
+            policy = self.config.get("permissions_policy", "ask")
+            if policy == "deny":
+                request.deny()
+                return True
+            elif policy == "allow":
+                request.allow()
+                return True
+
+            perm_name = "dostop do naprav"
+            req_class = request.__class__.__name__
+            if "UserMedia" in req_class:
+                is_audio = getattr(request, "is_for_audio_device", lambda: False)()
+                is_video = getattr(request, "is_for_video_device", lambda: False)()
+                if is_audio and is_video:
+                    perm_name = "mikrofon in spletno kamero"
+                elif is_audio:
+                    perm_name = "mikrofon"
+                elif is_video:
+                    perm_name = "spletno kamero"
+            elif "Geolocation" in req_class:
+                perm_name = "geolokacijo naprave"
+            elif "Notification" in req_class:
+                perm_name = "pošiljanje sistemskih obvestil"
+
+            uri = webview.get_uri() or ""
+            domain = ""
+            try:
+                domain = urllib.parse.urlparse(uri).netloc or uri
+            except Exception:
+                domain = uri
+
+            dialog = Gtk.MessageDialog(
+                transient_for=self,
+                flags=Gtk.DialogFlags.MODAL,
+                type=Gtk.MessageType.QUESTION,
+                buttons=Gtk.ButtonsType.NONE,
+                text=f"Dovoljenje za {perm_name}"
+            )
+            dialog.format_secondary_text(f"Spletna stran '{domain}' zahteva dovoljenje za: {perm_name}.\nAli dovolite dostop?")
+            dialog.add_button(t("cancel", "Zavrni"), Gtk.ResponseType.NO)
+            dialog.add_button("Dovoli", Gtk.ResponseType.YES)
+            dialog.set_default_response(Gtk.ResponseType.NO)
+
+            res = dialog.run()
+            dialog.destroy()
+
+            if res == Gtk.ResponseType.YES:
+                request.allow()
+            else:
+                request.deny()
+            return True
+        except Exception as e:
+            print(f"[Permissions] Napaka pri obravnavi dovoljenja: {e}")
+            try:
+                request.deny()
+            except Exception:
+                pass
+            return True
+
+
+    def create_find_bar(self):
+        """Ustvari Find-in-Page vrstico na dnu okna (Ctrl+F)."""
+        self.find_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        self.find_bar.set_no_show_all(True)
+        self.find_bar.get_style_context().add_class("find-bar")
+        self.find_bar.set_margin_start(8)
+        self.find_bar.set_margin_end(8)
+        self.find_bar.set_margin_top(4)
+        self.find_bar.set_margin_bottom(4)
+
+        lbl = Gtk.Label(label="🔍 Najdi:")
+        lbl.get_style_context().add_class("find-bar-label")
+        self.find_bar.pack_start(lbl, False, False, 0)
+
+        self.find_entry = Gtk.Entry()
+        self.find_entry.set_width_chars(28)
+        self.find_entry.set_placeholder_text("Išči na strani…")
+        self.find_entry.get_style_context().add_class("find-bar-entry")
+        self.find_entry.connect("changed", self._on_find_text_changed)
+        self.find_entry.connect("activate", lambda e: self._find_next())
+        self.find_entry.connect("key-press-event", self._on_find_key_press)
+        self.find_bar.pack_start(self.find_entry, False, False, 0)
+
+        self.find_result_label = Gtk.Label(label="")
+        self.find_result_label.get_style_context().add_class("find-bar-result")
+        self.find_bar.pack_start(self.find_result_label, False, False, 4)
+
+        btn_prev = Gtk.Button(label="◀")
+        btn_prev.set_tooltip_text("Prejšnje (Shift+Enter)")
+        btn_prev.get_style_context().add_class("find-nav-btn")
+        btn_prev.connect("clicked", lambda b: self._find_prev())
+        self.find_bar.pack_start(btn_prev, False, False, 0)
+
+        btn_next = Gtk.Button(label="▶")
+        btn_next.set_tooltip_text("Naslednje (Enter)")
+        btn_next.get_style_context().add_class("find-nav-btn")
+        btn_next.connect("clicked", lambda b: self._find_next())
+        self.find_bar.pack_start(btn_next, False, False, 0)
+
+        btn_close = Gtk.Button(label="✕")
+        btn_close.set_tooltip_text("Zapri iskanje (Escape)")
+        btn_close.get_style_context().add_class("find-close-btn")
+        btn_close.connect("clicked", lambda b: self.hide_find_bar())
+        self.find_bar.pack_end(btn_close, False, False, 0)
+
+        self.find_bar.show_all()
+        self.find_bar.hide()
+
+    def show_find_bar(self):
+        """Prikaži find bar in fokusiraj vnosno polje."""
+        self.find_bar.show()
+        self.find_entry.grab_focus()
+        self.find_entry.select_region(0, -1)
+
+    def hide_find_bar(self):
+        """Skrij find bar in počisti iskanje."""
+        self.find_bar.hide()
+        wv = self.get_active_webview()
+        if wv:
+            try:
+                fc = wv.get_find_controller()
+                fc.search_finish()
+            except Exception:
+                pass
+        self.find_result_label.set_text("")
+
+    def _on_find_key_press(self, entry, event):
+        if event.keyval == Gdk.KEY_Escape:
+            self.hide_find_bar()
+            return True
+        if event.keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
+            shift = (event.state & Gdk.ModifierType.SHIFT_MASK) != 0
+            if shift:
+                self._find_prev()
+            else:
+                self._find_next()
+            return True
+        return False
+
+    def _on_find_text_changed(self, entry):
+        text = entry.get_text()
+        wv = self.get_active_webview()
+        if not wv:
+            return
+        try:
+            fc = wv.get_find_controller()
+            if text:
+                fc.search(text,
+                          WebKit2.FindOptions.CASE_INSENSITIVE | WebKit2.FindOptions.WRAP_AROUND,
+                          200)
+                fc.connect("found-text", self._on_find_found)
+                fc.connect("failed-to-find-text", self._on_find_failed)
+            else:
+                fc.search_finish()
+                self.find_result_label.set_text("")
+        except Exception as e:
+            print(f"[Find] Napaka: {e}")
+
+    def _on_find_found(self, fc, match_count):
+        try:
+            if match_count > 0:
+                self.find_result_label.set_markup(f"<span foreground='#87cf3e'>{match_count} zadetkov</span>")
+            else:
+                self.find_result_label.set_markup("<span foreground='#87cf3e'>1 zadetek</span>")
+        except Exception:
+            pass
+
+    def _on_find_failed(self, fc):
+        try:
+            self.find_result_label.set_markup("<span foreground='#ff6b6b'>Ni zadetkov</span>")
+        except Exception:
+            pass
+
+    def _find_next(self):
+        wv = self.get_active_webview()
+        if wv:
+            try:
+                wv.get_find_controller().search_next()
+            except Exception:
+                pass
+
+    def _find_prev(self):
+        wv = self.get_active_webview()
+        if wv:
+            try:
+                wv.get_find_controller().search_previous()
+            except Exception:
+                pass
+
+    def create_keyboard_panel(self):
+
+        self.keyboard_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.keyboard_box.set_size_request(-1, 240)
+        self.keyboard_box.set_no_show_all(True)
+
+        # Ločen ephemeral WebContext za tipkovnico (ne deli piškotkov z Gmailom/sejami)
+        kb_context = WebKit2.WebContext.new_ephemeral()
+        self.kb_webview = WebKit2.WebView.new_with_context(kb_context)
+        self.setup_webview_settings(self.kb_webview)
+        kb_path = os.path.join(BASE_DIR, "ui", "keyboard.html")
+        self.kb_webview.load_uri(f"file://{kb_path}")
+
+        kb_content_mgr = self.kb_webview.get_user_content_manager()
+        kb_content_mgr.register_script_message_handler("safeerKeyboard")
+        kb_content_mgr.connect("script-message-received::safeerKeyboard", self.on_keyboard_message)
+
+        self.keyboard_box.pack_start(self.kb_webview, True, True, 0)
+
+        # Check config: Privzeto IZKLOPLJENO
+        is_kb_on = self.config.get("virtual_keyboard_enabled", False)
+        if is_kb_on:
+            self.keyboard_box.show_all()
+        else:
+            self.keyboard_box.hide()
+
+    def toggle_virtual_keyboard(self, widget=None):
+        new_state = self.config.toggle_virtual_keyboard()
+        if new_state:
+            self.keyboard_box.show_all()
+            if hasattr(self, "btn_keyboard"):
+                self.btn_keyboard.set_label("⌨️ Tipkovnica (Vklopljena)")
+                self.btn_keyboard.get_style_context().add_class("active")
+        else:
+            self.keyboard_box.hide()
+            if hasattr(self, "btn_keyboard"):
+                self.btn_keyboard.set_label("⌨️ Tipkovnica")
+                self.btn_keyboard.get_style_context().remove_class("active")
+
+    def on_keyboard_message(self, content_mgr, js_result):
+        try:
+            val = js_result.get_js_value()
+            json_str = val.to_json(0)
+            data = json.loads(json_str)
+            if data.get("action") == "close":
+                self.toggle_virtual_keyboard()
+            elif "key" in data:
+                key = data["key"]
+                js_inject = """
+                (function() {
+                    const el = document.activeElement;
+                    if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) {
+                        if ('__KEY__' === 'Backspace') {
+                            el.value = el.value.slice(0, -1);
+                        } else if ('__KEY__' === 'Enter') {
+                            if (el.form) el.form.submit();
+                        } else {
+                            el.value = (el.value || '') + '__KEY__';
+                        }
+                        el.dispatchEvent(new Event('input', { bubbles: true }));
+                    }
+                })();
+                """.replace("__KEY__", key.replace("'", "\\'"))
+                wv = self.get_active_webview()
+                if wv:
+                    wv.run_javascript(js_inject, None, None, None)
+        except Exception as e:
+            print(f"[Keyboard] Napaka: {e}")
+
+
+    def is_default_browser(self):
+        return system_is_default_browser()
+
+    def set_as_default_browser(self, show_dialog=True):
+        """Set and verify the actual per-user default using the desktop's native API."""
+        success, errors = set_default_browser(BASE_DIR)
+        if not success:
+            print("[DefaultBrowser] " + "; ".join(errors))
+
+        if show_dialog:
+            msg_type = Gtk.MessageType.INFO if success else Gtk.MessageType.WARNING
+            title = "🌐 Privzeti spletni brskalnik"
+            if success:
+                msg = "Safeer Browser je bil uspešno nastavljen kot vaš privzeti spletni brskalnik v sistemu Linux!"
+            else:
+                msg = "Safeerja ni bilo mogoče samodejno nastaviti kot privzetega. Preverite sistemske nastavitve (Priljubljene aplikacije)."
+            dlg = Gtk.MessageDialog(
+                transient_for=self,
+                flags=0,
+                message_type=msg_type,
+                buttons=Gtk.ButtonsType.OK,
+                text=title
+            )
+            dlg.format_secondary_text(msg)
+            dlg.run()
+            dlg.destroy()
+        return success
+
+    def check_default_browser_banner(self):
+        """Prikaže lično informativno vrstico, če Safeer še ni privzeti brskalnik."""
+        if not self.config.get("check_default_browser", True):
+            return
+        if self.is_default_browser():
+            return
+
+        self.default_infobar = Gtk.InfoBar()
+        self.default_infobar.set_message_type(Gtk.MessageType.QUESTION)
+        self.default_infobar.get_style_context().add_class("default-browser-infobar")
+
+        content_area = self.default_infobar.get_content_area()
+        msg_lbl = Gtk.Label(label="🌐 <b>Safeer Browser ni vaš privzeti brskalnik.</b> Želite, da odpira spletne povezave?")
+        msg_lbl.set_use_markup(True)
+        msg_lbl.set_xalign(0.0)
+        content_area.pack_start(msg_lbl, True, True, 6)
+
+        btn_set = self.default_infobar.add_button("Nastavi kot privzetega", Gtk.ResponseType.YES)
+        btn_later = self.default_infobar.add_button("Ne zdaj", Gtk.ResponseType.NO)
+        btn_never = self.default_infobar.add_button("Ne sprašuj več", Gtk.ResponseType.CLOSE)
+
+        def on_infobar_response(ib, response_id):
+            if response_id == Gtk.ResponseType.YES:
+                self.set_as_default_browser(show_dialog=True)
+                ib.hide()
+            elif response_id == Gtk.ResponseType.CLOSE:
+                self.config.set("check_default_browser", False)
+                ib.hide()
+            else:
+                ib.hide()
+
+        self.default_infobar.connect("response", on_infobar_response)
+        self.main_vbox.pack_start(self.default_infobar, False, False, 0)
+        self.main_vbox.reorder_child(self.default_infobar, 1)
+        self.default_infobar.show_all()
+
+    def open_first_run_wizard(self):
+        """Prikaže čist začetni čarovnik ob prvem zagonu za izbiro iskalnika, uvoz zaznamkov in nastavitev privzetega brskalnika."""
+        if self.config.get("first_run_completed", False):
+            return
+
+        from core.bookmarks_importer import detect_browser_profiles
+        detected = detect_browser_profiles()
+
+        dialog = Gtk.Dialog(
+            title="✨ Dobrodošli v Safeer Browser",
+            parent=self,
+            flags=Gtk.DialogFlags.MODAL | Gtk.DialogFlags.DESTROY_WITH_PARENT
+        )
+        dialog.set_default_size(520, 460)
+        dialog.set_resizable(False)
+        dialog.set_position(Gtk.WindowPosition.CENTER_ON_PARENT)
+        dialog.get_style_context().add_class("customizer-dialog")
+
+        btn_finish = dialog.add_button("Začni z brskanjem 🚀", Gtk.ResponseType.OK)
+        btn_finish.get_style_context().add_class("suggested-action")
+
+        content = dialog.get_content_area()
+        content.set_spacing(14)
+        content.set_margin_top(20)
+        content.set_margin_bottom(20)
+        content.set_margin_start(24)
+        content.set_margin_end(24)
+
+        # Header Title & Subtitle
+        head_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        lbl_h1 = Gtk.Label()
+        lbl_h1.set_markup("<span size='x-large' weight='bold' color='#87cf3e'>🍃 Safeer Browser</span>")
+        lbl_h1.set_xalign(0)
+        lbl_sub = Gtk.Label()
+        lbl_sub.set_markup("<b>Hitra začetna nastavitev za Linux Mint</b>\nPrilagodite brskalnik svojim navadam v manj kot minuti.")
+        lbl_sub.set_xalign(0)
+        lbl_sub.get_style_context().add_class("dim-label")
+        head_box.pack_start(lbl_h1, False, False, 0)
+        head_box.pack_start(lbl_sub, False, False, 0)
+        content.pack_start(head_box, False, False, 0)
+
+        # Separator
+        sep1 = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        content.pack_start(sep1, False, False, 0)
+
+        # 1. Search Engine Selection
+        box_search = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        lbl_search = Gtk.Label()
+        lbl_search.set_markup("<b>🔍 Privzeti iskalnik</b>")
+        lbl_search.set_xalign(0)
+        box_search.pack_start(lbl_search, False, False, 0)
+
+        combo_search = Gtk.ComboBoxText()
+        engines_order = [
+            ("duckduckgo", "🦆 DuckDuckGo (Priporočeno — visoka zasebnost)"),
+            ("brave", "🦁 Brave Search (Neodvisen spletni indeks)"),
+            ("google", "🔍 Google"),
+            ("ecosia", "🌲 Ecosia"),
+            ("bing", "🌐 Bing")
+        ]
+        active_engine = self.config.get("search_engine", "duckduckgo")
+        sel_idx = 0
+        for idx, (eid, elabel) in enumerate(engines_order):
+            combo_search.append(eid, elabel)
+            if eid == active_engine:
+                sel_idx = idx
+        combo_search.set_active(sel_idx)
+        box_search.pack_start(combo_search, False, False, 0)
+        content.pack_start(box_search, False, False, 0)
+
+        # 2. Bookmarks Import Checkbox
+        box_bm = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        lbl_bm = Gtk.Label()
+        lbl_bm.set_markup("<b>📥 Zaznamki in priljubljene strani</b>")
+        lbl_bm.set_xalign(0)
+        box_bm.pack_start(lbl_bm, False, False, 0)
+
+        detected_names = []
+        if "firefox" in detected:
+            detected_names.append("Firefox")
+        if "chrome" in detected or "chromium" in detected or "brave" in detected:
+            detected_names.append("Chrome/Brave")
+
+        import_chk = None
+        if detected_names:
+            names_str = " & ".join(detected_names)
+            import_chk = Gtk.CheckButton(label=f"Uvozi moje obstoječe zaznamke iz {names_str} (1-klik)")
+            import_chk.set_active(True)
+            box_bm.pack_start(import_chk, False, False, 0)
+        else:
+            lbl_no_bm = Gtk.Label(label="Zaznamke lahko kadarkoli uvozite v orodni vrstici (zvezdica ⭐ ali Ctrl+B).")
+            lbl_no_bm.set_xalign(0)
+            lbl_no_bm.get_style_context().add_class("dim-label")
+            box_bm.pack_start(lbl_no_bm, False, False, 0)
+        content.pack_start(box_bm, False, False, 0)
+
+        # 3. Default Browser Option
+        box_def = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        lbl_def = Gtk.Label()
+        lbl_def.set_markup("<b>🌐 Privzeti sistemski brskalnik</b>")
+        lbl_def.set_xalign(0)
+        box_def.pack_start(lbl_def, False, False, 0)
+
+        is_already_def = self.is_default_browser()
+        def_chk = None
+        if not is_already_def:
+            def_chk = Gtk.CheckButton(label="Nastavi Safeer kot privzeti brskalnik za odpiranje povezav")
+            def_chk.set_active(False)
+            box_def.pack_start(def_chk, False, False, 0)
+        else:
+            lbl_is_def = Gtk.Label(label="✓ Safeer je že nastavljen kot vaš privzeti brskalnik.")
+            lbl_is_def.set_xalign(0)
+            lbl_is_def.get_style_context().add_class("dim-label")
+            box_def.pack_start(lbl_is_def, False, False, 0)
+        content.pack_start(box_def, False, False, 0)
+
+        dialog.show_all()
+        dialog.run()
+
+        # Apply user choices
+        selected_engine = combo_search.get_active_id() or "duckduckgo"
+        self.config.set("search_engine", selected_engine)
+
+        if import_chk and import_chk.get_active():
+            self.config.auto_import_from_browser("all")
+            self.broadcast_portals_update()
+
+        if def_chk and def_chk.get_active():
+            self.set_as_default_browser(show_dialog=False)
+
+        self.config.set("first_run_completed", True)
+        dialog.destroy()
+
+    def load_homepage(self):
+        home_path = os.path.join(BASE_DIR, "ui", "home.html")
+        wv = self.get_active_webview()
+        if wv:
+            wv.load_uri(f"file://{home_path}")
+        self.url_entry.set_text("safeer://home")
+        active = self.get_active_tab()
+        if active:
+            active["title"] = "Safeer Domača Stran"
+            active["icon"] = "🍃"
+            active["title_label"].set_text("Safeer Domača Stran")
+            active["icon_label"].set_text("🍃")
+        self.security_icon.set_text("🎚️")
+
+    def on_url_activate(self, entry):
+        text = entry.get_text().strip()
+        if not text:
+            return
+
+        # 1. Switch-To-Tab shortcut (npr. "% youtube" ali "% 24ur")
+        if text.startswith("%") or text.startswith("@tab "):
+            query = text.lstrip("%").replace("@tab", "").strip().lower()
+            if query:
+                for tab in self.tabs:
+                    t_title = tab.get("title", "").lower()
+                    t_uri = tab.get("uri", "").lower()
+                    if query in t_title or query in t_uri:
+                        self.switch_to_tab(tab["id"])
+                        return
+
+        # 2. Smart Search Engine prefixes (@g, @ddg, @b, @yt, @w, @gh)
+        if text.startswith("@"):
+            parts = text.split(" ", 1)
+            prefix = parts[0].lower()
+            q = parts[1].strip() if len(parts) > 1 else ""
+            target = None
+            if prefix in ("@g", "@google"):
+                target = f"https://www.google.com/search?q={urllib.parse.quote_plus(q)}"
+            elif prefix in ("@ddg", "@duckduckgo"):
+                target = f"https://duckduckgo.com/?q={urllib.parse.quote_plus(q)}"
+            elif prefix in ("@b", "@brave"):
+                target = f"https://search.brave.com/search?q={urllib.parse.quote_plus(q)}"
+            elif prefix in ("@yt", "@youtube"):
+                target = f"https://www.youtube.com/results?search_query={urllib.parse.quote_plus(q)}"
+            elif prefix in ("@w", "@wiki", "@wikipedia"):
+                target = f"https://en.wikipedia.org/wiki/Special:Search?search={urllib.parse.quote_plus(q)}"
+            elif prefix in ("@gh", "@github"):
+                target = f"https://github.com/search?q={urllib.parse.quote_plus(q)}"
+            if target and q:
+                wv = self.get_active_webview()
+                if wv:
+                    wv.load_uri(target)
+                return
+
+        if text == "safeer://home" or text == "about:blank":
+            self.load_homepage()
+            return
+
+        if is_threat_domain(text):
+            self.config.increment_threats_blocked(1)
+            self.show_threat_warning(text)
+            return
+
+        if text.startswith("localhost:") or text == "localhost" or text.startswith("127.0.0.1:") or text == "127.0.0.1":
+            target = "http://" + text
+        elif text.startswith("file://"):
+            target = text
+        elif text.startswith("http://"):
+            try:
+                parsed = urllib.parse.urlparse(text)
+                host = (parsed.hostname or "").lower()
+                is_local = host in ("localhost", "127.0.0.1") or host.startswith("192.168.") or host.startswith("10.") or host.startswith("172.")
+                if is_local:
+                    target = text
+                else:
+                    target = "https://" + text[7:]
+            except Exception:
+                target = text
+        elif not text.startswith("https://"):
+            if "." in text and " " not in text:
+                target = "https://" + text
+            else:
+                engine = self.config.get("search_engine", "duckduckgo")
+                engine_info = SEARCH_ENGINES.get(engine, SEARCH_ENGINES.get("duckduckgo", SEARCH_ENGINES["google"]))
+                target = f"{engine_info['url']}{urllib.parse.quote_plus(text)}"
+        else:
+            target = text
+
+        if self.config.get("tracking_protection_enabled", True):
+            target = strip_tracking_parameters(target)
+
+        wv = self.get_active_webview()
+        if wv:
+            wv.load_uri(target)
+
+    def show_threat_warning(self, domain):
+        self.increment_shields_blocked()
+        dialog = Gtk.MessageDialog(
+            transient_for=self,
+            flags=0,
+            message_type=Gtk.MessageType.WARNING,
+            buttons=Gtk.ButtonsType.OK,
+            text="🛡️ Safeer Shield: ZAZNANA NEVARNA DOMENA!"
+        )
+        dialog.format_secondary_text(
+            f"Povezava z '{domain}' je bila prekinjena.\n"
+            "Naslov je naveden v lokalnem seznamu groženj. Dostop je blokiran zaradi varnosti."
+        )
+        dialog.run()
+        dialog.destroy()
+
+    def increment_shields_blocked(self):
+        """Inkrementira shields counter in posodobi gumb v real-timu."""
+        self._shields_blocked += 1
+        try:
+            self.config.increment_threats_blocked(1)
+        except Exception:
+            pass
+        self.update_shield_button_label()
+
+    def update_shield_button_label(self):
+        """Posodobi napis na gumbu ščita v orodni vrstici na podlagi statistike zaščite."""
+        try:
+            total = self.config.get("total_ads_blocked", 0) + self.config.get("total_threats_blocked", 0)
+            if total >= 1000:
+                label = f"🛡️ {total // 1000}k+"
+            elif total > 0:
+                label = f"🛡️ {total}"
+            else:
+                label = "🛡️"
+            if hasattr(self, 'btn_shield') and self.btn_shield:
+                self.btn_shield.set_label(label)
+        except Exception:
+            pass
+
+    def format_clean_url(self, uri):
+        """Pretvori tehnični URL v čist, velik in jasno viden naslov kot v Mozilli Firefox."""
+        if not uri or "ui/home.html" in uri:
+            return "safeer://home"
+        try:
+            parsed = urllib.parse.urlparse(uri)
+            if parsed.scheme in ("http", "https"):
+                path = parsed.path if parsed.path and parsed.path != "/" else ""
+                query = f"?{parsed.query}" if parsed.query else ""
+                return f"{parsed.netloc}{path}{query}"
+        except Exception:
+            pass
+        return uri
+
+    def on_url_focus_in(self, entry, event):
+        """Ob kliku v URL vrstico prikaži polni naslov in označi vse besedilo za urejanje."""
+        wv = self.get_active_webview()
+        cur_uri = wv.get_uri() if wv else ""
+        if "ui/home.html" not in cur_uri and cur_uri:
+            entry.set_text(cur_uri)
+            GLib.idle_add(entry.select_region, 0, -1)
+        return False
+
+    def on_url_focus_out(self, entry, event):
+        """Ko uporabnik klikne ven, vrni jasen, čist in berljiv naslov kot v Firefoxu."""
+        wv = self.get_active_webview()
+        cur_uri = wv.get_uri() if wv else ""
+        if "ui/home.html" not in cur_uri and cur_uri:
+            entry.set_text(self.format_clean_url(cur_uri))
+        return False
+
+    # -------------------------------------------------------------
+    # Multi-Tab Management Engine
+    # -------------------------------------------------------------
+    def get_active_tab(self):
+        for tab in self.tabs:
+            if tab["id"] == self.active_tab_id:
+                return tab
+        if self.tabs:
+            return self.tabs[0]
+        return None
+
+    def get_active_webview(self):
+        tab = self.get_active_tab()
+        return tab["webview"] if tab else None
+
+    def new_tab(self, url=None, switch=True, related_view=None, defer=False):
+        self.tab_counter += 1
+        tab_id = f"tab_{self.tab_counter}"
+
+        wv = (WebKit2.WebView.new_with_related_view(related_view) if related_view is not None
+              else WebKit2.WebView.new_with_context(self.web_context))
+        self.setup_webview_settings(wv)
+        wv._safeer_network_errors = NetworkErrorHandler(wv)
+
+        wv.connect("load-changed", lambda w, ev: self.on_tab_load_changed(tab_id, w, ev))
+        wv.connect("notify::title", lambda w, p: self.on_tab_title_changed(tab_id, w, p))
+        wv.connect("notify::uri", lambda w, p: self.on_tab_uri_changed(tab_id, w, p))
+        wv.connect("web-process-terminated", lambda w, reason: self.on_web_process_terminated(tab_id, w, reason))
+        wv.connect("create", self.on_create_webview)
+        wv.connect("decide-policy", self.on_decide_policy)
+
+        content_mgr = wv.get_user_content_manager()
+        content_mgr.register_script_message_handler("safeer")
+        content_mgr.connect("script-message-received::safeer", self.on_js_message)
+
+        # 1. Global Privacy Control (GPC) & Do Not Track (DNT) W3C Engine
+        if self.config.get("gpc_dnt_enabled", True):
+            gpc_script = WebKit2.UserScript(
+                GPC_AND_DNT_SCRIPT,
+                WebKit2.UserContentInjectedFrames.ALL_FRAMES,
+                WebKit2.UserScriptInjectionTime.START,
+                None,
+                AUTH_SCRIPT_EXCLUSIONS
+            )
+            content_mgr.add_script(gpc_script)
+
+        # 2. YouTube Adblock script
+        yt_script = WebKit2.UserScript(
+            YOUTUBE_ADBLOCK_SCRIPT,
+            WebKit2.UserContentInjectedFrames.ALL_FRAMES,
+            WebKit2.UserScriptInjectionTime.START,
+            ["*://*.youtube.com/*", "*://youtube.com/*", "*://*.googlevideo.com/*"],
+            AUTH_SCRIPT_EXCLUSIONS + ["*://accounts.youtube.com/*", "*://accounts.google.com/*", "*://myaccount.google.com/*"]
+        )
+        content_mgr.add_script(yt_script)
+
+        # 2.0.1. Keep YouTube / YouTube Music playing without the "Continue watching?" pause
+        content_mgr.add_script(WebKit2.UserScript(
+            YOUTUBE_KEEP_WATCHING_SCRIPT,
+            WebKit2.UserContentInjectedFrames.TOP_FRAME,
+            WebKit2.UserScriptInjectionTime.START,
+            ["*://*.youtube.com/*", "*://youtube.com/*"],
+            AUTH_SCRIPT_EXCLUSIONS + ["*://accounts.youtube.com/*"]
+        ))
+
+        # 2.0.2. Push Square / Nintendo Life / Pure Xbox / Time Extension ad inserts
+        content_mgr.add_script(WebKit2.UserScript(
+            HOOKSHOT_INSERTS_SCRIPT,
+            WebKit2.UserContentInjectedFrames.TOP_FRAME,
+            WebKit2.UserScriptInjectionTime.START,
+            [f"*://{d}/*" for site in ("pushsquare.com", "nintendolife.com", "purexbox.com", "timeextension.com", "digitalfoundry.net") for d in (site, "*." + site)],
+            None
+        ))
+
+        # 2.1. Vgrajena AdGuard Zaščitna razširitev (Anti-Adblock Defuser & Cosmetic Rules)
+        if self.config.get("adguard_protection_enabled", True):
+            adg_script = WebKit2.UserScript(
+                ADGUARD_PROTECTION_SCRIPT,
+                WebKit2.UserContentInjectedFrames.ALL_FRAMES,
+                WebKit2.UserScriptInjectionTime.START,
+                None,
+                # Social feeds have no anti-adblock walls; their huge DOMs make every scan cost real CPU.
+                AUTH_SCRIPT_EXCLUSIONS + ["*://*.google.com/*", "*://*.google.si/*", "*://*.banka.si/*",
+                                          "*://*.facebook.com/*", "*://*.messenger.com/*", "*://*.instagram.com/*"]
+            )
+            content_mgr.add_script(adg_script)
+
+        # 3. Cosmetic script
+        gen_script = WebKit2.UserScript(
+            GENERIC_COSMETIC_SCRIPT,
+            WebKit2.UserContentInjectedFrames.ALL_FRAMES,
+            WebKit2.UserScriptInjectionTime.END,
+            None,
+            AUTH_SCRIPT_EXCLUSIONS + ["*://*.google.com/*", "*://*.google.si/*", "*://*.facebook.com/*", "*://*.messenger.com/*", "*://*.banka.si/*"]
+        )
+        content_mgr.add_script(gen_script)
+
+        # 4. Anti-Clickjacking & Invisible Overlay Shield
+        clickjack_script = WebKit2.UserScript(
+            ANTI_CLICKJACKING_SCRIPT,
+            WebKit2.UserContentInjectedFrames.ALL_FRAMES,
+            WebKit2.UserScriptInjectionTime.END,
+            None,
+            AUTH_SCRIPT_EXCLUSIONS + ["file://*"]
+        )
+        content_mgr.add_script(clickjack_script)
+
+        # 5. Pametni optimizator neaktivnih zavihkov (zamrzne animacije in upočasni ozadne procese za prihranek RAM-a in CPU)
+        throttler_script = WebKit2.UserScript(
+            TAB_THROTTLER_SCRIPT,
+            WebKit2.UserContentInjectedFrames.ALL_FRAMES,
+            WebKit2.UserScriptInjectionTime.START,
+            None,
+            AUTH_SCRIPT_EXCLUSIONS + [
+                "*://youtube.com/*",
+                "*://*.youtube.com/*",
+                "*://youtu.be/*",
+                "*://*.youtube-nocookie.com/*",
+            ],
+        )
+        content_mgr.add_script(throttler_script)
+
+        # Custom User Scripts Injection (Tampermonkey Engine)
+        user_scripts = self.config.get_user_scripts()
+        for s in user_scripts:
+            if s.get("enabled", True) and s.get("code"):
+                try:
+                    pattern = s.get("pattern", "*").strip()
+                    whitelist = None if pattern in ("*", "") else [pattern if pattern.startswith("*://") or pattern.startswith("http") else f"*://*.{pattern}/*"]
+                    run_time = WebKit2.UserScriptInjectionTime.START if s.get("run_at") == "start" else WebKit2.UserScriptInjectionTime.END
+                    us = WebKit2.UserScript(
+                        s["code"],
+                        WebKit2.UserContentInjectedFrames.ALL_FRAMES,
+                        run_time,
+                        whitelist,
+                        None
+                    )
+                    content_mgr.add_script(us)
+                except Exception as e:
+                    print(f"[UserScript] Opozorilo pri nalaganju skripte '{s.get('name')}': {e}")
+
+        # Force Dark Mode if enabled
+        if self.config.get("force_dark_mode", True):
+            self.apply_dark_mode_to_webview(wv, True)
+
+        # Tab Strip Widget
+        tab_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        tab_box.get_style_context().add_class("firefox-tab")
+        tab_box.get_style_context().add_class("inactive-tab")
+        tab_box.set_size_request(200, 36)
+
+        tab_icon = Gtk.Label(label="🌐")
+        tab_icon.get_style_context().add_class("tab-icon")
+        tab_box.pack_start(tab_icon, False, False, 2)
+
+        tab_title = Gtk.Label(label="Nova stran")
+        tab_title.get_style_context().add_class("tab-title")
+        tab_title.set_ellipsize(Pango.EllipsizeMode.END)
+        tab_title.set_xalign(0.0)
+        tab_box.pack_start(tab_title, True, True, 2)
+
+        # Audio Indicator & One-Click Mute Button (🔊 / 🔇)
+        btn_audio = Gtk.Button(label="🔊")
+        btn_audio.get_style_context().add_class("tab-audio-btn")
+        btn_audio.set_tooltip_text(f"{t('audio_mute')}")
+        btn_audio.set_no_show_all(True)
+        btn_audio.hide()
+
+        def on_tab_mute_clicked(b, w=wv, btn=btn_audio):
+            muted = not w.get_property("is-muted")
+            w.set_is_muted(muted)
+            btn.set_label("🔇" if muted else "🔊")
+            btn.set_tooltip_text(t("audio_unmute") if muted else t("audio_mute"))
+
+        btn_audio.connect("clicked", on_tab_mute_clicked)
+        tab_box.pack_start(btn_audio, False, False, 2)
+
+        def on_audio_state_notify(w, param, btn=btn_audio, tid=tab_id):
+            playing = w.get_property("is-playing-audio")
+            muted = w.get_property("is-muted")
+            if playing or muted:
+                btn.set_label("🔇" if muted else "🔊")
+                btn.set_tooltip_text(t("audio_unmute") if muted else t("audio_mute"))
+                btn.show()
+            else:
+                btn.hide()
+
+            # Dinamični čuvaj zvoka in procesorja:
+            # Če zavihek v ozadju predvaja zvok (npr. YouTube Music), ga ohrani na polni hitrosti
+            # Če ne predvaja zvoka in ni aktiven, ga uspavaj za prihranek RAM-a in procesorja
+            if tid != self.active_tab_id and not getattr(w, "_safeer_crashed", False):
+                if playing:
+                    w.run_javascript("if (window.__safeerResumeTab) window.__safeerResumeTab();", None, None, None)
+                else:
+                    w.run_javascript("if (window.__safeerThrottleTab) window.__safeerThrottleTab();", None, None, None)
+
+        wv.connect("notify::is-playing-audio", on_audio_state_notify)
+        wv.connect("notify::is-muted", on_audio_state_notify)
+
+        btn_close = Gtk.Button(label="✕")
+        btn_close.get_style_context().add_class("tab-close-btn")
+        btn_close.set_tooltip_text("Zapri zavihek (Ctrl + W)")
+        btn_close.connect("clicked", lambda b: self.close_tab(tab_id))
+        tab_box.pack_start(btn_close, False, False, 2)
+
+        def on_tab_press(w, ev, tid=tab_id):
+            if ev.button == 2:  # Srednji klik (kolešček) zapre zavihek
+                self.close_tab(tid)
+                return True
+            elif ev.button == 1:
+                self.switch_to_tab(tid)
+                return True
+            return False
+
+        tab_event_box = Gtk.EventBox()
+        tab_event_box.add(tab_box)
+        tab_event_box.connect("button-press-event", on_tab_press)
+
+        self.tabs_box.pack_start(tab_event_box, False, False, 0)
+        if related_view is None:
+            tab_event_box.show_all()
+        else:
+            tab_event_box.set_no_show_all(True)
+            def show_popup(view):
+                tab_event_box.set_no_show_all(False)
+                tab_event_box.show_all()
+                self.switch_to_tab(tab_id)
+            wv.connect("ready-to-show", show_popup)
+            wv.connect("close", lambda view: self.close_tab(tab_id))
+
+        wv.show_all()
+        self.webview_stack.add_named(wv, tab_id)
+
+        tab_data = {
+            "id": tab_id,
+            "deferred": bool(defer and related_view is None),
+            "webview": wv,
+            "title": "Nova stran",
+            "icon": "🌐",
+            "uri": url or "safeer://home",
+            "tab_box": tab_box,
+            "event_box": tab_event_box,
+            "title_label": tab_title,
+            "icon_label": tab_icon
+        }
+        self.tabs.append(tab_data)
+
+        target = url or "safeer://home"
+        if tab_data["deferred"]:
+            pass  # Restored background tabs load only when selected.
+        elif related_view is not None:
+            pass  # The create signal's caller loads the exact original request.
+        elif target == "safeer://home":
+            home_path = os.path.join(BASE_DIR, "ui", "home.html")
+            wv.load_uri(f"file://{home_path}")
+            tab_title.set_text("Safeer Domača Stran")
+            tab_icon.set_text("🍃")
+        elif is_safe_web_url(target):
+            wv.load_uri(target)
+        else:
+            print(f"[New Tab Security] Zavrnjen neveljaven ali nevaren URL: {target}")
+            home_path = os.path.join(BASE_DIR, "ui", "home.html")
+            wv.load_uri(f"file://{home_path}")
+            tab_title.set_text("Safeer Domača Stran")
+            tab_icon.set_text("🍃")
+
+        if switch:
+            self.switch_to_tab(tab_id)
+
+        return tab_id
+
+    def close_tab(self, tab_id):
+        tab_to_close = None
+        for tab in self.tabs:
+            if tab["id"] == tab_id:
+                tab_to_close = tab
+                break
+        if not tab_to_close:
+            return
+
+        # Zapomni si zaprti zavihek za obnovo (Ctrl + Shift + T)
+        wv = tab_to_close.get("webview")
+        cur_uri = wv.get_uri() if wv else tab_to_close.get("uri", "")
+        cur_title = wv.get_title() if wv else tab_to_close.get("title", "")
+        if cur_uri and not cur_uri.startswith("file://") and cur_uri != "about:blank":
+            self.closed_tabs_stack.append({"uri": cur_uri, "title": cur_title or cur_uri})
+            if len(self.closed_tabs_stack) > 30:
+                self.closed_tabs_stack.pop(0)
+
+        if len(self.tabs) <= 1:
+            self.load_homepage()
+            return
+
+        idx = self.tabs.index(tab_to_close)
+        self.tabs.remove(tab_to_close)
+
+        self.tabs_box.remove(tab_to_close["event_box"])
+        if tab_to_close.get("crash_notice") is not None:
+            notice = tab_to_close["crash_notice"]
+            self.webview_stack.remove(notice)
+            notice.destroy()
+        self.webview_stack.remove(tab_to_close["webview"])
+        tab_to_close["webview"].destroy()
+        # Do not flush every other tab's cache when closing one tab.
+        GLib.idle_add(collect_closed_views)
+
+        if self.active_tab_id == tab_id:
+            new_idx = max(0, idx - 1)
+            self.switch_to_tab(self.tabs[new_idx]["id"])
+
+    def switch_to_tab(self, tab_id):
+        self.active_tab_id = tab_id
+        target = None
+        for tab in self.tabs:
+            is_active = (tab["id"] == tab_id)
+            if is_active:
+                target = tab
+                if tab.pop("deferred", False):
+                    tab["webview"].load_uri(self.get_home_uri() if tab["uri"] == "safeer://home" else tab["uri"])
+                tab["tab_box"].get_style_context().add_class("active-tab")
+                tab["tab_box"].get_style_context().remove_class("inactive-tab")
+                try:
+                    if tab.get("crashed") or tab.get("deferred"):
+                        continue
+                    tab["webview"].run_javascript("if (window.__safeerResumeTab) window.__safeerResumeTab();", None, None, None)
+                except Exception:
+                    pass
+            else:
+                tab["tab_box"].get_style_context().remove_class("active-tab")
+                tab["tab_box"].get_style_context().add_class("inactive-tab")
+                try:
+                    if tab.get("crashed") or tab.get("deferred"):
+                        continue
+                    is_audio = tab["webview"].get_property("is-playing-audio")
+                    if not is_audio:
+                        tab["webview"].run_javascript("if (window.__safeerThrottleTab) window.__safeerThrottleTab();", None, None, None)
+                    else:
+                        tab["webview"].run_javascript("if (window.__safeerResumeTab) window.__safeerResumeTab();", None, None, None)
+                except Exception:
+                    pass
+
+        if not target:
+            return
+
+        self.webview_stack.set_visible_child(target.get("crash_notice") or target["webview"])
+
+        cur_uri = target["webview"].get_uri() or target["uri"] or ""
+        self.url_entry.set_text(self.format_clean_url(cur_uri))
+        if cur_uri.startswith("https://"):
+            self.security_icon.set_text("🔒")
+        else:
+            self.security_icon.set_text("🎚️")
+
+        self.set_title(f"{target['title']} — Safeer Browser (Linux Mint)")
+        self.update_star_status()
+
+    def restore_closed_tab(self):
+        """Obnovi nazadnje zaprti zavihek (Ctrl + Shift + T)."""
+        if not self.closed_tabs_stack:
+            return
+        last_tab = self.closed_tabs_stack.pop()
+        self.new_tab(url=last_tab["uri"], switch=True)
+
+    def switch_to_next_tab(self):
+        """Preklopi na naslednji zavihek (Ctrl + Tab)."""
+        if len(self.tabs) <= 1:
+            return
+        for i, tab in enumerate(self.tabs):
+            if tab["id"] == self.active_tab_id:
+                next_idx = (i + 1) % len(self.tabs)
+                self.switch_to_tab(self.tabs[next_idx]["id"])
+                return
+
+    def switch_to_prev_tab(self):
+        """Preklopi na prejšnji zavihek (Ctrl + Shift + Tab)."""
+        if len(self.tabs) <= 1:
+            return
+        for i, tab in enumerate(self.tabs):
+            if tab["id"] == self.active_tab_id:
+                prev_idx = (i - 1 + len(self.tabs)) % len(self.tabs)
+                self.switch_to_tab(self.tabs[prev_idx]["id"])
+                return
+
+    def switch_to_tab_index(self, index):
+        """Skoči neposredno na zavihek glede na zaporedno številko 0-7 (Ctrl + 1..8)."""
+        if 0 <= index < len(self.tabs):
+            self.switch_to_tab(self.tabs[index]["id"])
+
+    def switch_to_last_tab(self):
+        """Skoči na zadnji odprti zavihek (Ctrl + 9)."""
+        if self.tabs:
+            self.switch_to_tab(self.tabs[-1]["id"])
+
+    def on_tab_load_changed(self, tab_id, webview, event):
+        if event == WebKit2.LoadEvent.STARTED:
+            webview._safeer_crashed = False
+            for item in self.tabs:
+                if item["id"] == tab_id:
+                    item["crashed"] = False
+                    notice = item.pop("crash_notice", None)
+                    if notice is not None:
+                        self.webview_stack.remove(notice)
+                        notice.destroy()
+                        if self.active_tab_id == tab_id:
+                            self.webview_stack.set_visible_child(webview)
+                    break
+        if event == WebKit2.LoadEvent.FINISHED:
+            uri = webview.get_uri() or ""
+            title = webview.get_title() or ""
+
+            for tab_item in self.tabs:
+                if tab_item["id"] == tab_id:
+                    tab_item["uri"] = uri
+                    if "ui/home.html" in uri:
+                        h_title = t("home_title")
+                        tab_item["title"] = h_title
+                        tab_item["icon"] = "🍃"
+                        if "title_label" in tab_item and tab_item["title_label"]:
+                            tab_item["title_label"].set_text(h_title)
+                        if "icon_label" in tab_item and tab_item["icon_label"]:
+                            tab_item["icon_label"].set_text("🍃")
+                        # Inject live custom portals and shield metrics into home.html
+                        portals = self.config.get_portals()
+                        portals_json = json.dumps(portals)
+                        lang = get_current_language()
+                        ads_blocked = self.config.get("total_ads_blocked", 0)
+                        threats_blocked = self.config.get("total_threats_blocked", 0)
+                        brave_on = "true" if self.config.get("brave_mode_enabled", True) else "false"
+                        js = (
+                            f"if (window.setCustomPortals) {{ window.setCustomPortals({portals_json}); }} "
+                            f"if (window.setAppLanguage) {{ window.setAppLanguage('{lang}'); }} "
+                            f"if (window.setShieldMetrics) {{ window.setShieldMetrics({ads_blocked}, {threats_blocked}); }} "
+                            f"if (window.setBraveMode) {{ window.setBraveMode({brave_on}); }}"
+                        )
+                        webview.run_javascript(js, None, None, None)
+                    break
+
+            if self.active_tab_id == tab_id:
+                if "ui/home.html" in uri:
+                    self.url_entry.set_text("safeer://home")
+                    self.security_icon.set_text("🎚️")
+                else:
+                    self.url_entry.set_text(self.format_clean_url(uri))
+                    if getattr(webview, "_safeer_load_failed", False):
+                        self.security_icon.set_text("⚠️")
+                    elif uri.startswith("https://"):
+                        self.security_icon.set_text("🔒")
+                    else:
+                        self.security_icon.set_text("🎚️")
+                self.update_star_status()
+
+            self.add_history_entry(uri, title)
+
+            if self.config.get("force_dark_mode", True) and "ui/home.html" not in uri and not getattr(webview, "_safeer_load_failed", False):
+                self.inject_dark_mode_js(webview, True)
+
+    def on_tab_title_changed(self, tab_id, webview, prop):
+        title = webview.get_title()
+        if not title:
+            return
+
+        for tab in self.tabs:
+            if tab["id"] == tab_id:
+                tab["title"] = title
+                tab["title_label"].set_text(title)
+                t_lower = title.lower()
+                if "google" in t_lower:
+                    tab["icon_label"].set_text("🌐")
+                elif "youtube" in t_lower:
+                    tab["icon_label"].set_text("▶️")
+                elif "facebook" in t_lower or "messenger" in t_lower:
+                    tab["icon_label"].set_text("💬")
+                elif "gmail" in t_lower or "pošta" in t_lower:
+                    tab["icon_label"].set_text("✉️")
+                else:
+                    tab["icon_label"].set_text("🌐")
+                break
+
+        if self.active_tab_id == tab_id:
+            self.set_title(f"{title} — Safeer Browser (Linux Mint)")
+
+    def on_tab_uri_changed(self, tab_id, webview, prop):
+        uri = webview.get_uri()
+        if uri and "ui/home.html" not in uri:
+            for tab in self.tabs:
+                if tab["id"] == tab_id:
+                    tab["uri"] = uri
+                    break
+            if self.active_tab_id == tab_id and not self.url_entry.is_focus():
+                self.url_entry.set_text(self.format_clean_url(uri))
+                self.update_star_status()
+
+    def get_home_uri(self) -> str:
+        """Vrne zanesljiv URI do lokalne domače strani Safeer Browserja."""
+        home_path = os.path.join(BASE_DIR, "ui", "home.html")
+        return f"file://{home_path}"
+
+    def on_web_process_terminated(self, tab_id, webview, reason):
+        tab = next((item for item in self.tabs if item["id"] == tab_id), None)
+        if tab is None or tab.get("crash_notice") is not None:
+            return
+        tab["crashed"] = True
+        webview._safeer_crashed = True
+        webview._safeer_network_errors.cancel_pending()
+        # Log only the reason: URLs may contain login tokens or private queries.
+        print(f"[Safeer] Web process stopped: {reason.value_nick}; awaiting manual reload", flush=True)
+        notice = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        notice.set_halign(Gtk.Align.CENTER)
+        notice.set_valign(Gtk.Align.CENTER)
+        title = Gtk.Label(label="Zavihek se je ustavil / Tab stopped")
+        notice.pack_start(title, False, False, 0)
+        message = Gtk.Label(label="Zaprite nepotrebne zavihke in poskusite znova.\nClose unused tabs, then try again.")
+        notice.pack_start(message, False, False, 0)
+        retry = Gtk.Button(label="Ponovno naloži / Reload")
+        def reload_tab(_button):
+            if tab not in self.tabs:
+                return
+            tab["crashed"] = False
+            webview._safeer_crashed = False
+            tab["crash_notice"] = None
+            self.webview_stack.remove(notice)
+            notice.destroy()
+            if self.active_tab_id == tab_id:
+                self.webview_stack.set_visible_child(webview)
+            webview.reload()
+        retry.connect("clicked", reload_tab)
+        notice.pack_start(retry, False, False, 0)
+        tab["crash_notice"] = notice
+        self.webview_stack.add_named(notice, tab_id + "-crashed")
+        notice.show_all()
+        if self.active_tab_id == tab_id:
+            self.webview_stack.set_visible_child(notice)
+
+
+    # -------------------------------------------------------------
+    # Force Dark Mode Engine
+    # -------------------------------------------------------------
+    def apply_dark_mode_to_webview(self, webview, is_dark: bool):
+        content_mgr = webview.get_user_content_manager()
+        try:
+            content_mgr.remove_all_style_sheets()
+        except Exception:
+            pass
+
+        if is_dark:
+            try:
+                sheet = WebKit2.UserStyleSheet(
+                    FORCE_DARK_MODE_CSS,
+                    WebKit2.UserContentInjectedFrames.ALL_FRAMES,
+                    WebKit2.UserStyleLevel.USER,
+                    None,
+                    AUTH_SCRIPT_EXCLUSIONS + ["file://*"]
+                )
+                content_mgr.add_style_sheet(sheet)
+            except Exception as e:
+                print(f"[DarkMode] Napaka: {e}")
+
+    def toggle_dark_mode(self, widget=None):
+        new_state = self.config.toggle_force_dark()
+        self.update_dark_mode_ui(new_state)
+
+    def update_dark_mode_ui(self, is_dark: bool):
+        if hasattr(self, 'btn_dark_mode'):
+            if is_dark:
+                self.btn_dark_mode.set_label("🌙")
+                self.btn_dark_mode.get_style_context().add_class("active")
+                self.btn_dark_mode.set_tooltip_text("Prisili temni način (Force Dark Mode) — VKLOPLJEN")
+            else:
+                self.btn_dark_mode.set_label("☀️")
+                self.btn_dark_mode.get_style_context().remove_class("active")
+                self.btn_dark_mode.set_tooltip_text("Prisili temni način (Force Dark Mode) — IZKLOPLJEN")
+
+        for tab in self.tabs:
+            wv = tab["webview"]
+            self.apply_dark_mode_to_webview(wv, is_dark)
+            self.inject_dark_mode_js(wv, is_dark)
+
+    def inject_dark_mode_js(self, webview, is_dark: bool):
+        js = f"""
+        (function() {{
+            if (window.location.protocol === 'file:') return;
+            var el = document.getElementById('safeer-force-dark-style');
+            var enable = {'true' if is_dark else 'false'};
+            if (enable) {{
+                if (!el) {{
+                    el = document.createElement('style');
+                    el.id = 'safeer-force-dark-style';
+                    el.textContent = `{FORCE_DARK_MODE_CSS.strip()}`;
+                    (document.head || document.documentElement).appendChild(el);
+                }}
+            }} else {{
+                if (el) el.remove();
+            }}
+        }})();
+        """
+        try:
+            webview.run_javascript(js, None, None, None)
+        except Exception:
+            pass
+
+    # -------------------------------------------------------------
+    # Downloads Management Engine
+    # -------------------------------------------------------------
+    def get_default_downloads_dir(self) -> str:
+        """Vrne zanesljivo pot do sistemske mape za prenose (Prenosi ali Downloads)."""
+        d = GLib.get_user_special_dir(GLib.UserDirectory.DIRECTORY_DOWNLOAD)
+        if d and os.path.isdir(d):
+            return d
+        prenosi = os.path.expanduser("~/Prenosi")
+        if os.path.isdir(prenosi):
+            return prenosi
+        downloads = os.path.expanduser("~/Downloads")
+        if os.path.isdir(downloads):
+            return downloads
+        os.makedirs(prenosi, exist_ok=True)
+        return prenosi
+
+    def get_unique_download_path(self, folder: str, filename: str) -> str:
+        """Ustvari unikatno ime datoteke v mapi, če datoteka z istim imenom že obstaja (npr. File (1).tar.gz)."""
+        base_name, ext = os.path.splitext(filename)
+        if base_name.lower().endswith(".tar"):
+            base_name, ext2 = os.path.splitext(base_name)
+            ext = ext2 + ext
+        target = os.path.join(folder, filename)
+        counter = 1
+        while os.path.exists(target):
+            target = os.path.join(folder, f"{base_name} ({counter}){ext}")
+            counter += 1
+        return target
+
+    def setup_downloads_handling(self):
+        self.web_context.connect("download-started", self.on_download_started)
+
+    def on_download_started(self, context, download):
+        download.connect("decide-destination", self.on_decide_destination)
+
+    def on_decide_destination(self, download, suggested_filename):
+        dl_dir = self.get_default_downloads_dir()
+        os.makedirs(dl_dir, exist_ok=True)
+
+        req = download.get_request()
+        uri = req.get_uri() if req else ""
+        if not suggested_filename:
+            parsed_path = urllib.parse.urlparse(uri).path
+            suggested_filename = os.path.basename(parsed_path) or "prenos_datoteke"
+        suggested_filename = urllib.parse.unquote(suggested_filename)
+
+        always_ask = self.config.get("always_ask_download_dir", False)
+        target_path = None
+
+        if always_ask:
+            dialog = Gtk.FileChooserNative(
+                title=f"📥 {t('save_download', 'Shrani prenos')} — Safeer Browser",
+                transient_for=self,
+                action=Gtk.FileChooserAction.SAVE,
+                accept_label=t("save", "Shrani"),
+                cancel_label=t("cancel", "Prekliči")
+            )
+            dialog.set_current_folder(dl_dir)
+            dialog.set_current_name(suggested_filename)
+            dialog.set_do_overwrite_confirmation(True)
+
+            resp = dialog.run()
+            if resp == Gtk.ResponseType.ACCEPT:
+                target_path = dialog.get_filename()
+            dialog.destroy()
+            if not target_path:
+                download.cancel()
+                return True
+        else:
+            target_path = self.get_unique_download_path(dl_dir, suggested_filename)
+
+        if target_path:
+            dest_uri = Gio.File.new_for_path(target_path).get_uri()
+            download.set_destination(dest_uri)
+
+            dl_data = {
+                "id": str(uuid.uuid4())[:8],
+                "filename": os.path.basename(target_path),
+                "path": target_path,
+                "progress": 0.0,
+                "status": "running",
+                "time": datetime.now().strftime("%H:%M:%S")
+            }
+            self.downloads.insert(0, dl_data)
+
+            self.btn_downloads.set_label("⬇️ 0%")
+            self.btn_downloads.get_style_context().add_class("active")
+
+            download.connect("notify::estimated-progress", lambda d, p: self.on_download_progress(dl_data, d))
+            download.connect("finished", lambda d: self.on_download_finished(dl_data))
+            download.connect("failed", lambda d, err: self.on_download_failed(dl_data, err))
+
+            # Samodejno pospravi morebitni prazen zavihek, ki ga je WebKit odprl le za ta prenos
+            wv = download.get_web_view()
+            if wv:
+                self.cleanup_download_tab_if_transient(wv)
+
+            return True
+        return False
+
+    def on_download_progress(self, dl_data, download):
+        prog = download.get_estimated_progress()
+        dl_data["progress"] = prog
+        pct = int(prog * 100)
+        self.btn_downloads.set_label(f"⬇️ {pct}%")
+
+    def on_download_finished(self, dl_data):
+        dl_data["status"] = "completed"
+        dl_data["progress"] = 1.0
+        fname = dl_data.get("filename", "datoteka")
+
+        # Prijazno obvestilo na namizju Linux Mint
+        try:
+            subprocess.Popen([
+                "notify-send",
+                "-a", "Safeer Browser",
+                "-i", "document-save",
+                "📥 Prenos zaključen",
+                f"Datoteka {fname} je shranjena v mapi Prenosi."
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+
+        any_running = any(d["status"] == "running" for d in self.downloads)
+        if not any_running:
+            self.btn_downloads.set_label("✅")
+            self.btn_downloads.get_style_context().remove_class("active")
+            GLib.timeout_add(3500, self._reset_download_btn_icon)
+
+    def _reset_download_btn_icon(self):
+        any_running = any(d["status"] == "running" for d in self.downloads)
+        if not any_running:
+            self.btn_downloads.set_label("📥")
+            self.btn_downloads.get_style_context().remove_class("active")
+        return False
+
+    def on_download_failed(self, dl_data, error):
+        dl_data["status"] = "failed"
+        any_running = any(d["status"] == "running" for d in self.downloads)
+        if not any_running:
+            self.btn_downloads.set_label("❌")
+            self.btn_downloads.get_style_context().remove_class("active")
+            GLib.timeout_add(4000, self._reset_download_btn_icon)
+
+    def open_downloads_dialog(self):
+        dialog = Gtk.Dialog(title=f"📥 {t('downloads_title')} — Safeer Browser", transient_for=self, flags=0)
+        dialog.set_default_size(600, 460)
+        dialog.get_style_context().add_class("customizer-dialog")
+        btn_close = dialog.add_button(t("close", "Zapri"), Gtk.ResponseType.CLOSE)
+        btn_close.get_style_context().add_class("customizer-close-btn")
+
+        content = dialog.get_content_area()
+        content.set_spacing(10)
+        content.set_margin_top(14)
+        content.set_margin_bottom(14)
+        content.set_margin_left(16)
+        content.set_margin_right(16)
+
+        header_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        lbl_title = Gtk.Label(label=f"<b><span size='11500'>{GLib.markup_escape_text(t('active_recent_downloads'))}</span></b>")
+        lbl_title.set_use_markup(True)
+        lbl_title.set_xalign(0.0)
+        header_box.pack_start(lbl_title, True, True, 0)
+
+        btn_open_folder = Gtk.Button(label=t("open_downloads_folder"))
+        btn_open_folder.get_style_context().add_class("btn-primary-glow")
+        dl_dir = self.get_default_downloads_dir()
+        btn_open_folder.connect("clicked", lambda b: Gtk.show_uri_on_window(self, Gio.File.new_for_path(dl_dir).get_uri(), Gdk.CURRENT_TIME))
+        header_box.pack_start(btn_open_folder, False, False, 0)
+        content.pack_start(header_box, False, False, 0)
+
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        content.pack_start(scroll, True, True, 0)
+
+        dls_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        scroll.add(dls_vbox)
+
+        if not self.downloads:
+            empty_lbl = Gtk.Label(label=t("no_downloads"))
+            empty_lbl.get_style_context().add_class("text-muted")
+            dls_vbox.pack_start(empty_lbl, True, True, 20)
+        else:
+            for dl in self.downloads:
+                row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+                row.get_style_context().add_class("item-card-row")
+
+                icon_lbl = Gtk.Label(label="✅" if dl["status"] == "completed" else ("⬇️" if dl["status"] == "running" else "❌"))
+                row.pack_start(icon_lbl, False, False, 4)
+
+                meta_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+                fname_lbl = Gtk.Label(label=f"<b>{GLib.markup_escape_text(dl['filename'])}</b>")
+                fname_lbl.set_use_markup(True)
+                fname_lbl.set_xalign(0.0)
+                fname_lbl.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+                meta_box.pack_start(fname_lbl, False, False, 0)
+
+                status_name = t("dl_completed") if dl["status"] == "completed" else (f"{t('dl_downloading')} {int(dl['progress']*100)}%" if dl["status"] == "running" else t("dl_failed"))
+                status_txt = f"{dl['time']} • {status_name}"
+                status_lbl = Gtk.Label(label=status_txt)
+                status_lbl.set_xalign(0.0)
+                status_lbl.get_style_context().add_class("text-muted")
+                meta_box.pack_start(status_lbl, False, False, 0)
+                row.pack_start(meta_box, True, True, 0)
+
+                if dl["status"] == "completed" and os.path.exists(dl["path"]):
+                    btn_open = Gtk.Button(label=t("open_file"))
+                    btn_open.get_style_context().add_class("nav-btn")
+                    p = dl["path"]
+                    btn_open.connect("clicked", lambda b, path=p: Gtk.show_uri_on_window(self, Gio.File.new_for_path(path).get_uri(), Gdk.CURRENT_TIME))
+                    row.pack_end(btn_open, False, False, 0)
+
+                dls_vbox.pack_start(row, False, False, 0)
+
+        dialog.show_all()
+        dialog.run()
+        dialog.destroy()
+
+    # -------------------------------------------------------------
+    # History Management Engine
+    # -------------------------------------------------------------
+    def add_history_entry(self, uri, title):
+        if not uri or "ui/home.html" in uri or uri == "safeer://home" or uri == "about:blank":
+            return
+        entry = {
+            "title": title or uri,
+            "url": uri,
+            "time": datetime.now().strftime("%d.%m.%Y %H:%M")
+        }
+        history = self.load_history()
+        if history and history[0].get("url") == uri:
+            history[0]["title"] = entry["title"]
+            history[0]["time"] = entry["time"]
+        else:
+            history.insert(0, entry)
+        history = history[:500]
+        self.save_history(history)
+
+    def load_history(self):
+        if os.path.exists(self.history_file):
+            try:
+                with open(self.history_file, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                pass
+        return []
+
+    def save_history(self, history):
+        try:
+            with open(self.history_file, "w", encoding="utf-8") as f:
+                json.dump(history, f, indent=2, ensure_ascii=False)
+        except Exception:
+            pass
+
+    def open_history_dialog(self):
+        dialog = Gtk.Dialog(title=f"🕒 {t('history_title')} — Safeer Browser", transient_for=self, flags=0)
+        dialog.set_default_size(720, 500)
+        dialog.get_style_context().add_class("customizer-dialog")
+        btn_close = dialog.add_button(t("close", "Zapri"), Gtk.ResponseType.CLOSE)
+        btn_close.get_style_context().add_class("customizer-close-btn")
+
+        content = dialog.get_content_area()
+        content.set_spacing(10)
+        content.set_margin_top(14)
+        content.set_margin_bottom(14)
+        content.set_margin_left(16)
+        content.set_margin_right(16)
+
+        top_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        search_entry = Gtk.Entry()
+        search_entry.set_placeholder_text(t("search_history_placeholder"))
+        search_entry.get_style_context().add_class("ff-url-entry")
+        top_box.pack_start(search_entry, True, True, 0)
+
+        btn_clear = Gtk.Button(label=t("clear_history"))
+        btn_clear.get_style_context().add_class("btn-delete")
+        top_box.pack_start(btn_clear, False, False, 0)
+
+        btn_clear_cookies = Gtk.Button(label=t("cookies_data"))
+        btn_clear_cookies.get_style_context().add_class("nav-btn")
+        btn_clear_cookies.connect("clicked", lambda b: [dialog.destroy(), self.open_clear_data_dialog()])
+        top_box.pack_start(btn_clear_cookies, False, False, 0)
+        content.pack_start(top_box, False, False, 0)
+
+        store = Gtk.ListStore(str, str, str)
+        all_history = self.load_history()
+        for item in all_history:
+            store.append([item.get("time", ""), item.get("title", ""), item.get("url", "")])
+
+        filter_store = store.filter_new()
+        def search_filter_func(model, iter, data):
+            query = search_entry.get_text().lower().strip()
+            if not query:
+                return True
+            title = model[iter][1].lower()
+            url = model[iter][2].lower()
+            return query in title or query in url
+
+        filter_store.set_visible_func(search_filter_func)
+        search_entry.connect("changed", lambda e: filter_store.refilter())
+
+        tree = Gtk.TreeView(model=filter_store)
+        tree.get_style_context().add_class("history-tree")
+
+        col_time = Gtk.TreeViewColumn(t("history_time_col"), Gtk.CellRendererText(), text=0)
+        col_time.set_min_width(130)
+        tree.append_column(col_time)
+
+        col_title = Gtk.TreeViewColumn(t("history_title_col"), Gtk.CellRendererText(), text=1)
+        col_title.set_min_width(240)
+        tree.append_column(col_title)
+
+        col_url = Gtk.TreeViewColumn(t("history_url_col"), Gtk.CellRendererText(), text=2)
+        col_url.set_min_width(280)
+        tree.append_column(col_url)
+
+        def on_row_activated(treeview, path, column):
+            model = treeview.get_model()
+            url = model[path][2]
+            if url:
+                wv = self.get_active_webview()
+                if wv:
+                    wv.load_uri(url)
+                dialog.destroy()
+
+        tree.connect("row-activated", on_row_activated)
+
+        def on_clear_clicked(btn):
+            self.save_history([])
+            store.clear()
+
+        btn_clear.connect("clicked", on_clear_clicked)
+
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        scroll.add(tree)
+        content.pack_start(scroll, True, True, 0)
+
+        dialog.show_all()
+        dialog.run()
+        dialog.destroy()
+
+    def open_clear_data_dialog(self):
+        """Dialog za brisanje zgodovine, piškotkov, prijavnih sej in predpomnilnika."""
+        dialog = Gtk.Dialog(
+            title=f"🧹 {t('clear_data_title')} — Safeer Browser",
+            transient_for=self,
+            flags=0
+        )
+        dialog.set_default_size(500, 340)
+        dialog.get_style_context().add_class("customizer-dialog")
+        btn_cancel = dialog.add_button(t("cancel", "Prekliči"), Gtk.ResponseType.CANCEL)
+        btn_cancel.get_style_context().add_class("customizer-close-btn")
+        btn_confirm = dialog.add_button(t("clear_selected_btn"), Gtk.ResponseType.OK)
+        btn_confirm.get_style_context().add_class("btn-delete")
+
+        content = dialog.get_content_area()
+        content.set_spacing(12)
+        content.set_margin_top(16)
+        content.set_margin_bottom(16)
+        content.set_margin_left(20)
+        content.set_margin_right(20)
+
+        header = Gtk.Label(label=f"<b>{GLib.markup_escape_text(t('clear_data_header'))}</b>")
+        header.set_use_markup(True)
+        header.set_xalign(0.0)
+        content.pack_start(header, False, False, 0)
+
+        check_history = Gtk.CheckButton(label=t("clear_history_chk"))
+        check_history.set_active(True)
+        content.pack_start(check_history, False, False, 2)
+
+        check_cookies = Gtk.CheckButton(label=t("clear_cookies_chk"))
+        check_cookies.set_active(True)
+        content.pack_start(check_cookies, False, False, 2)
+
+        check_cache = Gtk.CheckButton(label=t("clear_cache_chk"))
+        check_cache.set_active(True)
+        content.pack_start(check_cache, False, False, 2)
+
+        dialog.show_all()
+        resp = dialog.run()
+        if resp == Gtk.ResponseType.OK:
+            do_hist = check_history.get_active()
+            do_cookies = check_cookies.get_active()
+            do_cache = check_cache.get_active()
+
+            if do_hist:
+                self.save_history([])
+
+            types_to_clear = 0
+            if do_cookies:
+                types_to_clear |= WebKit2.WebsiteDataTypes.COOKIES
+                types_to_clear |= WebKit2.WebsiteDataTypes.SESSION_STORAGE
+                types_to_clear |= WebKit2.WebsiteDataTypes.LOCAL_STORAGE
+                cookie_path = os.path.join(self.config.config_dir, "cookies.sqlite")
+                if os.path.exists(cookie_path):
+                    try:
+                        os.remove(cookie_path)
+                    except Exception:
+                        pass
+
+            if do_cache:
+                types_to_clear |= WebKit2.WebsiteDataTypes.DISK_CACHE
+                types_to_clear |= WebKit2.WebsiteDataTypes.MEMORY_CACHE
+                types_to_clear |= WebKit2.WebsiteDataTypes.DOM_CACHE
+                types_to_clear |= WebKit2.WebsiteDataTypes.INDEXEDDB_DATABASES
+                types_to_clear |= WebKit2.WebsiteDataTypes.WEBSQL_DATABASES
+                types_to_clear |= WebKit2.WebsiteDataTypes.OFFLINE_APPLICATION_CACHE
+
+            if types_to_clear != 0:
+                try:
+                    self.website_data_manager.clear(types_to_clear, 0, None, None, None)
+                except Exception as e:
+                    print(f"[ClearData] Napaka: {e}")
+
+        dialog.destroy()
+
+    def open_customizer_dialog(self):
+        """Dialog za prilagoditev teme, lastnega CSS-ja in uporabniških skript (Tampermonkey)."""
+        dialog = Gtk.Dialog(
+            title=f"🧩 {t('customizer_title')} — Safeer",
+            transient_for=self,
+            flags=0
+        )
+        dialog.set_default_size(940, 680)
+        dialog.set_resizable(True)
+        dialog.set_position(Gtk.WindowPosition.CENTER)
+        dialog.get_style_context().add_class("customizer-dialog")
+
+        btn_close = dialog.add_button(t("close", "Zapri"), Gtk.ResponseType.CLOSE)
+        btn_close.get_style_context().add_class("customizer-close-btn")
+
+        content = dialog.get_content_area()
+        content.set_spacing(10)
+        content.set_margin_top(12)
+        content.set_margin_bottom(12)
+        content.set_margin_start(16)
+        content.set_margin_end(16)
+
+        # -------------------------------------------------------------
+        # Hero Header Banner
+        # -------------------------------------------------------------
+        banner = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=14)
+        banner.get_style_context().add_class("customizer-banner")
+
+        icon_lbl = Gtk.Label(label="✨")
+        icon_lbl.get_style_context().add_class("banner-icon")
+        banner.pack_start(icon_lbl, False, False, 2)
+
+        title_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        lbl_head = Gtk.Label(label=f"<b><span size='13000'>{GLib.markup_escape_text(t('customizer_title'))}</span></b>")
+        lbl_head.set_use_markup(True)
+        lbl_head.set_xalign(0.0)
+
+        lbl_sub = Gtk.Label(label=f"<span color='#94a3b8'>{GLib.markup_escape_text(t('customizer_subtitle'))}</span>")
+        lbl_sub.set_use_markup(True)
+        lbl_sub.set_xalign(0.0)
+
+        title_vbox.pack_start(lbl_head, False, False, 0)
+        title_vbox.pack_start(lbl_sub, False, False, 0)
+        banner.pack_start(title_vbox, True, True, 0)
+        content.pack_start(banner, False, False, 0)
+
+        notebook = Gtk.Notebook()
+        notebook.get_style_context().add_class("customizer-notebook")
+        notebook.set_vexpand(True)
+        notebook.set_hexpand(True)
+        content.pack_start(notebook, True, True, 0)
+
+        # -------------------------------------------------------------
+        # ZAVIHEK 1: 🎨 Teme & Barve (Interaktivne Tematske Kartice)
+        # -------------------------------------------------------------
+        themes_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
+        themes_box.set_margin_top(16)
+        themes_box.set_margin_bottom(16)
+        themes_box.set_margin_start(16)
+        themes_box.set_margin_end(16)
+
+        lbl_theme = Gtk.Label(label=f"<b><span size='11500'>{GLib.markup_escape_text(t('choose_theme'))}</span></b>")
+        lbl_theme.set_use_markup(True)
+        lbl_theme.set_xalign(0.0)
+        themes_box.pack_start(lbl_theme, False, False, 0)
+
+        grid = Gtk.Grid()
+        grid.set_column_spacing(14)
+        grid.set_row_spacing(14)
+        grid.set_hexpand(True)
+        grid.set_column_homogeneous(True)
+
+        theme_cards_data = [
+            {
+                "id": "midnight",
+                "name": "Firefox Midnight",
+                "icon": "🌙",
+                "desc": t("theme_midnight_desc"),
+                "tag": "Proton • Dark",
+                "colors": ["#1c1b22", "#2b2a33", "#0060df"]
+            },
+            {
+                "id": "mint",
+                "name": "Linux Mint Emerald",
+                "icon": "🍃",
+                "desc": t("theme_mint_desc"),
+                "tag": "Mint Desktop • Eco",
+                "colors": ["#141c15", "#1c2b1f", "#87cf3e"]
+            },
+            {
+                "id": "neon",
+                "name": "Cyberpunk Neon",
+                "icon": "⚡",
+                "desc": t("theme_neon_desc"),
+                "tag": "Cyan & Violet",
+                "colors": ["#090d16", "#111827", "#00d2ff"]
+            },
+            {
+                "id": "amoled",
+                "name": "Pure AMOLED Black",
+                "icon": "🖤",
+                "desc": t("theme_amoled_desc"),
+                "tag": "Pitch Black • OLED",
+                "colors": ["#000000", "#181818", "#38bdf8"]
+            }
+        ]
+
+        card_widgets = []
+        cur_theme = self.config.get("theme", "midnight")
+
+        def select_theme(th_id):
+            self.config.set("theme", th_id)
+            self.apply_css()
+            for c_id, c_box, badge_lbl in card_widgets:
+                is_active = (c_id == th_id)
+                ctx = c_box.get_style_context()
+                b_ctx = badge_lbl.get_style_context()
+                if is_active:
+                    ctx.add_class("active-theme")
+                    b_ctx.add_class("active-badge")
+                    badge_lbl.set_text(f"✓ {t('active_theme_badge')}")
+                else:
+                    ctx.remove_class("active-theme")
+                    b_ctx.remove_class("active-badge")
+                    badge_lbl.set_text(t("select_theme_btn"))
+
+        for idx, th in enumerate(theme_cards_data):
+            th_id = th["id"]
+            is_cur = (cur_theme == th_id)
+
+            eb = Gtk.EventBox()
+            try:
+                eb.set_cursor(Gdk.Cursor.new_from_name(Gdk.Display.get_default(), "pointer"))
+            except Exception:
+                pass
+
+            card_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+            card_box.get_style_context().add_class("theme-card-box")
+            if is_cur:
+                card_box.get_style_context().add_class("active-theme")
+
+            top_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            t_lbl = Gtk.Label(label=f"<b>{th['icon']} {th['name']}</b>")
+            t_lbl.set_use_markup(True)
+            t_lbl.set_xalign(0.0)
+            top_row.pack_start(t_lbl, True, True, 0)
+
+            for hex_val in th["colors"]:
+                sw = Gtk.Box()
+                sw.set_size_request(13, 13)
+                p = Gtk.CssProvider()
+                p.load_from_data(f".swatch-{hex_val[1:]} {{ background-color: {hex_val}; border-radius: 50%; min-width: 12px; min-height: 12px; margin-right: 3px; border: 1px solid rgba(255,255,255,0.25); }}".encode('utf-8'))
+                sw.get_style_context().add_provider(p, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+                sw.get_style_context().add_class(f"swatch-{hex_val[1:]}")
+                top_row.pack_start(sw, False, False, 0)
+
+            badge_lbl = Gtk.Label(label=f"✓ {t('active_theme_badge')}" if is_cur else t("select_theme_btn"))
+            badge_lbl.get_style_context().add_class("theme-badge")
+            if is_cur:
+                badge_lbl.get_style_context().add_class("active-badge")
+            top_row.pack_end(badge_lbl, False, False, 0)
+            card_box.pack_start(top_row, False, False, 0)
+
+            d_lbl = Gtk.Label(label=th["desc"])
+            d_lbl.set_line_wrap(True)
+            d_lbl.set_xalign(0.0)
+            d_lbl.get_style_context().add_class("text-muted")
+            card_box.pack_start(d_lbl, False, False, 0)
+
+            tag_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+            tag_lbl = Gtk.Label(label=f"<small>{GLib.markup_escape_text(th['tag'])}</small>")
+            tag_lbl.set_use_markup(True)
+            tag_lbl.get_style_context().add_class("theme-badge")
+            tag_box.pack_start(tag_lbl, False, False, 0)
+            card_box.pack_start(tag_box, False, False, 0)
+
+            eb.add(card_box)
+            eb.connect("button-press-event", lambda w, ev, tid=th_id: select_theme(tid))
+
+            grid.attach(eb, idx % 2, idx // 2, 1, 1)
+            card_widgets.append((th_id, card_box, badge_lbl))
+
+        themes_box.pack_start(grid, False, False, 0)
+
+        info_card = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        info_card.get_style_context().add_class("theme-card-box")
+        info_card.set_margin_top(12)
+        lbl_info = Gtk.Label(label=f"💡 <i>{GLib.markup_escape_text(t('theme_live_notice'))}</i>")
+        lbl_info.set_use_markup(True)
+        lbl_info.set_xalign(0.0)
+        info_card.pack_start(lbl_info, True, True, 4)
+        themes_box.pack_start(info_card, False, False, 0)
+
+        notebook.append_page(themes_box, Gtk.Label(label=f"🎨 {t('tab_themes')}"))
+
+        # -------------------------------------------------------------
+        # ZAVIHEK 2: 🖌️ Lasten CSS (userChrome.css) - VELIK IN PROSTOREN!
+        # -------------------------------------------------------------
+        css_page_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        css_page_box.set_margin_top(14)
+        css_page_box.set_margin_bottom(14)
+        css_page_box.set_margin_start(16)
+        css_page_box.set_margin_end(16)
+        css_page_box.set_vexpand(True)
+        css_page_box.set_hexpand(True)
+
+        css_header_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        lbl_css_title = Gtk.Label(label=f"<b>{GLib.markup_escape_text(t('custom_css_title'))}</b>")
+        lbl_css_title.set_use_markup(True)
+        lbl_css_title.set_xalign(0.0)
+        css_header_box.pack_start(lbl_css_title, True, True, 0)
+        css_page_box.pack_start(css_header_box, False, False, 0)
+
+        lbl_css_desc = Gtk.Label(label=t('custom_css_desc'))
+        lbl_css_desc.set_xalign(0.0)
+        css_page_box.pack_start(lbl_css_desc, False, False, 0)
+
+        # Snippets Bar
+        snippets_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        lbl_snip = Gtk.Label(label=f"<b>{GLib.markup_escape_text(t('snippets_lbl'))}</b>")
+        lbl_snip.set_use_markup(True)
+        snippets_box.pack_start(lbl_snip, False, False, 0)
+
+        btn_snip_rounded = Gtk.Button(label=t('snip_rounded'))
+        btn_snip_rounded.get_style_context().add_class("snippet-chip")
+        btn_snip_font = Gtk.Button(label=t('snip_font'))
+        btn_snip_font.get_style_context().add_class("snippet-chip")
+        btn_snip_glow = Gtk.Button(label=t('snip_glow'))
+        btn_snip_glow.get_style_context().add_class("snippet-chip")
+        btn_snip_compact = Gtk.Button(label=t('snip_compact'))
+        btn_snip_compact.get_style_context().add_class("snippet-chip")
+
+        snippets_box.pack_start(btn_snip_rounded, False, False, 0)
+        snippets_box.pack_start(btn_snip_font, False, False, 0)
+        snippets_box.pack_start(btn_snip_glow, False, False, 0)
+        snippets_box.pack_start(btn_snip_compact, False, False, 0)
+        css_page_box.pack_start(snippets_box, False, False, 2)
+
+        # Spacious Scrolled Code Editor
+        css_scroll = Gtk.ScrolledWindow()
+        css_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        css_scroll.set_vexpand(True)
+        css_scroll.set_hexpand(True)
+        css_scroll.set_min_content_height(340)
+
+        css_tv = Gtk.TextView()
+        css_tv.get_style_context().add_class("code-editor")
+        css_tv.set_monospace(True)
+        css_tv.set_vexpand(True)
+        css_tv.set_hexpand(True)
+        css_tv.set_left_margin(14)
+        css_tv.set_right_margin(14)
+        css_tv.set_top_margin(12)
+        css_tv.set_bottom_margin(12)
+
+        css_buf = css_tv.get_buffer()
+        existing_css = self.config.get("custom_css", "")
+        if not existing_css:
+            existing_css = "/* Safeer Browser — Lasten CSS (userChrome.css slog) */\n/* Primer:\n.toolbar { background: #0c1017; }\n.nav-btn { border-radius: 8px; }\n*/\n"
+        css_buf.set_text(existing_css)
+
+        def insert_snippet(btn, snippet_code):
+            cur_txt = css_buf.get_text(css_buf.get_start_iter(), css_buf.get_end_iter(), True)
+            if snippet_code not in cur_txt:
+                new_txt = cur_txt.rstrip() + "\n\n" + snippet_code + "\n"
+                css_buf.set_text(new_txt)
+
+        btn_snip_rounded.connect("clicked", insert_snippet, "/* Zaobljeni zavihki */\n.tab-btn { border-radius: 12px 12px 0 0; }")
+        btn_snip_font.connect("clicked", insert_snippet, "/* Večja pisava */\n* { font-size: 14px; }")
+        btn_snip_glow.connect("clicked", insert_snippet, "/* Cian sijaj */\n.url-bar:focus-within { box-shadow: 0 0 12px rgba(0, 210, 255, 0.4); }")
+        btn_snip_compact.connect("clicked", insert_snippet, "/* Kompaktna orodna vrstica */\n.nav-btn { padding: 3px 6px; }")
+
+        css_scroll.add(css_tv)
+        css_page_box.pack_start(css_scroll, True, True, 0)
+
+        # Action Buttons for CSS
+        css_actions_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        btn_save_css = Gtk.Button(label=t('save_and_apply_css'))
+        btn_save_css.get_style_context().add_class("btn-primary-glow")
+        def on_save_css(b):
+            txt = css_buf.get_text(css_buf.get_start_iter(), css_buf.get_end_iter(), True)
+            self.config.set("custom_css", txt)
+            self.apply_css()
+            orig_lbl = b.get_label()
+            b.set_label("✅ OK!")
+            GLib.timeout_add(1500, lambda: b.set_label(orig_lbl))
+        btn_save_css.connect("clicked", on_save_css)
+        css_actions_box.pack_start(btn_save_css, False, False, 0)
+
+        btn_clear_css = Gtk.Button(label=t('clear_code'))
+        btn_clear_css.get_style_context().add_class("btn-delete")
+        def on_clear_css(b):
+            css_buf.set_text("")
+            self.config.set("custom_css", "")
+            self.apply_css()
+        btn_clear_css.connect("clicked", on_clear_css)
+        css_actions_box.pack_end(btn_clear_css, False, False, 0)
+
+        css_page_box.pack_start(css_actions_box, False, False, 0)
+
+        notebook.append_page(css_page_box, Gtk.Label(label=f"🖌️ {t('tab_css')}"))
+
+        # -------------------------------------------------------------
+        # ZAVIHEK 3: ⭐ Priljubljene strani & Multimedija
+        # -------------------------------------------------------------
+        portals_tab_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        portals_tab_box.set_margin_top(14)
+        portals_tab_box.set_margin_bottom(14)
+        portals_tab_box.set_margin_start(16)
+        portals_tab_box.set_margin_end(16)
+        portals_tab_box.set_vexpand(True)
+        portals_tab_box.set_hexpand(True)
+
+        portals_top_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        lbl_portals_head = Gtk.Label(label=f"<b><span size='11500'>{GLib.markup_escape_text(t('portals_title'))}</span></b>")
+        lbl_portals_head.set_use_markup(True)
+        lbl_portals_head.set_xalign(0.0)
+        portals_top_bar.pack_start(lbl_portals_head, True, True, 0)
+
+        btn_add_p_tab = Gtk.Button(label=f"➕ {t('add_portal')}")
+        btn_add_p_tab.get_style_context().add_class("btn-primary-glow")
+        portals_top_bar.pack_end(btn_add_p_tab, False, False, 0)
+
+        btn_import_p_tab = Gtk.Button(label=f"📥 {t('import_bookmarks')}")
+        btn_import_p_tab.get_style_context().add_class("nav-btn")
+        btn_import_p_tab.set_tooltip_text(t("import_bookmarks_desc"))
+        portals_top_bar.pack_end(btn_import_p_tab, False, False, 0)
+
+        btn_res_p_tab = Gtk.Button(label=f"🔄 {t('reset_default')}")
+        btn_res_p_tab.get_style_context().add_class("btn-delete")
+        portals_top_bar.pack_end(btn_res_p_tab, False, False, 0)
+        portals_tab_box.pack_start(portals_top_bar, False, False, 0)
+
+        p_scroll = Gtk.ScrolledWindow()
+        p_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        p_scroll.set_vexpand(True)
+        p_scroll.set_hexpand(True)
+        p_scroll.set_min_content_height(340)
+
+        p_list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        p_scroll.add(p_list_box)
+        portals_tab_box.pack_start(p_scroll, True, True, 0)
+
+        def populate_tab_portals():
+            for child in p_list_box.get_children():
+                p_list_box.remove(child)
+
+            portals = self.config.get_portals()
+            for idx, p in enumerate(portals):
+                p_id = p.get("id")
+                row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+                row.get_style_context().add_class("item-card-row")
+
+                # Reordering buttons (Move Up / Move Down)
+                reorder_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+                btn_up = Gtk.Button(label="⬆️")
+                btn_up.set_tooltip_text(t("move_up", "Premakni navzgor"))
+                btn_up.get_style_context().add_class("nav-btn")
+                btn_up.set_sensitive(idx > 0)
+                def on_move_tab_up(b, pid=p_id):
+                    self.config.move_portal_up(pid)
+                    self.broadcast_portals_update()
+                    populate_tab_portals()
+                btn_up.connect("clicked", on_move_tab_up)
+
+                btn_down = Gtk.Button(label="⬇️")
+                btn_down.set_tooltip_text(t("move_down", "Premakni navzdol"))
+                btn_down.get_style_context().add_class("nav-btn")
+                btn_down.set_sensitive(idx < len(portals) - 1)
+                def on_move_tab_down(b, pid=p_id):
+                    self.config.move_portal_down(pid)
+                    self.broadcast_portals_update()
+                    populate_tab_portals()
+                btn_down.connect("clicked", on_move_tab_down)
+
+                reorder_box.pack_start(btn_up, False, False, 0)
+                reorder_box.pack_start(btn_down, False, False, 0)
+                row.pack_start(reorder_box, False, False, 2)
+
+                badge = Gtk.Label(label=p.get("mark", "🌐"))
+                badge.set_width_chars(3)
+                badge.get_style_context().add_class("nav-btn")
+                row.pack_start(badge, False, False, 4)
+
+                info_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+                info_box.set_hexpand(True)
+
+                escaped_title = GLib.markup_escape_text(p.get('title', ''))
+                lbl_title = Gtk.Label(label=f"<b>{escaped_title}</b>")
+                lbl_title.set_use_markup(True)
+                lbl_title.set_xalign(0.0)
+                lbl_title.set_ellipsize(Pango.EllipsizeMode.END)
+
+                lbl_url = Gtk.Label(label=p.get('url', ''))
+                lbl_url.set_xalign(0.0)
+                lbl_url.set_ellipsize(Pango.EllipsizeMode.END)
+                lbl_url.get_style_context().add_class("text-muted")
+
+                info_box.pack_start(lbl_title, False, False, 0)
+                info_box.pack_start(lbl_url, False, False, 0)
+                row.pack_start(info_box, True, True, 0)
+
+                actions_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+                btn_edit = Gtk.Button(label=f"✏️ {t('edit')}")
+                btn_edit.get_style_context().add_class("nav-btn")
+                btn_edit.connect("clicked", lambda b, prt=p: self.open_portal_editor_dialog(prt, on_saved=populate_tab_portals))
+                actions_box.pack_start(btn_edit, False, False, 0)
+
+                btn_del = Gtk.Button(label="🗑️")
+                btn_del.set_tooltip_text(t("delete", "Izbriši"))
+                btn_del.get_style_context().add_class("btn-delete")
+                def on_delete_tab(b, pid=p_id):
+                    self.config.delete_portal(pid)
+                    self.broadcast_portals_update()
+                    populate_tab_portals()
+                btn_del.connect("clicked", on_delete_tab)
+                actions_box.pack_start(btn_del, False, False, 0)
+
+                row.pack_end(actions_box, False, False, 0)
+                p_list_box.pack_start(row, False, False, 0)
+
+            p_list_box.show_all()
+
+        populate_tab_portals()
+        btn_add_p_tab.connect("clicked", lambda b: self.open_portal_editor_dialog(None, on_saved=populate_tab_portals))
+        btn_import_p_tab.connect("clicked", lambda b: self.open_bookmarks_import_dialog(on_imported=populate_tab_portals))
+        def on_reset_tab_click(b):
+            self.config.reset_portals()
+            self.broadcast_portals_update()
+            populate_tab_portals()
+        btn_res_p_tab.connect("clicked", on_reset_tab_click)
+
+        notebook.append_page(portals_tab_box, Gtk.Label(label=f"⭐ {t('tab_portals')}"))
+
+        # -------------------------------------------------------------
+        # ZAVIHEK 4: 🧩 Uporabniške skripte (UserScripts)
+        # -------------------------------------------------------------
+        scripts_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        scripts_box.set_margin_top(14)
+        scripts_box.set_margin_bottom(14)
+        scripts_box.set_margin_start(16)
+        scripts_box.set_margin_end(16)
+
+        scripts_top_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        lbl_scripts = Gtk.Label(label=f"<b><span size='11500'>{GLib.markup_escape_text(t('userscripts_title'))}</span></b>")
+        lbl_scripts.set_use_markup(True)
+        lbl_scripts.set_xalign(0.0)
+        scripts_top_bar.pack_start(lbl_scripts, True, True, 0)
+
+        btn_add_script = Gtk.Button(label=t('add_new_script'))
+        btn_add_script.get_style_context().add_class("btn-primary-glow")
+        scripts_top_bar.pack_end(btn_add_script, False, False, 0)
+        scripts_box.pack_start(scripts_top_bar, False, False, 0)
+
+        # Scrolled scripts container
+        scripts_scroll = Gtk.ScrolledWindow()
+        scripts_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scripts_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        scripts_scroll.add(scripts_vbox)
+        scripts_box.pack_start(scripts_scroll, True, True, 0)
+
+        def populate_scripts():
+            for child in scripts_vbox.get_children():
+                scripts_vbox.remove(child)
+
+            # Vgrajena sistemska razširitev: AdGuard Zaščita
+            adg_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+            adg_row.get_style_context().add_class("item-card-row")
+            adg_sw = Gtk.Switch()
+            adg_sw.set_active(self.config.get("adguard_protection_enabled", True))
+            def on_adg_toggle(widget, state):
+                self.config.set("adguard_protection_enabled", state)
+            adg_sw.connect("state-set", on_adg_toggle)
+            adg_row.pack_start(adg_sw, False, False, 4)
+
+            adg_info = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+            adg_title = Gtk.Label(label="<b>🛡️ AdGuard Advanced Protection (Vgrajena razširitev)</b>")
+            adg_title.set_use_markup(True)
+            adg_title.set_xalign(0.0)
+            adg_info.pack_start(adg_title, False, False, 0)
+            adg_meta = Gtk.Label(label="Sprotno defusanje anti-adblock zidov, stubs za oglasne API-je in kozmetično čiščenje.")
+            adg_meta.set_xalign(0.0)
+            adg_meta.get_style_context().add_class("text-muted")
+            adg_info.pack_start(adg_meta, False, False, 0)
+            adg_row.pack_start(adg_info, True, True, 0)
+
+            adg_badge = Gtk.Label(label="VGRAJENO")
+            adg_badge.get_style_context().add_class("btn-primary-glow")
+            adg_row.pack_end(adg_badge, False, False, 0)
+            scripts_vbox.pack_start(adg_row, False, False, 0)
+
+            scripts = self.config.get_user_scripts()
+            if not scripts:
+                empty_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+                empty_box.get_style_context().add_class("theme-card-box")
+                empty_box.set_margin_top(20)
+                empty_box.set_margin_bottom(20)
+
+                empty_icon = Gtk.Label(label="🧩")
+                empty_icon.get_style_context().add_class("banner-icon")
+                empty_box.pack_start(empty_icon, False, False, 0)
+
+                empty_lbl = Gtk.Label(label=t('empty_scripts'))
+                empty_lbl.set_justify(Gtk.Justification.CENTER)
+                empty_box.pack_start(empty_lbl, True, True, 6)
+                scripts_vbox.pack_start(empty_box, True, True, 10)
+            else:
+                for s in scripts:
+                    row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+                    row.get_style_context().add_class("item-card-row")
+
+                    sw = Gtk.Switch()
+                    sw.set_active(s.get("enabled", True))
+                    s_id = s["id"]
+                    sw.connect("state-set", lambda widget, state, sid=s_id: self.config.toggle_user_script(sid))
+                    row.pack_start(sw, False, False, 4)
+
+                    info_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+                    title_lbl = Gtk.Label(label=f"<b>{GLib.markup_escape_text(s.get('name', 'Brez imena'))}</b>")
+                    title_lbl.set_use_markup(True)
+                    title_lbl.set_xalign(0.0)
+                    info_box.pack_start(title_lbl, False, False, 0)
+
+                    pattern_txt = f"Domena: <tt>{GLib.markup_escape_text(s.get('pattern', '*'))}</tt> • Zagon: {s.get('run_at', 'end').upper()}"
+                    meta_lbl = Gtk.Label(label=pattern_txt)
+                    meta_lbl.set_use_markup(True)
+                    meta_lbl.set_xalign(0.0)
+                    meta_lbl.get_style_context().add_class("text-muted")
+                    info_box.pack_start(meta_lbl, False, False, 0)
+                    row.pack_start(info_box, True, True, 0)
+
+                    btn_edit = Gtk.Button(label=f"✏️ {t('edit')}")
+                    btn_edit.get_style_context().add_class("nav-btn")
+                    s_copy = s.copy()
+                    btn_edit.connect("clicked", lambda b, script_data=s_copy: [self.open_script_editor_dialog(script_data), populate_scripts()])
+                    row.pack_end(btn_edit, False, False, 0)
+
+                    btn_del = Gtk.Button(label="🗑️")
+                    btn_del.get_style_context().add_class("btn-delete")
+                    btn_del.connect("clicked", lambda b, sid=s_id: [self.config.delete_user_script(sid), populate_scripts()])
+                    row.pack_end(btn_del, False, False, 0)
+
+                    scripts_vbox.pack_start(row, False, False, 0)
+            scripts_vbox.show_all()
+
+        populate_scripts()
+        btn_add_script.connect("clicked", lambda b: [self.open_script_editor_dialog(None), populate_scripts()])
+
+        notebook.append_page(scripts_box, Gtk.Label(label=f"🧩 {t('tab_scripts')}"))
+
+        dialog.show_all()
+        dialog.run()
+        dialog.destroy()
+
+    def open_script_editor_dialog(self, script=None):
+        """Urejevalnik uporabniške JavaScript skripte."""
+        is_edit = script is not None
+        title = "Uredi skripto" if is_edit else "Nova uporabniška skripta"
+        dialog = Gtk.Dialog(title=title, transient_for=self, flags=0)
+        dialog.set_default_size(680, 520)
+        dialog.get_style_context().add_class("customizer-dialog")
+        btn_cancel = dialog.add_button(t("cancel", "Prekliči"), Gtk.ResponseType.CANCEL)
+        btn_cancel.get_style_context().add_class("customizer-close-btn")
+        btn_save = dialog.add_button(f"💾 {t('save')}", Gtk.ResponseType.OK)
+        btn_save.get_style_context().add_class("btn-primary-glow")
+
+        content = dialog.get_content_area()
+        content.set_spacing(10)
+        content.set_margin_top(12)
+        content.set_margin_bottom(12)
+        content.set_margin_left(16)
+        content.set_margin_right(16)
+
+        # Name Entry
+        lbl_name = Gtk.Label(label="Ime skripte:")
+        lbl_name.set_xalign(0.0)
+        content.pack_start(lbl_name, False, False, 0)
+        entry_name = Gtk.Entry()
+        entry_name.set_text(script.get("name", "") if is_edit else "Moja nova skripta")
+        content.pack_start(entry_name, False, False, 0)
+
+        # Match Pattern
+        lbl_pat = Gtk.Label(label="Domena ali vzorec URL-ja (* za vse strani, npr. *youtube.com*):")
+        lbl_pat.set_xalign(0.0)
+        content.pack_start(lbl_pat, False, False, 0)
+        entry_pat = Gtk.Entry()
+        entry_pat.set_text(script.get("pattern", "*") if is_edit else "*")
+        content.pack_start(entry_pat, False, False, 0)
+
+        # Run at
+        lbl_run = Gtk.Label(label="Čas zagona skripte:")
+        lbl_run.set_xalign(0.0)
+        content.pack_start(lbl_run, False, False, 0)
+        combo_run = Gtk.ComboBoxText()
+        combo_run.append("end", "Ko je stran v celoti naložena (END)")
+        combo_run.append("start", "Pred začetkom nalaganja DOM-a (START)")
+        combo_run.set_active_id(script.get("run_at", "end") if is_edit else "end")
+        content.pack_start(combo_run, False, False, 0)
+
+        # Code View
+        lbl_code = Gtk.Label(label="JavaScript koda:")
+        lbl_code.set_xalign(0.0)
+        content.pack_start(lbl_code, False, False, 0)
+
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_min_content_height(180)
+
+        tv = Gtk.TextView()
+        tv.get_style_context().add_class("code-editor")
+        buf = tv.get_buffer()
+        default_code = script.get("code", "") if is_edit else """// Safeer Uporabniška Skripta (Tampermonkey slog)
+(function() {
+    console.log("Safeer skripta teče na:", window.location.href);
+    // Tukaj dodajte svojo JavaScript kodo:
+    
+})();"""
+        buf.set_text(default_code)
+        scroll.add(tv)
+        content.pack_start(scroll, True, True, 0)
+
+        dialog.show_all()
+        resp = dialog.run()
+        if resp == Gtk.ResponseType.OK:
+            s_name = entry_name.get_text().strip() or "Brez imena"
+            s_pat = entry_pat.get_text().strip() or "*"
+            s_run = combo_run.get_active_id() or "end"
+            start, end = buf.get_bounds()
+            s_code = buf.get_text(start, end, True)
+
+            if is_edit:
+                self.config.update_user_script(
+                    script["id"],
+                    name=s_name,
+                    pattern=s_pat,
+                    code=s_code,
+                    enabled=script.get("enabled", True),
+                    run_at=s_run
+                )
+            else:
+                self.config.add_user_script(
+                    name=s_name,
+                    pattern=s_pat,
+                    code=s_code,
+                    run_at=s_run
+                )
+        dialog.destroy()
+
+    def broadcast_portals_update(self):
+        """Osveži priljubljene portale na vseh odprtih zavihkih z domačo stranjo in v orodnih vrsticah."""
+        portals = self.config.get_portals()
+        portals_json = json.dumps(portals)
+        js = f"if (window.setCustomPortals) {{ window.setCustomPortals({portals_json}); }}"
+        for tab in self.tabs:
+            wv = tab.get("webview")
+            uri = tab.get("uri", "")
+            if wv and ("home.html" in uri or uri == "safeer://home"):
+                wv.run_javascript(js, None, None, None)
+        if hasattr(self, 'populate_bookmarks_bar'):
+            self.populate_bookmarks_bar()
+        if hasattr(self, 'update_star_status'):
+            self.update_star_status()
+
+    def broadcast_language_update(self):
+        """Osveži jezik na vseh odprtih zavihkih z domačo stranjo."""
+        lang = get_current_language()
+        js = f"if (window.setAppLanguage) {{ window.setAppLanguage('{lang}'); }}"
+        for tab in self.tabs:
+            wv = tab.get("webview")
+            uri = tab.get("uri", "")
+            if wv and ("home.html" in uri or uri == "safeer://home"):
+                wv.run_javascript(js, None, None, None)
+
+    def broadcast_search_engine_update(self):
+        """Osveži privzeti iskalnik na vseh odprtih zavihkih z domačo stranjo."""
+        engine = self.config.get("search_engine", "google")
+        js = f"if (window.setSearchEngine) {{ window.setSearchEngine('{engine}'); }}"
+        for tab in self.tabs:
+            wv = tab.get("webview")
+            uri = tab.get("uri", "")
+            if wv and ("home.html" in uri or uri == "safeer://home"):
+                wv.run_javascript(js, None, None, None)
+
+    def open_portal_editor_dialog(self, portal=None, on_saved=None, prefill=None):
+        """Dialog za dodajanje ali urejanje priljubljenega portala / strani."""
+        is_edit = portal is not None
+        title = f"✏️ {t('edit')} {t('tab_portals')}" if is_edit else f"➕ {t('add_portal')}"
+        dialog = Gtk.Dialog(title=title, transient_for=self, flags=0)
+        dialog.set_default_size(600, 500)
+        dialog.set_resizable(True)
+        dialog.set_position(Gtk.WindowPosition.CENTER)
+        dialog.get_style_context().add_class("customizer-dialog")
+        btn_cancel = dialog.add_button(t("cancel", "Prekliči"), Gtk.ResponseType.CANCEL)
+        btn_cancel.get_style_context().add_class("customizer-close-btn")
+        btn_save = dialog.add_button(f"💾 {t('save_portal')}", Gtk.ResponseType.OK)
+        btn_save.get_style_context().add_class("btn-primary-glow")
+
+        content = dialog.get_content_area()
+        content.set_spacing(10)
+        content.set_margin_top(14)
+        content.set_margin_bottom(14)
+        content.set_margin_start(16)
+        content.set_margin_end(16)
+
+        lbl_title = Gtk.Label(label=f"<b>{GLib.markup_escape_text(t('portal_name'))}:</b>")
+        lbl_title.set_use_markup(True)
+        lbl_title.set_xalign(0.0)
+        content.pack_start(lbl_title, False, False, 0)
+        entry_title = Gtk.Entry()
+        entry_title.set_placeholder_text("YouTube, 24ur, Reddit, GitHub...")
+        if is_edit:
+            entry_title.set_text(portal.get("title", ""))
+        elif prefill and prefill.get("title"):
+            entry_title.set_text(prefill.get("title"))
+        content.pack_start(entry_title, False, False, 0)
+
+        lbl_url = Gtk.Label(label=f"<b>{GLib.markup_escape_text(t('portal_url'))}:</b>")
+        lbl_url.set_use_markup(True)
+        lbl_url.set_xalign(0.0)
+        content.pack_start(lbl_url, False, False, 0)
+        entry_url = Gtk.Entry()
+        entry_url.set_placeholder_text("https://...")
+        if is_edit:
+            entry_url.set_text(portal.get("url", "https://"))
+        elif prefill and prefill.get("url"):
+            entry_url.set_text(prefill.get("url"))
+        else:
+            entry_url.set_text("https://")
+        content.pack_start(entry_url, False, False, 0)
+
+        lbl_mark = Gtk.Label(label=f"<b>{GLib.markup_escape_text(t('portal_icon'))}:</b>")
+        lbl_mark.set_use_markup(True)
+        lbl_mark.set_xalign(0.0)
+        content.pack_start(lbl_mark, False, False, 0)
+
+        mark_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        entry_mark = Gtk.Entry()
+        entry_mark.set_max_length(4)
+        entry_mark.set_width_chars(6)
+        entry_mark.set_text(portal.get("mark", "🌐") if is_edit else "⭐")
+        mark_box.pack_start(entry_mark, False, False, 0)
+
+        emojis = ["📺", "🎬", "🎵", "📰", "🎮", "🤖", "📊", "💬", "🌐", "⭐", "🚀", "🛒"]
+        for em in emojis:
+            btn_em = Gtk.Button(label=em)
+            btn_em.connect("clicked", lambda b, e=em: entry_mark.set_text(e))
+            mark_box.pack_start(btn_em, False, False, 0)
+        content.pack_start(mark_box, False, False, 0)
+
+        lbl_color = Gtk.Label(label=f"<b>{GLib.markup_escape_text(t('portal_color'))}:</b>")
+        lbl_color.set_use_markup(True)
+        lbl_color.set_xalign(0.0)
+        content.pack_start(lbl_color, False, False, 0)
+
+        selected_color = [portal.get("color", "#00d2ff") if is_edit else "#10b981"]
+        colors_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        color_presets = [
+            ("🔴 Rdeča", "#cc0000"),
+            ("🔵 Modra", "#0284c7"),
+            ("🟢 Mint", "#10b981"),
+            ("🟣 Vijolična", "#a855f7"),
+            ("🟠 Oranžna", "#f59e0b"),
+            ("⚫ Temna", "#1e293b"),
+            ("✨ Cian", "#00d2ff")
+        ]
+        lbl_curr_color = Gtk.Label(label=f"HEX: {selected_color[0]}")
+        for cname, chex in color_presets:
+            btn_c = Gtk.Button(label=cname)
+            def on_c_click(b, hex_code=chex):
+                selected_color[0] = hex_code
+                lbl_curr_color.set_text(f"HEX: {hex_code}")
+            btn_c.connect("clicked", on_c_click)
+            colors_box.pack_start(btn_c, False, False, 0)
+        content.pack_start(colors_box, False, False, 0)
+        content.pack_start(lbl_curr_color, False, False, 0)
+
+        dialog.show_all()
+        resp = dialog.run()
+        if resp == Gtk.ResponseType.OK:
+            p_title = entry_title.get_text().strip() or "Priljubljena stran"
+            p_url = entry_url.get_text().strip() or "https://"
+            p_mark = entry_mark.get_text().strip() or "🌐"
+            p_color = selected_color[0]
+            p_bg = f"linear-gradient(145deg, #091a28, {p_color})"
+
+            if is_edit:
+                self.config.update_portal(portal.get("id"), title=p_title, url=p_url, mark=p_mark, bg=p_bg, color=p_color)
+            else:
+                self.config.add_portal(title=p_title, url=p_url, mark=p_mark, bg=p_bg, color=p_color)
+
+            self.broadcast_portals_update()
+            if on_saved:
+                on_saved()
+
+        dialog.destroy()
+
+    def open_bookmarks_import_dialog(self, on_imported=None):
+        """Odpre interaktivni dialog za 1-klik uvoz zaznamkov neposredno iz Firefoxa, Chroma, Brave ali HTML datoteke."""
+        from core.bookmarks_importer import detect_browser_profiles
+
+        detected = detect_browser_profiles()
+
+        dialog = Gtk.Dialog(
+            title=f"📥 {t('import_1click_title')}",
+            parent=self,
+            flags=Gtk.DialogFlags.MODAL | Gtk.DialogFlags.DESTROY_WITH_PARENT
+        )
+        dialog.set_default_size(520, 360)
+        dialog.set_resizable(False)
+        dialog.set_position(Gtk.WindowPosition.CENTER_ON_PARENT)
+        dialog.get_style_context().add_class("customizer-dialog")
+
+        btn_cancel = dialog.add_button(t("cancel", "Prekliči"), Gtk.ResponseType.CANCEL)
+        btn_cancel.get_style_context().add_class("customizer-close-btn")
+
+        content = dialog.get_content_area()
+        content.set_spacing(12)
+        content.set_margin_top(16)
+        content.set_margin_bottom(16)
+        content.set_margin_start(20)
+        content.set_margin_end(20)
+
+        # Header Title & Description
+        head_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        lbl_h1 = Gtk.Label()
+        lbl_h1.set_markup(f"<span size='large' weight='bold' color='#00d2ff'>📥 {t('import_1click_title')}</span>")
+        lbl_h1.set_xalign(0)
+        lbl_desc = Gtk.Label()
+        lbl_desc.set_text(t("import_bookmarks_desc"))
+        lbl_desc.set_line_wrap(True)
+        lbl_desc.set_xalign(0)
+        lbl_desc.get_style_context().add_class("dim-label")
+        head_box.pack_start(lbl_h1, False, False, 0)
+        head_box.pack_start(lbl_desc, False, False, 0)
+        content.pack_start(head_box, False, False, 0)
+
+        # Actions Box
+        actions_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+
+        def handle_import_result(res):
+            dialog.destroy()
+            added = res.get("added", 0)
+            skipped = res.get("skipped", 0)
+            self.broadcast_portals_update()
+            if on_imported:
+                on_imported()
+
+            if added > 0:
+                msg = t("import_success").replace("{count}", str(added)).replace("{skipped}", str(skipped))
+                msg_type = Gtk.MessageType.INFO
+            else:
+                msg = t("import_no_new")
+                msg_type = Gtk.MessageType.WARNING
+
+            info_dlg = Gtk.MessageDialog(
+                transient_for=self,
+                flags=0,
+                message_type=msg_type,
+                buttons=Gtk.ButtonsType.OK,
+                text=f"📥 {msg}"
+            )
+            info_dlg.run()
+            info_dlg.destroy()
+
+        # 1. Firefox Option
+        if "firefox" in detected:
+            btn_ff = Gtk.Button(label=t("import_from_firefox"))
+            btn_ff.get_style_context().add_class("suggested-action")
+            btn_ff.connect("clicked", lambda b: handle_import_result(self.config.auto_import_from_browser("firefox")))
+            actions_box.pack_start(btn_ff, False, False, 0)
+
+        # 2. Chrome / Brave Option
+        if "chrome" in detected or "brave" in detected or "chromium" in detected:
+            btn_cr = Gtk.Button(label=t("import_from_chrome"))
+            btn_cr.get_style_context().add_class("suggested-action")
+            btn_cr.connect("clicked", lambda b: handle_import_result(self.config.auto_import_from_browser("chrome")))
+            actions_box.pack_start(btn_cr, False, False, 0)
+
+        # 3. Import All Option (if both or multiple detected)
+        if len(detected) > 1:
+            btn_all = Gtk.Button(label=t("import_all_auto"))
+            btn_all.connect("clicked", lambda b: handle_import_result(self.config.auto_import_from_browser("all")))
+            actions_box.pack_start(btn_all, False, False, 0)
+
+        # 4. Netscape HTML file chooser fallback
+        def open_file_chooser_sub(b):
+            dialog.destroy()
+            file_chooser = Gtk.FileChooserNative(
+                title=f"📥 {t('import_file_title')}",
+                parent=self,
+                action=Gtk.FileChooserAction.OPEN,
+                accept_label=t("import_bookmarks"),
+                cancel_label=t("cancel")
+            )
+            filter_html = Gtk.FileFilter()
+            filter_html.set_name(t("import_html_filter"))
+            filter_html.add_mime_type("text/html")
+            filter_html.add_pattern("*.html")
+            filter_html.add_pattern("*.htm")
+            file_chooser.add_filter(filter_html)
+
+            filter_all = Gtk.FileFilter()
+            filter_all.set_name(t("all_files"))
+            filter_all.add_pattern("*")
+            file_chooser.add_filter(filter_all)
+
+            res = file_chooser.run()
+            if res == Gtk.ResponseType.ACCEPT:
+                filename = file_chooser.get_filename()
+                file_chooser.destroy()
+                if filename and os.path.exists(filename):
+                    count = self.config.import_bookmarks_from_html(filename)
+                    handle_import_result({"added": count, "skipped": 0})
+            else:
+                file_chooser.destroy()
+
+        btn_html = Gtk.Button(label=t("import_from_html_btn"))
+        btn_html.connect("clicked", open_file_chooser_sub)
+        actions_box.pack_start(btn_html, False, False, 0)
+
+        content.pack_start(actions_box, True, True, 0)
+        dialog.show_all()
+        res = dialog.run()
+        if res == Gtk.ResponseType.CANCEL:
+            dialog.destroy()
+
+    def open_portals_dialog(self):
+        """Samostojno okno za upravljanje priljubljenih strani in multimedije."""
+        dialog = Gtk.Dialog(
+            title=f"⭐ {t('portals_title')} — Safeer",
+            transient_for=self,
+            flags=0
+        )
+        dialog.set_default_size(840, 600)
+        dialog.set_resizable(True)
+        dialog.set_position(Gtk.WindowPosition.CENTER)
+        dialog.get_style_context().add_class("customizer-dialog")
+        btn_close = dialog.add_button(t("close", "Zapri"), Gtk.ResponseType.CLOSE)
+        btn_close.get_style_context().add_class("customizer-close-btn")
+
+        content = dialog.get_content_area()
+        content.set_spacing(10)
+        content.set_margin_top(12)
+        content.set_margin_bottom(12)
+        content.set_margin_start(16)
+        content.set_margin_end(16)
+
+        header_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        lbl_head = Gtk.Label(label=f"<b>⭐ {GLib.markup_escape_text(t('portals_title'))}</b>")
+        lbl_head.set_use_markup(True)
+        lbl_head.set_xalign(0.0)
+        header_box.pack_start(lbl_head, True, True, 0)
+
+        btn_add = Gtk.Button(label=f"➕ {t('add_portal')}")
+        btn_add.get_style_context().add_class("nav-btn")
+        header_box.pack_end(btn_add, False, False, 0)
+
+        btn_import = Gtk.Button(label=f"📥 {t('import_bookmarks')}")
+        btn_import.get_style_context().add_class("nav-btn")
+        btn_import.set_tooltip_text(t("import_bookmarks_desc"))
+        header_box.pack_end(btn_import, False, False, 0)
+
+        btn_reset = Gtk.Button(label=f"🔄 {t('reset_default')}")
+        btn_reset.get_style_context().add_class("btn-delete")
+        header_box.pack_end(btn_reset, False, False, 0)
+        content.pack_start(header_box, False, False, 0)
+
+        lbl_sub = Gtk.Label(label=t('portals_sub'))
+        lbl_sub.set_xalign(0.0)
+        content.pack_start(lbl_sub, False, False, 0)
+
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_vexpand(True)
+        scroll.set_hexpand(True)
+        scroll.set_min_content_height(360)
+
+        list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        scroll.add(list_box)
+        content.pack_start(scroll, True, True, 0)
+
+        def populate_portals():
+            for child in list_box.get_children():
+                list_box.remove(child)
+
+            portals = self.config.get_portals()
+            for idx, p in enumerate(portals):
+                p_id = p.get("id")
+                row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+                row.get_style_context().add_class("user-script-row")
+                row.set_margin_top(4)
+                row.set_margin_bottom(4)
+
+                # Reordering buttons (Move Up / Move Down)
+                reorder_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+                btn_up = Gtk.Button(label="⬆️")
+                btn_up.set_tooltip_text(t("move_up", "Premakni navzgor"))
+                btn_up.get_style_context().add_class("nav-btn")
+                btn_up.set_sensitive(idx > 0)
+                def on_move_p_up(b, pid=p_id):
+                    self.config.move_portal_up(pid)
+                    self.broadcast_portals_update()
+                    populate_portals()
+                btn_up.connect("clicked", on_move_p_up)
+
+                btn_down = Gtk.Button(label="⬇️")
+                btn_down.set_tooltip_text(t("move_down", "Premakni navzdol"))
+                btn_down.get_style_context().add_class("nav-btn")
+                btn_down.set_sensitive(idx < len(portals) - 1)
+                def on_move_p_down(b, pid=p_id):
+                    self.config.move_portal_down(pid)
+                    self.broadcast_portals_update()
+                    populate_portals()
+                btn_down.connect("clicked", on_move_p_down)
+
+                reorder_box.pack_start(btn_up, False, False, 0)
+                reorder_box.pack_start(btn_down, False, False, 0)
+                row.pack_start(reorder_box, False, False, 2)
+
+                badge = Gtk.Label(label=p.get("mark", "🌐"))
+                badge.set_width_chars(3)
+                row.pack_start(badge, False, False, 4)
+
+                info_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+                info_box.set_hexpand(True)
+
+                escaped_title = GLib.markup_escape_text(p.get('title', ''))
+                lbl_title = Gtk.Label(label=f"<b>{escaped_title}</b>")
+                lbl_title.set_use_markup(True)
+                lbl_title.set_xalign(0.0)
+                lbl_title.set_ellipsize(Pango.EllipsizeMode.END)
+
+                lbl_url = Gtk.Label(label=p.get('url', ''))
+                lbl_url.set_xalign(0.0)
+                lbl_url.set_ellipsize(Pango.EllipsizeMode.END)
+                lbl_url.get_style_context().add_class("text-muted")
+
+                info_box.pack_start(lbl_title, False, False, 0)
+                info_box.pack_start(lbl_url, False, False, 0)
+                row.pack_start(info_box, True, True, 0)
+
+                actions_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+                btn_edit = Gtk.Button(label=f"✏️ {t('edit')}")
+                btn_edit.get_style_context().add_class("nav-btn")
+                btn_edit.connect("clicked", lambda b, prt=p: self.open_portal_editor_dialog(prt, on_saved=populate_portals))
+                actions_box.pack_start(btn_edit, False, False, 0)
+
+                btn_del = Gtk.Button(label="🗑️")
+                btn_del.set_tooltip_text(t("delete", "Izbriši"))
+                btn_del.get_style_context().add_class("btn-delete")
+                def on_delete(b, pid=p_id):
+                    self.config.delete_portal(pid)
+                    self.broadcast_portals_update()
+                    populate_portals()
+                btn_del.connect("clicked", on_delete)
+                actions_box.pack_start(btn_del, False, False, 0)
+
+                row.pack_end(actions_box, False, False, 0)
+
+                list_box.pack_start(row, False, False, 0)
+
+            list_box.show_all()
+
+        populate_portals()
+        btn_add.connect("clicked", lambda b: self.open_portal_editor_dialog(None, on_saved=populate_portals))
+        btn_import.connect("clicked", lambda b: self.open_bookmarks_import_dialog(on_imported=populate_portals))
+        def on_reset(b):
+            self.config.reset_portals()
+            self.broadcast_portals_update()
+            populate_portals()
+        btn_reset.connect("clicked", on_reset)
+
+        dialog.show_all()
+        dialog.run()
+        dialog.destroy()
+
+    def on_js_message(self, content_mgr, js_result):
+        try:
+            val = js_result.get_js_value()
+            json_str = val.to_json(0)
+            data = json.loads(json_str)
+            action = data.get("action")
+            if action == "navigate":
+                url = data.get("url")
+                if url:
+                    wv = self.get_active_webview()
+                    if wv:
+                        wv.load_uri(url)
+            elif action == "set_language":
+                lang = data.get("language", "sl")
+                self.config.set("language", lang)
+                set_language(lang)
+                self.update_ui_language()
+            elif action == "increment_ads":
+                count = int(data.get("count", 1))
+                self.config.increment_ads_blocked(count)
+                self.update_shield_button_label()
+            elif action == "increment_threats":
+                count = int(data.get("count", 1))
+                self.config.increment_threats_blocked(count)
+                self.update_shield_button_label()
+            elif action == "set_default_browser":
+                self.set_as_default_browser(show_dialog=True)
+            elif action == "open_sidebar":
+                service = data.get("service")
+                if service == "settings":
+                    self.open_settings_dialog()
+                elif service == "customizer":
+                    self.open_customizer_dialog()
+                elif service in ["portals", "edit_portals"]:
+                    self.open_portals_dialog()
+                elif service == "add_portal":
+                    self.open_portal_editor_dialog(None)
+                elif service == "import_bookmarks":
+                    self.open_bookmarks_import_dialog()
+                else:
+                    self.toggle_sidebar_panel(service)
+        except Exception as e:
+            print(f"[IPC] Napaka: {e}")
+
+    def update_ui_language(self):
+        """Posodobi celotno orodno vrstico, orodne namige, naslove in zavihke ob menjavi jezika."""
+        self.set_title(f"{t('app_title')} — Linux Mint Edition")
+
+        if hasattr(self, 'btn_new_tab'):
+            self.btn_new_tab.set_tooltip_text(f"{t('new_tab')} (Ctrl + T)")
+        if hasattr(self, 'btn_sidebar'):
+            self.btn_sidebar.set_tooltip_text(f"{t('sidebar_display')} (F4)")
+        if hasattr(self, 'btn_back'):
+            self.btn_back.set_tooltip_text(f"{t('back')} (Alt + ←)")
+        if hasattr(self, 'btn_forward'):
+            self.btn_forward.set_tooltip_text(f"{t('forward')} (Alt + →)")
+        if hasattr(self, 'btn_reload'):
+            self.btn_reload.set_tooltip_text(f"{t('reload')} (F5 / Ctrl + R)")
+        if hasattr(self, 'btn_home'):
+            self.btn_home.set_tooltip_text(f"{t('home')} (Alt + Home)")
+        if hasattr(self, 'btn_bookmarks'):
+            self.btn_bookmarks.set_tooltip_text(f"{t('bookmarks_menu')} (Ctrl + B)")
+        if hasattr(self, 'populate_bookmarks_bar'):
+            self.populate_bookmarks_bar()
+        if hasattr(self, 'btn_shield'):
+            self.btn_shield.set_tooltip_text(f"{t('app_title')} Cyber Shield: {t('adblock_active')}")
+        if hasattr(self, 'url_entry'):
+            self.url_entry.set_placeholder_text(t('search_placeholder'))
+        if hasattr(self, 'btn_dark_mode'):
+            self.btn_dark_mode.set_tooltip_text(f"{t('force_dark_mode')}")
+        if hasattr(self, 'btn_downloads'):
+            self.btn_downloads.set_tooltip_text(f"{t('downloads')} (Ctrl + J)")
+        if hasattr(self, 'btn_history'):
+            self.btn_history.set_tooltip_text(f"{t('history')} (Ctrl + H)")
+        if hasattr(self, 'btn_customizer'):
+            self.btn_customizer.set_tooltip_text(f"{t('customizer_title')}")
+        if hasattr(self, 'btn_keyboard'):
+            self.btn_keyboard.set_tooltip_text(t('virtual_keyboard', 'Navidezna tipkovnica'))
+        if hasattr(self, 'btn_reader'):
+            self.btn_reader.set_tooltip_text(t('reader_mode'))
+        if hasattr(self, 'btn_pip'):
+            self.btn_pip.set_tooltip_text(f"{t('pip_video')}")
+        if hasattr(self, 'btn_star'):
+            self.btn_star.set_tooltip_text(f"{t('bookmark_page')} (Ctrl + D)")
+        self.update_star_status()
+
+        if hasattr(self, 'btn_back_drawer'):
+            self.btn_back_drawer.set_tooltip_text(f"{t('back')}")
+        if hasattr(self, 'btn_reload_drawer'):
+            self.btn_reload_drawer.set_tooltip_text(f"{t('reload')}")
+        if hasattr(self, 'btn_popout'):
+            self.btn_popout.set_tooltip_text(t('open_file'))
+        if hasattr(self, 'btn_expand_drawer'):
+            self.btn_expand_drawer.set_tooltip_text(f"{t('sidebar_display')}")
+        if hasattr(self, 'btn_close_drawer'):
+            self.btn_close_drawer.set_tooltip_text(t('close'))
+        if hasattr(self, 'btn_add_sidebar'):
+            self.btn_add_sidebar.set_tooltip_text(f"{t('add_portal')}")
+        if hasattr(self, 'btn_settings_sidebar'):
+            self.btn_settings_sidebar.set_tooltip_text(f"{t('settings')}")
+
+        self.update_tab_titles_for_language()
+        self.broadcast_language_update()
+
+    def update_tab_titles_for_language(self):
+        """Posodobi naslove zavihkov in okna v skladu z novim jezikom."""
+        for t_info in self.tabs:
+            uri = t_info.get("uri", "")
+            if "ui/home.html" in uri or uri == "safeer://home":
+                h_title = t("home_title")
+                t_info["title"] = h_title
+                if "title_label" in t_info and t_info["title_label"]:
+                    t_info["title_label"].set_text(h_title)
+        self.set_title(f"{t('app_title')} — Linux Mint Edition")
+
+
+def main():
+    if "--version" in sys.argv:
+        print(f"Safeer Browser {APP_VERSION}")
+        return
+
+    if "--set-default" in sys.argv:
+        success, errors = set_default_browser(BASE_DIR)
+        if success:
+            print("✅ Safeer je privzet za HTTP, HTTPS, HTML in XHTML.")
+        else:
+            print("Nastavitev ni uspela: " + "; ".join(errors), file=sys.stderr)
+        sys.exit(0 if success else 1)
+
+    target_url = None
+    if len(sys.argv) > 1 and not sys.argv[1].startswith("-"):
+        target_url = sys.argv[1]
+
+    # Preveri, če Safeer že teče – v tem primeru povezavo nemudoma pošlji obstoječi instanci
+    sock_path = os.path.join(CONFIG_DIR, "safeer.sock")
+    if os.path.exists(sock_path):
+        try:
+            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            s.settimeout(1.5)
+            s.connect(sock_path)
+            cmd = f"OPEN {target_url}" if target_url else "FOCUS"
+            s.sendall(cmd.encode("utf-8"))
+            s.recv(1024)
+            s.close()
+            sys.exit(0)
+        except Exception:
+            try:
+                os.remove(sock_path)
+            except Exception:
+                pass
+
+    app = SafeerMintBrowser(initial_url=target_url)
+    app.connect("destroy", Gtk.main_quit)
+
+    # Paint the built-in home before making the first window visible.
+    app.show_initial_window()
+
+    if not app.config.get("sidebar_enabled", True):
+        app.sidebar_box.hide()
+        app.content_paned.set_position(0)
+    else:
+        app.content_paned.set_position(DOCK_WIDTH)
+
+    Gtk.main()
+
+
+if __name__ == "__main__":
+    main()
