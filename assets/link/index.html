@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="sl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Safeer Link</title>
+<link rel="stylesheet" href="link.css">
+<link rel="stylesheet" href="daljinec.css">
+</head>
+<body>
+
+<!-- Vsa vidna besedila nosijo data-t; link.js jih napolni v jeziku uporabnika.
+     Tu zapisana slovenscina je hkrati privzetek, ce bi se prevod kdaj izgubil. -->
+
+<header class="glava">
+  <div class="znak">
+    <span class="logo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1 M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg></span>
+    <div>
+      <h1>Safeer Link</h1>
+      <p class="stanjeVrstica">
+        <span class="pika" id="pika"></span>
+        <span id="podnaslov" data-t="preverjam">Preverjam …</span>
+      </p>
+    </div>
+  </div>
+  <button class="zapri" id="gumbZapri" aria-label="Zapri" data-t-naslov="zapri">✕</button>
+</header>
+
+<!-- Samostojna aplikacija (Safeer Control na racunalniku): razdelki v levem meniju namesto enega
+     dolgega zaslona. Telefon in televizor menija ne vidita - tam ostane ena drsna stran. -->
+<nav class="stranski" id="stranskiMeni" hidden aria-label="Razdelki">
+  <button data-razdelek="naprave"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18v11H3z M8 20h8 M12 16v4"/></svg><span data-t="povezaneNaprave">Povezane naprave</span></button>
+  <button data-razdelek="daljinec"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 2h8a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z M12 6v.1 M10 11h4 M12 9v4 M10 17h4"/></svg><span data-t="daljinec">Daljinec</span></button>
+  <button data-razdelek="poslji"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12l16-8-6 16-2-7z"/></svg><span data-t="posljiStran">Pošlji to stran</span></button>
+  <button data-razdelek="mape"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h6l2 2h10v11H3z"/></svg><span data-t="mapeNaslov">Datoteke za televizor</span></button>
+  <button data-razdelek="sync"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 0 1 14-5l2 2 M20 12a8 8 0 0 1-14 5l-2-2 M18 3v4h-4 M6 21v-4h4"/></svg><span data-t="sinhronizacija">Sinhronizacija</span></button>
+</nav>
+
+<main>
+
+  <!-- Vklop in izklop sta skupaj in na vrhu: kdor odpre Safeer Link, najprej odloca o tem. -->
+  <div id="hubStikalo" hidden>
+    <div class="stikaloVrstica">
+      <button class="glavni" id="gumbHubVklopi" data-t="vklopiLink">Vklopi Safeer Link</button>
+      <button class="drugotni" id="gumbHubIzklopi" data-t="izklopiLink">Izklopi Safeer Link</button>
+    </div>
+    <p class="opomba" id="opombaHubVklop"></p>
+  </div>
+
+  <!-- Stanje 4: sredisce tece v tem brskalniku (na televizorju, telefonu ali racunalniku). -->
+  <section class="zaslon" id="zaslonHubTu" hidden>
+
+    <div class="panel" id="panelPrijave" hidden>
+      <h2 data-t="cakaPrijava">Naprava se želi povezati</h2>
+      <ul class="seznam" id="seznamPrijav"></ul>
+    </div>
+
+    <div class="panel">
+      <div class="vrsticaGlave">
+        <h2 id="naslovHubTu">Ta naprava je središče</h2>
+        <button class="drobniGumb" id="gumbHubOsvezi" data-t="osvezi">Osveži</button>
+      </div>
+      <p class="pojasnilo" data-t="tuPojasnilo">
+        Naprave v domačem omrežju se povezujejo na to napravo. Ko se povežejo, si lahko med
+        seboj pošiljajo strani, besedila, datoteke in zaslon.
+      </p>
+      <ul class="seznam" id="seznamHubNaprav"></ul>
+      <p class="opomba" id="opombaHub"></p>
+    </div>
+
+  </section>
+
+  <!-- Prijavno okno (Safeer Control in Safeer OS na racunalniku): samo tri moznosti - QR koda,
+       6-mestna koda ali nadaljevanje brez povezave naprav. Brez menija in glave, na sredini okna. -->
+  <section class="zaslon" id="zaslonPrijava" hidden>
+    <div class="prijavaOkno">
+      <div class="prijavaZnak"><span class="znakOs" aria-hidden="true">S</span><span>Safeer OS</span></div>
+      <h2 data-t="prijavaNaslov">Prijava</h2>
+      <p class="prijavaPodnaslov" data-t="prijavaPodnaslov">Poveži ta računalnik s svojimi napravami.</p>
+
+      <div class="prijavaNacini">
+        <div class="prijavaNacin" id="prijavaQr">
+          <div class="qrOkvir" id="qrSlika" aria-live="polite"><span class="qrCakam" data-t="prijavaQrPripravljam">Pripravljam kodo …</span></div>
+          <h3 data-t="prijavaQrNaslov">Skeniraj s telefonom</h3>
+          <p data-t="prijavaQrOpis">Usmeri kamero telefona ali tablice, ki je že v Safeer Linku, v kodo in potrdi na telefonu.</p>
+          <p class="opomba" id="opombaQr"></p>
+          <button class="drobniGumb" id="gumbQrZnova" data-t="prijavaPoisci" hidden>Poišči znova</button>
+        </div>
+
+        <div class="prijavaLoci" data-t="prijavaAli">ali</div>
+
+        <div class="prijavaNacin" id="prijavaKoda">
+          <div class="kodaIkona" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 5h18v11H3z M8 20h8 M12 16v4 M7 10.5h.01 M10.5 10.5h.01 M14 10.5h.01 M17.5 10.5h.01"/></svg></div>
+          <h3 data-t="prijavaKodaNaslov">Vpiši 6-mestno kodo</h3>
+          <p id="prijavaKodaOpis" data-t="prijavaKodaOpis">Klikni v polje – koda se pokaže na televizorju ali tablici, kjer teče Safeer Link.</p>
+          <input class="vnosStevilke" id="prijavaVnosKode" type="text" inputmode="numeric"
+                 autocomplete="one-time-code" maxlength="6" placeholder="------" aria-label="Koda" />
+          <button class="glavni" id="gumbPrijavaKoda" data-t="prijavaGumb">Prijava</button>
+          <p class="opomba" id="opombaPrijavaKoda"></p>
+        </div>
+      </div>
+
+      <label class="zaupajIzbira" id="prijavaZaupanje" hidden>
+        <input type="checkbox" id="prijavaZaupaj" />
+        <span><b data-t="prijavaZaupaj">Zaupaj temu računalniku</b>
+          <small data-t="prijavaZaupajOpis">Povezava bo potrebna samo enkrat. Izberi le na svojem računalniku – sicer se ob naslednji prijavi v računalnik znova povežeš.</small></span>
+      </label>
+
+      <button class="povezavaGumb" id="gumbBrezPovezave" data-t="prijavaBrez" hidden>Nadaljuj brez povezave naprav</button>
+      <p class="opomba" id="opombaBrezPovezave"></p>
+    </div>
+  </section>
+
+  <!-- Po »Nadaljuj brez povezave naprav«: Safeer OS dela na tem racunalniku, naprave se povezejo, ko uporabnik zeli. -->
+  <section class="zaslon" id="zaslonBrezPovezave" hidden>
+    <div class="prijavaOkno">
+      <div class="prijavaZnak"><span class="znakOs" aria-hidden="true">S</span><span>Safeer OS</span></div>
+      <div class="prijavaNacin brezPovezaveKartica">
+        <div class="kodaIkona" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 5h18v11H3z M8 20h8 M12 16v4 M9 9l6 4 M15 9l-6 4"/></svg></div>
+        <h3 data-t="brezPovezaveNaslov">Naprave niso povezane</h3>
+        <p data-t="brezPovezaveOpis">Safeer OS deluje na tem računalniku. Telefon, tablico ali televizor povežeš, kadar želiš.</p>
+        <button class="glavni" id="gumbPoveziNaprave" data-t="poveziNaprave">Poveži naprave</button>
+        <button class="drugotni" id="gumbOdpriOsLokalno" data-t="odpriSafeerOs">Odpri Safeer OS</button>
+        <p class="opomba" id="opombaBrezPovezaveOs"></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Stanje 1: Huba ni -->
+  <section class="zaslon" id="zaslonBrezHuba">
+    <div class="kartica sredina">
+      <div class="velikaIkona"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11 12 3l9 8 M5 10v11h5v-6h4v6h5V10"/></svg></div>
+      <h2 data-t="brezHubaNaslov">Safeer Link še ni vklopljen</h2>
+      <p class="pojasnilo" data-t="brezHubaOpis">
+        Safeer Link poveže tvoje naprave doma — telefon, računalnik in televizor. Z ene na
+        drugo pošlješ stran, besedilo, datoteko ali zaslon, brez oblaka in brez računa.
+        Ena naprava je središče (lahko tudi ta), ostale se povežejo nanjo.
+      </p>
+      <p class="pojasnilo drobno" data-t="brezHubaPomirilo">
+        Brskalnik deluje povsem normalno tudi brez njega. Ničesar ne izgubiš, če to okno zapreš.
+      </p>
+      <button class="glavni" id="gumbPoisci" data-t="poisci">Poišči v mojem omrežju</button>
+      <button class="drugotni" id="gumbNavodila" data-t="kakoDobim">Kako to vklopim</button>
+      <p class="opomba" id="opombaIskanje"></p>
+    </div>
+  </section>
+
+  <!-- Stanje 2: Hub je, a nas še ne pozna -->
+  <section class="zaslon" id="zaslonSeznanitev" hidden>
+    <div class="kartica sredina">
+      <div class="velikaIkona"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 11h14v10H5z M8 11V7a4 4 0 0 1 8 0v4"/></svg></div>
+      <h2 data-t="povežiNaslov">Poveži to napravo</h2>
+      <p class="pojasnilo">
+        <span data-t="hubNajdenNa">Safeer Link je na naslovu</span>
+        <span class="poudarek" id="naslovHuba"></span>.
+        <span data-t="zakajPotrditi">Da ti sme pošiljati in sinhronizirati, ga moraš enkrat potrditi.</span>
+      </p>
+      <!-- Nov postopek: kodo pokaze gostitelj, uporabnik jo prepise sem. -->
+      <div class="koda" id="vnosKodeBlok" hidden>
+        <p class="pojasnilo drobno" data-t="vnesiKodoOpis">
+          Na napravi, kjer teče Safeer Link, se je izpisala 6-mestna številka. Prepiši jo sem.
+        </p>
+        <input class="vnosStevilke" id="vnosKode" type="text" inputmode="numeric"
+               autocomplete="one-time-code" maxlength="6" placeholder="------"
+               aria-label="Koda" />
+        <button class="glavni" id="gumbVnesiKodo" data-t="povezi">Poveži</button>
+        <p class="opomba" data-t="kodaVelja">Koda velja 5 minut.</p>
+      </div>
+
+      <div class="koda" id="kodaBlok" hidden>
+        <p class="pojasnilo drobno" data-t="potrdiKodo">Kodo potrdi na napravi, kjer teče Safeer Link:</p>
+        <div class="stevilke" id="kodaStevilke">------</div>
+        <p class="opomba" data-t="kodaVelja">Koda velja 5 minut.</p>
+      </div>
+      <button class="glavni" id="gumbSeznani" data-t="poveziSSafeerLink">Poveži s Safeer Link</button>
+      <p class="opomba" id="opombaSeznanitev"></p>
+    </div>
+  </section>
+
+  <!-- Stanje 2b: Safeer Link je na novem naslovu (usmerjevalnik je podelil nov IP). -->
+  <section class="zaslon" id="zaslonPreseljen" hidden>
+    <div class="kartica sredina">
+      <div class="velikaIkona"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11 12 3l9 8 M5 10v11h5v-6h4v6h5V10"/></svg></div>
+      <h2 data-t="preseljenNaslov">Safeer Link je na novem naslovu</h2>
+      <p class="pojasnilo">
+        <span data-t="preseljenOpis">Doma se javlja z drugega naslova kot doslej — običajno zato, ker mu je usmerjevalnik podelil novega. Potrdi, da je to tvoj Safeer Link.</span>
+      </p>
+      <p class="pojasnilo drobno"><span class="poudarek" id="noviNaslov"></span></p>
+      <button class="glavni" id="gumbPotrdiNaslov" data-t="daPovezi">Da, poveži</button>
+      <p class="opomba" id="opombaPreselitev"></p>
+    </div>
+  </section>
+
+  <!-- Stanje 3: povezani. En sam zaslon, brez zavihkov: najprej dejanje, nato stanje. -->
+  <section class="zaslon" id="zaslonPovezan" hidden>
+
+    <!-- Deljenje zaslona tece: vidno na vrhu, dokler ga uporabnik ne prekine. -->
+    <div class="panel zaslonTece" id="panelZaslonTece" hidden>
+      <p class="oznaka"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 1.5h11a2.5 2.5 0 0 1 2.5 2.5v16a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 20V4a2.5 2.5 0 0 1 2.5-2.5z M8 6h8v9H8z"/></svg> <span id="zaslonTeceBesedilo"></span></p>
+      <button class="drugotni" id="gumbPrekiniZaslon" data-t="prekiniZaslon">Prekini deljenje zaslona</button>
+    </div>
+
+    <!-- Deljenje z izbrano napravo: zaslon, datoteka ali besedilo, nato en gumb. -->
+    <div class="panel" id="panelDeljenje" data-razdelek="naprave" hidden>
+      <div class="vrsticaGlave">
+        <h2 id="deljenjeNaslov">Deli z napravo</h2>
+        <span class="gumbiGlave">
+          <button class="drobniGumb" id="gumbPreimenuj" data-t="preimenuj">Preimenuj</button>
+          <button class="drobniGumb" id="gumbOdstrani" data-t="odstrani" hidden>Odstrani</button>
+          <button class="drobniGumb" id="gumbDeljenjeZapri" data-t="zapriDeljenje">Zapri</button>
+        </span>
+      </div>
+      <div class="preimenuj" id="preimenujBlok" hidden>
+        <input class="vnosImena" id="vnosImena" type="text" maxlength="64" />
+        <button class="drugotni tanek" id="gumbShraniIme" data-t="shraniIme">Shrani ime</button>
+      </div>
+      <button class="glavni" id="gumbDaljinec" hidden><svg viewBox="0 0 24 24" aria-hidden="true" style="width:18px;height:18px;margin-right:6px"><path d="M8 2h8a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z M12 6v.1 M10 11h4 M12 9v4 M10 17h4"/></svg><span data-t="daljinec">Daljinec</span></button>
+      <!-- Blizajnica na zaslon: Safeer OS in Safeer brskalnik na televizorju z enim klikom. -->
+      <div class="izbire" id="bliznjiceZaslona" hidden>
+        <button class="izbira" id="gumbOdpriSafeerOs"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18v11H3z M8 20h8 M12 16v4"/></svg> <span data-t="odpriSafeerOs">Safeer OS na televizorju</span></button>
+        <button class="izbira" id="gumbOdpriBrskalnik"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z M2 12h20 M12 2c3 3 3 17 0 20 M12 2c-3 3-3 17 0 20"/></svg> <span data-t="odpriBrskalnik">Safeer brskalnik</span></button>
+      </div>
+      <p class="pojasnilo drobno" id="opisIzbire" data-t="izberiVsebino">Kaj želiš deliti s to napravo?</p>
+      <div class="izbire" id="izbireDeljenja">
+        <button class="izbira" data-vrsta="zaslon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 1.5h11a2.5 2.5 0 0 1 2.5 2.5v16a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 20V4a2.5 2.5 0 0 1 2.5-2.5z M8 6h8v9H8z"/></svg> <span data-t="deliZaslon">Zaslon</span></button>
+        <button class="izbira" data-vrsta="datoteka"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h6l2 2h10v11H3z"/></svg> <span data-t="deliDatoteka">Datoteka</span></button>
+        <button class="izbira" data-vrsta="besedilo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v12H9l-5 4z"/></svg> <span data-t="deliBesedilo">Besedilo</span></button>
+      </div>
+      <p class="pojasnilo drobno" id="deljenjeOpis"></p>
+      <textarea class="vnosBesedila" id="deljenjeBesedilo" rows="4" hidden></textarea>
+      <button class="glavni" id="gumbPosljiNaNapravo" hidden data-t="posljiNaNapravo">Pošlji na napravo</button>
+      <p class="opomba" id="opombaDeljenje"></p>
+    </div>
+
+    <div class="panel" id="panelCast" data-razdelek="poslji" hidden>
+      <h2 data-t="posljiStran">Pošlji to stran</h2>
+      <div class="kartica tesno">
+        <p class="oznaka" data-t="odprtoVBrskalniku">Odprto v brskalniku</p>
+        <p class="naslovStrani" id="naslovStrani">—</p>
+        <p class="urlStrani" id="urlStrani"></p>
+      </div>
+      <ul class="seznam" id="seznamPrejemnikov"></ul>
+      <p class="opomba" id="opombaCast"></p>
+
+      <div class="predvajalnik" id="predvajalnik" hidden>
+        <p class="oznaka">
+          <span data-t="predvajaSeNa">Predvaja se na</span> <span id="imePrejemnika"></span>
+        </p>
+        <p class="naslovStrani" id="naslovPredvajanja">—</p>
+        <div class="crta"><div class="crtaNapolnjena" id="crtaNapolnjena"></div></div>
+        <p class="cas"><span id="casPolozaj">0:00</span> / <span id="casTrajanje">0:00</span></p>
+        <div class="tipke">
+          <button data-ukaz="nazaj"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 19 2 12l9-7z M21 19l-9-7 9-7z"/></svg><span data-t="nazaj10">10 s</span></button>
+          <button data-ukaz="pause"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h3v14H7z M14 5h3v14h-3z"/></svg><span data-t="pavza">Pavza</span></button>
+          <button data-ukaz="play"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4l14 8-14 8z"/></svg><span data-t="predvajaj">Predvajaj</span></button>
+          <button data-ukaz="naprej"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 5l9 7-9 7z M3 5l9 7-9 7z"/></svg><span data-t="naprej10">10 s</span></button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Samo televizor: dovoljenje, da se Safeer odpre sam ob ukazu ali strani s telefona. -->
+    <div class="panel opozoriloOspredje" id="opozoriloOspredje" hidden>
+      <p class="pojasnilo" data-t="ospredjeOpis">Da se Safeer odpre sam, ko mu s telefona pošlješ stran ali ukaz, mu enkrat dovoli prekrivanje drugih aplikacij.</p>
+      <button class="drugotni tanek" id="gumbDovoliOspredje" data-t="ospredjeDovoli">Dovoli</button>
+    </div>
+
+    <div class="panel" id="panelNaprave" data-razdelek="naprave">
+      <div class="vrsticaGlave">
+        <h2 data-t="povezaneNaprave">Povezane naprave</h2>
+        <button class="drobniGumb" id="gumbOsvezi" data-t="osvezi">Osveži</button>
+      </div>
+      <ul class="seznam" id="seznamNaprav"></ul>
+      <p class="opomba" id="opombaNaprave" data-t="povezujem">Povezujem se …</p>
+      <button class="drugotni tanek" id="gumbPozabi" hidden data-t="pozabiNapravo">
+        Pozabi to napravo
+      </button>
+      <p class="opomba" id="opombaPozabi"></p>
+    </div>
+
+    <!-- Samo Safeer Control: kako se prikljuci nova naprava. Kodo vedno pokaze sredisce (varnost:
+         kdor sredisca ne vidi, se ne more prikljuciti), zato povemo, kje jo bo uporabnik videl. -->
+    <div class="panel" id="panelDodaj" data-razdelek="naprave" hidden>
+      <h2 data-t="dodajNaslov">Dodaj telefon ali tablico</h2>
+      <div id="vabiloBlok" class="vabilo" hidden>
+        <p class="pojasnilo" data-t="vabiloOpis">S kamero telefona ali tablice skeniraj kodo – Safeer se odpre in naprava se poveže s Safeer Linkom.</p>
+        <div class="qrOkvir" id="vabiloQr" hidden></div>
+        <button class="glavni" id="gumbVabilo" data-t="vabiloGumb">Pokaži QR kodo za novo napravo</button>
+        <p class="opomba" id="opombaVabilo"></p>
+      </div>
+      <ol class="koraki">
+        <li data-t="dodajKorak1">Na telefonu odpri Safeer in v meniju izberi Safeer Link.</li>
+        <li data-t="dodajKorak2">Pritisni »Poveži s Safeer Link«.</li>
+        <li id="dodajKorak3">Na središču se izpiše 6-mestna koda – prepiši jo v telefon.</li>
+      </ol>
+      <p class="opomba" data-t="dodajOpomba">Koda se pokaže samo na središču: kdor ga ne vidi, se ne more povezati – tudi ne v javnem omrežju.</p>
+    </div>
+
+    <!-- Samo Safeer Control: mape na tem racunalniku, ki jih sme videti televizor (Safeer OS). -->
+    <div class="panel" id="panelMape" data-razdelek="mape" hidden>
+      <h2 data-t="mapeNaslov">Datoteke za televizor</h2>
+      <p class="pojasnilo" data-t="mapeOpis">
+        Izbrane mape vidi Safeer OS na televizorju — filmi, glasba in slike se predvajajo naravnost s tega računalnika, samo v domačem omrežju.
+      </p>
+      <ul class="seznam" id="seznamMape"></ul>
+      <p class="opomba" id="opombaMape" data-t="mapePrazno">Ni izbrane nobene mape. Televizor ne vidi nič.</p>
+      <button class="drugotni" id="gumbDodajMapo" data-t="mapeDodaj">Dodaj mapo</button>
+      <button class="drugotni" id="gumbStandardneMape" data-t="mapeStandardne">Deli Videi, Glasba in Slike</button>
+    </div>
+
+    <div class="panel" id="panelSync" data-razdelek="sync">
+      <h2 data-t="sinhronizacija">Sinhronizacija</h2>
+      <p class="pojasnilo" data-t="syncOpis">
+        Zaznamki potujejo med tvojimi napravami prek domačega Safeer Linka.
+        Nič ne gre v oblak.
+      </p>
+      <ul class="seznam" id="seznamSync"></ul>
+      <p class="opomba" id="opombaSync" data-t="syncPrivzeto">Sinhronizacija se vklopi, ko jo potrdiš — do takrat se ne pošlje nič.</p>
+    </div>
+
+  </section>
+
+  <!-- Stanje 5: daljinec za izbrano napravo (Safeer Control prek Safeer Linka).
+       Vsa besedila napolni daljinec.js v jeziku uporabnika; slovenscina je privzetek. -->
+  <section class="zaslon daljinec" id="zaslonDaljinec" hidden>
+
+    <div class="daljinecGlava">
+      <button class="daljinecNazaj" id="daljinecNazaj" aria-label="Nazaj" data-d-naslov="nazajNaLink">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
+      </button>
+      <div class="daljinecNaprava">
+        <p class="oznaka" data-d="upravljam">Upravljam</p>
+        <h2 id="daljinecIme">Televizor</h2>
+        <p class="daljinecStanje" id="daljinecStanje"></p>
+        <p class="daljinecSredisce" id="daljinecSredisce"></p>
+      </div>
+      <button class="daljinecPosnetekGumb" id="daljinecPosnetekGumb" data-d-naslov="pokaziZaslon" aria-label="Pokaži zaslon">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 5h20v13H2z M8 21h8"/></svg>
+      </button>
+    </div>
+
+    <!-- Posnetek zaslona naprave: pokaze se na zahtevo, lahko se osvezuje sam. -->
+    <div class="daljinecPosnetek" id="daljinecPosnetek" hidden>
+      <img id="daljinecSlika" alt="" />
+      <div class="daljinecPosnetekVrstica">
+        <span class="opomba" id="daljinecPosnetekOpomba"></span>
+        <label class="daljinecStikalo"><input type="checkbox" id="daljinecSamodejno" /> <span data-d="samodejno">Samodejno</span></label>
+      </div>
+    </div>
+
+    <!-- Glas: en velik gumb, pod njim, kar je bilo sliseno in kaj se je zgodilo. -->
+    <div class="daljinecGlas" id="daljinecGlas">
+      <button class="mikrofon" id="daljinecMikrofon" aria-label="Govori" data-d-naslov="govori">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3z M5 11a7 7 0 0 0 14 0 M12 18v4 M8 22h8"/></svg>
+      </button>
+      <p class="daljinecSliseno" id="daljinecSliseno" data-d="govoriNamig">Pritisni in povej, npr. »odpri YouTube« ali »glasneje«</p>
+      <p class="daljinecOdgovor" id="daljinecOdgovor"></p>
+      <form class="daljinecVnos" id="daljinecVnosObrazec">
+        <input type="text" id="daljinecVnos" autocomplete="off" data-d-placeholder="vnosNamig" placeholder="Ukaz, stran ali iskanje …" />
+        <button type="submit" class="daljinecPoslji" aria-label="Pošlji" data-d-naslov="poslji"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h14 M13 6l6 6-6 6"/></svg></button>
+      </form>
+    </div>
+
+    <!-- Hitre tipke in smerni kriz. -->
+    <div class="daljinecTipke">
+      <div class="daljinecVrsta">
+        <button class="dTipka" data-tipka="home"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11 12 3l9 8 M5 10v11h5v-6h4v6h5V10"/></svg><span data-d="domov">Domov</span></button>
+        <button class="dTipka" data-tipka="back"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg><span data-d="nazaj">Nazaj</span></button>
+        <button class="dTipka" data-tipka="play_pause"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4l9 8-9 8z M17 4h3v16h-3z"/></svg><span data-d="predvajaj">Predvajaj</span></button>
+        <button class="dTipka" data-tipka="menu"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16 M4 12h16 M4 18h16"/></svg><span data-d="meni">Meni</span></button>
+      </div>
+
+      <div class="daljinecSredina">
+        <div class="dpad" id="daljinecDpad">
+          <button class="dpadTipka gor" data-tipka="up" aria-label="Gor"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg></button>
+          <button class="dpadTipka levo" data-tipka="left" aria-label="Levo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg></button>
+          <button class="dpadTipka ok" data-tipka="ok" aria-label="OK">OK</button>
+          <button class="dpadTipka desno" data-tipka="right" aria-label="Desno"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
+          <button class="dpadTipka dol" data-tipka="down" aria-label="Dol"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+        </div>
+        <div class="glasnost" id="daljinecGlasnost">
+          <button class="glasnostTipka" data-glasnost="up" aria-label="Glasneje"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14 M5 12h14"/></svg></button>
+          <div class="glasnostStolpec" id="daljinecGlasnostStolpec"><div class="glasnostRaven" id="daljinecGlasnostRaven"></div></div>
+          <span class="glasnostVrednost" id="daljinecGlasnostVrednost">–</span>
+          <button class="glasnostTipka" data-glasnost="down" aria-label="Tišje"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/></svg></button>
+          <button class="glasnostTipka utisaj" data-glasnost="toggle_mute" aria-label="Utišaj"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9z M16 9l5 6 M21 9l-5 6"/></svg></button>
+        </div>
+      </div>
+
+      <div class="daljinecVrsta drsenje" id="daljinecDrsenje">
+        <button class="dTipka" data-drsenje="up"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 14l6-6 6 6"/></svg><span data-d="stranGor">Stran gor</span></button>
+        <button class="dTipka" data-drsenje="down"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 10l6 6 6-6"/></svg><span data-d="stranDol">Stran dol</span></button>
+        <button class="dTipka" data-tipka="previous"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 19 2 12l9-7z M21 19l-9-7 9-7z"/></svg><span data-d="prejsnji">Prejšnji</span></button>
+        <button class="dTipka" data-tipka="next"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 5l9 7-9 7z M3 5l9 7-9 7z"/></svg><span data-d="naslednji">Naslednji</span></button>
+      </div>
+    </div>
+
+    <!-- Aplikacije na napravi: prave, z ikonami, ne vnaprej izbrane. -->
+    <div class="panel" id="daljinecAplikacijePanel">
+      <div class="vrsticaGlave">
+        <h2 id="daljinecAplikacijeNaslov">Aplikacije na napravi</h2>
+        <label class="pretociIzbira" id="daljinecPretociIzbira" hidden><input type="checkbox" id="daljinecPretoci"> <span data-d="pretociNaRacunalnik">Odpri na tem računalniku</span></label>
+        <button class="drobniGumb" id="daljinecAplikacijeOsvezi" data-d="osvezi">Osveži</button>
+      </div>
+      <div class="aplikacije" id="daljinecAplikacije"></div>
+      <p class="opomba" id="daljinecAplikacijeOpomba"></p>
+    </div>
+
+    <!-- Redkeje: vzdrzevanje. -->
+    <div class="panel" id="daljinecVecPanel">
+      <details class="daljinecVec">
+        <summary data-d="vec">Več</summary>
+        <div class="tipke">
+          <button data-ukaz="restart"><span data-d="znovaZazeni">Znova zaženi Safeer</span></button>
+          <button data-ukaz="clear_cache"><span data-d="pocistiPredpomnilnik">Počisti predpomnilnik</span></button>
+          <button data-ukaz="status"><span data-d="stanjeNaprave">Stanje naprave</span></button>
+        </div>
+        <p class="opomba" id="daljinecVecOpomba"></p>
+      </details>
+    </div>
+
+  </section>
+
+  <!-- Vedno vidno, na dnu: kaj velja v javnih omrezjih in zakaj si kljub temu zascite. -->
+  <footer class="opozoriloWifi">
+    <p class="wifiNaslov"><span class="wifiIkona"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 9a15 15 0 0 1 20 0 M5.5 12.5a10 10 0 0 1 13 0 M9 16a5 5 0 0 1 6 0 M12 19.5v.1"/></svg></span>
+      <span data-t="javniWifiNaslov">V javnih omrežjih priporočamo, da je Safeer Link izklopljen</span>
+    </p>
+    <p class="wifiOpis" data-t="javniWifiOpis">
+      V kavarni, hotelu ali na letališču je v istem omrežju lahko kdorkoli. Če Safeer Link tam kljub temu
+      uporabljaš, ostaneš zaščiten: tuja naprava se ne more povezati sama. Naprava, ki gosti Safeer Link,
+      izpiše na svojem zaslonu 6-mestno številko, in dokler te številke ne vtipkaš na drugi napravi,
+      se ne poveže nič in se ne prenese nič.
+    </p>
+  </footer>
+
+</main>
+
+<script src="link.js"></script>
+<script src="daljinec.js"></script>
+</body>
+</html>

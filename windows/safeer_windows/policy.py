@@ -369,6 +369,29 @@ def third_party_cookie_allowed(origin_host: str) -> bool:
     return any(host == allowed or host.endswith("." + allowed) for allowed in COOKIE_THIRD_PARTY_ALLOWED)
 
 
+GOOGLE_AUTH_HOSTS = (
+    "accounts.google.com", "accounts.google.si", "accounts.youtube.com",
+    "myaccount.google.com", "mail.google.com", "workspace.google.com",
+    "ogs.google.com", "apis.google.com", "ssl.gstatic.com",
+)
+WINDOWS_AUTH_FIREFOX_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0"
+
+
+def is_google_auth_url(url: str) -> bool:
+    try:
+        parsed = urllib.parse.urlparse(url)
+        host = (parsed.netloc or "").lower().split(":")[0]
+        if any(host == h or host.endswith("." + h) or host.startswith("accounts.google.") for h in GOOGLE_AUTH_HOSTS):
+            return True
+        if host in ("google.com", "www.google.com", "google.si", "www.google.si"):
+            path = (parsed.path or "").lower()
+            if any(tok in path for tok in ("/signin", "/servicelogin", "/accounts", "/interactive", "/embedded/setup")):
+                return True
+    except Exception:
+        pass
+    return False
+
+
 def clean_user_agent(user_agent: str) -> str:
     return re.sub(r"\s*QtWebEngine/[\d.]+", "", user_agent or "").strip()
 

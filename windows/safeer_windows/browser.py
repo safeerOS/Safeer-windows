@@ -226,6 +226,8 @@ class ShieldInterceptor(QWebEngineUrlRequestInterceptor):
         if self.browser.settings.get("gpc_dnt_enabled") and url.startswith(("http://", "https://")):
             info.setHttpHeader(QByteArray(b"Sec-GPC"), QByteArray(b"1"))
             info.setHttpHeader(QByteArray(b"DNT"), QByteArray(b"1"))
+        if policy.is_google_auth_url(url):
+            info.setHttpHeader(QByteArray(b"User-Agent"), QByteArray(policy.WINDOWS_AUTH_FIREFOX_UA.encode("utf-8")))
 
 
 class SafeerPage(QWebEnginePage):

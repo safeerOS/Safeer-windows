@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="sl">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src file: data:; style-src 'self' 'unsafe-inline'; script-src 'self'">
+<title>Safeer OS vrstica</title>
+<link rel="stylesheet" href="vrstica.css">
+</head>
+<body>
+<div id="vrstica">
+  <button class="znak" id="gumbDomov" data-naslov="domov"><img src="znak.svg" alt=""></button>
+  <button class="ikona" id="gumbProgrami" data-naslov="vsiProgrami"><svg viewBox="0 0 24 24"><path d="M4 4h6v6H4z M14 4h6v6h-6z M4 14h6v6H4z M14 14h6v6h-6z"/></svg></button>
+  <button class="ikona" id="gumbIsci" data-naslov="isci"><svg viewBox="0 0 24 24"><path d="M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14z M20 20l-4-4"/></svg></button>
+  <span class="loc"></span>
+  <div id="okna"></div>
+  <button class="stanje" id="gumbStanje">
+    <span id="sLink"></span><span id="sOmrezje"></span><span id="sZvok"></span><span id="sBaterija"></span>
+  </button>
+  <div class="ura"><b id="ura">--:--</b><span id="datum"></span></div>
+</div>
+<script src="besedila.js"></script>
+<script src="vrstica.js"></script>
+</body>
+</html>

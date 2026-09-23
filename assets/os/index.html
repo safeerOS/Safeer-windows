@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="sl">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src file: data:; style-src 'self' 'unsafe-inline'; script-src 'self'">
+<title>Safeer OS</title>
+<link rel="stylesheet" href="os.css">
+</head>
+<body>
+<div id="ozadje"></div>
+<div id="aplikacija">
+  <aside id="stranska">
+    <div class="znamka">
+      <img src="znak.svg" alt="">
+      <div><b>Safeer OS</b><span data-t="podnaslov"></span></div>
+    </div>
+    <nav id="meni">
+      <button data-razdelek="domov" class="izbran"><svg data-ikona="domov"></svg><span data-t="domov"></span></button>
+      <button data-razdelek="media"><svg data-ikona="glasba"></svg><span>Safeer Media</span></button>
+      <button data-razdelek="programi"><svg data-ikona="programi"></svg><span data-t="programi"></span></button>
+      <button data-razdelek="datoteke"><svg data-ikona="mapa"></svg><span data-t="datoteke"></span></button>
+      <button data-razdelek="naprave"><svg data-ikona="povezava"></svg><span data-t="naprave"></span></button>
+      <button data-razdelek="nastavitve"><svg data-ikona="drsniki"></svg><span data-t="nastavitve"></span></button>
+    </nav>
+    <div class="stranska-dno">
+      <div class="uporabnik">
+        <div class="zacetnica" id="zacetnica">S</div>
+        <div class="ime"><b id="imeUporabnika"></b><span id="imeRacunalnika"></span></div>
+        <button class="gumb-ikona" id="gumbNapajanje" data-naslov="napajanje"><svg data-ikona="napajanje"></svg></button>
+      </div>
+      <div class="poganja"><span data-t="poganja"></span><b><svg data-ikona="povezava"></svg>Safeer Link</b></div>
+    </div>
+  </aside>
+
+  <main id="glavno">
+    <header id="vrh">
+      <label class="iskanje">
+        <svg data-ikona="isci"></svg>
+        <input id="iskanje" type="text" autocomplete="off" spellcheck="false" data-ph="isci">
+        <kbd data-t="tipkaj"></kbd>
+      </label>
+      <div class="presledek"></div>
+      <button class="stanje" id="gumbStanje">
+        <span id="stanjePovezava"><i class="pika siva"></i><span data-t="brezNaprav"></span></span>
+        <span id="stanjeOmrezje"></span>
+        <span id="stanjeZvok"></span>
+        <span id="stanjeBaterija"></span>
+      </button>
+      <div class="ura"><b id="ura">--:--</b><span id="datum"></span></div>
+    </header>
+
+    <div id="vsebina">
+      <!-- DOMOV -->
+      <section class="razdelek viden" id="r-domov">
+        <h1 id="pozdrav"></h1>
+        <p data-t="pozdravPod"></p>
+        <div class="velike">
+          <button class="velika" id="kBrskalnik"><svg data-ikona="splet"></svg><div><b data-t="brskalnik"></b><span data-t="brskalnikPod"></span></div><svg class="puscica" data-ikona="desno"></svg></button>
+          <button class="velika" data-pojdi="datoteke"><svg data-ikona="mapa"></svg><div><b data-t="datoteke"></b><span data-t="datotekePod"></span></div><svg class="puscica" data-ikona="desno"></svg></button>
+          <button class="velika" data-pojdi="naprave"><svg data-ikona="naprave"></svg><div><b data-t="naprave"></b><span id="kNapravePod" data-t="napravePodNov"></span></div><svg class="puscica" data-ikona="desno"></svg></button>
+        </div>
+        <h2><span data-t="nedavnoUporabljeno"></span><button class="dodatno" data-pojdi="programi" data-t="vsiProgrami"></button></h2>
+        <div class="vrsta-plosc" id="domaciProgrami"></div>
+        <div id="blokOkna" hidden>
+          <h2><span data-t="odprtoZdaj"></span></h2>
+          <div class="okna" id="okna"></div>
+        </div>
+        <div class="plosce">
+          <div class="plosca-dom">
+            <button class="glava-plosce" data-pojdi="naprave"><b data-t="povezaneNaprave"></b><svg data-ikona="desno"></svg></button>
+            <div class="vrstica-naprave"><svg data-ikona="naprave"></svg><div><b data-t="taRacunalnik"></b><span id="domNapravaStanje"><i class="pika siva"></i><span data-t="niPovezano"></span></span></div></div>
+            <p class="drobno" id="domNapraveOpis" data-t="napraveVControl"></p>
+            <button class="gumb" id="domControl"><svg data-ikona="qr"></svg><span id="domControlBesedilo" data-t="poveziNaprave"></span></button>
+          </div>
+          <div class="plosca-dom">
+            <div class="glava-plosce"><b data-t="hitriDostop"></b></div>
+            <div class="hitri" id="hitriDostop"></div>
+          </div>
+          <div class="plosca-dom">
+            <button class="glava-plosce" data-pojdi="nastavitve"><b data-t="sistem"></b><svg data-ikona="desno"></svg></button>
+            <div class="sistem-vrstica"><svg data-ikona="namizje"></svg><div><b id="sistemIme">Linux Mint</b><span id="sistemRacunalnik"></span></div></div>
+            <dl class="sistem-podatki" id="sistemPodatki"></dl>
+          </div>
+        </div>
+        <div id="blokNedavne" hidden>
+          <h2><span data-t="nedavneDatoteke"></span><button class="dodatno" id="gumbNedavnePocistiDomov" data-t="pocistiSeznam"></button><button class="dodatno" data-pojdi="datoteke" data-t="vseDatoteke"></button></h2>
+          <div class="vrstice" id="nedavneDomov"></div>
+        </div>
+      </section>
+
+      <!-- SAFEER MEDIA -->
+      <section class="razdelek" id="r-media">
+        <h1>Safeer Media</h1><p id="mediaOpis">Glasba in video z računalnika ter tvoji spletni viri na enem mestu.</p>
+        <div class="media-zdaj" id="mediaZdaj" hidden><div><small>ZDAJ SE PREDVAJA</small><h2 id="mediaZdajNaslov"></h2><p id="mediaZdajIzvajalec"></p><div id="mediaHandoff" class="media-handoff"></div></div><div class="media-kontrole"><button id="mediaNazaj">◀</button><button id="mediaPlay">▶ / ❚❚</button><button id="mediaNaprej">▶</button><button id="mediaStop">■</button></div></div>
+        <div class="filtri"><button class="izbran" data-media-filter="vse">Vse</button><button data-media-filter="glasba">Glasba</button><button data-media-filter="video">Video</button></div>
+        <h2>Na tem računalniku</h2><div class="mreza" id="mediaMreza"></div>
+        <p class="namig" id="mediaPrazno" hidden>V mapah Glasba/Music in Video/Videos ni podprtih medijskih datotek.</p>
+        <h2>Tvoji spletni viri</h2><div class="mreza" id="mediaViri"></div>
+      </section>
+
+      <!-- PROGRAMI -->
+      <section class="razdelek" id="r-programi">
+        <h1 data-t="programi"></h1>
+        <p id="programiPod"></p>
+        <div class="filtri naprave-filtri" id="filtriNaprav" hidden></div>
+        <div class="filtri" id="filtri"></div>
+        <div class="mreza" id="vsiProgrami"></div>
+      </section>
+
+      <!-- DATOTEKE -->
+      <section class="razdelek" id="r-datoteke">
+        <h1 data-t="datoteke"></h1>
+        <p data-t="datotekeOpis"></p>
+        <div class="datoteke-postavitev">
+          <div class="mape-seznam" id="mapeSeznam"></div>
+          <div>
+            <div class="drobtine" id="drobtine"></div>
+            <div class="vrstice" id="vsebinaMape"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- NAPRAVE -->
+      <section class="razdelek" id="r-naprave">
+        <h1 data-t="naprave"></h1>
+        <p data-t="napraveOpis"></p>
+        <div class="panel">
+          <h3><i class="pika siva" id="napravePika"></i><span id="napraveNaslov"></span></h3>
+          <p id="napraveBesedilo"></p>
+          <p class="namig" id="napraveNamig" hidden></p>
+          <div class="gumbi-naprav">
+            <button class="gumb glavni" id="gumbControl"><svg data-ikona="qr"></svg><span id="gumbControlBesedilo"></span></button>
+            <button class="gumb" id="gumbNovaNaprava" hidden><svg data-ikona="plus"></svg><span data-t="poveziNovoNapravo"></span></button>
+            <button class="gumb" id="gumbOdjava" hidden><svg data-ikona="odjava"></svg><span id="gumbOdjavaBesedilo"></span></button>
+          </div>
+        </div>
+        <div class="hitre zaupanje" id="blokZaupanje" hidden>
+          <button class="stikalo" id="stikaloZaupaj" role="switch" aria-checked="false"><svg data-ikona="scit"></svg><div><span data-t="zaupajRacunalniku"></span><small id="zaupajPod"></small></div><i></i></button>
+        </div>
+        <div class="panel" id="blokSeznamNaprav" hidden>
+          <h3><span data-t="seznamNaprav"></span></h3>
+          <ul class="seznam-naprav" id="seznamNaprav"></ul>
+          <p class="namig" id="seznamNapravNamig"></p>
+        </div>
+        <div class="zmoznosti">
+          <div class="zmoznost"><svg data-ikona="poslji"></svg><span data-t="zmoznost1"></span></div>
+          <div class="zmoznost"><svg data-ikona="zaslon"></svg><span data-t="zmoznost2"></span></div>
+          <div class="zmoznost"><svg data-ikona="daljinec"></svg><span data-t="zmoznost3"></span></div>
+          <div class="zmoznost"><svg data-ikona="programi"></svg><span data-t="zmoznost4"></span></div>
+        </div>
+      </section>
+
+      <!-- OMREZJE (iz Nastavitev in iz vrstice stanja) -->
+      <section class="razdelek" id="r-omrezje">
+        <button class="gumb nazaj" id="gumbOmrezjeNazaj"><svg data-ikona="nazaj"></svg><span data-t="nastavitve"></span></button>
+        <h1 data-t="o_omrezje"></h1>
+        <p data-t="omrezjeOpis"></p>
+        <h2 data-t="trenutnaPovezava"></h2>
+        <div class="vrstice" id="omrezjeTrenutno"></div>
+        <div class="hitre omrezje-stikala">
+          <button class="stikalo" id="stikaloWifiOmrezje" role="switch" aria-checked="false"><svg data-ikona="wifi"></svg><div><span>Wi-Fi</span><small id="omrezjeStanje"></small></div><i></i></button>
+        </div>
+        <div id="blokWifi" hidden>
+          <h2><span data-t="wifiOmrezja"></span><button class="dodatno" id="gumbOmrezjeOsvezi" data-t="osvezi"></button></h2>
+          <div class="vrstice" id="omrezjaSeznam"></div>
+        </div>
+        <div id="blokShranjene" hidden>
+          <h2 data-t="shranjenePovezave"></h2>
+          <div class="vrstice" id="omrezjaShranjena"></div>
+        </div>
+        <button class="stikalo napredno" id="gumbOmrezjeNapredno" hidden><svg data-ikona="drsniki"></svg><div><span data-t="napredno"></span><small data-t="naprednoPod"></small></div></button>
+      </section>
+
+      <!-- ZVOK (iz Nastavitev, iz vrstice stanja in z desnim klikom na zvocnik v vrstici) -->
+      <section class="razdelek" id="r-zvok">
+        <button class="gumb nazaj" id="gumbZvokNazaj"><svg data-ikona="nazaj"></svg><span data-t="nastavitve"></span></button>
+        <h1 data-t="m_sound"></h1>
+        <p data-t="zvokOpis"></p>
+        <h2 data-t="zvokIzhod"></h2>
+        <div class="vrstice zvok-izbira" id="zvokIzhodi"></div>
+        <div class="zvok-glasnost" id="zvokGlasnostIzhoda"></div>
+        <div id="blokZvokLink">
+          <h2><span data-t="zvokNaNapravi"></span></h2>
+          <p class="drobno" data-t="zvokNaNapraviOpis"></p>
+          <div class="vrstice zvok-izbira" id="zvokLink"></div>
+          <div class="zvok-jbl" id="zvokJbl"></div>
+        </div>
+        <div id="blokZvokProgrami" hidden>
+          <h2 data-t="zvokProgrami"></h2>
+          <div class="vrstice" id="zvokProgrami"></div>
+        </div>
+        <div id="blokZvokVhod" hidden>
+          <h2 data-t="zvokVhod"></h2>
+          <div class="vrstice zvok-izbira" id="zvokVhodi"></div>
+          <div class="zvok-glasnost" id="zvokGlasnostVhoda"></div>
+        </div>
+        <button class="stikalo napredno" id="gumbZvokNapredno" hidden><svg data-ikona="drsniki"></svg><div><span data-t="napredno"></span><small data-t="zvokNaprednoPod"></small></div></button>
+      </section>
+
+      <!-- NASTAVITVE -->
+      <section class="razdelek" id="r-nastavitve">
+        <h1 data-t="nastavitve"></h1>
+        <p data-t="nastavitveOpis"></p>
+        <h2 data-t="hitreNastavitve"></h2>
+        <div class="hitre" id="hitreNastavitve"></div>
+        <h2 data-t="scit"></h2>
+        <div class="hitre" id="blokScit"></div>
+        <h2>Safeer OS</h2>
+        <div class="hitre">
+          <button class="stikalo" id="stikaloCelozaslonsko" role="switch" aria-checked="true"><svg data-ikona="celozaslonsko"></svg><div><span data-t="celozaslonsko"></span><small data-t="celozaslonskoPod"></small></div><i></i></button>
+          <button class="stikalo" id="gumbNamizje"><svg data-ikona="namizje"></svg><div><span data-t="pokaziNamizje"></span><small data-t="pokaziNamizjePod"></small></div></button>
+          <button class="stikalo" id="stikaloSamozagon" role="switch" aria-checked="false"><svg data-ikona="ponovno"></svg><div><span data-t="samozagon"></span><small data-t="samozagonPod"></small></div><i></i></button>
+          <button class="stikalo" id="gumbNazajVMint"><svg data-ikona="odjava"></svg><div><span data-t="nazajVMint"></span><small data-t="nazajVMintPod"></small></div></button>
+        </div>
+        <div id="skupineNastavitev"></div>
+        <p class="o-sistemu" id="oSistemu"></p>
+      </section>
+    </div>
+
+    <footer id="noga">
+      <span><kbd data-t="tipkaKlik"></kbd><span data-t="odpri"></span></span>
+      <span><kbd>Esc</kbd><span data-t="domov"></span></span>
+      <span><kbd>F11</kbd><span data-t="celozaslonsko"></span></span>
+      <span class="podpis" data-t="podpis"></span>
+    </footer>
+  </main>
+</div>
+
+<!-- Iskanje -->
+<div class="sloj" id="slojIskanje"><div class="tancica"></div><div class="plosca zadetki" id="zadetki"></div></div>
+<!-- Hitre nastavitve -->
+<div class="sloj" id="slojHitro"><div class="tancica"></div><div class="plosca" id="hitro"></div></div>
+<!-- Napajanje -->
+<div class="sloj" id="slojNapajanje"><div class="tancica"></div><div class="plosca" id="napajanje"></div></div>
+<!-- Dodaj spletno aplikacijo -->
+<div class="sloj" id="slojDodaj"><div class="tancica"></div>
+  <form class="plosca" id="obrazecDodaj">
+    <h3 data-t="dodajSpletno"></h3>
+    <input id="dodajIme" data-ph="imeAplikacije" maxlength="40">
+    <input id="dodajNaslov" data-ph="naslovAplikacije" maxlength="300">
+    <p class="drobno" data-t="dodajNamig"></p>
+    <div class="gumbi"><button type="button" class="gumb" id="dodajPreklici" data-t="preklici"></button><button type="submit" class="gumb glavni" data-t="dodaj"></button></div>
+  </form>
+</div>
+<!-- Nazaj v Linux Mint -->
+<div class="sloj" id="slojMint"><div class="tancica"></div>
+  <div class="plosca">
+    <h3 data-t="nazajVMint"></h3>
+    <p class="drobno" data-t="nazajOpis"></p>
+    <div class="gumbi">
+      <button type="button" class="gumb" id="mintPreklici" data-t="preklici"></button>
+      <button type="button" class="gumb" id="mintZaStalno" data-t="zaStalno"></button>
+      <button type="button" class="gumb glavni" id="mintSamoTokrat" data-t="samoTokrat"></button>
+    </div>
+  </div>
+</div>
+<div id="obvestilo"></div>
+<script src="besedila.js"></script>
+<script src="os.js"></script>
+</body>
+</html>

@@ -63,6 +63,8 @@ Source: "{#AppSourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdi
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"; AppUserModelID: "Safeer.Browser"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon; AppUserModelID: "Safeer.Browser"
+Name: "{autoprograms}\Safeer OS"; Filename: "{app}\SafeerOS.exe"; AppUserModelID: "Safeer.OS"
+Name: "{autodesktop}\Safeer OS"; Filename: "{app}\SafeerOS.exe"; Tasks: desktopicon; AppUserModelID: "Safeer.OS"
 
 [Registry]
 ; Browser registration so Windows lists Safeer Browser in Settings > Apps > Default apps.
