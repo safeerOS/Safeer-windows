@@ -1,0 +1,302 @@
+/* Safeer Control — daljinec v Safeer Linku.
+   Iste barve in oblike kot link.css; tu je samo tisto, kar potrebuje daljinec.
+   Ista datoteka je v brskalniku za telefon, televizor in Linux. */
+
+.daljinec { padding-bottom: 8px; }
+
+/* ---------- glava daljinca ---------- */
+
+.daljinecGlava {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 4px 0 14px;
+}
+.daljinecNazaj, .daljinecPosnetekGumb {
+  flex: none;
+  width: 44px; height: 44px;
+  border-radius: 50%;
+  border: 1px solid var(--crta);
+  background: var(--plosca);
+  color: var(--besedilo);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.daljinecNazaj svg, .daljinecPosnetekGumb svg { width: 22px; height: 22px; }
+.daljinecPosnetekGumb.vklopljen { border-color: var(--zelena); color: var(--zelena); }
+.daljinecNaprava { flex: 1; min-width: 0; }
+.daljinecNaprava h2 { margin: 0; font-size: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.daljinecNaprava .oznaka { margin: 0; }
+.daljinecStanje {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: var(--medlo);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.daljinecStanje.napaka { color: var(--rumena); }
+.daljinecSredisce {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--zelena);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* ---------- posnetek zaslona ---------- */
+
+.daljinecPosnetek {
+  background: var(--plosca);
+  border: 1px solid var(--crta);
+  border-radius: 16px;
+  padding: 10px;
+  margin-bottom: 14px;
+}
+.daljinecPosnetek img {
+  display: block;
+  width: 100%;
+  border-radius: 10px;
+  background: #000;
+  min-height: 60px;
+}
+.daljinecPosnetekVrstica {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  margin-top: 8px;
+}
+.daljinecPosnetekVrstica .opomba { margin: 0; }
+.daljinecStikalo { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--medlo); }
+.daljinecStikalo input { accent-color: var(--zelena); width: 18px; height: 18px; }
+
+/* ---------- glas ---------- */
+
+.daljinecGlas {
+  text-align: center;
+  background: var(--plosca);
+  border: 1px solid var(--crta);
+  border-radius: 20px;
+  padding: 18px 16px 14px;
+  margin-bottom: 14px;
+}
+.mikrofon {
+  width: 86px; height: 86px;
+  border-radius: 50%;
+  border: 0;
+  background: var(--zelena);
+  color: var(--zelenaTemna);
+  display: inline-flex; align-items: center; justify-content: center;
+  box-shadow: 0 0 0 0 rgba(84, 214, 165, .45);
+  transition: transform .15s ease, box-shadow .2s ease;
+}
+.mikrofon svg { width: 38px; height: 38px; stroke-width: 2; }
+.mikrofon:active { transform: scale(.95); }
+.mikrofon.poslusam {
+  animation: mikrofonUtrip 1.4s ease-out infinite;
+}
+.mikrofon.obdelujem { background: var(--rumena); animation: none; }
+.mikrofon[disabled] { opacity: .35; }
+@keyframes mikrofonUtrip {
+  0% { box-shadow: 0 0 0 0 rgba(84, 214, 165, .55); }
+  70% { box-shadow: 0 0 0 22px rgba(84, 214, 165, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(84, 214, 165, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mikrofon.poslusam { animation: none; box-shadow: 0 0 0 6px rgba(84, 214, 165, .35); }
+}
+.daljinecSliseno {
+  margin: 12px 0 0;
+  font-size: 16px;
+  min-height: 1.5em;
+  color: var(--besedilo);
+}
+.daljinecSliseno.namig { color: var(--medlo); font-size: 14px; }
+.daljinecOdgovor {
+  margin: 4px 0 0;
+  font-size: 14px;
+  min-height: 1.5em;
+  color: var(--zelena);
+}
+.daljinecOdgovor.napaka { color: var(--rumena); }
+
+.daljinecVnos {
+  display: flex; gap: 8px;
+  margin-top: 12px;
+}
+.daljinecVnos input {
+  flex: 1; min-width: 0;
+  font: inherit; font-size: 16px;
+  padding: 11px 14px;
+  color: var(--besedilo);
+  background: var(--ploscaSvetla);
+  border: 1px solid var(--crta);
+  border-radius: 999px;
+}
+.daljinecVnos input:focus { outline: 3px solid var(--zelena); outline-offset: 2px; }
+.daljinecPoslji {
+  flex: none;
+  width: 46px; height: 46px;
+  border-radius: 50%;
+  border: 1px solid var(--crta);
+  background: var(--ploscaSvetla);
+  color: var(--besedilo);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.daljinecPoslji svg { width: 20px; height: 20px; }
+
+/* ---------- tipke ---------- */
+
+.daljinecTipke {
+  background: var(--plosca);
+  border: 1px solid var(--crta);
+  border-radius: 20px;
+  padding: 14px;
+  margin-bottom: 14px;
+}
+.daljinecVrsta {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+.daljinecVrsta.drsenje { margin-top: 14px; }
+.dTipka {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+  padding: 10px 4px;
+  border-radius: 12px;
+  border: 1px solid var(--crta);
+  background: var(--ploscaSvetla);
+  color: var(--besedilo);
+  font-size: 12px;
+  min-height: 60px;
+}
+.dTipka svg { width: 22px; height: 22px; margin: 0; }
+.dTipka:active, .dpadTipka:active, .glasnostTipka:active { background: var(--zelena); color: var(--zelenaTemna); }
+.dTipka.utrip, .dpadTipka.utrip, .glasnostTipka.utrip { background: var(--zelena); color: var(--zelenaTemna); }
+
+.daljinecSredina {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 16px;
+  align-items: center;
+  margin-top: 14px;
+}
+
+/* Smerni kriz: krog iz petih tipk. */
+.dpad {
+  position: relative;
+  width: 100%;
+  max-width: 220px;
+  aspect-ratio: 1 / 1;
+  margin: 0 auto;
+  border-radius: 50%;
+  background: var(--ploscaSvetla);
+  border: 1px solid var(--crta);
+}
+.dpadTipka {
+  position: absolute;
+  width: 30%; height: 30%;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--besedilo);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 16px; font-weight: 700;
+}
+.dpadTipka svg { width: 60%; height: 60%; stroke-width: 2.2; }
+.dpadTipka.gor { top: 3%; left: 35%; }
+.dpadTipka.dol { bottom: 3%; left: 35%; }
+.dpadTipka.levo { left: 3%; top: 35%; }
+.dpadTipka.desno { right: 3%; top: 35%; }
+.dpadTipka.ok {
+  top: 32%; left: 32%;
+  width: 36%; height: 36%;
+  background: var(--zelena);
+  color: var(--zelenaTemna);
+  box-shadow: 0 0 0 4px var(--plosca);
+}
+.dpadTipka:focus { outline: 3px solid var(--zelena); outline-offset: -2px; }
+.dpadTipka.ok:focus { outline-color: var(--besedilo); }
+
+/* Glasnost: navpicno, kot na daljincu. */
+.glasnost {
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  padding: 8px 6px;
+  border-radius: 999px;
+  background: var(--ploscaSvetla);
+  border: 1px solid var(--crta);
+}
+.glasnostTipka {
+  width: 44px; height: 44px;
+  border-radius: 50%;
+  border: 0;
+  background: var(--plosca);
+  color: var(--besedilo);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.glasnostTipka svg { width: 20px; height: 20px; stroke-width: 2.2; }
+.glasnostTipka.utisaj.utisano { color: var(--rumena); }
+.glasnostStolpec {
+  width: 6px; height: 54px;
+  border-radius: 999px;
+  background: var(--plosca);
+  position: relative; overflow: hidden;
+}
+.glasnostRaven {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  height: 0;
+  background: var(--zelena);
+  transition: height .2s ease;
+}
+.glasnostVrednost { font-size: 12px; color: var(--medlo); min-width: 2.2em; text-align: center; }
+
+/* ---------- aplikacije ---------- */
+
+.aplikacije {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+.aplikacija {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 10px 6px;
+  border-radius: 14px;
+  border: 1px solid var(--crta);
+  background: var(--plosca);
+  color: var(--besedilo);
+  font-size: 12px;
+  line-height: 1.2;
+  text-align: center;
+}
+.aplikacija img, .aplikacija .aplikacijaZnak {
+  width: 44px; height: 44px;
+  border-radius: 12px;
+  background: var(--ploscaSvetla);
+  object-fit: cover;
+}
+.aplikacija .aplikacijaZnak {
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 18px; font-weight: 700; color: var(--zelena);
+}
+.aplikacija span { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aplikacija:active { border-color: var(--zelena); }
+.aplikacija.utrip { border-color: var(--zelena); box-shadow: 0 0 0 2px var(--zelena) inset; }
+
+.daljinecVec summary {
+  cursor: pointer;
+  color: var(--medlo);
+  font-size: 14px;
+  padding: 6px 0;
+}
+.daljinecVec .tipke button { flex: 1 1 100%; }
+
+/* Televizor / velik zaslon: daljinec v dveh stolpcih, vecje tipke za daljinec. */
+@media (min-width: 900px) {
+  .daljinec { max-width: 1100px; margin: 0 auto; }
+  .daljinecTipke { padding: 20px; }
+  .dpad { max-width: 260px; }
+  .dTipka { font-size: 14px; min-height: 72px; }
+  .aplikacije { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
+  .aplikacija img, .aplikacija .aplikacijaZnak { width: 56px; height: 56px; }
+}
+
+/* Safeer Control: odpri aplikacijo naprave na tem racunalniku (pretakanje) */
+.pretociIzbira { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; margin-right: 10px;
+  font-size: 0.9em; cursor: pointer; user-select: none; }
+.pretociIzbira[hidden] { display: none; }
+.pretociIzbira input { width: 16px; height: 16px; margin: 0; }

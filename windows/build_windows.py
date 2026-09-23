@@ -47,6 +47,11 @@ SHARED_DATA = [
     ("ui/home.js", "shared/ui"),
     ("assets/safeer-mark.svg", "shared/assets"),
     ("assets/icon.png", "shared/assets"),
+    ("assets/os/index.html", "shared/assets/os"),
+    ("assets/os/os.js", "shared/assets/os"),
+    ("assets/os/os.css", "shared/assets/os"),
+    ("assets/os/besedila.js", "shared/assets/os"),
+    ("assets/os/znak.svg", "shared/assets/os"),
     ("windows/VERSION", "shared/windows"),
 ]
 
@@ -127,6 +132,29 @@ def pyinstaller() -> None:
         raise SystemExit("QtWebEngineProcess.exe was not bundled")
     print(f"built {EXE} ({dir_size(APP_DIR) / 1048576:.0f} MB); helper: {helper[0]}")
     prune_bundle()
+
+    # Build SafeerOS.exe in the same bundle
+    os_launcher = os.path.join(WINDOWS, "launcher_os.py")
+    if os.path.exists(os_launcher):
+        print("🔨 Gradnja SafeerOS.exe...", flush=True)
+        command_os = [
+            sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--windowed",
+            "--name", "SafeerOS", "--icon", ICON,
+            "--distpath", DIST, "--workpath", os.path.join(BUILD, "work_os"), "--specpath", BUILD,
+            "--paths", WINDOWS,
+            "--exclude-module", "tkinter",
+            "--exclude-module", "PIL",
+        ]
+        for name in shared_imports():
+            command_os += ["--hidden-import", name]
+        for source, target in SHARED_DATA:
+            command_os += ["--add-data", os.path.join(ROOT, *source.split("/")) + os.pathsep + target]
+        command_os.append(os_launcher)
+        run(command_os)
+        os_exe = os.path.join(DIST, "SafeerOS", "SafeerOS.exe")
+        if os.path.exists(os_exe):
+            shutil.copy2(os_exe, os.path.join(APP_DIR, "SafeerOS.exe"))
+            print(f"SafeerOS.exe uspešno dodan v {APP_DIR}")
 
 
 def dir_size(path: str) -> int:
