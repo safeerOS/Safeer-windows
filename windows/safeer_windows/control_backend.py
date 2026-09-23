@@ -1,0 +1,742 @@
+"""Safeer Control Backend za Windows — upravljanje povezave, seznanitev in naprav Safeer Linka."""
+
+from __future__ import annotations
+
+import base64
+import json
+import os
+import secrets
+import socket
+import sys
+import threading
+import time
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
+CORE_DIR = os.path.abspath(os.path.join(PACKAGE_DIR, "..", ".."))
+if CORE_DIR not in sys.path:
+    sys.path.insert(0, CORE_DIR)
+
+from core import link_hub, link_deljenje, link_seja
+
+CONFIG_DIR = os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~/.config"), "SafeerControl")
+CONFIG_FILE = os.path.join(CONFIG_DIR, "link.json")
+
+
+class SafeerControlBackend:
+    _instance: Optional["SafeerControlBackend"] = None
+    _lock = threading.Lock()
+
+    @classmethod
+    def pridobi(cls) -> "SafeerControlBackend":
+        with cls._lock:
+            if cls._instance is None:
+                cls._instance = cls()
+            return cls._instance
+
+    def __init__(self, config_pot: str = CONFIG_FILE) -> None:
+        self.config_pot = config_pot
+        self.nastavitve: Dict[str, Any] = {}
+        self.nalozi_nastavitve()
+
+        self.device_id, self.device_ime = self._doloci_identiteto()
+        self.povezava: Optional[link_hub.Povezava] = None
+        self.naprave: List[dict] = []
+        self._prijava: Optional[dict] = None
+        self._qr: Optional[dict] = None
+        self._qr_rod = 0
+        self._cakajoci: Dict[str, list] = {}
+        self._poslusavci: List[Callable[[str, Any], None]] = []
+        self._povezovanje = False
+        self._zadnji_hubi: List[dict] = []
+        self._cas_hubi = 0.0
+
+    # ------------------------------------------------------------------ Shramba
+    def nalozi_nastavitve(self) -> dict:
+        try:
+            if os.path.exists(self.config_pot):
+                with open(self.config_pot, "r", encoding="utf-8") as f:
+                    self.nastavitve = json.load(f) or {}
+            else:
+                self.nastavitve = {}
+        except Exception as e:
+            print(f"[ControlBackend] Napaka pri branju {self.config_pot}: {e}")
+            self.nastavitve = {}
+        return self.nastavitve
+
+    def shrani_nastavitve(self) -> bool:
+        try:
+            os.makedirs(os.path.dirname(self.config_pot), exist_ok=True)
+            zacasna = self.config_pot + ".tmp"
+            with open(zacasna, "w", encoding="utf-8") as f:
+                json.dump(self.nastavitve, f, ensure_ascii=False, indent=2)
+            if sys.platform != "win32":
+                try:
+                    os.chmod(zacasna, 0o600)
+                except OSError:
+                    pass
+            os.replace(zacasna, self.config_pot)
+            return True
+        except Exception as e:
+            print(f"[ControlBackend] Napaka pri shranjevanju {self.config_pot}: {e}")
+            return False
+
+    def _doloci_identiteto(self) -> Tuple[str, str]:
+        hostname = socket.gethostname().split(".")[0] or "PC"
+        id_nap = link_hub.id_naprave() + "-control"
+        ime_nap = f"Safeer Control ({hostname})"
+        return id_nap, ime_nap
+
+    # ------------------------------------------------------------------ Poslusavci dogodkov
+    def dodaj_poslusalca(self, fn: Callable[[str, Any], None]) -> None:
+        if fn not in self._poslusavci:
+            self._poslusavci.append(fn)
+
+    def odstrani_poslusalca(self, fn: Callable[[str, Any], None]) -> None:
+        if fn in self._poslusavci:
+            self._poslusavci.remove(fn)
+
+    def _oddaj_dogodek(self, vrsta: str, podatki: Any) -> None:
+        for fn in list(self._poslusavci):
+            try:
+                fn(vrsta, podatki)
+            except Exception as e:
+                print(f"[ControlBackend] Napaka v poslusalcu dogodka {vrsta}: {e}")
+
+    # ------------------------------------------------------------------ Stanje za Safeer OS & Safeer Link
+    def je_povezan(self) -> bool:
+        return self.povezava is not None and getattr(self.povezava, "tece", False)
+
+    def hub_url(self) -> str:
+        return str(self.nastavitve.get("hub_url") or "")
+
+    def hub_fp(self) -> str:
+        return str(self.nastavitve.get("hub_fp") or "")
+
+    def zeton(self) -> str:
+        return str(self.nastavitve.get("control_token") or "")
+
+    def stanje_povezave(self) -> dict:
+        """Stanje za Safeer OS: stanje ('povezan' | 'nov' | 'brez'), control=True, zaupana, hubi."""
+        povezan = self.je_povezan()
+        zaupana = bool(self.nastavitve.get("zaupana", True))
+        if not povezan and self.zeton() and self.hub_url():
+            if not self._povezovanje:
+                threading.Thread(target=self.povezi_se, daemon=True).start()
+
+        if povezan or (self.zeton() and self.hub_url()):
+            stanje = "povezan"
+        elif bool(self.nastavitve.get("brez_povezave")):
+            stanje = "brez"
+        else:
+            stanje = "nov"
+
+        hubi = []
+        if stanje != "povezan":
+            hubi = self.hubi_v_omrezju()
+
+        return {
+            "stanje": stanje,
+            "control": True,
+            "zaupana": zaupana,
+            "hubi": hubi,
+        }
+
+    def stanje_linka(self) -> dict:
+        """Stanje za window.__safeerLink.stanje v assets/link/link.js."""
+        hub = self.hub_url()
+        zeton = self.zeton()
+        znan = bool(hub)
+        seznanjen = bool(zeton and hub)
+        povezan = self.je_povezan()
+
+        ime_huba = self.nastavitve.get("hub_ime") or ""
+        if not ime_huba and hub:
+            try:
+                ime_huba = hub.split("//", 1)[1].split(":", 1)[0]
+            except Exception:
+                ime_huba = hub
+
+        return {
+            "znan": znan,
+            "seznanjen": seznanjen,
+            "povezan": povezan,
+            "hub": ime_huba or hub,
+            "hub_url": hub,
+            "naprava": self.device_ime,
+            "id": self.device_id,
+            "control": True,
+            "vKrogu": False,
+            "clanKroga": False,
+            "brezPovezaveIzbrano": bool(self.nastavitve.get("brez_povezave")),
+            "zaupajOkno": bool(self.nastavitve.get("zaupana", True)),
+            "brezPovezave": bool(self.nastavitve.get("brez_povezave")),
+            "deljeneMape": self.deljene_mape(),
+            "standardneDeljene": False,
+        }
+
+    # ------------------------------------------------------------------ Odkrivanje Hubov v omrezju
+    def _lokalni_ip(self) -> str:
+        s = None
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            return s.getsockname()[0]
+        except Exception:
+            return "127.0.0.1"
+        finally:
+            if s is not None:
+                try:
+                    s.close()
+                except Exception:
+                    pass
+
+    def _preisci_subnet_8990(self, prefix: str) -> List[str]:
+        from concurrent.futures import ThreadPoolExecutor
+        odprti: List[str] = []
+
+        def testiraj(zadnji: int):
+            ip = f"{prefix}.{zadnji}"
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.settimeout(0.20)
+                    if s.connect_ex((ip, 8990)) == 0:
+                        odprti.append(ip)
+            except Exception:
+                pass
+
+        try:
+            with ThreadPoolExecutor(max_workers=35) as bazen:
+                bazen.map(testiraj, range(1, 255))
+        except Exception:
+            pass
+
+        return odprti
+
+    def hubi_v_omrezju(self, osvezi: bool = False) -> List[dict]:
+        zdaj = time.time()
+        if not osvezi and (zdaj - self._cas_hubi < 10) and self._zadnji_hubi:
+            return list(self._zadnji_hubi)
+
+        najdeni = []
+        try:
+            mdns_seznam = link_hub.poisci_hube_mdns(cas=1.2)
+            for h in mdns_seznam:
+                najdeni.append({
+                    "ime": h.get("ime") or h.get("naslov", ""),
+                    "naslov": h["naslov"],
+                    "tls": h.get("tls", True),
+                    "fp": h.get("fp", ""),
+                })
+        except Exception as e:
+            print(f"[ControlBackend] mDNS iskanje: {e}")
+
+        kandidat_ipji: List[str] = []
+        if self.hub_url():
+            try:
+                from urllib.parse import urlparse
+                u = urlparse(self.hub_url())
+                if u.hostname:
+                    kandidat_ipji.append(u.hostname)
+            except Exception:
+                pass
+
+        # Znani hišni naslovi (Philips TV, Linux PC, telefoni)
+        for h_ip in ["192.168.0.77", "192.168.0.135", "192.168.0.143", "192.168.0.216", "192.168.0.10", "127.0.0.1", "safeer.local"]:
+            if h_ip not in kandidat_ipji:
+                kandidat_ipji.append(h_ip)
+
+        # Ugotovi lokalni IP in dodaj subnet scan
+        lokalni_ip = self._lokalni_ip()
+        if lokalni_ip and "." in lokalni_ip and not lokalni_ip.startswith("127."):
+            prefix = lokalni_ip.rsplit(".", 1)[0]
+            najdeni_v_omrezju = self._preisci_subnet_8990(prefix)
+            for ip in najdeni_v_omrezju:
+                if ip not in kandidat_ipji:
+                    kandidat_ipji.append(ip)
+
+        # Najprej preizkusi TLS (wss), nato ne-TLS (ws)
+        for ip in kandidat_ipji:
+            if not ip:
+                continue
+            for shema in ("wss", "ws"):
+                naslov = f"{shema}://{ip}:8990/cast/ws"
+                if any(n["naslov"] == naslov for n in najdeni):
+                    continue
+                try:
+                    osnova = link_hub._osnova(naslov)
+                    odtis = self.hub_fp() if (self.hub_url() and ip in self.hub_url()) else None
+                    if link_hub.je_hub(osnova, timeout=0.8, odtis=odtis):
+                        ime_h = f"Safeer Hub ({ip})"
+                        if ip == "192.168.0.77":
+                            ime_h = "Philips Android TV"
+                        elif ip == "192.168.0.135":
+                            ime_h = "Linux Centralni Hub"
+                        najdeni.append({
+                            "ime": ime_h,
+                            "naslov": naslov,
+                            "tls": shema == "wss",
+                            "fp": odtis or "",
+                        })
+                        break
+                except Exception:
+                    pass
+
+        # Sortiraj: TLS hubi in znana hišna vozlišča imajo prednost
+        najdeni.sort(key=lambda n: (
+            not n.get("tls", False),
+            0 if ("192.168.0.135" in n["naslov"] or "192.168.0.77" in n["naslov"]) else 1
+        ))
+
+        self._zadnji_hubi = najdeni
+        self._cas_hubi = zdaj
+        return list(najdeni)
+
+    def poisci_hub(self) -> Optional[dict]:
+        hubi = self.hubi_v_omrezju(osvezi=True)
+        # Prednost imajo varna TLS vozlisca
+        tls_hubi = [h for h in hubi if h.get("tls")]
+        izbrani = tls_hubi[0] if tls_hubi else (hubi[0] if hubi else None)
+        if izbrani:
+            self.nastavitve["hub_url"] = izbrani["naslov"]
+            if izbrani.get("fp"):
+                self.nastavitve["hub_fp"] = izbrani["fp"]
+            self.shrani_nastavitve()
+            self._oddaj_dogodek("hub", {"najden": True, "naslov": izbrani["naslov"], "ime": izbrani.get("ime", "")})
+            return izbrani
+        self._oddaj_dogodek("hub", {"najden": False, "naslov": "", "isce_naprej": False})
+        return None
+
+    def nadzor(self, cilj: str, dejanje: str, polozaj: Optional[float] = None, glasnost: Optional[float] = None) -> bool:
+        """Ukazi za predvajanje in daljinec (seek, volume, pause, play, play_pause)."""
+        if self._povezava:
+            return self._povezava.nadzor(cilj, dejanje, polozaj, glasnost)
+        return False
+
+    # ------------------------------------------------------------------ Seznanjanje
+    def zacni_seznanitev(self) -> dict:
+        hub = self.hub_url()
+        if not hub:
+            h = self.poisci_hub()
+            hub = h["naslov"] if h else ""
+        if not hub:
+            self._oddaj_dogodek("napaka", {"koda": "ni_huba", "sporocilo": "Ni najdenega Safeer Huba v omrezju."})
+            return {"ok": False, "napaka": "ni_huba"}
+
+        try:
+            zacetek = link_hub.zacni_seznanitev(hub, self.device_id, self.device_ime)
+            if not zacetek or (isinstance(zacetek, dict) and zacetek.get("napaka")):
+                razlog = (zacetek or {}).get("napaka") or "seznanitev_ni_stekla"
+                self._oddaj_dogodek("napaka", {"koda": razlog, "sporocilo": f"Seznanitev ni uspela ({razlog})."})
+                return {"ok": False, "napaka": razlog}
+            self._prijava = zacetek
+            odziv = {"nacin": "koda_na_gostitelju", "koda": ""}
+            self._oddaj_dogodek("nacin", odziv)
+            return {"ok": True, "prijava": zacetek}
+        except Exception as e:
+            print(f"[ControlBackend] Napaka pri zacetku seznanitve: {e}")
+            self._oddaj_dogodek("napaka", {"koda": "napaka", "sporocilo": str(e)})
+            return {"ok": False, "napaka": str(e)}
+
+    def potrdi_kodo(self, koda: str) -> bool:
+        hub = self.hub_url()
+        prijava = self._prijava
+        if not hub or not prijava:
+            self._oddaj_dogodek("kodaNiSprejeta", {"razlog": "prijava_ne_obstaja"})
+            return False
+
+        koda_cista = "".join(ch for ch in str(koda) if ch.isdigit())
+        if len(koda_cista) < 4:
+            self._oddaj_dogodek("kodaNiSprejeta", {"razlog": "prekratka_koda"})
+            return False
+
+        try:
+            zeton, razlog = link_hub.potrdi_kodo(hub, prijava, self.device_id, koda_cista)
+            if not zeton:
+                self._oddaj_dogodek("kodaNiSprejeta", {"razlog": razlog or "napacna_koda"})
+                return False
+
+            self._prijava = None
+            self.nastavitve["control_token"] = zeton
+            self.nastavitve["hub_fp"] = str(prijava.get("odtis", ""))
+            self.nastavitve["hub_url"] = hub
+            self.nastavitve["brez_povezave"] = False
+
+            seznanitve = self.nastavitve.get("seznanitve", {})
+            if isinstance(seznanitve, dict) and self.nastavitve["hub_fp"]:
+                seznanitve[self.nastavitve["hub_fp"]] = {"token": zeton, "hub_url": hub}
+                self.nastavitve["seznanitve"] = seznanitve
+
+            self.shrani_nastavitve()
+            self._oddaj_dogodek("seznanitev", True)
+            self._oddaj_dogodek("stanje", self.stanje_linka())
+
+            threading.Thread(target=self.povezi_se, daemon=True).start()
+            return True
+        except Exception as e:
+            print(f"[ControlBackend] Napaka pri potrditvi kode: {e}")
+            self._oddaj_dogodek("kodaNiSprejeta", {"razlog": str(e)})
+            return False
+
+    def prekini_seznanitev(self) -> None:
+        self._prijava = None
+
+    # ------------------------------------------------------------------ QR Seznanjanje
+    def zacni_qr(self) -> None:
+        self._qr_rod += 1
+        rod = self._qr_rod
+
+        def delo():
+            hub = self.hub_url()
+            if not hub:
+                h = self.poisci_hub()
+                hub = h["naslov"] if h else ""
+            if not hub:
+                self._oddaj_dogodek("qr", {"napaka": "ni_huba"})
+                return
+
+            try:
+                prijava = link_hub.zacni_qr(hub, self.device_id, self.device_ime)
+                if not prijava or prijava.get("napaka"):
+                    self._oddaj_dogodek("qr", {"napaka": (prijava or {}).get("napaka") or "ni_huba"})
+                    return
+
+                if rod != self._qr_rod:
+                    link_hub.preklici_qr(hub, prijava, self.device_id)
+                    return
+
+                svg = link_hub.qr_svg(prijava["povezava"])
+                self._qr = prijava
+                self._oddaj_dogodek("qr", {"svg": svg, "velja": prijava.get("velja", 120)})
+
+                konec = time.time() + max(30, int(prijava.get("velja", 120)) - 15)
+                while rod == self._qr_rod:
+                    time.sleep(1.5)
+                    if rod != self._qr_rod:
+                        return
+                    if time.time() > konec:
+                        self.zacni_qr()
+                        return
+                    zeton, razlog = link_hub.stanje_qr(hub, prijava, self.device_id)
+                    if zeton:
+                        self._qr = None
+                        self._qr_rod += 1
+                        self.nastavitve["control_token"] = zeton
+                        self.nastavitve["hub_fp"] = prijava.get("odtis", "")
+                        self.nastavitve["hub_url"] = hub
+                        self.nastavitve["brez_povezave"] = False
+                        self.shrani_nastavitve()
+                        self._oddaj_dogodek("seznanitev", True)
+                        self._oddaj_dogodek("stanje", self.stanje_linka())
+                        threading.Thread(target=self.povezi_se, daemon=True).start()
+                        return
+                    if razlog == "qr_ne_obstaja":
+                        self.zacni_qr()
+                        return
+            except Exception as e:
+                print(f"[ControlBackend] QR napaka: {e}")
+                self._oddaj_dogodek("qr", {"napaka": str(e)})
+
+        threading.Thread(target=delo, daemon=True).start()
+
+    def prekini_qr(self) -> None:
+        self._qr_rod += 1
+        prijava = self._qr
+        hub = self.hub_url()
+        self._qr = None
+        if prijava and hub:
+            threading.Thread(target=lambda: link_hub.preklici_qr(hub, prijava, self.device_id), daemon=True).start()
+
+    def pozabi_napravo(self) -> bool:
+        hub = self.hub_url()
+        zeton = self.zeton()
+        odtis = self.hub_fp()
+        if hub and zeton:
+            try:
+                link_hub.odidi(hub, zeton, odtis)
+            except Exception:
+                pass
+
+        if self.povezava is not None:
+            try:
+                self.povezava.zapri()
+            except Exception:
+                pass
+            self.povezava = None
+
+        self.naprave = []
+        for k in ("control_token", "hub_url", "hub_fp", "seznanitve", "zaupana", "seja_prijave"):
+            self.nastavitve.pop(k, None)
+        self.shrani_nastavitve()
+
+        self._oddaj_dogodek("pozabljeno", True)
+        self._oddaj_dogodek("naprave", [])
+        self._oddaj_dogodek("stanje", self.stanje_linka())
+        return True
+
+    def nastavi_zaupanje(self, zaupaj: bool) -> bool:
+        self.nastavitve["zaupana"] = bool(zaupaj)
+        self.shrani_nastavitve()
+        self._oddaj_dogodek("stanje", self.stanje_linka())
+        return True
+
+    def nadaljuj_brez_povezave(self) -> bool:
+        self.nastavitve["brez_povezave"] = True
+        self.shrani_nastavitve()
+        self._oddaj_dogodek("brezPovezave", True)
+        self._oddaj_dogodek("stanje", self.stanje_linka())
+        return True
+
+    # ------------------------------------------------------------------ Trajna WebSocket povezava
+    def povezi_se(self) -> bool:
+        if self._povezovanje or self.je_povezan():
+            return True
+
+        hub = self.hub_url()
+        zeton = self.zeton()
+        odtis = self.hub_fp()
+        if not (hub and zeton):
+            return False
+
+        self._povezovanje = True
+        try:
+            if self.povezava is not None:
+                try:
+                    self.povezava.zapri()
+                except Exception:
+                    pass
+                self.povezava = None
+
+            p = link_hub.Povezava(
+                ws_naslov=hub,
+                zeton=zeton,
+                device_id=self.device_id,
+                ime=self.device_ime,
+                sinhronizira=False,
+                odtis=odtis or None,
+                dodatne_zmoznosti=["files", "remote"],
+                v_krog=bool(self.nastavitve.get("zaupana", True)),
+            )
+            p.ob_sporocilu = self._na_sporocilo
+            p.ob_stanju = self._na_stanje_povezave
+            p.povezi()
+            self.povezava = p
+            return True
+        except Exception as e:
+            print(f"[ControlBackend] Povezava s Hubom ni uspela: {e}")
+            return False
+        finally:
+            self._povezovanje = False
+
+    def _na_stanje_povezave(self, povezan: bool) -> None:
+        self._oddaj_dogodek("povezava", povezan)
+        self._oddaj_dogodek("stanje", self.stanje_linka())
+
+    def _na_sporocilo(self, sporocilo: dict) -> None:
+        if not isinstance(sporocilo, dict):
+            return
+        vrsta = sporocilo.get("type", "")
+
+        if vrsta == "cast.devices":
+            seznam = []
+            for d in sporocilo.get("devices") or []:
+                seznam.append({
+                    "id": d.get("id", ""),
+                    "ime": d.get("name", ""),
+                    "vloga": d.get("role", "receiver"),
+                    "zmoznosti": d.get("capabilities") or [],
+                    "platforma": d.get("platform") or "",
+                    "vrsta": d.get("kind") or "",
+                    "aplikacije": d.get("apps") if isinstance(d.get("apps"), dict) else {},
+                    "ta": d.get("id") == self.device_id,
+                })
+            self.naprave = seznam
+            self._oddaj_dogodek("naprave", self.naprave)
+            self._oddaj_dogodek("stanje", self.stanje_linka())
+
+        elif vrsta in ("control.result", "control.ack"):
+            ref = str(sporocilo.get("ref_id", "") or "")
+            if ref in self._cakajoci:
+                event, res_holder = self._cakajoci[ref]
+                res_holder[0] = sporocilo.get("payload") or sporocilo
+                event.set()
+            self._oddaj_dogodek("ukaz", sporocilo)
+
+        elif vrsta == "share.text":
+            self._oddaj_dogodek("besedilo", sporocilo.get("payload"))
+
+        elif vrsta == "cast.status":
+            self._oddaj_dogodek("predvajanje", sporocilo.get("payload"))
+
+    # ------------------------------------------------------------------ RPC ukazi napravam
+    def ukaz_pocakaj(self, id_naprave: str, dejanje: str, parametri: Optional[dict] = None, cas: float = 12.0) -> dict:
+        if not self.je_povezan():
+            return {"ok": False, "message": "Ni povezave s Safeer Linkom.", "koda": "ni_povezave"}
+
+        ref = "cakaj-" + secrets.token_urlsafe(9)
+        ev = threading.Event()
+        odgovor = [None]
+        self._cakajoci[ref] = (ev, odgovor)
+
+        poslano = self.povezava.poslji({
+            "id": ref,
+            "type": "control.command",
+            "target": id_naprave,
+            "payload": {"action": dejanje, "params": parametri or {}},
+        })
+        if not poslano:
+            self._cakajoci.pop(ref, None)
+            return {"ok": False, "message": "Ukaza ni bilo mogoce poslati.", "koda": "ni_poslano"}
+
+        ev.wait(cas)
+        self._cakajoci.pop(ref, None)
+        res = odgovor[0]
+        if res is None:
+            return {"ok": False, "message": "Naprava ni odgovorila.", "koda": "cas"}
+        return res if isinstance(res, dict) else {"ok": True, "data": res}
+
+    def vse_naprave(self) -> List[dict]:
+        """Seznam naprav za Safeer OS stran Naprave."""
+        rez = []
+        for n in self.naprave:
+            ime = n.get("ime") or n.get("name") or n.get("id", "")
+            rez.append({
+                "id": n.get("id", ""),
+                "ime": ime,
+                "platforma": n.get("platforma") or n.get("platform", ""),
+                "vrsta": n.get("vrsta") or n.get("kind", ""),
+                "ta": bool(n.get("ta") or n.get("id") == self.device_id),
+            })
+        return rez
+
+    def naprave_s_programi(self) -> List[dict]:
+        """Naprave, ki znajo zagnati programe ali sprejemati daljinec (brez tega racunalnika)."""
+        rez = []
+        for n in self.naprave:
+            if n.get("ta") or n.get("id") == self.device_id:
+                continue
+            z = n.get("zmoznosti") or n.get("capabilities") or []
+            if "apps" in z or "remote" in z:
+                ime = n.get("ime") or n.get("name") or n.get("id", "")
+                rez.append({
+                    "id": n.get("id", ""),
+                    "ime": ime,
+                    "platforma": n.get("platforma") or n.get("platform", ""),
+                    "vrsta": n.get("vrsta") or n.get("kind", ""),
+                })
+        return rez
+
+    def programi_naprave(self, id_naprave: str) -> dict:
+        """Pridobi seznam namescenih programov oddaljene naprave (npr. TV ali telefon)."""
+        if not id_naprave:
+            return {"ok": False, "programi": []}
+
+        vsi = []
+        od = 0
+        for _ in range(10):
+            r = self.ukaz_pocakaj(id_naprave, "apps.list", {"icons": True, "offset": od, "limit": 50}, cas=8.0)
+            if not r.get("ok"):
+                return {"ok": False, "koda": r.get("koda", "napaka"), "programi": []}
+            podatki = r.get("data") if isinstance(r.get("data"), dict) else r
+            kos = podatki.get("items") or []
+            vsi.extend(kos)
+            skupaj = int(podatki.get("total") or len(vsi))
+            od = int(podatki.get("offset") or 0) + len(kos)
+            if not kos or od >= skupaj:
+                break
+
+        programi = []
+        for item in vsi:
+            if not isinstance(item, dict) or not item.get("id"):
+                continue
+            ikona = str(item.get("icon") or "")
+            if not ikona and item.get("icon_png"):
+                ikona = "data:image/png;base64," + str(item["icon_png"])
+            programi.append({
+                "id": str(item["id"]),
+                "ime": str(item.get("name") or item["id"]),
+                "opis": str(item.get("comment") or ""),
+                "skupina": str(item.get("group") or "drugo"),
+                "ikona": ikona,
+                "naprava": str(id_naprave),
+            })
+
+        return {"ok": True, "programi": programi, "deli": True}
+
+    def zazeni_na_napravi(self, id_naprave: str, app: str) -> bool:
+        r = self.ukaz_pocakaj(id_naprave, "apps.launch", {"app": app}, cas=6.0)
+        return bool(r.get("ok"))
+
+    def odpri_tukaj(self, id_naprave: str, app: str) -> dict:
+        r = self.ukaz_pocakaj(id_naprave, "apps.launch", {"app": app, "stream": True}, cas=8.0)
+        podatki = r.get("data") if isinstance(r.get("data"), dict) else {}
+        return {
+            "ok": bool(r.get("ok")),
+            "tu": podatki.get("stream") == "pending",
+            "koda": str(r.get("koda") or ""),
+            "message": str(r.get("message") or ""),
+        }
+
+    def preimenuj_napravo(self, id_naprave: str, novo_ime: str) -> dict:
+        hub = self.hub_url()
+        zeton = self.zeton()
+        odtis = self.hub_fp()
+        if not (hub and zeton):
+            return {"ok": False, "koda": "ni_povezave"}
+        ok, ime_shranjeno, n = link_deljenje.preimenuj_napravo(hub, zeton, odtis or "", id_naprave, novo_ime)
+        if ok:
+            for d in self.naprave:
+                if d.get("id") == id_naprave:
+                    d["ime"] = ime_shranjeno
+            self._oddaj_dogodek("naprave", self.naprave)
+        return {"ok": bool(ok), "ime": ime_shranjeno, "message": n.get("sporocilo", "")}
+
+    def ukaz(self, cilj: str, akcija: str, podatki: Any = None, ref: str = "") -> bool:
+        """Poslje nadzorni ukaz (daljinec, tipke, zvok) napravi."""
+        if not self.je_povezan():
+            return False
+        return self.povezava.poslji({
+            "id": ref or f"ukaz-{int(time.time() * 1000)}",
+            "type": "control.command",
+            "target": cilj,
+            "payload": {"action": akcija, "params": podatki or {}},
+        })
+
+    def poslji_besedilo(self, cilj: str, vsebina: str) -> bool:
+        if not self.je_povezan():
+            return False
+        return self.povezava.poslji({
+            "id": f"text-{int(time.time() * 1000)}",
+            "type": "share.text",
+            "target": cilj,
+            "payload": {"text": vsebina},
+        })
+
+    # ------------------------------------------------------------------ Deljene mape
+    def deljene_mape(self) -> List[str]:
+        return list(self.nastavitve.get("deljene_mape", []))
+
+    def dodaj_deljeno_mapo(self, pot: str) -> bool:
+        mape = self.deljene_mape()
+        cista = os.path.abspath(pot)
+        if os.path.isdir(cista) and cista not in mape:
+            mape.append(cista)
+            self.nastavitve["deljene_mape"] = mape
+            self.shrani_nastavitve()
+            self._oddaj_dogodek("stanje", self.stanje_linka())
+            return True
+        return False
+
+    def odstrani_deljeno_mapo(self, indeks: int) -> bool:
+        mape = self.deljene_mape()
+        if 0 <= indeks < len(mape):
+            del mape[indeks]
+            self.nastavitve["deljene_mape"] = mape
+            self.shrani_nastavitve()
+            self._oddaj_dogodek("stanje", self.stanje_linka())
+            return True
+        return False
+
+
+def get_backend() -> SafeerControlBackend:
+    return SafeerControlBackend.pridobi()
