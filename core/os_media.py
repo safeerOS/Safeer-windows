@@ -499,12 +499,77 @@ class _MediaHTMLParser(HTMLParser):
         return self.items[:MAX_SOURCE_ITEMS]
 
 
+def _embed_url_for_provider(netloc: str, scheme: str, imdb_id: str,
+                            tmdb_id: str, media_type: str,
+                            season: int = 0, episode: int = 0) -> str:
+    """Sestavi embed URL za danega ponudnika glede na tip vsebine."""
+    s, e = max(1, season), max(1, episode)
+    is_tv = (media_type == "serija")
+
+    if "vidlink" in netloc:
+        if is_tv:
+            return f"https://vidlink.pro/tv/{tmdb_id}/{s}/{e}?primaryColor=00e5ff&autoplay=true&sub=0&subtitles=false"
+        return f"https://vidlink.pro/movie/{tmdb_id}?primaryColor=00e5ff&autoplay=true&sub=0&subtitles=false"
+
+    if "vidsrc.me" in netloc:
+        if is_tv:
+            return f"https://vidsrc.me/embed/tv?tmdb={tmdb_id}&season={s}&episode={e}&sub=0"
+        return f"https://vidsrc.me/embed/movie?tmdb={tmdb_id}&sub=0"
+
+    if "vidsrc.in" in netloc:
+        if is_tv:
+            return f"https://vidsrc.in/embed/tv/{tmdb_id}/{s}/{e}?sub=0"
+        return f"https://vidsrc.in/embed/movie/{tmdb_id}?sub=0"
+
+    if "vidsrc.pm" in netloc:
+        if is_tv:
+            return f"https://vidsrc.pm/embed/tv/{tmdb_id}/{s}/{e}?sub=0"
+        return f"https://vidsrc.pm/embed/movie/{tmdb_id}?sub=0"
+
+    if "autoembed" in netloc:
+        if is_tv:
+            return f"https://player.autoembed.cc/embed/tv/{tmdb_id}/{s}/{e}"
+        return f"https://player.autoembed.cc/embed/movie/{tmdb_id}"
+
+    if "multiembed" in netloc:
+        if is_tv:
+            return f"https://multiembed.mov/?video_id={tmdb_id}&tmdb=1&s={s}&e={e}&sub=0"
+        return f"https://multiembed.mov/?video_id={tmdb_id}&tmdb=1&sub=0"
+
+    if "2embed" in netloc:
+        if is_tv:
+            return f"https://www.2embed.cc/embedtv/{tmdb_id}&s={s}&e={e}&sub=0"
+        return f"https://www.2embed.cc/embed/{tmdb_id}"
+
+    if "111movies" in netloc:
+        if is_tv:
+            return f"https://111movies.com/tv/{tmdb_id}/{s}/{e}"
+        return f"https://111movies.com/movie/{tmdb_id}"
+
+    # Privzeto: vidsrc.cc format
+    if is_tv:
+        return f"{scheme}://{netloc}/v2/embed/tv/{imdb_id}/{s}/{e}"
+    return f"{scheme}://{netloc}/v2/embed/movie/{imdb_id}"
+
+
+# Domene ki podpirajo TMDB ID-je neposredno (brez IMDb preslikave)
+_TMDB_NATIVE_PROVIDERS = {"vidlink", "vidsrc.me", "vidsrc.in", "vidsrc.pm",
+                          "autoembed", "multiembed", "2embed", "111movies"}
+
+# Vse prepoznane embed domene (razširjeno)
+_EMBED_DOMAINS = ("vidsrc", "vidlink", "embed.su", "superembed", "multiembed",
+                  "2embed", "autoembed", "111movies")
+
+
 def _resolve_embed_or_direct_source(url: str, source_id: str, source_name: str) -> list[dict]:
     """Prepozna embed ponudnike, specifične epizode/filme ali splošne vdelane toke."""
     parsed = urllib.parse.urlsplit(url)
     netloc = parsed.netloc.lower()
     path = parsed.path
-    is_embed_domain = any(dom in netloc for dom in ("vidsrc", "vidlink", "embed.su", "superembed", "multiembed", "2embed"))
+    is_embed_domain = any(dom in netloc for dom in _EMBED_DOMAINS)
+
+    # Ugotovi ali ponudnik podpira TMDB ID-je (namesto IMDb)
+    uses_tmdb = any(dom in netloc for dom in _TMDB_NATIVE_PROVIDERS)
 
     # 1. Specifična povezava do TV serije ali epizode (/tv/ ali /series/ ali SxxExx)
     match_tv = re.search(r"/(?:tv|series|embed/tv)/([^/]+)/(\d+)/(\d+)", url)
@@ -538,7 +603,12 @@ def _resolve_embed_or_direct_source(url: str, source_id: str, source_name: str) 
         if episodes:
             items = []
             for s, e, ep_name in episodes:
-                tv_url = f"{scheme}://{embed_host}/v2/embed/tv/{imdb_id}/{s}/{e}"
+                # Za TMDB ponudnike poišči TMDB ID iz aliasov
+                tmdb_id = imdb_id  # privzeto (če je že TMDB)
+                for tmdb_k, imdb_v in [(k, v) for k, v in KNOWN_IMDB.items() if not k.startswith("tt") and v.get("title") == info.get("title")]:
+                    tmdb_id = tmdb_k
+                    break
+                tv_url = _embed_url_for_provider(embed_host, scheme, imdb_id, tmdb_id, "serija", s, e)
                 full_title = f"{title_base} S{s:02d}E{e:02d} - {ep_name}"
                 it = _item(full_title, tv_url, base=tv_url, source_id=source_id,
                            source_name=effective_name, kind="serija",
@@ -548,7 +618,7 @@ def _resolve_embed_or_direct_source(url: str, source_id: str, source_name: str) 
                     items.append(it)
             return items
         else:
-            tv_url = f"{scheme}://{embed_host}/v2/embed/tv/{imdb_id}/1/1"
+            tv_url = _embed_url_for_provider(embed_host, scheme, imdb_id, imdb_id, "serija", 1, 1)
             it = _item(f"{title_base} S01E01", tv_url, base=tv_url, source_id=source_id,
                        source_name=effective_name, kind="serija",
                        year=info.get("year", 0), image=info.get("image", ""),
@@ -566,16 +636,30 @@ def _resolve_embed_or_direct_source(url: str, source_id: str, source_name: str) 
                      description=info.get("description", ""))
         return [item] if item else []
 
-    # 3. Korenska domena embed ponudnika (npr. https://vidsrc.cc ali https://vidlink.pro)
+    # 3. Korenska domena embed ponudnika — generiraj katalog prepoznanih filmov/serij
     if is_embed_domain and (not path or path in ("/", "/index.html", "/v2", "/v2/")):
         items = []
         embed_host = parsed.netloc or "vidsrc.cc"
         scheme = parsed.scheme or "https"
-        effective_name = source_name if source_name and source_name != embed_host else "VidSrc"
-        # Ustvari katalog prepoznanih filmov in serij za tega ponudnika
+        effective_name = source_name if source_name and source_name != embed_host else embed_host.split(".")[0].capitalize()
+
+        # Zgradimo obratno preslikavo: IMDb ID → TMDB ID
+        imdb_to_tmdb: dict[str, str] = {}
+        for tmdb_k, info_v in KNOWN_IMDB.items():
+            if not tmdb_k.startswith("tt"):
+                # To je TMDB alias — poišči original IMDb ključ
+                for imdb_k2, info2 in KNOWN_IMDB.items():
+                    if imdb_k2.startswith("tt") and info2.get("title") == info_v.get("title"):
+                        imdb_to_tmdb[imdb_k2] = tmdb_k
+                        break
+
         for imdb_id, meta in KNOWN_IMDB.items():
+            if not imdb_id.startswith("tt"):
+                continue  # preskoči TMDB aliase, obdelamo le IMDb ključe
+            tmdb_id = imdb_to_tmdb.get(imdb_id, imdb_id)
+
             if meta.get("kind") == "film":
-                movie_url = f"{scheme}://{embed_host}/v2/embed/movie/{imdb_id}"
+                movie_url = _embed_url_for_provider(embed_host, scheme, imdb_id, tmdb_id, "film")
                 it = _item(meta["title"], movie_url, base=movie_url, source_id=source_id,
                            source_name=effective_name, kind="film",
                            year=meta.get("year", 0), image=meta.get("image", ""),
@@ -584,7 +668,7 @@ def _resolve_embed_or_direct_source(url: str, source_id: str, source_name: str) 
                     items.append(it)
             elif meta.get("kind") == "serija":
                 for s, e, ep_name in meta.get("episodes", []):
-                    tv_url = f"{scheme}://{embed_host}/v2/embed/tv/{imdb_id}/{s}/{e}"
+                    tv_url = _embed_url_for_provider(embed_host, scheme, imdb_id, tmdb_id, "serija", s, e)
                     full_title = f"{meta['title']} S{s:02d}E{e:02d} - {ep_name}"
                     it = _item(full_title, tv_url, base=tv_url, source_id=source_id,
                                source_name=effective_name, kind="serija",
