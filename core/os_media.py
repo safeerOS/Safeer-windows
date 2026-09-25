@@ -559,6 +559,108 @@ class MediaCenter:
             merged = [item for item in merged if item.get("vrsta") == kind]
         return {"vnosi": merged, "viri": self.sources(), "skupaj": len(merged), "mape": [str(path) for path in self.roots]}
 
+    def export_json(self) -> dict:
+        """Izvozi celotno konfiguracijo in shranjene vire za prenos ali varnostno kopijo."""
+        with self._lock:
+            data = self._load()
+            return {
+                "razlicica": 1,
+                "aplikacija": "Safeer Media",
+                "cas": int(time.time()),
+                "viri": data.get("viri", []),
+            }
+
+    def import_json(self, raw_data: Any, default_name: str = "") -> dict:
+        """Uvozi JSON kodo ali izvoženo JSON datoteko.
+
+        Podpira:
+        1. Celoten izvoz Safeer Media (slovar z 'viri').
+        2. Seznam medijskih vnosov ali katalog z 'items'/'vnosi'.
+        3. Prilagojen vir s tokovi.
+        """
+        if isinstance(raw_data, str):
+            besedilo = raw_data.strip()
+            if not besedilo:
+                return {"ok": False, "napaka": "Prazen vnos JSON"}
+            try:
+                data = json.loads(besedilo)
+            except Exception as exc:
+                return {"ok": False, "napaka": f"Neveljaven JSON: {exc}"}
+        elif isinstance(raw_data, (dict, list)):
+            data = raw_data
+        else:
+            return {"ok": False, "napaka": "Neveljaven format podatkov"}
+
+        with self._lock:
+            shramba = self._load()
+            obstojeci_viri = shramba.get("viri", [])
+
+            # Primer 1: Izvožena konfiguracija virov z 'viri'
+            if isinstance(data, dict) and isinstance(data.get("viri"), list):
+                uvozeni_viri = data.get("viri", [])
+                st_dodanih = 0
+                st_posodobljenih = 0
+                for v in uvozeni_viri:
+                    if not isinstance(v, dict):
+                        continue
+                    url = v.get("url") or f"custom://{v.get('id', int(time.time()))}"
+                    ime = _text(v.get("ime") or v.get("name") or "Uvoženi vir", 80)
+                    vnosi = v.get("vnosi") if isinstance(v.get("vnosi"), list) else []
+
+                    najden = next((x for x in obstojeci_viri if x.get("url") == url or (x.get("id") and x.get("id") == v.get("id"))), None)
+                    if najden:
+                        najden["ime"] = ime
+                        if vnosi:
+                            najden["vnosi"] = vnosi
+                            najden["stevilo"] = len(vnosi)
+                        najden["posodobljeno"] = int(time.time())
+                        st_posodobljenih += 1
+                    else:
+                        vir_id = v.get("id") or hashlib.sha256(url.encode()).hexdigest()[:16]
+                        nov_vir = {
+                            "id": vir_id,
+                            "url": url,
+                            "ime": ime,
+                            "posodobljeno": int(time.time()),
+                            "napaka": "",
+                            "stevilo": len(vnosi),
+                            "vnosi": vnosi,
+                        }
+                        obstojeci_viri.append(nov_vir)
+                        st_dodanih += 1
+                shramba["viri"] = obstojeci_viri
+                self._save(shramba)
+                return {"ok": True, "st_dodanih": st_dodanih, "st_posodobljenih": st_posodobljenih, "vrsta": "viri"}
+
+            # Primer 2: Seznam elementov ali posamezen katalog
+            vir_hash = hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()[:12]
+            source_id = f"custom-{vir_hash}"
+            custom_name = _text(default_name or (data.get("name") if isinstance(data, dict) else "") or (data.get("ime") if isinstance(data, dict) else "") or "Uvoženi JSON katalog", 80)
+
+            items = _items_from_json(data, base="", source_id=source_id, source_name=custom_name)
+            if not items:
+                return {"ok": False, "napaka": "V JSON podatkih ni bilo mogoče najti medijskih vsebin (preverite naslov in url)."}
+
+            najden = next((x for x in obstojeci_viri if x.get("id") == source_id), None)
+            if najden:
+                najden["ime"] = custom_name
+                najden["vnosi"] = items
+                najden["stevilo"] = len(items)
+                najden["posodobljeno"] = int(time.time())
+            else:
+                obstojeci_viri.append({
+                    "id": source_id,
+                    "url": f"custom://{source_id}",
+                    "ime": custom_name,
+                    "posodobljeno": int(time.time()),
+                    "napaka": "",
+                    "stevilo": len(items),
+                    "vnosi": items,
+                })
+            shramba["viri"] = obstojeci_viri
+            self._save(shramba)
+            return {"ok": True, "st_vnosov": len(items), "vir": custom_name, "vrsta": "katalog"}
+
     def resolve(self, item_id: str) -> Optional[dict]:
         return next((item for item in self.catalog()["vnosi"] if item.get("id") == item_id), None)
 

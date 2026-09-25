@@ -482,6 +482,14 @@ class SafeerOsWindow(QMainWindow):
             name = str(a[1]) if len(a) > 1 else ""
             return self.media_center.add_source(url, name)
 
+        if metoda == "mediaUvoziJson":
+            raw_json = a[0] if a else ""
+            default_name = str(a[1]) if len(a) > 1 else ""
+            return self.media_center.import_json(raw_json, default_name)
+
+        if metoda == "mediaIzvoziJson":
+            return self.media_center.export_json()
+
         if metoda == "mediaOdstraniVir":
             return self.media_center.remove_source(str(a[0]) if a else "")
 
