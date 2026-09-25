@@ -136,8 +136,9 @@ class SafeerControlWindow(QMainWindow):
         super().__init__(parent, flags)
         self.backend = backend or control_backend.get_backend()
         #: Ko je vgrajen v Safeer OS (namesto lastnega vrha-okna): klice se ob "zapri", uspesni
-        #: seznanitvi ali "nadaljuj brez povezave", da starsevsko okno preklopi nazaj na svoj pogled.
+        #: seznanitvi ob prvem zagonu ali "nadaljuj brez povezave", da starsevsko okno preklopi nazaj.
         self.na_skritje = na_skritje
+        self.v_prijavi = False
         self.setWindowTitle("Safeer Control")
         if parent is None:
             self.resize(960, 640)
@@ -222,14 +223,15 @@ class SafeerControlWindow(QMainWindow):
 
     def _na_dogodek_zaledja(self, vrsta: str, podatki: Any) -> None:
         self.dispatcher.dispatch(lambda: self.osvezi_stran(vrsta, podatki))
-        if self.na_skritje is not None and vrsta in ("povezava", "stanje", "seznanitev") and (
-            self.backend.stanje_linka().get("povezan") or self.backend.stanje_povezave().get("stanje") == "povezan"
+        if self.na_skritje is not None and getattr(self, "v_prijavi", False) and vrsta == "seznanitev" and (
+            podatki and (isinstance(podatki, dict) and podatki.get("uspeh") or podatki is True)
         ):
+            self.v_prijavi = False
             self.dispatcher.dispatch(self.na_skritje)
 
-    def pojdi_na_razdelek(self, razdelek: str) -> None:
+    def pojdi_na_razdelek(self, razdelek: str, id_naprave: str = "") -> None:
         def akcija():
-            cmd = f"if (window.safeerLinkOdpri) window.safeerLinkOdpri({json.dumps(razdelek)});"
+            cmd = f"if (window.safeerLinkOdpri) window.safeerLinkOdpri({json.dumps(razdelek)}, {json.dumps(id_naprave)});"
             self.view.page().runJavaScript(cmd)
         self.dispatcher.dispatch(lambda: QTimer.singleShot(300, akcija))
 

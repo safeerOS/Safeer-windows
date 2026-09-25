@@ -167,7 +167,9 @@ class SafeerControlBackend:
             "hub": ime_huba or hub,
             "hub_url": hub,
             "naprava": self.device_ime,
+            "imeNaprave": self.device_ime,
             "id": self.device_id,
+            "idNaprave": self.device_id,
             "control": True,
             "vKrogu": False,
             "clanKroga": False,
@@ -550,6 +552,10 @@ class SafeerControlBackend:
                     "zmoznosti": d.get("capabilities") or [],
                     "platforma": d.get("platform") or "",
                     "vrsta": d.get("kind") or "",
+                    "naslov": d.get("ip") or d.get("naslov") or "",
+                    "ip": d.get("ip") or d.get("naslov") or "",
+                    "zasedenaOd": d.get("busy_by") or d.get("zasedenaOd") or "",
+                    "zasedenaOdIme": d.get("busy_by_name") or d.get("zasedenaOdIme") or "",
                     "aplikacije": d.get("apps") if isinstance(d.get("apps"), dict) else {},
                     "ta": d.get("id") == self.device_id,
                 })
@@ -558,12 +564,19 @@ class SafeerControlBackend:
             self._oddaj_dogodek("stanje", self.stanje_linka())
 
         elif vrsta in ("control.result", "control.ack"):
-            ref = str(sporocilo.get("ref_id", "") or "")
+            ref = str(sporocilo.get("ref_id", "") or sporocilo.get("id", "") or "")
+            payload = sporocilo.get("payload")
+            telo = dict(payload) if isinstance(payload, dict) else {}
             if ref in self._cakajoci:
                 event, res_holder = self._cakajoci[ref]
-                res_holder[0] = sporocilo.get("payload") or sporocilo
+                res_holder[0] = telo or sporocilo
                 event.set()
-            self._oddaj_dogodek("ukaz", sporocilo)
+            odziv_podatki = dict(telo)
+            odziv_podatki["ref"] = ref
+            odziv_podatki["ref_id"] = ref
+            if "ok" not in odziv_podatki and vrsta == "control.ack":
+                odziv_podatki["ok"] = True
+            self._oddaj_dogodek("ukaz", odziv_podatki)
 
         elif vrsta == "share.text":
             self._oddaj_dogodek("besedilo", sporocilo.get("payload"))
@@ -609,6 +622,7 @@ class SafeerControlBackend:
                 "platforma": n.get("platforma") or n.get("platform", ""),
                 "vrsta": n.get("vrsta") or n.get("kind", ""),
                 "ta": bool(n.get("ta") or n.get("id") == self.device_id),
+                "zmoznosti": n.get("zmoznosti") or n.get("capabilities") or [],
             })
         return rez
 
@@ -807,11 +821,16 @@ class SafeerControlBackend:
         """Poslje nadzorni ukaz (daljinec, tipke, zvok) napravi."""
         if not self.je_povezan():
             return False
+        if isinstance(podatki, str):
+            try:
+                podatki = json.loads(podatki)
+            except Exception:
+                pass
         return self.povezava.poslji({
             "id": ref or f"ukaz-{int(time.time() * 1000)}",
             "type": "control.command",
             "target": cilj,
-            "payload": {"action": akcija, "params": podatki or {}},
+            "payload": {"action": akcija, "params": podatki if isinstance(podatki, dict) else {}},
         })
 
     def poslji_besedilo(self, cilj: str, vsebina: str) -> bool:

@@ -883,11 +883,34 @@
           });
           setTimeout(function () { vnos.focus(); vnos.select(); }, 0);
         } else {
-          li.innerHTML = svg(ikonaNaprave(n)) + "<div><b></b><small></small></div><button class=\"gumb majhen\"></button>";
+          var jeDaljinec = !n.ta && (
+            (n.zmoznosti && n.zmoznosti.indexOf("remote") >= 0) ||
+            n.platforma === "tv" || n.vrsta === "screen" || n.vloga === "receiver"
+          );
+          var htmlGumbi = '<div style="display:flex;gap:6px;align-items:center;">' +
+            '<button class="gumb majhen gumb-preimenuj">✎ ' + ubezi(t("preimenuj")) + '</button>';
+          if (jeDaljinec) {
+            htmlGumbi += '<button class="gumb majhen glavni gumb-daljinec" style="display:inline-flex;gap:4px;align-items:center;">' +
+              svg("daljinec") + '<span>' + ubezi(t("daljinec") || "Daljinec") + '</span></button>';
+          }
+          htmlGumbi += '</div>';
+
+          li.innerHTML = svg(ikonaNaprave(n)) + "<div><b></b><small></small></div>" + htmlGumbi;
           li.querySelector("b").textContent = n.ime || n.id;
           li.querySelector("small").textContent = opis;
-          var g = li.querySelector("button"); g.textContent = "✎ " + t("preimenuj"); g.title = t("preimenuj");
-          g.addEventListener("click", function () { preimenujem = n.id; narisiSeznamNaprav(true); });
+          var gPreimenuj = li.querySelector(".gumb-preimenuj");
+          if (gPreimenuj) {
+            gPreimenuj.title = t("preimenuj");
+            gPreimenuj.addEventListener("click", function () { preimenujem = n.id; narisiSeznamNaprav(true); });
+          }
+          var gDaljinec = li.querySelector(".gumb-daljinec");
+          if (gDaljinec) {
+            gDaljinec.title = t("daljinec") || "Daljinec";
+            gDaljinec.addEventListener("click", function () {
+              obvesti(t("odpiram", { ime: n.ime || "Daljinec" }));
+              klic("daljinec", [n.id]);
+            });
+          }
         }
         ul.appendChild(li);
       });

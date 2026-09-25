@@ -1916,9 +1916,21 @@
     else if (razdelek !== "daljinec" && el("stranskiMeni").querySelector('button[data-razdelek="' + razdelek + '"]').hidden) izberiRazdelek("naprave");
   }
 
+  function najdiNapravo(id) {
+    if (!id || !stanje.naprave) return null;
+    for (var i = 0; i < stanje.naprave.length; i++) {
+      if (stanje.naprave[i].id === id) return stanje.naprave[i];
+    }
+    return null;
+  }
+
   /** Zaslon (televizor), ki sprejema ukaze daljinca; prvi tak, ali null. */
   function napravaZaDaljinec() {
-    var z = zasloni().filter(function (n) { return (n.zmoznosti || []).indexOf("remote") >= 0; });
+    var z = stanje.naprave.filter(function (n) {
+      if (n.id === stanje.idNaprave) return false;
+      var zm = n.zmoznosti || [];
+      return zm.indexOf("remote") >= 0 || n.platforma === "tv" || n.vrsta === "screen" || n.vloga === "receiver";
+    });
     return z.length ? z[0] : null;
   }
 
@@ -2198,12 +2210,23 @@
       most.prekiniVabilo();
     }
   }
-  window.safeerLinkOdpri = function (kaj) {
+  window.safeerLinkOdpri = function (kaj, napravaId) {
     if (kaj === "novaNaprava") {
       if (typeof izberiRazdelek === "function") izberiRazdelek("naprave");
       preklopiVabilo(true);
       var p = el("panelDodaj");
       if (p && p.scrollIntoView) p.scrollIntoView({ block: "start" });
+    } else if (kaj === "daljinec") {
+      var cilj = (napravaId && typeof najdiNapravo === "function") ? najdiNapravo(napravaId) : null;
+      if (!cilj && typeof napravaZaDaljinec === "function") cilj = napravaZaDaljinec();
+      if (cilj && window.SafeerDaljinec) {
+        if (typeof oznaciRazdelek === "function") oznaciRazdelek("daljinec");
+        window.SafeerDaljinec.odpri(cilj);
+      } else if (typeof izberiRazdelek === "function") {
+        izberiRazdelek("daljinec");
+      }
+    } else if (kaj === "naprave" || kaj === "mape" || kaj === "poslji" || kaj === "sync") {
+      if (typeof izberiRazdelek === "function") izberiRazdelek(kaj);
     }
   };
 
@@ -2559,8 +2582,8 @@
     pokazi("deljenjeBesedilo", false);
     pokazi("gumbPosljiNaNapravo", false);
     pokazi("preimenujBlok", false);
-    // Daljinec: napravo, ki javi zmoznost "remote", je mogoce upravljati (Safeer Control).
-    var znaDaljinec = !samoIme && !!(most && most.ukaz) && ((naprava.zmoznosti || []).indexOf("remote") >= 0) && !!window.SafeerDaljinec;
+    // Daljinec: napravo, ki javi zmoznost "remote" ali je TV/zaslon, je mogoce upravljati (Safeer Control).
+    var znaDaljinec = !samoIme && !!(most && most.ukaz) && (((naprava.zmoznosti || []).indexOf("remote") >= 0) || naprava.platforma === "tv" || naprava.vrsta === "screen" || naprava.vloga === "receiver") && !!window.SafeerDaljinec;
     pokazi("gumbDaljinec", znaDaljinec);
     pokazi("bliznjiceZaslona", znaDaljinec);
     pokazi("izbireDeljenja", !samoIme);
