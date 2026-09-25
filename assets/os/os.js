@@ -153,6 +153,17 @@
       scitNapaka_ni_resolved: "Lo Scudo di sistema non è ancora disponibile in questa versione Windows."
     }
   };
+  var BESEDILA_MEDIA = {
+    sl: { mediaOpis:"Filmi, serije in glasba iz vseh tvojih virov v enem katalogu.",mediaOsvezi:"Osveži vire",mediaPredvaja:"PREDVAJA SE V SAFEER OS",mediaNapaka:"Tega toka ni mogoče predvajati. Poskusi drugo različico.",mediaIsci:"Išči filme, serije in glasbo",mediaVse:"Vse",mediaFilmi:"Filmi",mediaSerije:"Serije",mediaGlasba:"Glasba",mediaPrazno:"Ni zadetkov. Dodaj vir ali spremeni iskanje.",mediaViri:"Tvoji viri",mediaViriOpis:"Spletno stran, javni API, RSS ali M3U dodaš samo enkrat.",mediaVirIme:"Ime vira (neobvezno)",mediaVirUrl:"https://primer.si/katalog.json",mediaDodaj:"Dodaj vir",mediaZadetkov:"{n} enotnih vsebin",mediaRazlicic:"{n} različic",mediaVirDodan:"Vir je dodan in katalog združen.",mediaVirPodvojen:"Ta vir je že dodan.",mediaVirNapaka:"Vira ni bilo mogoče prebrati.",mediaOsvezeno:"Viri so osveženi.",mediaBrezVirov:"Dodaj prvi spletni vir; lokalne mape so vključene samodejno.",mediaVirElementov:"{n} vsebin"},
+    en: { mediaOpis:"Movies, series and music from all your sources in one catalogue.",mediaOsvezi:"Refresh sources",mediaPredvaja:"PLAYING IN SAFEER OS",mediaNapaka:"This stream cannot be played. Try another version.",mediaIsci:"Search movies, series and music",mediaVse:"All",mediaFilmi:"Movies",mediaSerije:"Series",mediaGlasba:"Music",mediaPrazno:"No results. Add a source or change the search.",mediaViri:"Your sources",mediaViriOpis:"Add a website, public API, RSS or M3U only once.",mediaVirIme:"Source name (optional)",mediaVirUrl:"https://example.com/catalogue.json",mediaDodaj:"Add source",mediaZadetkov:"{n} unique titles",mediaRazlicic:"{n} versions",mediaVirDodan:"Source added and catalogue merged.",mediaVirPodvojen:"This source has already been added.",mediaVirNapaka:"The source could not be read.",mediaOsvezeno:"Sources refreshed.",mediaBrezVirov:"Add your first web source; local folders are included automatically.",mediaVirElementov:"{n} titles"},
+    de: { mediaOpis:"Filme, Serien und Musik aus allen Quellen in einem Katalog.",mediaOsvezi:"Quellen aktualisieren",mediaPredvaja:"WIEDERGABE IN SAFEER OS",mediaNapaka:"Dieser Stream kann nicht abgespielt werden. Probiere eine andere Version.",mediaIsci:"Filme, Serien und Musik suchen",mediaVse:"Alle",mediaFilmi:"Filme",mediaSerije:"Serien",mediaGlasba:"Musik",mediaPrazno:"Keine Ergebnisse. Quelle hinzufügen oder Suche ändern.",mediaViri:"Deine Quellen",mediaViriOpis:"Website, öffentliche API, RSS oder M3U nur einmal hinzufügen.",mediaVirIme:"Name der Quelle (optional)",mediaVirUrl:"https://beispiel.de/katalog.json",mediaDodaj:"Quelle hinzufügen",mediaZadetkov:"{n} eindeutige Inhalte",mediaRazlicic:"{n} Versionen",mediaVirDodan:"Quelle hinzugefügt und Katalog zusammengeführt.",mediaVirPodvojen:"Diese Quelle wurde bereits hinzugefügt.",mediaVirNapaka:"Die Quelle konnte nicht gelesen werden.",mediaOsvezeno:"Quellen aktualisiert.",mediaBrezVirov:"Füge deine erste Webquelle hinzu; lokale Ordner sind automatisch enthalten.",mediaVirElementov:"{n} Inhalte"},
+    es: { mediaOpis:"Películas, series y música de todas tus fuentes en un catálogo.",mediaOsvezi:"Actualizar fuentes",mediaPredvaja:"REPRODUCIENDO EN SAFEER OS",mediaNapaka:"No se puede reproducir este flujo. Prueba otra versión.",mediaIsci:"Buscar películas, series y música",mediaVse:"Todo",mediaFilmi:"Películas",mediaSerije:"Series",mediaGlasba:"Música",mediaPrazno:"No hay resultados. Añade una fuente o cambia la búsqueda.",mediaViri:"Tus fuentes",mediaViriOpis:"Añade una web, API pública, RSS o M3U una sola vez.",mediaVirIme:"Nombre de la fuente (opcional)",mediaVirUrl:"https://ejemplo.es/catalogo.json",mediaDodaj:"Añadir fuente",mediaZadetkov:"{n} contenidos únicos",mediaRazlicic:"{n} versiones",mediaVirDodan:"Fuente añadida y catálogo combinado.",mediaVirPodvojen:"Esta fuente ya está añadida.",mediaVirNapaka:"No se pudo leer la fuente.",mediaOsvezeno:"Fuentes actualizadas.",mediaBrezVirov:"Añade tu primera fuente web; las carpetas locales ya están incluidas.",mediaVirElementov:"{n} contenidos"},
+    fr: { mediaOpis:"Films, séries et musique de toutes vos sources dans un catalogue.",mediaOsvezi:"Actualiser les sources",mediaPredvaja:"LECTURE DANS SAFEER OS",mediaNapaka:"Ce flux ne peut pas être lu. Essayez une autre version.",mediaIsci:"Rechercher films, séries et musique",mediaVse:"Tout",mediaFilmi:"Films",mediaSerije:"Séries",mediaGlasba:"Musique",mediaPrazno:"Aucun résultat. Ajoutez une source ou modifiez la recherche.",mediaViri:"Vos sources",mediaViriOpis:"Ajoutez un site, une API publique, un RSS ou M3U une seule fois.",mediaVirIme:"Nom de la source (facultatif)",mediaVirUrl:"https://exemple.fr/catalogue.json",mediaDodaj:"Ajouter la source",mediaZadetkov:"{n} contenus uniques",mediaRazlicic:"{n} versions",mediaVirDodan:"Source ajoutée et catalogue fusionné.",mediaVirPodvojen:"Cette source est déjà ajoutée.",mediaVirNapaka:"La source n’a pas pu être lue.",mediaOsvezeno:"Sources actualisées.",mediaBrezVirov:"Ajoutez votre première source web ; les dossiers locaux sont inclus.",mediaVirElementov:"{n} contenus"},
+    it: { mediaOpis:"Film, serie e musica da tutte le fonti in un solo catalogo.",mediaOsvezi:"Aggiorna fonti",mediaPredvaja:"RIPRODUZIONE IN SAFEER OS",mediaNapaka:"Impossibile riprodurre questo flusso. Prova un’altra versione.",mediaIsci:"Cerca film, serie e musica",mediaVse:"Tutto",mediaFilmi:"Film",mediaSerije:"Serie",mediaGlasba:"Musica",mediaPrazno:"Nessun risultato. Aggiungi una fonte o cambia la ricerca.",mediaViri:"Le tue fonti",mediaViriOpis:"Aggiungi sito, API pubblica, RSS o M3U una sola volta.",mediaVirIme:"Nome fonte (facoltativo)",mediaVirUrl:"https://esempio.it/catalogo.json",mediaDodaj:"Aggiungi fonte",mediaZadetkov:"{n} contenuti unici",mediaRazlicic:"{n} versioni",mediaVirDodan:"Fonte aggiunta e catalogo unificato.",mediaVirPodvojen:"Questa fonte è già stata aggiunta.",mediaVirNapaka:"Impossibile leggere la fonte.",mediaOsvezeno:"Fonti aggiornate.",mediaBrezVirov:"Aggiungi la prima fonte web; le cartelle locali sono già incluse.",mediaVirElementov:"{n} contenuti"}
+  };
+  Object.keys(BESEDILA_MEDIA).forEach(function (koda) {
+    if (BESEDILA_OS[koda]) Object.assign(BESEDILA_OS[koda], BESEDILA_MEDIA[koda]);
+  });
   function prilagodiPlatformo(platforma) {
     if (platforma !== "windows") return;
     Object.keys(BESEDILA_WINDOWS).forEach(function (koda) {
@@ -1652,6 +1663,8 @@
     if (vrsta === "stanje") narisiStanje(podatki);
     if (vrsta === "okna") narisiOkna(podatki);
     if (vrsta === "pojdi") window.safeerOsPojdi(podatki);
+    if (vrsta === "mediaFallback" && podatki) predvajajHtml(podatki, 0);
+    if (vrsta === "mediaOsvezen" && S.razdelek === "media") naloziMedia();
     if (vrsta === "naprave") {
       if (S.razdelek === "programi") nalozNaprave();
       if (S.razdelek === "datoteke") nalozNapraveSDatoteki();
@@ -1833,48 +1846,96 @@
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", zacni); else zacni();
   // ------------------------------------------------------------------ Safeer Media
-  // Glasba in video iz map Glasba/Video tega racunalnika, predvajalnik (MPRIS) in "Nadaljuj na".
-  var media = { katalog: [], filter: "vse", url: "" };
+  // En katalog ne glede na vir. Zaledje zdruzi dvojnike in izbere najboljsi tok;
+  // LibVLC ga predvaja v lastnem Qt pogledu, HTML5 pa je rezervni predvajalnik.
+  var media = { katalog: [], viri: [], filter: "vse", query: "", aktivni: null };
+  function mediaIkona(vrsta) { return vrsta === "glasba" ? "glasba" : "video"; }
+  function mediaOznaka(vrsta) { return t(vrsta === "glasba" ? "mediaGlasba" : (vrsta === "serija" ? "mediaSerije" : "mediaFilmi")); }
   function narisiMedia() {
-    var m = $("mediaMreza"); if (!m) return; m.innerHTML = "";
-    var list = media.katalog.filter(function (x) { return media.filter === "vse" || x.vrsta === media.filter; });
-    $("mediaPrazno").hidden = !!list.length;
-    list.slice(0, 120).forEach(function (x) {
-      var b = el("button", "ploscica media-kartica", svg(x.vrsta === "video" ? "video" : "glasba") +
-        "<div><b>" + ubezi(x.naslov) + '</b><span class="media-tip">' + ubezi(x.vrsta) + "</span></div>");
-      b.onclick = function () { klic("mediaOdpri", [x.pot]); };
-      m.appendChild(b);
+    var mreza = $("mediaMreza"); if (!mreza) return; mreza.innerHTML = "";
+    var iskano = media.query.trim().toLocaleLowerCase();
+    var list = media.katalog.filter(function (x) {
+      if (media.filter !== "vse" && x.vrsta !== media.filter) return false;
+      if (!iskano) return true;
+      return [x.naslov, x.izvajalec, x.opis].join(" ").toLocaleLowerCase().indexOf(iskano) >= 0;
     });
-    var v = $("mediaViri"); v.innerHTML = "";
-    (S.spletne || PRIVZETE_SPLETNE).forEach(function (x) {
-      var b = el("button", "ploscica media-kartica", svg("splet") + "<div><b>" + ubezi(x.ime) + '</b><span class="media-tip">splet</span></div>');
-      b.onclick = function () { klic("splet", [x.url]); };
-      v.appendChild(b);
+    $("mediaPrazno").hidden = !!list.length;
+    $("mediaPovzetek").textContent = t("mediaZadetkov", { n: list.length });
+    list.slice(0, 300).forEach(function (x) {
+      var card = el("button", "media-kartica");
+      if (x.slika) {
+        var image = document.createElement("img"); image.alt = ""; image.loading = "lazy"; image.src = x.slika;
+        image.onerror = function () { image.replaceWith(el("span", "media-brez-slike", svg(mediaIkona(x.vrsta)))); };
+        card.appendChild(image);
+      } else card.appendChild(el("span", "media-brez-slike", svg(mediaIkona(x.vrsta))));
+      var data = el("span", "media-podatki");
+      data.appendChild(el("b", "", ubezi(x.naslov || "")));
+      var meta = el("span", "media-meta");
+      meta.appendChild(el("span", "", ubezi(mediaOznaka(x.vrsta) + (x.leto ? " · " + x.leto : ""))));
+      if (x.stevilo_razlicic > 1) meta.appendChild(el("span", "", ubezi(t("mediaRazlicic", { n: x.stevilo_razlicic }))));
+      data.appendChild(meta); card.appendChild(data);
+      card.appendChild(el("span", "media-kakovost", ubezi(x.kakovost || "")));
+      card.onclick = function () { odpriMedia(x.id); };
+      mreza.appendChild(card);
+    });
+    narisiMediaVire();
+  }
+  function narisiMediaVire() {
+    var cilj = $("mediaViri"); cilj.innerHTML = "";
+    if (!media.viri.length) { cilj.appendChild(el("div", "prazno", ubezi(t("mediaBrezVirov")))); return; }
+    media.viri.forEach(function (source) {
+      var row = el("div", "media-vir"); row.innerHTML = svg("splet");
+      var info = el("div"); info.appendChild(el("b", "", ubezi(source.ime || source.url)));
+      var status = source.napaka ? source.napaka : t("mediaVirElementov", { n: source.stevilo || 0 });
+      info.appendChild(el("small", source.napaka ? "media-vir-napaka" : "", ubezi(status + " · " + source.url)));
+      row.appendChild(info);
+      var refresh = el("button", "gumb-ikona", svg("ponovno")); refresh.title = t("mediaOsvezi");
+      refresh.onclick = function () { osveziMediaVir(source.id); }; row.appendChild(refresh);
+      var remove = el("button", "gumb-ikona", svg("x")); remove.title = t("odstrani");
+      remove.onclick = function () { klic("mediaOdstraniVir", [source.id]).then(naloziMedia); }; row.appendChild(remove);
+      cilj.appendChild(row);
     });
   }
-  function mediaStanje() {
-    if (S.razdelek !== "media" || document.hidden) return;
-    klic("mediaStanje").then(function (x) {
-      x = x || {};
-      var z = $("mediaZdaj"); z.hidden = !x.na_voljo; if (!x.na_voljo) return;
-      $("mediaZdajNaslov").textContent = x.naslov || "Predvajanje";
-      $("mediaZdajIzvajalec").textContent = x.izvajalec || "";
-      if ((x.url || "") === media.url) return;          // gumbe "Nadaljuj na" rišemo le ob novem viru
-      media.url = x.url || "";
-      var h = $("mediaHandoff"); h.innerHTML = "";
-      if (media.url) klic("mediaNaprave").then(function (ns) {
-        (ns || []).forEach(function (n) {
-          var b = el("button", "", "Nadaljuj na " + ubezi(n.ime || n.id));
-          b.onclick = function () { klic("mediaNadaljujNa", [n.id, media.url, x.naslov || "", x.polozaj || 0]); };
-          h.appendChild(b);
-        });
-      }, function () {});
-    }, function () {});
+  function predvajajHtml(item, index) {
+    var variants = item.razlicice && item.razlicice.length ? item.razlicice : [{ url:item.url, vir:item.vir, kakovost:item.kakovost }];
+    var variant = variants[index || 0] || variants[0], audio = item.vrsta === "glasba";
+    var player = audio ? $("mediaAudio") : $("mediaVideo"), other = audio ? $("mediaVideo") : $("mediaAudio");
+    other.pause(); other.removeAttribute("src"); other.hidden = true; player.hidden = false;
+    $("mediaPredvajalnik").hidden = false; $("mediaNapaka").hidden = true;
+    $("mediaPredvajalnikNaslov").textContent = item.naslov || "Safeer Media";
+    $("mediaPredvajalnikMeta").textContent = [item.izvajalec, item.leto, variant.vir, variant.kakovost].filter(Boolean).join(" · ");
+    player.src = variant.url || ""; player.load(); player.play().catch(function () {});
+    player.onerror = function () { $("mediaNapaka").hidden = false; };
+    var choices = $("mediaRazlicice"); choices.innerHTML = "";
+    variants.forEach(function (entry, i) {
+      var button = el("button", i === (index || 0) ? "izbran" : "", ubezi([entry.kakovost, entry.vir].filter(Boolean).join(" · ")));
+      button.onclick = function () { predvajajHtml(item, i); }; choices.appendChild(button);
+    });
+    $("vsebina").scrollTop = 0;
+  }
+  function odpriMedia(id) {
+    klic("mediaPredvajaj", [id]).then(function (item) {
+      if (!item) { obvesti(t("mediaVirNapaka")); return; }
+      media.aktivni = item;
+      if (!item.native) predvajajHtml(item, 0);
+    }, function () { obvesti(t("mediaVirNapaka")); });
+  }
+  function zapriMediaHtml() {
+    [$("mediaVideo"), $("mediaAudio")].forEach(function (player) { player.pause(); player.removeAttribute("src"); player.load(); });
+    $("mediaPredvajalnik").hidden = true; media.aktivni = null;
   }
   function naloziMedia() {
-    media.url = "\u0000";
-    klic("mediaKatalog").then(function (x) { media.katalog = (x && x.vnosi) || []; narisiMedia(); }, function () {});
-    mediaStanje();
+    klic("mediaKatalog", ["", "vse"]).then(function (response) {
+      media.katalog = (response && response.vnosi) || [];
+      media.viri = (response && response.viri) || [];
+      narisiMedia();
+    }, function () { media.katalog = []; media.viri = []; narisiMedia(); });
+  }
+  function osveziMediaVir(id) {
+    $("mediaVirSporocilo").textContent = t("mediaOsvezi") + " …";
+    klic("mediaOsveziVir", id ? [id] : []).then(function () {
+      $("mediaVirSporocilo").textContent = t("mediaOsvezeno"); naloziMedia();
+    }, function () { $("mediaVirSporocilo").textContent = t("mediaVirNapaka"); });
   }
   document.querySelectorAll("[data-media-filter]").forEach(function (b) {
     b.onclick = function () {
@@ -1883,9 +1944,18 @@
       narisiMedia();
     };
   });
-  [["mediaNazaj", "nazaj"], ["mediaPlay", "predvajaj_pavza"], ["mediaNaprej", "naprej"], ["mediaStop", "ustavi"]].forEach(function (p) {
-    var b = $(p[0]); if (b) b.onclick = function () { klic("mediaUkaz", [p[1]]).then(mediaStanje, function () {}); };
+  $("mediaIskanje").addEventListener("input", function () { media.query = this.value; narisiMedia(); });
+  $("mediaZapri").addEventListener("click", zapriMediaHtml);
+  $("mediaOsvezi").addEventListener("click", function () { osveziMediaVir(""); });
+  $("mediaDodajVir").addEventListener("submit", function (event) {
+    event.preventDefault(); var url = $("mediaVirUrl").value.trim(), name = $("mediaVirIme").value.trim();
+    if (!url) return;
+    $("mediaVirSporocilo").textContent = t("mediaDodaj") + " …";
+    klic("mediaDodajVir", [url, name]).then(function (result) {
+      if (result && result.ok) { $("mediaVirUrl").value = ""; $("mediaVirIme").value = ""; $("mediaVirSporocilo").textContent = t("mediaVirDodan"); }
+      else $("mediaVirSporocilo").textContent = t(result && result.napaka === "podvojen" ? "mediaVirPodvojen" : "mediaVirNapaka");
+      naloziMedia();
+    }, function () { $("mediaVirSporocilo").textContent = t("mediaVirNapaka"); });
   });
-  setInterval(mediaStanje, 2000);
 
 })();

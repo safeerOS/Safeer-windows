@@ -61,6 +61,13 @@ Safeer OS in Safeer Control **nista dva ločena programa**, temveč enotna aplik
 - **[`uninstall.ps1`](uninstall.ps1)** in **[`uninstall.bat`](uninstall.bat)**:
   - Čista odstranitev programa, bližnjic in pravil požarnega zidu.
 
+### 2.6 Safeer Media kot del Safeer OS
+- **[`core/os_media.py`](core/os_media.py)** je enotno jedro kataloga za lokalne mape, javne JSON API-je, RSS/Atom, M3U in spletne strani oziroma aplikacije, ki medije objavijo prek HTML, OpenGraph, JSON-LD ali vdelanega JSON-a.
+- Vir se shrani enkrat in se v ozadju osvežuje na šest ur. Kanonični URL prepreči, da bi uporabnik isti vir dodal dvakrat.
+- Vsebina iz vseh virov se normalizira v filme, serije in glasbo. Podvojeni naslovi se združijo, različice pa razvrstijo po kakovosti; uporabniku se privzeto ponudi najboljša.
+- **[`windows/safeer_windows/vlc_player.py`](windows/safeer_windows/vlc_player.py)** vgradi LibVLC neposredno v glavno Qt okno Safeer OS. Zunanji VLC se ne odpre. Če LibVLC ni na voljo, ostane v istem razdelku na voljo HTML5 predvajalnik.
+- Namestitveni program namesti Python vezavo `python-vlc` in, kadar je mogoče, uradni VLC prek `winget`. Zasebni API ključi se ne shranjujejo; uporabniški viri so lokalno v `media.json`.
+
 ---
 
 ## 3. Kje se nahajajo varnostni ključi, potrdila in žetoni
@@ -91,7 +98,7 @@ git branch  # mora biti: resava-poenotenje-wip
 # 2. Zaženi celotno zbirko testov
 PYTHONPATH=windows pytest windows/tests/
 
-# Pričakovani rezultat: Vseh 74 testov mora biti zelenih (74 passed)
+# Pričakovani rezultat: Vseh 84 testov mora biti zelenih (84 passed)
 ```
 
 Preveri tudi skladnost PowerShell skript (če je na voljo `pwsh`):

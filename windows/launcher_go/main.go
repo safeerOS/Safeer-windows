@@ -158,25 +158,25 @@ func findPython() *PythonInfo {
 func checkAndInstallPySide6(py *PythonInfo) error {
 	var cmd *exec.Cmd
 	if py.IsLauncher {
-		cmd = exec.Command(py.ExePath, "-3", "-c", "import PySide6")
+		cmd = exec.Command(py.ExePath, "-3", "-c", "import PySide6, vlc")
 	} else {
-		cmd = exec.Command(py.ExePath, "-c", "import PySide6")
+		cmd = exec.Command(py.ExePath, "-c", "import PySide6, vlc")
 	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000}
 	if err := cmd.Run(); err == nil {
 		return nil
 	}
 
-	showMessage("Safeer OS", "Safeer OS pripravlja knjižnico PySide6. Namestitev poteka v ozadju...", MB_ICONINFORMATION)
+	showMessage("Safeer OS", "Safeer OS pripravlja knjižnici PySide6 in python-vlc. Namestitev poteka v ozadju...", MB_ICONINFORMATION)
 	var installCmd *exec.Cmd
 	if py.IsLauncher {
-		installCmd = exec.Command(py.ExePath, "-3", "-m", "pip", "install", "PySide6", "qrcode")
+		installCmd = exec.Command(py.ExePath, "-3", "-m", "pip", "install", "PySide6", "qrcode", "python-vlc")
 	} else {
-		installCmd = exec.Command(py.ExePath, "-m", "pip", "install", "PySide6", "qrcode")
+		installCmd = exec.Command(py.ExePath, "-m", "pip", "install", "PySide6", "qrcode", "python-vlc")
 	}
 	installCmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000}
 	if err := installCmd.Run(); err != nil {
-		return fmt.Errorf("namestitev PySide6 ni uspela: %v", err)
+		return fmt.Errorf("namestitev Python knjižnic ni uspela: %v", err)
 	}
 	return nil
 }

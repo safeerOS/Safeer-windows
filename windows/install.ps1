@@ -5,7 +5,7 @@
     Skripta samodejno pripravi in namesti Safeer OS ter Safeer Control:
     1. Preveri operacijski sistem in arhitekturo (Windows 10/11 x64).
     2. Preveri ali samodejno tiho namesti Python 3.12 (uradni installer / winget).
-    3. Namesti potrebne Python knjižnice (PySide6, Pillow, cryptography, qrcode).
+    3. Namesti potrebne knjižnice (PySide6, Pillow, cryptography, qrcode, python-vlc in LibVLC).
     4. Namesti izvršljive datoteke (SafeerOS.exe, SafeerControl.exe) in aplikacijo v %LOCALAPPDATA%\SafeerOS.
     5. Nastavi pravila Windows Defender požarnega zidu za Safeer Link (vrata 8990 TCP za povezavo s TV/telefonom).
     6. Ustvari bližnjice z ikonami na Namizju in v meniju Start (Safeer Control, Safeer OS, Safeer Browser).
@@ -222,35 +222,55 @@ function Test-PythonModule($mod) {
 }
 
 $manjkajoce = @()
-foreach ($mod in @("PySide6", "PIL", "cryptography", "qrcode")) {
+foreach ($mod in @("PySide6", "PIL", "cryptography", "qrcode", "vlc")) {
     if (-not (Test-PythonModule $mod)) {
         $manjkajoce += $mod
     }
 }
 
 if ($manjkajoce.Count -gt 0) {
-    Write-Info "Nameščam manjkajoče knjižnice: PySide6 Pillow cryptography qrcode..."
-    & $pipPrefix install --disable-pip-version-check --quiet PySide6 Pillow cryptography qrcode
+    Write-Info "Nameščam manjkajoče knjižnice: PySide6 Pillow cryptography qrcode python-vlc..."
+    & $pipPrefix install --disable-pip-version-check --quiet PySide6 Pillow cryptography qrcode python-vlc
     if ($LASTEXITCODE -ne 0) {
         Write-Warn "Poskušam ponovno namestiti knjižnice z uporabniškimi pravicami..."
-        & $pipPrefix install --user --disable-pip-version-check PySide6 Pillow cryptography qrcode
+        & $pipPrefix install --user --disable-pip-version-check PySide6 Pillow cryptography qrcode python-vlc
     }
 }
 
 # Preveri uspešnost uvoza
 $testOk = $false
 try {
-    $res = & $pyRunPrefix -c "import PySide6.QtCore, PySide6.QtWidgets, PIL.Image, cryptography, qrcode; print('MODULI_OK')" 2>$null
+    $res = & $pyRunPrefix -c "import PySide6.QtCore, PySide6.QtWidgets, PIL.Image, cryptography, qrcode, vlc; print('MODULI_OK')" 2>$null
     if ($res -match "MODULI_OK") {
         $testOk = $true
     }
 } catch {}
 
 if (-not $testOk) {
-    Write-Err "Knjižnic PySide6/Pillow ni bilo mogoče naložiti. Preverite internetno povezavo ali namestite 'pip install PySide6 Pillow cryptography qrcode'."
+    Write-Err "Knjižnic ni bilo mogoče naložiti. Preverite internetno povezavo ali namestite 'pip install PySide6 Pillow cryptography qrcode python-vlc'."
     exit 1
 }
-Write-Success "Vse potrebne knjižnice (PySide6, Pillow, cryptography, qrcode) so pripravljene."
+Write-Success "Vse potrebne Python knjižnice so pripravljene."
+
+# Safeer Media uporablja LibVLC neposredno v svojem Qt pogledu. Python paket je le
+# veznik, zato preverimo še uradni VideoLAN runtime. Če ga ni, ostane na voljo
+# rezervni HTML5 predvajalnik, namestitev Safeer OS pa se vseeno dokonča.
+$vlcDll = @(
+    "$env:ProgramFiles\VideoLAN\VLC\libvlc.dll",
+    "${env:ProgramFiles(x86)}\VideoLAN\VLC\libvlc.dll"
+) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+if (-not $vlcDll) {
+    $wingetVlc = Get-Command winget.exe -ErrorAction SilentlyContinue
+    if ($wingetVlc) {
+        Write-Info "Nameščam uradni LibVLC runtime za vgrajeni Safeer Media predvajalnik..."
+        try {
+            $vlcInstall = Start-Process -FilePath "winget.exe" -ArgumentList "install --id VideoLAN.VLC -e --silent --accept-package-agreements --accept-source-agreements" -Wait -PassThru
+            if ($vlcInstall.ExitCode -ne 0) { Write-Warn "LibVLC ni bil nameščen; uporabljen bo rezervni HTML5 predvajalnik." }
+        } catch { Write-Warn "LibVLC ni bil nameščen; uporabljen bo rezervni HTML5 predvajalnik." }
+    } else {
+        Write-Warn "Windows Package Manager ni na voljo; Safeer Media bo do namestitve VLC uporabljal HTML5 predvajalnik."
+    }
+}
 
 # -----------------------------------------------------------------------------
 # 4. Priprava namestitvene mape in kopiranje datotek
