@@ -12,14 +12,16 @@ import threading
 import urllib.parse
 from typing import Any, List, Optional
 
-from PySide6.QtCore import QObject, QUrl, Qt, Signal, Slot
+from PySide6.QtCore import QObject, QTimer, QUrl, Qt, Signal, Slot
 from PySide6.QtGui import QIcon, QKeySequence, QShortcut
 from PySide6.QtWebEngineCore import (QWebEnginePage, QWebEngineProfile, QWebEngineScript,
                                      QWebEngineSettings)
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import QApplication, QMainWindow, QStackedWidget
 
-from . import control_backend, control_window, os_backend_win, policy
+from core import os_media
+
+from . import control_backend, control_window, os_backend_win, policy, vlc_player
 
 BRIDGE_PREFIX = "__safeer_os_bridge__:"
 
@@ -93,6 +95,7 @@ class SafeerOsWindow(QMainWindow):
         self.control_backend = control_backend.get_backend()
         self.control_window: Optional[control_window.SafeerControlWindow] = None
         self.control_backend.dodaj_poslusalca(self._na_dogodek_linka)
+        self.media_center = os_media.MediaCenter(os_backend_win.CONFIG_DIR)
 
         # Ikona
         try:
@@ -110,6 +113,7 @@ class SafeerOsWindow(QMainWindow):
         settings.setAttribute(attr.LocalContentCanAccessFileUrls, True)
         settings.setAttribute(attr.ScrollAnimatorEnabled, True)
         settings.setAttribute(attr.FullScreenSupportEnabled, True)
+        settings.setAttribute(attr.PlaybackRequiresUserGesture, False)
 
         # Registriraj skripto mostu
         script = QWebEngineScript()
@@ -126,6 +130,9 @@ class SafeerOsWindow(QMainWindow):
 
         self.zaslon = QStackedWidget(self)
         self.zaslon.addWidget(self.view)
+        self.media_player = vlc_player.VlcPlayerWidget(self)
+        self.media_player.nazaj.connect(self._zapri_media)
+        self.zaslon.addWidget(self.media_player)
         self.setCentralWidget(self.zaslon)
 
         # Tipke za celozaslonski nacin
@@ -135,8 +142,16 @@ class SafeerOsWindow(QMainWindow):
         self.shortcut_esc = QShortcut(QKeySequence("Escape"), self)
         self.shortcut_esc.activated.connect(self.na_escape)
 
+        # Uporabnik vir doda enkrat; Safeer OS nato zastarele kataloge tiho
+        # osvežuje ob zagonu in na šest ur, ne da bi blokiral glavno okno.
+        self.media_refresh_timer = QTimer(self)
+        self.media_refresh_timer.setInterval(6 * 60 * 60 * 1000)
+        self.media_refresh_timer.timeout.connect(self._osvezi_media_v_ozadju)
+        self.media_refresh_timer.start()
+
         # Nalozi domaco stran
         self.nalozi_vmesnik()
+        QTimer.singleShot(0, self._osvezi_media_v_ozadju)
 
         # Ce je dolocen zacetni razdelek (npr. 'control', 'daljinec', 'novaNaprava'),
         # odpri neposredno ta razdelek v vgrajenem Safeer Controlu!
@@ -173,8 +188,31 @@ class SafeerOsWindow(QMainWindow):
             self.showFullScreen()
 
     def na_escape(self) -> None:
+        if self.zaslon.currentWidget() is self.media_player:
+            self._zapri_media()
+            return
         if self.isFullScreen():
             self.showNormal()
+
+    def _odpri_media(self, item: dict) -> None:
+        if self.media_player.play_item(item):
+            self.zaslon.setCurrentWidget(self.media_player)
+            self.setWindowTitle(f"Safeer OS · Media · {item.get('naslov', '')}")
+        else:
+            self.poslji_dogodek("mediaFallback", item)
+
+    def _zapri_media(self) -> None:
+        self.media_player.stop()
+        self.zaslon.setCurrentWidget(self.view)
+        self.setWindowTitle("Safeer OS")
+
+    def _osvezi_media_v_ozadju(self) -> None:
+        def _delo() -> None:
+            rezultat = self.media_center.refresh_stale()
+            if rezultat.get("osvezenih"):
+                self.poslji_dogodek("mediaOsvezen", rezultat)
+
+        threading.Thread(target=_delo, name="SafeerMediaRefresh", daemon=True).start()
 
     def poslji_dogodek(self, vrsta: str, podatki: Any) -> None:
         payload_js = json.dumps(podatki, ensure_ascii=False)
@@ -435,10 +473,34 @@ class SafeerOsWindow(QMainWindow):
             return {"vklop": False, "najdena": False}
 
         if metoda == "mediaKatalog":
-            return {"vnosi": []}
+            query = str(a[0]) if a else ""
+            kind = str(a[1]) if len(a) > 1 else "vse"
+            return self.media_center.catalog(query, kind)
+
+        if metoda == "mediaDodajVir":
+            url = str(a[0]) if a else ""
+            name = str(a[1]) if len(a) > 1 else ""
+            return self.media_center.add_source(url, name)
+
+        if metoda == "mediaOdstraniVir":
+            return self.media_center.remove_source(str(a[0]) if a else "")
+
+        if metoda == "mediaOsveziVir":
+            source_id = str(a[0]) if a else ""
+            return self.media_center.refresh_source(source_id) if source_id else self.media_center.refresh_all()
+
+        if metoda == "mediaPredvajaj":
+            item = self.media_center.resolve(str(a[0]) if a else "")
+            if not item:
+                return None
+            native = self.media_player.available
+            if native:
+                self.dispatcher.dispatch(lambda: self._odpri_media(item))
+            return dict(item, native=native)
 
         if metoda == "mediaStanje":
-            return {"na_voljo": False}
+            return {"na_voljo": True, "native": self.media_player.available,
+                    "predvajalnik": "LibVLC" if self.media_player.available else "HTML5"}
 
         if metoda in ("odprtaOkna", "mediaNaprave"):
             return []

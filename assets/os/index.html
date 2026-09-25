@@ -2,7 +2,7 @@
 <html lang="sl">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src file: data:; style-src 'self' 'unsafe-inline'; script-src 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src file: data: http: https:; media-src file: blob: http: https:; style-src 'self' 'unsafe-inline'; script-src 'self'">
 <title>Safeer OS</title>
 <link rel="stylesheet" href="os.css">
 </head>
@@ -90,12 +90,32 @@
 
       <!-- SAFEER MEDIA -->
       <section class="razdelek" id="r-media">
-        <h1>Safeer Media</h1><p id="mediaOpis">Glasba in video z računalnika ter tvoji spletni viri na enem mestu.</p>
-        <div class="media-zdaj" id="mediaZdaj" hidden><div><small>ZDAJ SE PREDVAJA</small><h2 id="mediaZdajNaslov"></h2><p id="mediaZdajIzvajalec"></p><div id="mediaHandoff" class="media-handoff"></div></div><div class="media-kontrole"><button id="mediaNazaj">◀</button><button id="mediaPlay">▶ / ❚❚</button><button id="mediaNaprej">▶</button><button id="mediaStop">■</button></div></div>
-        <div class="filtri"><button class="izbran" data-media-filter="vse">Vse</button><button data-media-filter="glasba">Glasba</button><button data-media-filter="video">Video</button></div>
-        <h2>Na tem računalniku</h2><div class="mreza" id="mediaMreza"></div>
-        <p class="namig" id="mediaPrazno" hidden>V mapah Glasba/Music in Video/Videos ni podprtih medijskih datotek.</p>
-        <h2>Tvoji spletni viri</h2><div class="mreza" id="mediaViri"></div>
+        <div class="media-glava"><div><h1>Safeer Media</h1><p data-t="mediaOpis">Vsa tvoja vsebina, ne glede na vir.</p></div><button class="gumb" id="mediaOsvezi"><svg data-ikona="ponovno"></svg><span data-t="mediaOsvezi">Osveži vire</span></button></div>
+
+        <div class="media-predvajalnik" id="mediaPredvajalnik" hidden>
+          <div class="media-predvajalnik-glava"><div><small data-t="mediaPredvaja">PREDVAJA SE V SAFEER OS</small><h2 id="mediaPredvajalnikNaslov"></h2><p id="mediaPredvajalnikMeta"></p></div><button class="gumb-ikona" id="mediaZapri" data-naslov="zapri"><svg data-ikona="x"></svg></button></div>
+          <video id="mediaVideo" controls playsinline preload="metadata"></video>
+          <audio id="mediaAudio" controls preload="metadata" hidden></audio>
+          <p class="media-napaka" id="mediaNapaka" hidden data-t="mediaNapaka">Tega toka ni mogoče predvajati. Poskusi drugo različico.</p>
+          <div class="media-razlicice" id="mediaRazlicice"></div>
+        </div>
+
+        <div class="media-orodja">
+          <label class="media-iskanje"><svg data-ikona="isci"></svg><input id="mediaIskanje" type="search" autocomplete="off" data-ph="mediaIsci" placeholder="Išči filme, serije in glasbo"></label>
+          <div class="filtri"><button class="izbran" data-media-filter="vse" data-t="mediaVse">Vse</button><button data-media-filter="film" data-t="mediaFilmi">Filmi</button><button data-media-filter="serija" data-t="mediaSerije">Serije</button><button data-media-filter="glasba" data-t="mediaGlasba">Glasba</button></div>
+        </div>
+        <div class="media-povzetek" id="mediaPovzetek"></div>
+        <div class="media-katalog" id="mediaMreza"></div>
+        <p class="namig" id="mediaPrazno" hidden data-t="mediaPrazno">Ni zadetkov. Dodaj vir ali spremeni iskanje.</p>
+
+        <div class="media-viri-glava"><div><h2 data-t="mediaViri">Tvoji viri</h2><p data-t="mediaViriOpis">Spletno stran, javni API, RSS ali M3U dodaš samo enkrat.</p></div></div>
+        <form class="media-dodaj-vir" id="mediaDodajVir">
+          <input id="mediaVirIme" type="text" maxlength="80" data-ph="mediaVirIme" placeholder="Ime vira (neobvezno)">
+          <input id="mediaVirUrl" type="url" required data-ph="mediaVirUrl" placeholder="https://primer.si/katalog.json">
+          <button class="gumb glavni" type="submit"><svg data-ikona="plus"></svg><span data-t="mediaDodaj">Dodaj vir</span></button>
+        </form>
+        <p class="namig" id="mediaVirSporocilo"></p>
+        <div class="media-viri" id="mediaViri"></div>
       </section>
 
       <!-- PROGRAMI -->

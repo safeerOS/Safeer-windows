@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest import mock
 
 from safeer_windows import control_backend, os_backend_win, policy
-from core import link_hub
+from core import link_hub, os_media
 
 
 class TestOsWindows(unittest.TestCase):
@@ -130,6 +130,80 @@ class TestOsWindows(unittest.TestCase):
         self.assertIn('besedilo("naslovAplikacije", "Safeer OS")', skripta)
         self.assertNotIn('naslov.textContent = "Safeer Control"', skripta)
         self.assertIn('self.setWindowTitle("Safeer OS · Naprave")', okno)
+
+    def test_media_isti_vir_lahko_dodamo_samo_enkrat(self):
+        payload = json.dumps({"items": [{"title": "Film", "url": "https://cdn.test/film-720p.mp4",
+                                          "type": "movie", "year": 2025}]}).encode()
+        with tempfile.TemporaryDirectory() as td:
+            center = os_media.MediaCenter(td, roots=[])
+            with mock.patch.object(center, "_download", return_value=(payload, "application/json", "https://api.test/catalog")):
+                first = center.add_source("HTTPS://API.TEST/catalog/?utm_source=safeer", "Prvi vir")
+                duplicate = center.add_source("https://api.test/catalog", "Isti vir")
+            self.assertTrue(first["ok"])
+            self.assertFalse(duplicate["ok"])
+            self.assertEqual(duplicate["napaka"], "podvojen")
+            self.assertEqual(len(center.sources()), 1)
+
+    def test_media_zdruzi_enako_vsebino_in_izbere_najboljso(self):
+        with tempfile.TemporaryDirectory() as td:
+            center = os_media.MediaCenter(td, roots=[])
+            responses = {
+                "https://a.test/catalog": json.dumps({"items": [{"title": "Moj film", "url": "https://a.test/film-720p.mp4", "type": "movie", "year": 2025}]}).encode(),
+                "https://b.test/catalog": json.dumps({"items": [{"title": "Moj film 1080p", "url": "https://b.test/film-1080p.mp4", "type": "movie"}]}).encode(),
+            }
+            def download(url):
+                return responses[url], "application/json", url
+            with mock.patch.object(center, "_download", side_effect=download):
+                self.assertTrue(center.add_source("https://a.test/catalog", "A")["ok"])
+                self.assertTrue(center.add_source("https://b.test/catalog", "B")["ok"])
+            catalog = center.catalog()
+            self.assertEqual(len(catalog["vnosi"]), 1)
+            item = catalog["vnosi"][0]
+            self.assertEqual(item["kakovost"], "1080p")
+            self.assertEqual(item["stevilo_razlicic"], 2)
+            self.assertEqual(item["viri"], ["B", "A"])
+
+    def test_media_razbere_api_m3u_in_spletno_aplikacijo(self):
+        api = os_media.parse_payload(
+            b'{"shows":[{"name":"Oddaja","type":"series","season":1,"episode":2,"streams":[{"url":"https://cdn.test/e2-1080p.mp4"}]}]}',
+            "application/json", "https://api.test/catalog")
+        m3u = os_media.parse_payload(
+            b'#EXTM3U\n#EXTINF:-1 group-title="Music",Pesem\nhttps://cdn.test/song.mp3\n',
+            "audio/x-mpegurl", "https://api.test/list.m3u")
+        html = os_media.parse_payload(
+            b'<script type="application/ld+json">{"name":"Film","contentUrl":"/film-4k.mp4","@type":"Movie"}</script>',
+            "text/html", "https://app.test/watch")
+        self.assertEqual(api[0]["vrsta"], "serija")
+        self.assertEqual(api[0]["epizoda"], 2)
+        self.assertEqual(m3u[0]["vrsta"], "glasba")
+        self.assertEqual(html[0]["kakovost"], "4K")
+
+    def test_media_vmesnik_uporablja_vgrajeni_predvajalnik(self):
+        koren = Path(__file__).resolve().parents[2]
+        html = (koren / "assets" / "os" / "index.html").read_text(encoding="utf-8")
+        app = (koren / "windows" / "safeer_windows" / "os_app.py").read_text(encoding="utf-8")
+        player = (koren / "windows" / "safeer_windows" / "vlc_player.py").read_text(encoding="utf-8")
+        self.assertIn('id="mediaDodajVir"', html)
+        self.assertIn('id="mediaPredvajalnik"', html)
+        self.assertIn("VlcPlayerWidget", app)
+        self.assertIn("set_hwnd", player)
+        self.assertIn("SAFEER OS · MEDIA", player)
+
+    def test_media_samodejno_osvezi_samo_zastarele_vire(self):
+        payload = b'{"items":[{"title":"Film","url":"https://cdn.test/film.mp4"}]}'
+        with tempfile.TemporaryDirectory() as td:
+            center = os_media.MediaCenter(td, roots=[])
+            with mock.patch.object(center, "_download",
+                                   return_value=(payload, "application/json", "https://api.test/catalog")) as download:
+                self.assertTrue(center.add_source("https://api.test/catalog")["ok"])
+                download.reset_mock()
+                self.assertEqual(center.refresh_stale(max_age=3600)["osvezenih"], 0)
+                download.assert_not_called()
+                stored = center._load()
+                stored["viri"][0]["posodobljeno"] = 0
+                center._save(stored)
+                self.assertEqual(center.refresh_stale(max_age=3600)["osvezenih"], 1)
+                download.assert_called_once()
 
     # ------------------------------------------------------------------ Safeer Control testi
     def test_control_backend_identity(self):
