@@ -53,6 +53,7 @@ body { padding-bottom: 28px; }
 
 /* Stanje je barva, ne stavek: pika pove na prvi pogled, ali je vse v redu. */
 .stanjeVrstica { display: flex; align-items: center; gap: 7px; }
+.podrocjeAplikacije { color: var(--zelena); font-weight: 650; }
 
 .pika {
   flex: none;
@@ -459,7 +460,7 @@ svg[aria-hidden] { display: inline-block; fill: none; stroke: currentColor; stro
 .panel.opozoriloOspredje .pojasnilo { margin-bottom: 4px; }
 .panel.opozoriloOspredje button.drugotni.tanek { margin-top: 8px; }
 
-/* ---------- samostojna aplikacija (Safeer Control na racunalniku) ----------
+/* ---------- razdelek Naprave v Safeer OS ----------
    Levi meni z razdelki, vsebina desno; glava cez celo sirino. Telefon in televizor
    tega ne vidita (body brez razreda namizje). */
 

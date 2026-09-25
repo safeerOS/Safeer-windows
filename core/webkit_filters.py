@@ -1,4 +1,4 @@
-"""EasyList network rules -> WebKit content blocker JSON (WebKitUserContentFilterStore, Safari format).
+r"""EasyList network rules -> WebKit content blocker JSON (WebKitUserContentFilterStore, Safari format).
 
 Source of truth: clients/python/safeer_webkit_filters.py in safeer-threat-intel; Safeer Browser for Linux ships
 an identical copy as core/webkit_filters.py.

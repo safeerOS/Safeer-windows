@@ -12,13 +12,11 @@ Vse se izvaja na glavni niti GTK; klicatelj (core/safeer_link.py) poskrbi za GLi
 
 from __future__ import annotations
 
-import json
 import os
 import re
 import shutil
 import subprocess
 import sys
-import time
 import uuid
 from typing import Callable, Dict, Optional
 

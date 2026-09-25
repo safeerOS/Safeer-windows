@@ -1,10 +1,9 @@
-"""Safeer Control Okno za Windows — graficni vmesnik za Safeer Link (assets/link/index.html)."""
+"""Vgrajeni razdelek Naprave v Safeer OS (Safeer Link in Safeer Control)."""
 
 from __future__ import annotations
 
 import json
 import os
-import sys
 from typing import Any, Optional
 
 from PySide6.QtCore import QObject, Qt, QTimer, QUrl, Signal, Slot
@@ -139,7 +138,7 @@ class SafeerControlWindow(QMainWindow):
         #: seznanitvi ob prvem zagonu ali "nadaljuj brez povezave", da starsevsko okno preklopi nazaj.
         self.na_skritje = na_skritje
         self.v_prijavi = False
-        self.setWindowTitle("Safeer Control")
+        self.setWindowTitle("Safeer OS · Naprave")
         if parent is None:
             self.resize(960, 640)
             self.setMinimumSize(800, 520)

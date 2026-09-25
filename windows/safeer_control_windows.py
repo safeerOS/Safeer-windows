@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Safeer Control za Windows — vstopna točka v enotni program Safeer OS (razdelek Control)."""
+"""Zdruzljivostna vstopna tocka: odpre razdelek Naprave v enotnem Safeer OS."""
 
 from __future__ import annotations
 
@@ -23,4 +23,3 @@ def main_control() -> int:
 
 if __name__ == "__main__":
     sys.exit(main_control())
-

@@ -16,8 +16,10 @@
   <div class="znak">
     <span class="logo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1 M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg></span>
     <div>
-      <h1>Safeer Link</h1>
+      <h1 id="naslovAplikacije">Safeer Link</h1>
       <p class="stanjeVrstica">
+        <span class="podrocjeAplikacije" id="podrocjeAplikacije" hidden>Link · Control</span>
+        <span id="lociloPodrocja" hidden aria-hidden="true">·</span>
         <span class="pika" id="pika"></span>
         <span id="podnaslov" data-t="preverjam">Preverjam …</span>
       </p>
@@ -26,10 +28,10 @@
   <button class="zapri" id="gumbZapri" aria-label="Zapri" data-t-naslov="zapri">✕</button>
 </header>
 
-<!-- Samostojna aplikacija (Safeer Control na racunalniku): razdelki v levem meniju namesto enega
-     dolgega zaslona. Telefon in televizor menija ne vidita - tam ostane ena drsna stran. -->
+<!-- Razdelek Naprave v Safeer OS: levi meni namesto enega dolgega zaslona. Telefon in
+     televizor menija ne vidita - tam ostane ena drsna stran Safeer Link. -->
 <nav class="stranski" id="stranskiMeni" hidden aria-label="Razdelki">
-  <button data-razdelek="domov" id="gumbMeniDomov" title="Safeer OS Domov"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/></svg><span>Safeer OS Domov</span></button>
+  <button data-razdelek="domov" id="gumbMeniDomov" title="Safeer OS"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/></svg><span>Safeer OS</span></button>
   <button data-razdelek="naprave"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18v11H3z M8 20h8 M12 16v4"/></svg><span data-t="povezaneNaprave">Povezane naprave</span></button>
   <button data-razdelek="daljinec"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 2h8a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z M12 6v.1 M10 11h4 M12 9v4 M10 17h4"/></svg><span data-t="daljinec">Daljinec</span></button>
   <button data-razdelek="poslji"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12l16-8-6 16-2-7z"/></svg><span data-t="posljiStran">Pošlji to stran</span></button>
@@ -138,7 +140,7 @@
         Ena naprava je središče (lahko tudi ta), ostale se povežejo nanjo.
       </p>
       <p class="pojasnilo drobno" data-t="brezHubaPomirilo">
-        Brskalnik deluje povsem normalno tudi brez njega. Ničesar ne izgubiš, če to okno zapreš.
+        Safeer OS deluje tudi brez povezanih naprav. Naprave lahko povežeš kadar koli.
       </p>
       <button class="glavni" id="gumbPoisci" data-t="poisci">Poišči v mojem omrežju</button>
       <button class="drugotni" id="gumbNavodila" data-t="kakoDobim">Kako to vklopim</button>

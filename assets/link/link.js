@@ -88,7 +88,7 @@
       niVklopljen: "Ni povezano",
       brezHubaNaslov: "Safeer Link še ni vklopljen",
       brezHubaOpis: "Safeer Link poveže tvoje naprave doma — telefon, računalnik in televizor. Z ene na drugo pošlješ stran, besedilo, datoteko ali zaslon, brez oblaka in brez računa. Povezovanje začneš na katerikoli napravi (lahko tudi na tej), ostale se le pridružijo.",
-      brezHubaPomirilo: "Brskalnik deluje povsem normalno tudi brez njega. Ničesar ne izgubiš, če to okno zapreš.",
+      brezHubaPomirilo: "Safeer OS deluje tudi brez povezanih naprav. Naprave lahko povežeš kadar koli.",
       poisci: "Poišči v mojem omrežju",
       kakoDobim: "Kako to vklopim",
       iscem: "Iščem …",
@@ -200,7 +200,7 @@
       niVklopljen: "Not connected",
       brezHubaNaslov: "Safeer Link is not set up yet",
       brezHubaOpis: "Safeer Link connects the devices in your home — phone, computer and television. Send a page, text, a file or your screen from one to another, with no cloud and no account. Start on any device (this one will do); the others simply join.",
-      brezHubaPomirilo: "The browser works exactly as before without it. You lose nothing by closing this window.",
+      brezHubaPomirilo: "Safeer OS also works without connected devices. You can connect them at any time.",
       poisci: "Look on my network",
       kakoDobim: "How do I turn this on",
       iscem: "Looking …",
@@ -312,7 +312,7 @@
       niVklopljen: "Nicht verbunden",
       brezHubaNaslov: "Safeer Link ist noch nicht eingerichtet",
       brezHubaOpis: "Safeer Link verbindet die Geräte bei dir zu Hause — Telefon, Computer und Fernseher. Sende eine Seite, Text, eine Datei oder deinen Bildschirm von einem zum anderen, ohne Cloud und ohne Konto. Beginne auf einem beliebigen Gerät (auch auf diesem); die anderen kommen einfach dazu.",
-      brezHubaPomirilo: "Ohne ihn funktioniert der Browser genau wie vorher. Du verlierst nichts, wenn du dieses Fenster schließt.",
+      brezHubaPomirilo: "Safeer OS funktioniert auch ohne verbundene Geräte. Du kannst sie jederzeit verbinden.",
       poisci: "In meinem Netzwerk suchen",
       kakoDobim: "Wie schalte ich das ein",
       iscem: "Suche …",
@@ -424,7 +424,7 @@
       niVklopljen: "Sin conexión",
       brezHubaNaslov: "Safeer Link todavía no está configurado",
       brezHubaOpis: "Safeer Link conecta los dispositivos de tu casa: teléfono, ordenador y televisor. Envía una página, texto, un archivo o tu pantalla de uno a otro, sin nube y sin cuenta. Empieza en cualquier dispositivo (este mismo sirve); los demás simplemente se unen.",
-      brezHubaPomirilo: "Sin él, el navegador funciona exactamente igual que antes. No pierdes nada al cerrar esta ventana.",
+      brezHubaPomirilo: "Safeer OS también funciona sin dispositivos conectados. Puedes conectarlos en cualquier momento.",
       poisci: "Buscar en mi red",
       kakoDobim: "Cómo activo esto",
       iscem: "Buscando …",
@@ -536,7 +536,7 @@
       niVklopljen: "Non connecté",
       brezHubaNaslov: "Safeer Link n\'est pas encore configuré",
       brezHubaOpis: "Safeer Link relie les appareils de ta maison — téléphone, ordinateur et téléviseur. Envoie une page, un texte, un fichier ou ton écran de l’un à l’autre, sans cloud et sans compte. Commence sur n’importe quel appareil (celui-ci convient) ; les autres se joignent simplement.",
-      brezHubaPomirilo: "Sans lui, le navigateur fonctionne exactement comme avant. Tu ne perds rien en fermant cette fenêtre.",
+      brezHubaPomirilo: "Safeer OS fonctionne aussi sans appareils connectés. Tu peux les connecter à tout moment.",
       poisci: "Chercher sur mon réseau",
       kakoDobim: "Comment activer cela",
       iscem: "Recherche …",
@@ -648,7 +648,7 @@
       niVklopljen: "Non connesso",
       brezHubaNaslov: "Safeer Link non è ancora configurato",
       brezHubaOpis: "Safeer Link collega i dispositivi di casa tua: telefono, computer e televisore. Invia una pagina, un testo, un file o il tuo schermo da uno all’altro, senza cloud e senza account. Inizia su un dispositivo qualsiasi (va bene anche questo); gli altri si uniscono e basta.",
-      brezHubaPomirilo: "Senza di esso il browser funziona esattamente come prima. Non perdi nulla chiudendo questa finestra.",
+      brezHubaPomirilo: "Safeer OS funziona anche senza dispositivi collegati. Puoi collegarli in qualsiasi momento.",
       poisci: "Cerca nella mia rete",
       kakoDobim: "Come lo attivo",
       iscem: "Ricerca …",
@@ -1071,7 +1071,7 @@
       prijavaZaupaj: "Zaupaj temu računalniku",
       prijavaZaupajOpis: "Povezava bo potrebna samo enkrat. Izberi le na svojem računalniku – sicer se ob naslednji prijavi v računalnik znova povežeš.",
       prijavaUspela: "Prijavljeno. Povezujem …",
-      prijavaZnovaZazeni: "Safeer Control je treba znova zagnati, da naloži posodobitev: zapri ga v pladnju ali se odjavi in prijavi.",
+      prijavaZnovaZazeni: "Safeer OS je treba znova zagnati, da naloži posodobitev: zapri ga v pladnju ali se odjavi in prijavi.",
       brezPovezaveNaslov: "Naprave niso povezane",
       brezPovezaveOpis: "Safeer OS deluje na tem računalniku. Telefon, tablico ali televizor povežeš, kadar želiš.",
       poveziNaprave: "Poveži naprave",
@@ -1101,7 +1101,7 @@
       prijavaZaupaj: "Trust this computer",
       prijavaZaupajOpis: "You'll only need to connect once. Choose this only on your own computer – otherwise you'll connect again next time you sign in to the computer.",
       prijavaUspela: "Signed in. Connecting …",
-      prijavaZnovaZazeni: "Restart Safeer Control to load the update: quit it from the tray, or log out and back in.",
+      prijavaZnovaZazeni: "Restart Safeer OS to load the update: quit it from the tray, or log out and back in.",
       brezPovezaveNaslov: "No devices connected",
       brezPovezaveOpis: "Safeer OS works on this computer. Connect your phone, tablet or TV whenever you like.",
       poveziNaprave: "Connect devices",
@@ -1131,7 +1131,7 @@
       prijavaZaupaj: "Diesem Computer vertrauen",
       prijavaZaupajOpis: "Die Verbindung ist nur einmal nötig. Wähle das nur auf deinem eigenen Computer – sonst verbindest du dich bei der nächsten Anmeldung am Computer erneut.",
       prijavaUspela: "Angemeldet. Verbinde …",
-      prijavaZnovaZazeni: "Starte Safeer Control neu, um das Update zu laden: im Infobereich beenden oder ab- und wieder anmelden.",
+      prijavaZnovaZazeni: "Starte Safeer OS neu, um das Update zu laden: im Infobereich beenden oder ab- und wieder anmelden.",
       brezPovezaveNaslov: "Keine Geräte verbunden",
       brezPovezaveOpis: "Safeer OS läuft auf diesem Computer. Verbinde Handy, Tablet oder Fernseher, wann immer du willst.",
       poveziNaprave: "Geräte verbinden",
@@ -1161,7 +1161,7 @@
       prijavaZaupaj: "Confiar en este ordenador",
       prijavaZaupajOpis: "Solo tendrás que conectarte una vez. Elígelo solo en tu propio ordenador; si no, volverás a conectarte la próxima vez que inicies sesión en el ordenador.",
       prijavaUspela: "Sesión iniciada. Conectando …",
-      prijavaZnovaZazeni: "Reinicia Safeer Control para cargar la actualización: ciérralo desde la bandeja o cierra y abre sesión.",
+      prijavaZnovaZazeni: "Reinicia Safeer OS para cargar la actualización: ciérralo desde la bandeja o cierra y abre sesión.",
       brezPovezaveNaslov: "No hay dispositivos conectados",
       brezPovezaveOpis: "Safeer OS funciona en este ordenador. Conecta el móvil, la tableta o el televisor cuando quieras.",
       poveziNaprave: "Conectar dispositivos",
@@ -1191,7 +1191,7 @@
       prijavaZaupaj: "Faire confiance à cet ordinateur",
       prijavaZaupajOpis: "La connexion ne sera nécessaire qu'une fois. Choisis-le seulement sur ton propre ordinateur – sinon tu te reconnecteras à la prochaine ouverture de session.",
       prijavaUspela: "Connecté. Connexion en cours …",
-      prijavaZnovaZazeni: "Redémarre Safeer Control pour charger la mise à jour : quitte-le depuis la zone de notification ou reconnecte-toi.",
+      prijavaZnovaZazeni: "Redémarre Safeer OS pour charger la mise à jour : quitte-le depuis la zone de notification ou reconnecte-toi.",
       brezPovezaveNaslov: "Aucun appareil connecté",
       brezPovezaveOpis: "Safeer OS fonctionne sur cet ordinateur. Connecte ton téléphone, ta tablette ou ton téléviseur quand tu veux.",
       poveziNaprave: "Connecter des appareils",
@@ -1221,7 +1221,7 @@
       prijavaZaupaj: "Considera attendibile questo computer",
       prijavaZaupajOpis: "Dovrai collegarti una sola volta. Sceglilo solo sul tuo computer, altrimenti ti ricollegherai al prossimo accesso al computer.",
       prijavaUspela: "Accesso eseguito. Connessione …",
-      prijavaZnovaZazeni: "Riavvia Safeer Control per caricare l'aggiornamento: chiudilo dall'area di notifica o esci e rientra.",
+      prijavaZnovaZazeni: "Riavvia Safeer OS per caricare l'aggiornamento: chiudilo dall'area di notifica o esci e rientra.",
       brezPovezaveNaslov: "Nessun dispositivo collegato",
       brezPovezaveOpis: "Safeer OS funziona su questo computer. Collega telefono, tablet o televisore quando vuoi.",
       poveziNaprave: "Collega dispositivi",
@@ -1872,10 +1872,12 @@
     if (stanje.control) narisiControl();
   }
 
-  /** Safeer Control (namizna aplikacija brez brskalnika): ista stran, brez tistega, kar potrebuje brskalnik. */
+  /** Vgrajeni razdelek Naprave v Safeer OS: Link povezuje, Control pa upravlja naprave. */
   function narisiControl() {
-    var naslov = document.querySelector(".glava h1");
-    if (naslov) naslov.textContent = "Safeer Control";
+    document.title = "Safeer OS · Naprave";
+    besedilo("naslovAplikacije", "Safeer OS");
+    pokazi("podrocjeAplikacije", true);
+    pokazi("lociloPodrocja", true);
     pokazi("gumbZapri", false);
     pokazi("panelCast", false);
     pokazi("panelSync", false);
@@ -1889,7 +1891,7 @@
     narisiMeni();
   }
 
-  // ---------- samostojna aplikacija: levi meni z razdelki (samo Safeer Control) ----------
+  // ---------- vgrajeni razdelek Naprave: levi meni znotraj Safeer OS ----------
 
   var razdelek = "";
 

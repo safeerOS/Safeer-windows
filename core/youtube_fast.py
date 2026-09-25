@@ -7,7 +7,7 @@ providing ultra-fast, lightweight metadata parsing without heavy browser DOM ove
 import json
 import urllib.request
 import urllib.parse
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List
 
 
 def extract_video_renderers(data: Any) -> List[Dict[str, Any]]:

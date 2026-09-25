@@ -22,7 +22,7 @@ import os
 import re
 import shutil
 import subprocess
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 #: Ime navideznega izhoda, prek katerega gre zvok na napravo v Safeer Linku (core/link_zvok.py).
 LINK_IZHOD = "safeer_link_zvok"

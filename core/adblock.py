@@ -7,7 +7,7 @@ ambient blur removal, background audio engine, and abuse.ch botnet shield.
 
 import urllib.parse
 
-YOUTUBE_ADBLOCK_SCRIPT = """
+YOUTUBE_ADBLOCK_SCRIPT = r"""
 /* 🛡️ Safeer Linux Mint - YouTube Zero-Ad & Performance Engine */
 (function() {
     var h = location.hostname.toLowerCase();
