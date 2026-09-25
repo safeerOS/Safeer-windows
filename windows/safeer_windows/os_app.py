@@ -4,12 +4,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import mimetypes
 import os
 import platform
+import socket
+import socketserver
 import subprocess
 import sys
 import threading
 import urllib.parse
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
 from typing import Any, List, Optional
 
 # Nastavitve za Chromium v Qt WebEngine za predvajanje vdelanih tokov in preprecevanje zrusitev podokvirjev
@@ -60,7 +65,114 @@ MOST_JS = r"""
 """
 
 
+def _find_free_port() -> int:
+    """Poišče prosto TCP vrata na lokalnem vmesniku."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+class _SafeerAssetHandler(BaseHTTPRequestHandler):
+    """Minimalni HTTP handler ki streže datoteke iz assets_root mape.
+    Brez log izpisa v konzolo in brez zunanjih dostopov.
+    """
+    assets_root: str = ""
+
+    def do_GET(self) -> None:
+        url_path = urllib.parse.urlsplit(self.path).path
+        # Varnostna omejitev: samo relativne poti znotraj assets_root
+        rel = url_path.lstrip("/")
+        # Prepreči path traversal
+        target = Path(self.assets_root) / rel
+        try:
+            resolved = target.resolve()
+            base_resolved = Path(self.assets_root).resolve()
+            if not str(resolved).startswith(str(base_resolved)):
+                self.send_error(403)
+                return
+        except Exception:
+            self.send_error(403)
+            return
+
+        # Privzeto: index.html
+        if resolved.is_dir():
+            resolved = resolved / "index.html"
+
+        if not resolved.is_file():
+            self.send_error(404)
+            return
+
+        mime_type, _ = mimetypes.guess_type(str(resolved))
+        if not mime_type:
+            suffix = resolved.suffix.lower()
+            mime_type = {
+                ".js": "application/javascript",
+                ".css": "text/css",
+                ".html": "text/html",
+                ".svg": "image/svg+xml",
+                ".png": "image/png",
+                ".jpg": "image/jpeg",
+                ".ico": "image/x-icon",
+                ".json": "application/json",
+                ".woff": "font/woff",
+                ".woff2": "font/woff2",
+            }.get(suffix, "application/octet-stream")
+
+        try:
+            data = resolved.read_bytes()
+        except OSError:
+            self.send_error(500)
+            return
+
+        # Dovoli iframe embed iz kateregakoli izvora (potrebno za embed ponudnike)
+        self.send_response(200)
+        self.send_header("Content-Type", mime_type + ("; charset=utf-8" if "text" in mime_type or "javascript" in mime_type else ""))
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-cache")
+        # CORS in Permissions-Policy: dovoli autoplay, encrypted-media, fullscreen za vse iframe vire
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Permissions-Policy", "autoplay=*, encrypted-media=*, fullscreen=*, picture-in-picture=*")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def log_message(self, fmt, *args):  # type: ignore[override]
+        # Tiho — ne izpisujemo HTTP requestov v konzolo
+        pass
+
+
+class _ThreadedHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+
+_local_server: Optional[_ThreadedHTTPServer] = None
+_local_server_port: int = 0
+
+
+def _start_local_asset_server(assets_root: str) -> int:
+    """Zažene lokalni HTTP server za assets v ozadjem threadu. Vrne port."""
+    global _local_server, _local_server_port
+    if _local_server is not None:
+        return _local_server_port
+
+    port = _find_free_port()
+
+    class _Handler(_SafeerAssetHandler):
+        pass
+    _Handler.assets_root = assets_root
+
+    server = _ThreadedHTTPServer(("127.0.0.1", port), _Handler)
+    _local_server = server
+    _local_server_port = port
+
+    t = threading.Thread(target=server.serve_forever, name="SafeerAssetHTTP", daemon=True)
+    t.start()
+    print(f"[SafeerOS] Lokalni asset server zagnan na http://127.0.0.1:{port}/", flush=True)
+    return port
+
+
 class GuiDispatcher(QObject):
+
     signal_run = Signal(object)
 
     def __init__(self, parent: Optional[QObject] = None):
@@ -92,7 +204,9 @@ class SafeerOsPage(QWebEnginePage):
         # (npr. top-navigation iz oglasnih skript) so blokirani.
         if is_main_frame:
             url_str = url.toString() if hasattr(url, "toString") else str(url)
-            if url_str.startswith("file:") or url_str.startswith("qrc:") or "assets/os" in url_str:
+            if (url_str.startswith("file:") or url_str.startswith("qrc:")
+                    or "assets/os" in url_str
+                    or url_str.startswith("http://127.0.0.1:")):
                 return True
             print(f"[SafeerOS] Blokirana zunanja navigacija glavnega okna na: {url_str}")
             return False
@@ -257,13 +371,25 @@ class SafeerOsWindow(QMainWindow):
     def nalozi_vmesnik(self) -> None:
         try:
             os_html = policy.shared_path("assets/os/index.html")
+            # Strežemo celotno assets/ mapo (nadrejena assets/os/)
+            assets_root = os.path.abspath(os.path.join(os.path.dirname(os_html), ".."))
         except Exception:
-            os_html = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "assets", "os", "index.html"))
+            assets_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "assets"))
+            os_html = os.path.join(assets_root, "os", "index.html")
 
-        if os.path.exists(os_html):
-            self.view.load(QUrl.fromLocalFile(os_html))
-        else:
+        if not os.path.exists(os_html):
             print(f"[SafeerOS] Datoteka {os_html} ne obstaja!")
+            return
+
+        # Zageni lokalni HTTP server za assets/ — s tem vmesnik pobeži iz
+        # file:// izvora in iframe embed ponudniki dobijo polne HTTP dovoljenja
+        # (autoplay, encrypted-media, fullscreen) brez omejitev Chromium file:// varnostne politike.
+        port = _start_local_asset_server(assets_root)
+        url = f"http://127.0.0.1:{port}/os/index.html"
+
+        # Shrani port za morebitne kasnejše klice
+        self._asset_server_port = port
+        self.view.load(QUrl(url))
 
     def preklopi_celozaslonsko(self) -> None:
         if self.isFullScreen():
