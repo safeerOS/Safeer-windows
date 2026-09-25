@@ -10,6 +10,7 @@ motenja (fizična miška in aktivno okno ostaneta nedotaknjena).
 from __future__ import annotations
 
 import base64
+import hmac
 import io
 import json
 import os
@@ -34,14 +35,24 @@ from safeer_windows import os_backend_win
 PRIVZETA_SIRINA = 1920
 PRIVZETA_VISINA = 1080
 
+# Kakovosti pretoka (skladno s core/link_zaslon.py - visoka kakovost, 60 FPS in nizka zakasnitev)
+KAKOVOSTI = {
+    "nizka": {"fps": 30, "bitrate": "4M", "qp": 26, "sirina": 1280, "visina": 720},
+    "srednja": {"fps": 30, "bitrate": "8M", "qp": 20, "sirina": 1920, "visina": 1080},
+    "visoka": {"fps": 60, "bitrate": "16M", "qp": 18, "sirina": 1920, "visina": 1080},
+    "najvisja": {"fps": 60, "bitrate": "24M", "qp": 16, "sirina": 1920, "visina": 1080},
+}
+PRIVZETA_KAKOVOST = "najvisja"
+
 # Okvirji pretoka (skladno s core/link_zaslon.py)
 OKVIR_SLIKA = 1
 OKVIR_ZVOK = 2
 OKVIR_OBVESTILO = 3
 
-# Posnetek pomanjšan za hiter prenos prek WebSocket/JSON
-POSNETEK_SIRINA = 960
-POSNETEK_VISINA = 540
+# Visoka kakovost posnetka zaslona (ostra besedila, 1280x720 ali polno 1080p, visoka kompresija JPEG)
+POSNETEK_SIRINA = 1280
+POSNETEK_VISINA = 720
+KAKOVOST_JPEG = 85
 
 # Privzete aplikacije na navideznem namizju
 PRIVZETI_PROGRAMI = [
@@ -104,6 +115,10 @@ class NavidezniZaslon:
         self._odjemalec: Optional[ssl.SSLSocket] = None
         self._zeton = ""
         self.odtis = ""
+        try:
+            _, _, self.odtis = zagotovi_potrdilo(self.tls_mapa)
+        except Exception:
+            pass
         self.vrata = 0
         self._tece = False
         self._posiljatelj_seje = ""
@@ -120,6 +135,11 @@ class NavidezniZaslon:
             "version": "0.5.0",
             "foreground": True,
             "screen": "virtual",
+            "secure": True,
+            "quality": "najvisja",
+            "encryption": "TLS 1.2+ (ECDHE/AEAD)",
+            "tls": bool(self.odtis),
+            "fingerprint": self.odtis,
             "title": self.aktivni_naslov,
             "url": self.aktivni_url or "safeer://desktop",
             "actions": [
@@ -531,7 +551,7 @@ class NavidezniZaslon:
                          fill=(255, 255, 255), outline=(0, 0, 0))
 
             buf = io.BytesIO()
-            im.save(buf, format="JPEG", quality=75)
+            im.save(buf, format="JPEG", quality=KAKOVOST_JPEG)
             slika_bajti = buf.getvalue()
 
         except Exception:
@@ -551,8 +571,8 @@ class NavidezniZaslon:
         )
 
     # ------------------------------------------------------------------ Pretočna seja (Screen Stream)
-    def zacni_sejo(self, posiljatelj: str, kakovost: str = "srednja") -> dict:
-        """Začne pretočni strežnik za navidezni ločeni zaslon (skladno s core/link_zaslon.py)."""
+    def zacni_sejo(self, posiljatelj: str, kakovost: str = PRIVZETA_KAKOVOST) -> dict:
+        """Začne visoko kakovosten pretočni strežnik za navidezni ločeni zaslon (skladno s core/link_zaslon.py)."""
         with self._kljuc:
             self.ustavi_sejo()
 
@@ -562,6 +582,10 @@ class NavidezniZaslon:
             kljuc, potrdilo, self.odtis = zagotovi_potrdilo(self.tls_mapa)
             ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+            try:
+                ctx.set_ciphers("ECDHE+AESGCM:ECDHE+CHACHA20:DHE+AESGCM:!aNULL:!eNULL:!MD5:!3DES:!RC4")
+            except ssl.SSLError:
+                pass
             ctx.load_cert_chain(potrdilo, kljuc)
 
             posluh = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -574,7 +598,10 @@ class NavidezniZaslon:
             self._posluh = posluh
             self._tece = True
 
-            self._seja_nit = threading.Thread(target=self._streci_sejo, args=(posluh, ctx),
+            k = KAKOVOSTI.get(kakovost) or KAKOVOSTI[PRIVZETA_KAKOVOST]
+            fps = int(k.get("fps", 60))
+
+            self._seja_nit = threading.Thread(target=self._streci_sejo, args=(posluh, ctx, fps),
                                               name="safeer-navidezni-zaslon-streznik", daemon=True)
             self._seja_nit.start()
 
@@ -586,19 +613,20 @@ class NavidezniZaslon:
                 "codec": "h264",
                 "width": self.sirina,
                 "height": self.visina,
-                "fps": 30,
+                "fps": fps,
                 "quality": kakovost,
                 "audio": None,
                 "input": True,
                 "gamepad": True,
                 "screen": "virtual",
+                "secure": True,
                 "game": False,
                 "focus": True,
                 "profile": "",
                 "media": False,
             }
 
-    def _streci_sejo(self, posluh: socket.socket, ctx: ssl.SSLContext) -> None:
+    def _streci_sejo(self, posluh: socket.socket, ctx: ssl.SSLContext, fps: int = 60) -> None:
         odjemalec = None
         try:
             surov, _ = posluh.accept()
@@ -613,12 +641,13 @@ class NavidezniZaslon:
                     break
                 vrstica += b
             pozdrav = vrstica.decode("utf-8", "replace").strip()
-            if not pozdrav.startswith("SAFEER-ZASLON ") or pozdrav.split(" ", 1)[1] != self._zeton:
+            deli = pozdrav.split(" ", 1)
+            if len(deli) != 2 or deli[0] != "SAFEER-ZASLON" or not hmac.compare_digest(deli[1], self._zeton):
                 odjemalec.close()
                 return
 
             glava = {
-                "v": 2, "w": self.sirina, "h": self.visina, "fps": 30,
+                "v": 2, "w": self.sirina, "h": self.visina, "fps": fps,
                 "zvok": None, "vnos": True, "plosek": True
             }
             odjemalec.sendall((json.dumps(glava) + "\n").encode("utf-8"))
@@ -693,6 +722,10 @@ class NavidezniZaslon:
             "dovoljeno": True,
             "mozno": True,
             "screen": "virtual",
+            "varno": True,
+            "kakovost": PRIVZETA_KAKOVOST,
+            "sifriranje": "TLS 1.2+ (ECDHE/AEAD)",
+            "odtis": self.odtis,
         }
 
 

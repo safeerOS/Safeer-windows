@@ -146,6 +146,8 @@ class SafeerControlBackend:
             "control": True,
             "zaupana": zaupana,
             "hubi": hubi,
+            "varno": True,
+            "kakovost": "najvisja",
         }
 
     def stanje_linka(self) -> dict:
@@ -174,6 +176,10 @@ class SafeerControlBackend:
             "id": self.device_id,
             "idNaprave": self.device_id,
             "control": True,
+            "varno": True,
+            "kakovost": "najvisja",
+            "sifriranje": "TLS 1.2+ (ECDHE/AEAD)",
+            "navidezni_zaslon": True,
             "vKrogu": False,
             "clanKroga": False,
             "brezPovezaveIzbrano": bool(self.nastavitve.get("brez_povezave")),
@@ -670,7 +676,7 @@ class SafeerControlBackend:
                 izid = {"ok": True, "message": "Program se zapira", "data": {"closed": zaprti}}
 
             elif akcija == "screen.start":
-                kakovost = str(params.get("quality") or "srednja")
+                kakovost = str(params.get("quality") or "najvisja")
                 seja = self.navidezni_zaslon.zacni_sejo(posiljatelj, kakovost=kakovost)
                 izid = {"ok": True, "message": "Navidezni zaslon se deli", "data": seja}
 
