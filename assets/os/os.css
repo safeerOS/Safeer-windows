@@ -163,6 +163,9 @@ h2 .dodatno:hover { color: var(--besedilo); }
 .vrstica .pozabi { width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; color: var(--medlo); flex: none; }
 .vrstica .pozabi:hover { background: rgba(255, 107, 107, .2); color: var(--rdeca); }
 .vrstica .pozabi svg { width: 18px; height: 18px; }
+.vrstica .dejanje { width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; color: var(--medlo); flex: none; margin-left: 4px; }
+.vrstica .dejanje:hover { background: rgba(31, 122, 92, .2); color: var(--zelena); }
+.vrstica .dejanje svg { width: 18px; height: 18px; }
 h2 .dodatno + .dodatno { margin-left: 14px; }
 .ploscica:hover .odstrani { display: grid; }
 

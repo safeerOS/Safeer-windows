@@ -371,6 +371,26 @@ class SafeerOsWindow(QMainWindow):
             id_n = str(a[0]) if a else ""
             return self.control_backend.programi_naprave(id_n)
 
+        if metoda == "napraveSDatoteki":
+            return self.control_backend.naprave_s_datotekami()
+
+        if metoda == "datotekeNaprave":
+            id_n = str(a[0]) if a else ""
+            mapa = str(a[1]) if len(a) > 1 else ""
+            return self.control_backend.datoteke_naprave(id_n, mapa)
+
+        if metoda == "odpriDatotekoNaprave":
+            id_n = str(a[0]) if a else ""
+            id_dat = str(a[1]) if len(a) > 1 else ""
+            return self.control_backend.odpri_datoteko_naprave(id_n, id_dat)
+
+        if metoda == "prenesiDatotekoNaprave":
+            id_n = str(a[0]) if a else ""
+            id_dat = str(a[1]) if len(a) > 1 else ""
+            ime_dat = str(a[2]) if len(a) > 2 else ""
+            streznik = a[3] if len(a) > 3 and isinstance(a[3], dict) else None
+            return self.control_backend.prenesi_datoteko_naprave(id_n, id_dat, ime_dat, streznik)
+
         if metoda == "zazeniNaNapravi":
             id_n = str(a[0]) if a else ""
             app = str(a[1]) if len(a) > 1 else ""
