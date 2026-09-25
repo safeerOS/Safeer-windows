@@ -2,7 +2,7 @@
 <html lang="sl">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src file: data: http: https:; media-src file: blob: http: https:; style-src 'self' 'unsafe-inline'; script-src 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src file: data: http: https:; media-src file: blob: http: https:; frame-src file: http: https: blob:; child-src file: http: https: blob:; connect-src file: http: https:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'">
 <title>Safeer OS</title>
 <link rel="stylesheet" href="os.css">
 </head>
@@ -143,7 +143,8 @@
                 <textarea id="mediaJsonKoda" rows="5" spellcheck="false" placeholder='[&#10;  {&#10;    "title": "Primer videa",&#10;    "url": "https://primer.si/video.mp4",&#10;    "kind": "film"&#10;  }&#10;]'></textarea>
                 <div class="media-json-akcije">
                   <button class="gumb glavni" type="button" id="mediaUvoziKodoGumb"><svg data-ikona="plus"></svg><span data-t="mediaUvoziKodo">Uvozi JSON kodo</span></button>
-                  <button class="gumb" type="button" id="mediaPocistiKodoGumb"><span>Počisti</span></button>
+                  <button class="gumb" type="button" id="mediaPrimerKodeGumb" title="Vstavi primer veljavne JSON kode"><svg data-ikona="program"></svg><span data-t="mediaVstaviPrimer">Primer kode (Code Example)</span></button>
+                  <button class="gumb" type="button" id="mediaPocistiKodoGumb"><span data-t="mediaPocisti">Počisti</span></button>
                 </div>
               </div>
             </div>
@@ -167,9 +168,10 @@
         </div>
 
         <div class="media-predvajalnik" id="mediaPredvajalnik" hidden>
-          <div class="media-predvajalnik-glava"><div><small data-t="mediaPredvaja">PREDVAJA SE V SAFEER OS</small><h2 id="mediaPredvajalnikNaslov"></h2><p id="mediaPredvajalnikMeta"></p></div><button class="gumb-ikona" id="mediaZapri" data-naslov="zapri"><svg data-ikona="x"></svg></button></div>
-          <video id="mediaVideo" controls playsinline preload="metadata"></video>
+          <div class="media-predvajalnik-glava"><div><small data-t="mediaPredvaja">PREDVAJA SE V SAFEER OS</small><h2 id="mediaPredvajalnikNaslov"></h2><p id="mediaPredvajalnikMeta"></p></div><div class="media-predvajalnik-akcije"><button class="gumb-ikona" id="mediaKino" title="Kino način (celozaslonsko)"><svg data-ikona="celozaslonsko"></svg></button><button class="gumb-ikona" id="mediaZapri" data-naslov="zapri"><svg data-ikona="x"></svg></button></div></div>
+          <video id="mediaVideo" controls playsinline preload="metadata" hidden></video>
           <audio id="mediaAudio" controls preload="metadata" hidden></audio>
+          <iframe id="mediaIframe" allowfullscreen webkitallowfullscreen mozallowfullscreen allow="autoplay; encrypted-media; picture-in-picture; fullscreen" style="position:relative; width:100%; aspect-ratio:16/9; max-height:80vh; border:none; background:#000; border-radius:12px;" hidden></iframe>
           <p class="media-napaka" id="mediaNapaka" hidden data-t="mediaNapaka">Tega toka ni mogoče predvajati. Poskusi drugo različico.</p>
           <div class="media-razlicice" id="mediaRazlicice"></div>
         </div>

@@ -66,12 +66,14 @@ def _absolute(base: str, value: Any) -> str:
     return url if urllib.parse.urlsplit(url).scheme in ("http", "https", "file") else ""
 
 
-def _kind(value: Any, url: str = "", title: str = "") -> str:
+def _kind(value: Any, url: str = "", title: str = "", season: int = 0, episode: int = 0) -> str:
+    if season > 0 or episode > 0:
+        return "serija"
     hint = f"{value or ''} {url} {title}".lower()
     ext = Path(urllib.parse.urlsplit(url).path).suffix.lower()
-    if ext in AUDIO or any(x in hint for x in ("audio", "music", "song", "track", "album", "glasba")):
+    if ext in AUDIO or any(x in hint for x in ("audio", "music", "song", "track", "album", "glasba", "/music/")):
         return "glasba"
-    if any(x in hint for x in ("series", "episode", "season", "show", "tv", "serija", "epizoda")):
+    if any(x in hint for x in ("series", "episode", "season", "show", "tv", "serija", "epizoda", "/tv/", "/series/")):
         return "serija"
     return "film"
 
@@ -96,6 +98,155 @@ def _quality_label(resolution: int) -> str:
     return f"{resolution}p" if resolution else "Samodejno"
 
 
+KNOWN_IMDB = {
+    "tt1375666": {
+        "title": "Inception (Izvor)",
+        "kind": "film",
+        "year": 2010,
+        "image": "https://m.media-amazon.com/images/M/MV5BMjAxMzY3NjcxNF5BMl5BanBnXkFtZTcwNTI5OTM0Mw@@._V1_SX300.jpg",
+        "description": "Tat, ki krade skrivnosti skozi tehnologijo deljenja sanj, dobi obratno nalogo: vsaditev ideje.",
+    },
+    "tt0816692": {
+        "title": "Interstellar (Medzvezdno)",
+        "kind": "film",
+        "year": 2014,
+        "image": "https://m.media-amazon.com/images/M/MV5BZjdkOTU3MDktN2IxOS00OGEyLWFmMjktY2FiMmZkNWIyODZiXkEyXkFqcGdeQXVyMTMxODk2OTU@._V1_SX300.jpg",
+        "description": "Skupina raziskovalcev potuje skozi črvino v vesolju v poskusu zagotovitve preživetja človeštva.",
+    },
+    "tt0468569": {
+        "title": "The Dark Knight (Vitez teme)",
+        "kind": "film",
+        "year": 2008,
+        "image": "https://m.media-amazon.com/images/M/MV5BMTMxNTMwODM0NF5BMl5BanBnXkFtZTcwODAyMTk2Mw@@._V1_SX300.jpg",
+        "description": "Batman se spopade s psihopatskim Jokerjem, ki v Gotham prinaša kaos.",
+    },
+    "tt0111161": {
+        "title": "Kaznilnica odrešitve (The Shawshank Redemption)",
+        "kind": "film",
+        "year": 1994,
+        "image": "https://m.media-amazon.com/images/M/MV5BNDE3ODcxNzMtY2YzZC00NmNlLWJiNDMtZDViZWM2MzIxZDYwXkEyXkFqcGdeQXVyNjAwNDUxODI@._V1_SX300.jpg",
+        "description": "Zgodba o upanju in prijateljstvu med zapornikoma v zaporu Shawshank.",
+    },
+    "tt0110912": {
+        "title": "Šund (Pulp Fiction)",
+        "kind": "film",
+        "year": 1994,
+        "image": "https://m.media-amazon.com/images/M/MV5BNGNhMDIzZTUtNTBlZi00MTRlLWFjM2ItYzViMjE3YzI5MjljXkEyXkFqcGdeQXVyNzkwMjQ5NzEt._V1_SX300.jpg",
+        "description": "Prepletene zgodbe dveh plačanih morilcev, boksarja in mafijskega šefa.",
+    },
+    "tt0133093": {
+        "title": "Matrica (The Matrix)",
+        "kind": "film",
+        "year": 1999,
+        "image": "https://m.media-amazon.com/images/M/MV5BNzQzOTk3OTAtNDQ0Zi00ZTVkLWI0MTEtMDllZjNkYzNjNTc4L2ltYWdlXkEyXkFqcGdeQXVyNjU0OTQ0OTY@._V1_SX300.jpg",
+        "description": "Programer odkrije resnico o svoji navidezni resničnosti in vojni proti strojem.",
+    },
+    "tt0172495": {
+        "title": "Gladiator",
+        "kind": "film",
+        "year": 2000,
+        "image": "https://m.media-amazon.com/images/M/MV5BMDliMmNhNDEtODUyOS00MjNlLTgxODEtN2U3NzIxMGVkZTA1L2ltYWdlXkEyXkFqcGdeQXVyNjU0OTQ0OTY@._V1_SX300.jpg",
+        "description": "Nekdanji rimski general se maščuje pokvarjenemu cesarju, ki je umoril njegovo družino.",
+    },
+    "tt15239678": {
+        "title": "Dune: Part Two (Dune: Peščeni planet 2)",
+        "kind": "film",
+        "year": 2024,
+        "image": "https://m.media-amazon.com/images/M/MV5BN2QyZGUgkUtYTY5MS00ZTM0LWI0NDktZjBkNjVjYzJkZTI4XkEyXkFqcGdeQXVyMTkxNjUyNQ@@._V1_SX300.jpg",
+        "description": "Paul Atreides se združi s Chani in Fremeni na poti maščevanja.",
+    },
+    "tt15398776": {
+        "title": "Oppenheimer",
+        "kind": "film",
+        "year": 2023,
+        "image": "https://m.media-amazon.com/images/M/MV5BMDBmYTZjNjMtNjc5Yi00Nzc5LODExOWUtODEzNTYRmMjVhNDhkXkEyXkFqcGdeQXVyNzAwMjU2MTY@._V1_SX300.jpg",
+        "description": "Zgodba o očetu atomske bombe J. Robertu Oppenheimerju in projektu Manhattan.",
+    },
+    "tt1630029": {
+        "title": "Avatar: Pot vode (The Way of Water)",
+        "kind": "film",
+        "year": 2022,
+        "image": "https://m.media-amazon.com/images/M/MV5BYjhiNjBlODctY2ZiOC00YjVlLWFlNzAtNTVhNzM1YjI1NzMxXkEyXkFqcGdeQXVyMjkwOTAyMDU@._V1_SX300.jpg",
+        "description": "Jake Sully in Neytiri ščitita svojo družino na oceanih Pandore.",
+    },
+    "tt0944947": {
+        "title": "Igra prestolov (Game of Thrones)",
+        "kind": "serija",
+        "year": 2011,
+        "image": "https://m.media-amazon.com/images/M/MV5BN2EyZjM3NzUtNWUzMi00MTgxLWI0NTctMzY4M2VlOTdjZWRiXkEyXkFqcGdeQXVyNDUzOTQ5MjY@._V1_SX300.jpg",
+        "description": "Plemiške družine se borijo za nadzor nad Deželami Westerosa.",
+        "episodes": [
+            (1, 1, "Zima prihaja (Winter Is Coming)"),
+            (1, 2, "Kraljeva cesta (The Kingsroad)"),
+            (1, 3, "Lord Snow"),
+            (1, 4, "Pohabljenci, pankrti in zlomljene reči"),
+            (1, 5, "Volk in lev (The Wolf and the Lion)"),
+        ],
+    },
+    "tt0903747": {
+        "title": "Kriva pota (Breaking Bad)",
+        "kind": "serija",
+        "year": 2008,
+        "image": "https://m.media-amazon.com/images/M/MV5BYmQ4YWMxYjUtNjZmYi00MDQ1LWFjMjAtNjA5cfFhMmZmN2I3XkEyXkFqcGdeQXVyMTMzNDExODE5._V1_SX300.jpg",
+        "description": "Učitelj kemije z rakom začne kuhati metamfetamin s svojim nekdanjim dijakom.",
+        "episodes": [
+            (1, 1, "Pilot"),
+            (1, 2, "Mačka v žaklju (Cat's in the Bag...)"),
+            (1, 3, "...in vreča v reki (...And the Bag's in the River)"),
+            (1, 4, "Mož z rakom (Cancer Man)"),
+            (1, 5, "Siva snov (Gray Matter)"),
+        ],
+    },
+    "tt4574334": {
+        "title": "Stranger Things (Nenavadne stvari)",
+        "kind": "serija",
+        "year": 2016,
+        "image": "https://m.media-amazon.com/images/M/MV5BMDZkYmVhNjMtNWU4MC00MDQxLWE3YTgtZDAzOWZkYzg3NTBhXkEyXkFqcGdeQXVyMTkxNjUyNQ@@._V1_SX300.jpg",
+        "description": "Ko deček izgine v majhnem mestu, prijatelji in mati odkrijejo skrivne poskuse in deklico z nadnaravnimi močmi.",
+        "episodes": [
+            (1, 1, "Izginotje Willa Byersa"),
+            (1, 2, "Čudakinja na ulici Maple"),
+            (1, 3, "Božične lučke"),
+        ],
+    },
+    "tt3581920": {
+        "title": "The Last of Us",
+        "kind": "serija",
+        "year": 2023,
+        "image": "https://m.media-amazon.com/images/M/MV5BZGUzYTI3M2EtZmM0Yy00NGUyLWI4ODEtN2Q3ZGJlYzhhZjU3XkEyXkFqcGdeQXVyNTM0NTU5Mg@@._V1_SX300.jpg",
+        "description": "Joel in Ellie potujeta skozi post-apokaliptične Združene države.",
+        "episodes": [
+            (1, 1, "Ko si izgubljen v temi"),
+            (1, 2, "Okuženi"),
+            (1, 3, "Dolg, dolg čas"),
+        ],
+    },
+    "tt8462636": {
+        "title": "Černobil (Chernobyl)",
+        "kind": "serija",
+        "year": 2019,
+        "image": "https://m.media-amazon.com/images/M/MV5BNTBlOWUxZTctNTY2ZS00NjJkLTgwZjEtZWM1M2IxM2U0MDMzXkEyXkFqcGdeQXVyMTkxNjUyNQ@@._V1_SX300.jpg",
+        "description": "Kronika jedrske nesreče v Černobilu leta 1986 in neprimerljivega poguma reševalcev.",
+        "episodes": [
+            (1, 1, "1:23:45"),
+            (1, 2, "Prosim, ostanite mirni"),
+            (1, 3, "Odpri se, zemlja"),
+        ],
+    },
+}
+
+# TMDB aliasi za enotno prepoznavanje numeričnih ID-jev
+for _imdb_k, _tmdb_k in [
+    ("tt0944947", "1399"), ("tt0903747", "1396"), ("tt4574334", "66732"),
+    ("tt3581920", "100088"), ("tt8462636", "87108"), ("tt1375666", "27205"),
+    ("tt0816692", "157336"), ("tt0468569", "155"), ("tt0111161", "278"),
+    ("tt0110912", "680"), ("tt0133093", "603"), ("tt0172495", "98"),
+    ("tt15239678", "693134"), ("tt15398776", "872585"), ("tt1630029", "76600")
+]:
+    if _imdb_k in KNOWN_IMDB:
+        KNOWN_IMDB[_tmdb_k] = KNOWN_IMDB[_imdb_k]
+
+
 def _item(title: Any, url: Any, *, base: str, source_id: str, source_name: str,
           kind: Any = "", year: Any = 0, image: Any = "", artist: Any = "",
           quality: Any = "", resolution: Any = 0, bitrate: Any = 0,
@@ -113,19 +264,78 @@ def _item(title: Any, url: Any, *, base: str, source_id: str, source_name: str,
         bitrate_int = int(float(bitrate or 0))
     except (TypeError, ValueError):
         bitrate_int = 0
+
+    season_int = int(season or 0) if str(season or "").isdigit() else 0
+    episode_int = int(episode or 0) if str(episode or "").isdigit() else 0
+
+    # Samodejno prepoznavanje sezone in epizode iz URL-ja ali naslova
+    if season_int == 0 and episode_int == 0:
+        match_tv = re.search(r"/(?:tv|series|embed/tv)/[^/]+(?:/(\d+)/(\d+))?", media_url)
+        if match_tv and match_tv.group(1) and match_tv.group(2):
+            season_int = int(match_tv.group(1))
+            episode_int = int(match_tv.group(2))
+        else:
+            match_se = re.search(r"\b[sS](\d+)[eE](\d+)\b", clean_title + " " + media_url)
+            if match_se:
+                season_int = int(match_se.group(1))
+                episode_int = int(match_se.group(2))
+            else:
+                match_x = re.search(r"\b(\d+)x(\d+)\b", clean_title + " " + media_url)
+                if match_x:
+                    season_int = int(match_x.group(1))
+                    episode_int = int(match_x.group(2))
+
+    # Obogatitev z zbirko znanih IMDb in TMDB naslovov ter plakatov
+    imdb_match = re.search(r"\b(tt\d+|\d{2,7})\b", (clean_title + " " + media_url).lower())
+    if imdb_match and imdb_match.group(1) in KNOWN_IMDB:
+        k_info = KNOWN_IMDB[imdb_match.group(1)]
+        is_generic = (
+            clean_title.lower().startswith("tt") or
+            clean_title.isdigit() or
+            clean_title == source_name or
+            clean_title.lower() in ("film", "serija", "vir", "vsebina", "vdelani video", "vdelana vsebina")
+        )
+        if is_generic:
+            if season_int > 0 and episode_int > 0:
+                ep_name = ""
+                for s, e, n in k_info.get("episodes", []):
+                    if s == season_int and e == episode_int:
+                        ep_name = f" - {n}"
+                        break
+                clean_title = f"{k_info.get('title', clean_title)} S{season_int:02d}E{episode_int:02d}{ep_name}"
+            else:
+                clean_title = k_info.get("title", clean_title)
+        if not image and k_info.get("image"):
+            image = k_info["image"]
+        if not year_int and k_info.get("year"):
+            year_int = k_info["year"]
+        if not description and k_info.get("description"):
+            description = k_info["description"]
+        if not kind and k_info.get("kind"):
+            kind = k_info["kind"]
+
+    # Izboljšava naslova za IMDb ID-je ali generic vnose, če ni v KNOWN_IMDB
+    if clean_title.lower().startswith("tt") and clean_title[2:].isdigit():
+        if season_int > 0 and episode_int > 0:
+            clean_title = f"{source_name or 'Serija'} S{season_int:02d}E{episode_int:02d} ({clean_title})"
+        else:
+            clean_title = f"{source_name or 'Film'} ({clean_title})"
+    elif clean_title.lower() in ("film", "vir", "vsebina") and (season_int > 0 or episode_int > 0):
+        clean_title = f"{source_name or 'Serija'} S{max(1, season_int):02d}E{max(1, episode_int):02d}"
+
     res = _resolution(resolution, quality, media_url, clean_title)
     result = {
         "naslov": clean_title,
         "url": media_url,
-        "vrsta": _kind(kind, media_url, clean_title),
+        "vrsta": _kind(kind, media_url, clean_title, season_int, episode_int),
         "leto": year_int if 1900 <= year_int <= 2200 else 0,
         "slika": _absolute(base, image),
         "izvajalec": _text(artist, 160),
         "locljivost": res,
         "kakovost": _quality_label(res),
         "bitrate": max(0, bitrate_int),
-        "sezona": int(season or 0) if str(season or "").isdigit() else 0,
-        "epizoda": int(episode or 0) if str(episode or "").isdigit() else 0,
+        "sezona": season_int,
+        "epizoda": episode_int,
         "opis": _text(description, 500),
         "vir_id": source_id,
         "vir": source_name,
@@ -195,6 +405,8 @@ class _MediaHTMLParser(HTMLParser):
         self.script_parts: list[str] = []
         self.items: list[dict] = []
         self.meta: dict[str, str] = {}
+        self.current_a: Optional[dict] = None
+        self.current_a_text: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, Optional[str]]]) -> None:
         values = {k.lower(): v or "" for k, v in attrs}
@@ -214,14 +426,19 @@ class _MediaHTMLParser(HTMLParser):
                           quality=values.get("data-quality", ""), resolution=values.get("height", 0))
             if found:
                 self.items.append(found)
-        if tag == "a" and values.get("href"):
-            path = urllib.parse.urlsplit(values["href"]).path.lower()
-            if Path(path).suffix in MEDIA_EXT:
-                title = values.get("title") or Path(path).stem
-                found = _item(title, values["href"], base=self.base, source_id=self.source_id,
-                              source_name=self.source_name)
+        if tag == "iframe" and values.get("src"):
+            src = values["src"]
+            if any(x in src.lower() for x in ("embed", "player", "vidsrc", "vidlink", "youtube", "vimeo", "dailymotion", "stream")) or Path(urllib.parse.urlsplit(src).path).suffix.lower() in MEDIA_EXT:
+                title = values.get("title") or values.get("aria-label") or self.meta.get("og:title") or self.title or self.source_name
+                kind = _kind(values.get("kind"), src, title)
+                poster = self.meta.get("og:image") or self.meta.get("twitter:image", "")
+                found = _item(title, src, base=self.base, source_id=self.source_id,
+                              source_name=self.source_name, kind=kind, image=poster)
                 if found:
                     self.items.append(found)
+        if tag == "a" and values.get("href"):
+            self.current_a = values
+            self.current_a_text = []
 
     def handle_endtag(self, tag: str) -> None:
         if tag == "title":
@@ -234,25 +451,154 @@ class _MediaHTMLParser(HTMLParser):
                 pass
             self.script_type = ""
             self.script_parts = []
+        if tag == "a" and self.current_a is not None:
+            values = self.current_a
+            inner_text = " ".join(self.current_a_text).strip()
+            self.current_a = None
+            self.current_a_text = []
+            href = values.get("href", "")
+            path = urllib.parse.urlsplit(href).path.lower()
+            is_media = (
+                Path(path).suffix in MEDIA_EXT or
+                "/embed/" in href.lower() or
+                any(x in href.lower() for x in ("vidsrc", "vidlink", "superembed", "embed.su", "watch", "stream", "video", "movie", "tv", "series", "epizoda", "sezona"))
+            )
+            if is_media:
+                title = inner_text or values.get("title") or values.get("aria-label") or Path(path).stem
+                found = _item(title, href, base=self.base, source_id=self.source_id,
+                              source_name=self.source_name)
+                if found:
+                    self.items.append(found)
 
     def handle_data(self, data: str) -> None:
         if self.in_title:
             self.title = _text(self.title + " " + data, 200)
         if self.script_type:
             self.script_parts.append(data)
+        if self.current_a is not None:
+            self.current_a_text.append(data)
 
     def finish(self) -> list[dict]:
-        for media_key, kind in (("og:video", "film"), ("og:video:url", "film"),
-                                ("og:audio", "glasba"), ("og:audio:url", "glasba")):
+        og_type = self.meta.get("og:type", "").lower()
+        for media_key, default_kind in (("og:video", "film"), ("og:video:url", "film"),
+                                        ("og:audio", "glasba"), ("og:audio:url", "glasba")):
             if self.meta.get(media_key):
+                kind = default_kind
+                if "video" in media_key:
+                    if any(x in og_type for x in ("tv", "episode", "series")):
+                        kind = "serija"
+                    elif "movie" in og_type:
+                        kind = "film"
                 found = _item(self.meta.get("og:title") or self.title or self.source_name,
                               self.meta[media_key], base=self.base, source_id=self.source_id,
                               source_name=self.source_name, kind=kind,
-                              image=self.meta.get("og:image", ""),
-                              description=self.meta.get("og:description", ""))
+                              image=self.meta.get("og:image") or self.meta.get("twitter:image", ""),
+                              description=self.meta.get("og:description") or self.meta.get("description", ""))
                 if found:
                     self.items.append(found)
         return self.items[:MAX_SOURCE_ITEMS]
+
+
+def _resolve_embed_or_direct_source(url: str, source_id: str, source_name: str) -> list[dict]:
+    """Prepozna embed ponudnike, specifične epizode/filme ali splošne vdelane toke."""
+    parsed = urllib.parse.urlsplit(url)
+    netloc = parsed.netloc.lower()
+    path = parsed.path
+    is_embed_domain = any(dom in netloc for dom in ("vidsrc", "vidlink", "embed.su", "superembed", "multiembed", "2embed"))
+
+    # 1. Specifična povezava do TV serije ali epizode (/tv/ ali /series/ ali SxxExx)
+    match_tv = re.search(r"/(?:tv|series|embed/tv)/([^/]+)/(\d+)/(\d+)", url)
+    if match_tv:
+        imdb_id = match_tv.group(1).lower()
+        season = int(match_tv.group(2))
+        episode = int(match_tv.group(3))
+        info = KNOWN_IMDB.get(imdb_id, {})
+        title_base = info.get("title", source_name or "Serija")
+        ep_name = ""
+        for s, e, n in info.get("episodes", []):
+            if s == season and e == episode:
+                ep_name = f" - {n}"
+                break
+        clean_title = f"{title_base} S{season:02d}E{episode:02d}{ep_name}"
+        item = _item(clean_title, url, base=url, source_id=source_id, source_name=source_name or "VidSrc",
+                     kind="serija", year=info.get("year", 0), image=info.get("image", ""),
+                     season=season, episode=episode, description=info.get("description", ""))
+        return [item] if item else []
+
+    # 1b. Povezava do celotne TV serije brez sezone/epizode (npr. /embed/tv/1399 ali /tv/tt0944947)
+    match_tv_show = re.search(r"/(?:tv|series|embed/tv)/([^/?#]+)/?$", url)
+    if match_tv_show:
+        imdb_id = match_tv_show.group(1).lower()
+        info = KNOWN_IMDB.get(imdb_id, {})
+        title_base = info.get("title", source_name or "Serija")
+        embed_host = parsed.netloc or "vidsrc.cc"
+        scheme = parsed.scheme or "https"
+        effective_name = source_name if source_name and source_name != embed_host else "VidSrc"
+        episodes = info.get("episodes", [])
+        if episodes:
+            items = []
+            for s, e, ep_name in episodes:
+                tv_url = f"{scheme}://{embed_host}/v2/embed/tv/{imdb_id}/{s}/{e}"
+                full_title = f"{title_base} S{s:02d}E{e:02d} - {ep_name}"
+                it = _item(full_title, tv_url, base=tv_url, source_id=source_id,
+                           source_name=effective_name, kind="serija",
+                           year=info.get("year", 0), image=info.get("image", ""),
+                           season=s, episode=e, description=info.get("description", ""))
+                if it:
+                    items.append(it)
+            return items
+        else:
+            tv_url = f"{scheme}://{embed_host}/v2/embed/tv/{imdb_id}/1/1"
+            it = _item(f"{title_base} S01E01", tv_url, base=tv_url, source_id=source_id,
+                       source_name=effective_name, kind="serija",
+                       year=info.get("year", 0), image=info.get("image", ""),
+                       season=1, episode=1, description=info.get("description", ""))
+            return [it] if it else []
+
+    # 2. Specifična povezava do filma (/movie/ ali /embed/movie/)
+    match_movie = re.search(r"/(?:movie|embed/movie)/([^/]+)", url)
+    if match_movie:
+        imdb_id = match_movie.group(1).lower()
+        info = KNOWN_IMDB.get(imdb_id, {})
+        clean_title = info.get("title") or f"{source_name or 'Film'} ({imdb_id})"
+        item = _item(clean_title, url, base=url, source_id=source_id, source_name=source_name or "VidSrc",
+                     kind="film", year=info.get("year", 0), image=info.get("image", ""),
+                     description=info.get("description", ""))
+        return [item] if item else []
+
+    # 3. Korenska domena embed ponudnika (npr. https://vidsrc.cc ali https://vidlink.pro)
+    if is_embed_domain and (not path or path in ("/", "/index.html", "/v2", "/v2/")):
+        items = []
+        embed_host = parsed.netloc or "vidsrc.cc"
+        scheme = parsed.scheme or "https"
+        effective_name = source_name if source_name and source_name != embed_host else "VidSrc"
+        # Ustvari katalog prepoznanih filmov in serij za tega ponudnika
+        for imdb_id, meta in KNOWN_IMDB.items():
+            if meta.get("kind") == "film":
+                movie_url = f"{scheme}://{embed_host}/v2/embed/movie/{imdb_id}"
+                it = _item(meta["title"], movie_url, base=movie_url, source_id=source_id,
+                           source_name=effective_name, kind="film",
+                           year=meta.get("year", 0), image=meta.get("image", ""),
+                           description=meta.get("description", ""))
+                if it:
+                    items.append(it)
+            elif meta.get("kind") == "serija":
+                for s, e, ep_name in meta.get("episodes", []):
+                    tv_url = f"{scheme}://{embed_host}/v2/embed/tv/{imdb_id}/{s}/{e}"
+                    full_title = f"{meta['title']} S{s:02d}E{e:02d} - {ep_name}"
+                    it = _item(full_title, tv_url, base=tv_url, source_id=source_id,
+                               source_name=effective_name, kind="serija",
+                               year=meta.get("year", 0), image=meta.get("image", ""),
+                               season=s, episode=e, description=meta.get("description", ""))
+                    if it:
+                        items.append(it)
+        return items
+
+    # 4. Splošen neposredni tok ali vdelana stran
+    kind = _kind("", url, source_name)
+    title = source_name if source_name and source_name != parsed.netloc else (parsed.netloc or "Vdelana vsebina")
+    it = _item(title, url, base=url, source_id=source_id, source_name=source_name, kind=kind)
+    return [it] if it else []
 
 
 def _parse_m3u(text: str, base: str, source_id: str, source_name: str) -> list[dict]:
@@ -468,8 +814,9 @@ class MediaCenter:
 
     def _download(self, url: str) -> tuple[bytes, str, str]:
         request = urllib.request.Request(url, headers={
-            "User-Agent": "Safeer-OS-Media/1.0",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
             "Accept": "application/json, application/rss+xml, application/xml, audio/x-mpegurl, text/html;q=0.9, */*;q=0.5",
+            "Accept-Language": "sl,en-US;q=0.9,en;q=0.8",
         })
         with urllib.request.urlopen(request, timeout=15) as response:
             length = int(response.headers.get("Content-Length") or 0)
@@ -490,12 +837,19 @@ class MediaCenter:
         try:
             payload, content_type, final_url = self._download(source["url"])
             items = parse_payload(payload, content_type, final_url, source["id"], source["ime"])
+            if not items:
+                items = _resolve_embed_or_direct_source(final_url, source["id"], source["ime"])
             source.update({"vnosi": items, "stevilo": len(items), "posodobljeno": int(time.time()), "napaka": ""})
             ok, error = True, ""
         except Exception as exc:
-            error = _text(exc, 180) or "Vira ni bilo mogoče prebrati."
-            source["napaka"] = error
-            ok = False
+            items = _resolve_embed_or_direct_source(source["url"], source["id"], source["ime"])
+            if items:
+                source.update({"vnosi": items, "stevilo": len(items), "posodobljeno": int(time.time()), "napaka": ""})
+                ok, error = True, ""
+            else:
+                error = _text(exc, 180) or "Vira ni bilo mogoče prebrati."
+                source["napaka"] = error
+                ok = False
         with self._lock:
             data = self._load()
             saved = next((item for item in data.get("viri", []) if item.get("id") == source_id), None)

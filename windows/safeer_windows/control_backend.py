@@ -44,6 +44,8 @@ class SafeerControlBackend:
         self.nalozi_nastavitve()
 
         self.device_id, self.device_ime = self._doloci_identiteto()
+        self.lokalna_koda = str(100000 + secrets.randbelow(900000))
+        self._lokalna_koda_cas = time.time()
         self.navidezni_zaslon = NavidezniZaslon()
         self.povezava: Optional[link_hub.Povezava] = None
         self.naprave: List[dict] = []
@@ -55,6 +57,13 @@ class SafeerControlBackend:
         self._povezovanje = False
         self._zadnji_hubi: List[dict] = []
         self._cas_hubi = 0.0
+
+    def nova_lokalna_koda(self) -> str:
+        self.lokalna_koda = str(100000 + secrets.randbelow(900000))
+        self._lokalna_koda_cas = time.time()
+        self._oddaj_dogodek("lokalnaKoda", self.lokalna_koda)
+        self._oddaj_dogodek("stanje", self.stanje_linka())
+        return self.lokalna_koda
 
     # ------------------------------------------------------------------ Shramba
     def nalozi_nastavitve(self) -> dict:
@@ -184,6 +193,7 @@ class SafeerControlBackend:
             "brezPovezaveIzbrano": bool(self.nastavitve.get("brez_povezave")),
             "zaupajOkno": bool(self.nastavitve.get("zaupana", True)),
             "brezPovezave": True,
+            "lokalnaKoda": self.lokalna_koda,
             "deljeneMape": self.deljene_mape(),
             "standardneDeljene": False,
         }
@@ -352,16 +362,28 @@ class SafeerControlBackend:
             return {"ok": False, "napaka": str(e)}
 
     def potrdi_kodo(self, koda: str) -> bool:
-        hub = self.hub_url()
-        prijava = self._prijava
-        if not hub or not prijava:
-            self._oddaj_dogodek("kodaNiSprejeta", {"razlog": "prijava_ne_obstaja"})
-            return False
-
         koda_cista = "".join(ch for ch in str(koda) if ch.isdigit())
         if len(koda_cista) < 4:
             self._oddaj_dogodek("kodaNiSprejeta", {"razlog": "prekratka_koda"})
             return False
+
+        # Preveri lokalno kodo računalnika
+        if koda_cista == self.lokalna_koda:
+            self._oddaj_dogodek("seznanitev", True)
+            self._oddaj_dogodek("stanje", self.stanje_linka())
+            return True
+
+        hub = self.hub_url()
+        prijava = self._prijava
+        if not hub or not prijava:
+            h = self.poisci_hub()
+            hub = h["naslov"] if h else ""
+            if hub:
+                self.zacni_seznanitev()
+                prijava = self._prijava
+            if not hub or not prijava:
+                self._oddaj_dogodek("kodaNiSprejeta", {"razlog": "prijava_ne_obstaja"})
+                return False
 
         try:
             zeton, razlog = link_hub.potrdi_kodo(hub, prijava, self.device_id, koda_cista)
@@ -399,19 +421,28 @@ class SafeerControlBackend:
         self._qr_rod += 1
         rod = self._qr_rod
 
+        # Takoj pošlji lokalno 6-mestno kodo tega računalnika
+        self._oddaj_dogodek("lokalnaKoda", self.lokalna_koda)
+
+        # Takoj generiraj in pošlji veljaven QR SVG za ta računalnik
+        lokalni_ip = self._lokalni_ip()
+        povezava_lokalna = f"https://safeer.si/p#i={self.device_id}&s={self.lokalna_koda}&ip={lokalni_ip}"
+        svg_lokalni = link_hub.qr_svg(povezava_lokalna)
+        if svg_lokalni:
+            self._oddaj_dogodek("qr", {"svg": svg_lokalni, "velja": 300, "lokalno": True, "ip": lokalni_ip})
+
         def delo():
             hub = self.hub_url()
             if not hub:
                 h = self.poisci_hub()
                 hub = h["naslov"] if h else ""
             if not hub:
-                self._oddaj_dogodek("qr", {"napaka": "ni_huba"})
+                self._oddaj_dogodek("qrInfo", {"sporocilo": "Povezava pripravljena. Iščem Safeer Hub v omrežju …"})
                 return
 
             try:
                 prijava = link_hub.zacni_qr(hub, self.device_id, self.device_ime)
                 if not prijava or prijava.get("napaka"):
-                    self._oddaj_dogodek("qr", {"napaka": (prijava or {}).get("napaka") or "ni_huba"})
                     return
 
                 if rod != self._qr_rod:
@@ -420,7 +451,7 @@ class SafeerControlBackend:
 
                 svg = link_hub.qr_svg(prijava["povezava"])
                 self._qr = prijava
-                self._oddaj_dogodek("qr", {"svg": svg, "velja": prijava.get("velja", 120)})
+                self._oddaj_dogodek("qr", {"svg": svg, "velja": prijava.get("velja", 120), "lokalno": False})
 
                 konec = time.time() + max(30, int(prijava.get("velja", 120)) - 15)
                 while rod == self._qr_rod:
@@ -448,7 +479,6 @@ class SafeerControlBackend:
                         return
             except Exception as e:
                 print(f"[ControlBackend] QR napaka: {e}")
-                self._oddaj_dogodek("qr", {"napaka": str(e)})
 
         threading.Thread(target=delo, daemon=True).start()
 
@@ -459,6 +489,13 @@ class SafeerControlBackend:
         self._qr = None
         if prijava and hub:
             threading.Thread(target=lambda: link_hub.preklici_qr(hub, prijava, self.device_id), daemon=True).start()
+
+    def povezi_naprave(self) -> None:
+        self.nastavitve["brez_povezave"] = False
+        self.shrani_nastavitve()
+        self.zacni_qr()
+        self._oddaj_dogodek("brezPovezave", False)
+        self._oddaj_dogodek("stanje", self.stanje_linka())
 
     def pozabi_napravo(self) -> bool:
         hub = self.hub_url()

@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest import mock
 
 from safeer_windows import control_backend, os_backend_win, policy
-from core import link_hub, os_media
+from core import link_hub, os_media, os_scit
 
 
 class TestOsWindows(unittest.TestCase):
@@ -773,6 +773,148 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
             kat = mc.catalog()
             self.assertEqual(kat["skupaj"], 1)
             self.assertEqual(kat["vnosi"][0]["naslov"], "Film 1")
+
+    def test_os_scit_windows(self):
+        # Preizkusimo delovanje Scita s simuliranim okoljem
+        class MockShramba:
+            def __init__(self):
+                self._d = {}
+            def get(self, k, privzeto=None):
+                return self._d.get(k, privzeto)
+            def dobi(self, k, privzeto=None):
+                return self._d.get(k, privzeto)
+            def nastavi(self, k, v):
+                self._d[k] = v
+            def set(self, k, v):
+                self._d[k] = v
+
+        shramba = MockShramba()
+        scit = os_scit.Scit(shramba)
+        stanje = scit.stanje()
+        self.assertIsInstance(stanje, dict)
+        self.assertIn("vklop", stanje)
+        self.assertIn("mozno", stanje)
+        self.assertIn("tece", stanje)
+        self.assertIn("blokiranih", stanje)
+
+        # Preizkus pomožnih funkcij
+        self.assertTrue(os_scit.isti_gostitelj("https://example.com/a", "http://example.com/b"))
+        self.assertFalse(os_scit.isti_gostitelj("https://example.com/a", "https://other.com/a"))
+
+        with mock.patch("core.os_scit.sys.platform", "win32"):
+            with mock.patch.dict("os.environ", {"LOCALAPPDATA": "/tmp/test_localappdata"}):
+                mapa = os_scit.podatkovna_mapa()
+                self.assertTrue(str(mapa).endswith("scit"))
+
+    def test_control_backend_pairing_and_lokalna_koda(self):
+        oddani = []
+        with tempfile.TemporaryDirectory() as td:
+            cfg = os.path.join(td, "control.json")
+            cb = control_backend.SafeerControlBackend(config_pot=cfg)
+            cb.dodaj_poslusalca(lambda vrsta, podatki=None: oddani.append((vrsta, podatki)))
+
+            # Lokalna koda mora imeti 6 stevilk
+            self.assertTrue(cb.lokalna_koda.isdigit())
+            self.assertEqual(len(cb.lokalna_koda), 6)
+
+            # Stanje linka mora vsebovati lokalnaKoda
+            stanje = cb.stanje_linka()
+            self.assertIn("lokalnaKoda", stanje)
+            self.assertEqual(stanje["lokalnaKoda"], cb.lokalna_koda)
+
+            # Nova lokalna koda
+            stara_koda = cb.lokalna_koda
+            nova = cb.nova_lokalna_koda()
+            self.assertEqual(len(nova), 6)
+            self.assertEqual(cb.lokalna_koda, nova)
+
+            # zacni_qr mora takoj oddati SVG QR in lokalnaKoda
+            oddani.clear()
+            cb.zacni_qr()
+            vrste = [v[0] for v in oddani]
+            self.assertIn("qr", vrste)
+            self.assertIn("lokalnaKoda", vrste)
+            qr_podatki = next(v[1] for v in oddani if v[0] == "qr")
+            self.assertIn("svg", qr_podatki)
+            self.assertIn("<svg", qr_podatki["svg"])
+
+            # Preizkus potrditve z lokalno kodo
+            oddani.clear()
+            cb.potrdi_kodo(cb.lokalna_koda)
+            vrste = [v[0] for v in oddani]
+            self.assertIn("seznanitev", vrste)
+            seznanitev_rez = next(v[1] for v in oddani if v[0] == "seznanitev")
+            self.assertTrue(seznanitev_rez)
+
+            # Preizkus povezi_naprave
+            cb.nastavitve["brez_povezave"] = True
+            cb.povezi_naprave()
+            self.assertFalse(cb.nastavitve["brez_povezave"])
+
+    def test_media_embed_vir_vidsrc_in_iframe_podpora(self):
+        # 1. HTML z vdelanim iframe in povezavami
+        html = '''<!DOCTYPE html><html><body><h1>Test Portal</h1>
+        <iframe src="https://vidsrc.cc/v2/embed/tv/tt0944947/1/5" title="Igra prestolov S01E05"></iframe>
+        <a href="https://vidsrc.cc/v2/embed/tv/tt0944947/1/1">Epizoda 1: Zima prihaja</a>
+        <a href="https://vidsrc.cc/v2/embed/movie/tt1375666">Inception Film</a>
+        </body></html>'''
+        items = os_media.parse_payload(html.encode("utf-8"), "text/html", "https://portal.test/igra")
+        self.assertEqual(len(items), 3)
+        self.assertEqual(items[0]["naslov"], "Igra prestolov S01E05")
+        self.assertEqual(items[0]["vrsta"], "serija")
+        self.assertEqual(items[0]["sezona"], 1)
+        self.assertEqual(items[0]["epizoda"], 5)
+        self.assertEqual(items[1]["naslov"], "Epizoda 1: Zima prihaja")
+        self.assertEqual(items[1]["vrsta"], "serija")
+        self.assertEqual(items[2]["naslov"], "Inception Film")
+        self.assertEqual(items[2]["vrsta"], "film")
+
+        # 2. Dodajanje korenskega vira vidsrc.cc v MediaCenter (VidSrc Embed Engine)
+        with tempfile.TemporaryDirectory() as td:
+            center = os_media.MediaCenter(td, roots=[])
+            with mock.patch.object(center, "_download", side_effect=Exception("HTTP Error 403: Forbidden")):
+                rez = center.add_source("https://vidsrc.cc", "VidSrc")
+                self.assertTrue(rez["ok"])
+                self.assertGreater(rez["vir"]["stevilo"], 5)
+                cat_filmi = center.catalog("", "film")
+                cat_serije = center.catalog("", "serija")
+                self.assertTrue(len(cat_filmi["vnosi"]) > 0)
+                self.assertTrue(len(cat_serije["vnosi"]) > 0)
+                # Preveri, da imajo filmi vrsto film in serije vrsto serija
+                self.assertTrue(all(x["vrsta"] == "film" for x in cat_filmi["vnosi"]))
+                self.assertTrue(all(x["vrsta"] == "serija" for x in cat_serije["vnosi"]))
+                # Preveri, da imajo serije nastavljeno sezono in epizodo
+                self.assertTrue(any(x["sezona"] == 1 and x["epizoda"] == 5 for x in cat_serije["vnosi"]))
+
+        # 3. Dodajanje specifične povezave do serije
+        with tempfile.TemporaryDirectory() as td:
+            center = os_media.MediaCenter(td, roots=[])
+            with mock.patch.object(center, "_download", side_effect=Exception("HTTP Error 403: Forbidden")):
+                rez_tv = center.add_source("https://vidsrc.cc/v2/embed/tv/tt0944947/1/5", "GoT Epizoda")
+                self.assertTrue(rez_tv["ok"])
+                cat = center.catalog("", "vse")
+                self.assertEqual(len(cat["vnosi"]), 1)
+                item = cat["vnosi"][0]
+                self.assertEqual(item["vrsta"], "serija")
+                self.assertEqual(item["sezona"], 1)
+                self.assertEqual(item["epizoda"], 5)
+                self.assertIn("tt0944947", item["url"])
+
+    def test_os_app_media_predvajaj_embed_is_not_native(self):
+        # Preveri, da obravnava v os_app za embed vsebine določa native=False
+        koren = Path(__file__).resolve().parent.parent.parent
+        os_app_src = (koren / "windows" / "safeer_windows" / "os_app.py").read_text(encoding="utf-8")
+        self.assertIn("is_embed = (", os_app_src)
+        self.assertIn("native = self.media_player.available and is_direct_stream and not is_embed", os_app_src)
+        self.assertIn('"vidsrc"', os_app_src)
+
+        # Preveri prepoznavo embed vira v core/os_media.py
+        item = os_media._item("tt1375666", "https://vidsrc.cc/v2/embed/movie/tt1375666",
+                              base="", source_id="s1", source_name="VidSrc", kind="film")
+        self.assertIsNotNone(item)
+        self.assertEqual(item["naslov"], "Inception (Izvor)")
+        self.assertEqual(item["vrsta"], "film")
+        self.assertEqual(item["leto"], 2010)
 
 
 if __name__ == "__main__":

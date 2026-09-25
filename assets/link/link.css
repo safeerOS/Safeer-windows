@@ -556,6 +556,42 @@ body.namizje.prijava main, body.prijava main { max-width: none; padding: 0; }
   justify-content: center;
   padding: 32px 24px;
 }
+.prijavaVrh {
+  width: 100%;
+  max-width: 980px;
+  display: flex;
+  justify-content: flex-start;
+  margin-bottom: 16px;
+}
+.gumbNazajOs {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--crta);
+  color: var(--besedilo);
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.gumbNazajOs:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: var(--zelena);
+  color: var(--zelena);
+  transform: translateX(-2px);
+}
+.gumbNazajOs svg {
+  width: 18px;
+  height: 18px;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
 .prijavaZnak { display: flex; align-items: center; gap: 10px; font-size: 19px; font-weight: 700; letter-spacing: -0.01em; }
 .znakOs {
   width: 40px; height: 40px; border-radius: 12px;
@@ -568,16 +604,16 @@ body.namizje.prijava main, body.prijava main { max-width: none; padding: 0; }
 
 .prijavaNacini {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-  gap: 22px;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 16px;
   width: 100%;
-  max-width: 820px;
+  max-width: 980px;
 }
 .prijavaNacin {
   background: var(--plosca);
   border: 1px solid var(--crta);
   border-radius: 18px;
-  padding: 24px 22px;
+  padding: 24px 20px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -587,6 +623,21 @@ body.namizje.prijava main, body.prijava main { max-width: none; padding: 0; }
 .prijavaNacin p { color: var(--medlo); font-size: 14px; margin: 0; }
 .prijavaNacin .opomba { margin-top: 10px; }
 .prijavaNacin .drobniGumb { margin-top: 10px; cursor: pointer; }
+
+.stevilkePrikaz {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 32px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  color: var(--zelena);
+  background: rgba(20, 30, 24, 0.6);
+  border: 1px solid var(--crta);
+  border-radius: 12px;
+  padding: 12px 18px;
+  margin: 16px 0 10px;
+  box-shadow: 0 0 16px rgba(100, 220, 140, 0.12);
+  user-select: all;
+}
 
 .qrOkvir {
   width: 208px; height: 208px;
@@ -643,7 +694,7 @@ button.povezavaGumb {
 button.povezavaGumb:hover { color: var(--besedilo); }
 button.povezavaGumb:focus-visible { outline: 2px solid var(--zelena); outline-offset: 2px; }
 
-@media (max-width: 720px) {
+@media (max-width: 860px) {
   .prijavaNacini { grid-template-columns: minmax(0, 1fr); }
   .prijavaLoci { justify-self: center; }
 }

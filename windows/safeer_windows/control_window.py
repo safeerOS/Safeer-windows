@@ -7,8 +7,8 @@ import os
 from typing import Any, Optional
 
 from PySide6.QtCore import QObject, Qt, QTimer, QUrl, Signal, Slot
-from PySide6.QtGui import QIcon
-from PySide6.QtWidgets import QFileDialog, QMainWindow
+from PySide6.QtGui import QColor, QIcon
+from PySide6.QtWidgets import QFileDialog, QMainWindow, QVBoxLayout, QWidget
 from PySide6.QtWebEngineCore import (
     QWebEnginePage,
     QWebEngineProfile,
@@ -92,6 +92,7 @@ MOST_JS = """
     odpri: function (url) { poslji("odpri", [url]); },
     deliStandardneMape: function () { poslji("deliStandardneMape"); },
     poveziNaprave: function () { poslji("poveziNaprave"); },
+    novaLokalnaKoda: function () { poslji("novaLokalnaKoda"); },
     hubVklopi: function () { poslji("hubVklopi"); },
     hubIzklopi: function () { poslji("hubIzklopi"); },
     hubOsvezi: function () { poslji("hubOsvezi"); },
@@ -128,11 +129,10 @@ class SafeerControlPage(QWebEnginePage):
             super().javaScriptConsoleMessage(level, message, line, source)
 
 
-class SafeerControlWindow(QMainWindow):
-    def __init__(self, backend: Optional[control_backend.SafeerControlBackend] = None, parent: Optional[QMainWindow] = None,
+class SafeerControlWindow(QWidget):
+    def __init__(self, backend: Optional[control_backend.SafeerControlBackend] = None, parent: Optional[QWidget] = None,
                  na_skritje: Optional[Any] = None):
-        flags = Qt.Widget if parent is not None else Qt.Window
-        super().__init__(parent, flags)
+        super().__init__(parent)
         self.backend = backend or control_backend.get_backend()
         #: Ko je vgrajen v Safeer OS (namesto lastnega vrha-okna): klice se ob "zapri", uspesni
         #: seznanitvi ob prvem zagonu ali "nadaljuj brez povezave", da starsevsko okno preklopi nazaj.
@@ -172,8 +172,12 @@ class SafeerControlWindow(QMainWindow):
 
         self.view = QWebEngineView(self)
         self.page_obj = SafeerControlPage(self.profile, self)
+        self.page_obj.setBackgroundColor(QColor("#090d15"))
         self.view.setPage(self.page_obj)
-        self.setCentralWidget(self.view)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.view)
 
         # Poslusaj dogodke iz zaledja
         self.backend.dodaj_poslusalca(self._na_dogodek_zaledja)
@@ -266,7 +270,14 @@ class SafeerControlWindow(QMainWindow):
             if self.na_skritje is not None:
                 self.dispatcher.dispatch(self.na_skritje)
         elif metoda == "poveziNaprave":
-            self.pojdi_na_razdelek("novaNaprava")
+            self.backend.povezi_naprave()
+            self.osvezi_stran()
+        elif metoda == "novaLokalnaKoda":
+            self.backend.nova_lokalna_koda()
+        elif metoda == "zacniVabilo":
+            self.backend.zacni_qr()
+        elif metoda == "prekiniVabilo":
+            self.backend.prekini_qr()
         elif metoda == "odpri":
             url = str(a[0]) if a else ""
             if url:

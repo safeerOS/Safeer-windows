@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
+import shutil
 import subprocess
 import sys
 from typing import List, Optional
@@ -181,6 +183,66 @@ def pokazi_v_mapi(pot: str) -> bool:
 # Programi
 # ---------------------------------------------------------------------------
 
+_IKONA_PREDPOMNILNIK: dict[str, str] = {}
+_ICON_PROVIDER = None
+
+
+def _pridobi_icon_provider():
+    global _ICON_PROVIDER
+    if _ICON_PROVIDER is None:
+        try:
+            from PySide6.QtWidgets import QApplication, QFileIconProvider
+            if not QApplication.instance():
+                os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+                _ = QApplication(sys.argv)
+            _ICON_PROVIDER = QFileIconProvider()
+        except Exception:
+            _ICON_PROVIDER = False
+    return _ICON_PROVIDER if _ICON_PROVIDER is not False else None
+
+
+def pridobi_ikono_programa(pot: str, ime: str = "") -> str:
+    """Pridobi pristno ikono programa v obliki Base64 PNG.
+
+    Uporablja nativni Windows Shell prek Qt QFileIconProvider, s predpomnjenjem
+    v pomnilniku za bliskovito hitrost.
+    """
+    if not pot:
+        return ""
+
+    if pot in _IKONA_PREDPOMNILNIK:
+        return _IKONA_PREDPOMNILNIK[pot]
+
+    polna_pot = pot
+    if not os.path.isabs(polna_pot):
+        najdena = shutil.which(polna_pot)
+        if najdena:
+            polna_pot = najdena
+
+    provider = _pridobi_icon_provider()
+    if provider and os.path.exists(polna_pot):
+        try:
+            from PySide6.QtCore import QFileInfo, QByteArray, QBuffer, QIODevice
+            qicon = provider.icon(QFileInfo(polna_pot))
+            if not qicon.isNull():
+                pm = qicon.pixmap(64, 64)
+                if not pm.isNull():
+                    ba = QByteArray()
+                    buf = QBuffer(ba)
+                    buf.open(QIODevice.WriteOnly)
+                    if pm.save(buf, "PNG"):
+                        raw = bytes(ba.data())
+                        if raw:
+                            data_uri = f"data:image/png;base64,{base64.b64encode(raw).decode('ascii')}"
+                            _IKONA_PREDPOMNILNIK[pot] = data_uri
+                            return data_uri
+        except Exception:
+            pass
+
+    _IKONA_PREDPOMNILNIK[pot] = ""
+    return ""
+
+
 def doloci_skupino(ime: str, pot: str) -> str:
     niz = (ime + " " + pot).lower()
     for skup, kljucne in KATEGORIJE_PROGRAMOV.items():
@@ -199,7 +261,11 @@ def poisci_start_menu_programe() -> List[dict]:
                                  r"Microsoft\Windows\Start Menu\Programs")
         cur_user = os.path.join(os.environ.get("APPDATA", ""),
                                 r"Microsoft\Windows\Start Menu\Programs")
-        mape.extend([all_users, cur_user])
+        desktop_user = os.path.join(os.environ.get("USERPROFILE", ""), "Desktop")
+        desktop_public = os.path.join(os.environ.get("PUBLIC", r"C:\Users\Public"), "Desktop")
+        for m in (all_users, cur_user, desktop_user, desktop_public):
+            if m and os.path.isdir(m) and m not in mape:
+                mape.append(m)
     else:
         # Za testiranje na Linuxu
         mape.append("/usr/share/applications")
@@ -225,7 +291,7 @@ def poisci_start_menu_programe() -> List[dict]:
                         "ime": ime,
                         "pot": polna.replace("/", "\\"),
                         "skupina": doloci_skupino(ime, polna),
-                        "ikona": "znak.svg",
+                        "ikona": pridobi_ikono_programa(polna, ime),
                         "opis": ""
                     })
 
@@ -247,7 +313,7 @@ def poisci_start_menu_programe() -> List[dict]:
                 "ime": ime,
                 "pot": cmd,
                 "skupina": skup,
-                "ikona": "znak.svg",
+                "ikona": pridobi_ikono_programa(cmd, ime),
                 "opis": ""
             })
 

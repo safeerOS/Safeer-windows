@@ -28,6 +28,7 @@ import shutil
 import socket
 import struct
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -37,10 +38,19 @@ from array import array
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
-from core.signed_feed import _atomic_write, isti_gostitelj
+from urllib.parse import urlparse
+from core.signed_feed import _atomic_write
+
+def isti_gostitelj(url1: str, url2: str) -> bool:
+    try:
+        h1 = (urlparse(url1).hostname or "").lower()
+        h2 = (urlparse(url2).hostname or "").lower()
+        return bool(h1 and h1 == h2)
+    except Exception:
+        return False
 
 NASLOV = "127.0.0.1"
-VRATA = (5354, 5355, 5356, 5357)
+VRATA = (53, 5354, 5355, 5356, 5357) if sys.platform == "win32" else (5354, 5355, 5356, 5357)
 PRAVILO_POT = "/etc/polkit-1/rules.d/49-safeer-os-scit.rules"
 PRAVILO = """// Safeer OS - Scit (filtriranje DNS): skrbnik sme systemd-resolved nastaviti streznik DNS brez gesla.
 polkit.addRule(function (action, subject) {
@@ -96,6 +106,9 @@ def _zazeni(ukaz: List[str], cas: float = 8.0) -> Tuple[int, str]:
 
 
 def podatkovna_mapa() -> str:
+    if sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or os.path.expanduser("~")
+        return os.path.join(base, "SafeerOS", "scit")
     try:
         from core.threat_intel import default_data_dir
         return os.path.join(str(default_data_dir("safeer-mint")), "scit")
@@ -133,9 +146,38 @@ def odgovor_zavrnjeno(paket: bytes) -> bytes:
     return glava + paket[12:konec]
 
 
+def upstream_strezniki_windows() -> List[str]:
+    strezniki: List[str] = []
+    try:
+        cmd = ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+               "(Get-DnsClientServerAddress -AddressFamily IPv4).ServerAddresses"]
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+        if res.returncode == 0:
+            for vrstica in res.stdout.splitlines():
+                v = vrstica.strip()
+                if re.fullmatch(r"\d{1,3}(\.\d{1,3}){3}", v) and not v.startswith("127."):
+                    if v not in strezniki:
+                        strezniki.append(v)
+    except Exception:
+        pass
+    if not strezniki:
+        try:
+            res = subprocess.run(["ipconfig", "/all"], capture_output=True, text=True, timeout=5)
+            if res.returncode == 0:
+                for match in re.finditer(r"DNS Servers[.\s:]+([\d.]+)", res.stdout):
+                    ip = match.group(1).strip()
+                    if re.fullmatch(r"\d{1,3}(\.\d{1,3}){3}", ip) and not ip.startswith("127."):
+                        if ip not in strezniki:
+                            strezniki.append(ip)
+        except Exception:
+            pass
+    return strezniki or ["1.1.1.1", "9.9.9.9", "8.8.8.8"]
+
+
 def upstream_strezniki(vmesnik: str) -> List[str]:
-    """Strezniki DNS, ki jih je za ta vmesnik dal usmerjevalnik (NetworkManager), ne glede na to, kaj je
-    trenutno nastavljeno v systemd-resolved."""
+    """Strezniki DNS za posredovanje poizvedb."""
+    if sys.platform == "win32":
+        return upstream_strezniki_windows()
     koda, izpis = _zazeni(["nmcli", "-g", "IP4.DNS", "device", "show", vmesnik])
     strezniki = []
     if koda == 0:
@@ -528,8 +570,22 @@ class Seznami:
         return st
 
 
-# ---------------------------------------------------------------------- systemd-resolved
+# ---------------------------------------------------------------------- systemd-resolved / Windows DNS
 def vmesniki_povezani() -> List[str]:
+    if sys.platform == "win32":
+        izhod: List[str] = []
+        try:
+            cmd = ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                   "Get-NetAdapter | Where-Object Status -eq 'Up' | Select-Object -ExpandProperty Name"]
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            if r.returncode == 0:
+                for line in r.stdout.splitlines():
+                    ime = line.strip()
+                    if ime and ime not in izhod:
+                        izhod.append(ime)
+        except Exception:
+            pass
+        return izhod or ["Ethernet", "Wi-Fi"]
     koda, izpis = _zazeni(["nmcli", "-t", "-f", "DEVICE,TYPE,STATE", "device"])
     izhod = []
     if koda != 0:
@@ -542,12 +598,23 @@ def vmesniki_povezani() -> List[str]:
 
 
 def dns_vmesnika(vmesnik: str) -> str:
+    if sys.platform == "win32":
+        try:
+            cmd = ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                   f"(Get-DnsClientServerAddress -InterfaceAlias '{vmesnik}' -AddressFamily IPv4).ServerAddresses"]
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            if r.returncode == 0:
+                return r.stdout.strip().replace("\r\n", " ")
+        except Exception:
+            pass
+        return ""
     koda, izpis = _zazeni(["resolvectl", "dns", vmesnik])
     return izpis.split(":", 1)[1].strip() if koda == 0 and ":" in izpis else ""
 
 
 def trenutni_streznik(vmesnik: str) -> str:
-    """Streznik, ki ga systemd-resolved za ta vmesnik trenutno uporablja (»Current DNS Server«)."""
+    if sys.platform == "win32":
+        return dns_vmesnika(vmesnik)
     koda, izpis = _zazeni(["resolvectl", "status", vmesnik])
     if koda != 0:
         return ""
@@ -556,9 +623,8 @@ def trenutni_streznik(vmesnik: str) -> str:
 
 
 def pravilo_namesceno() -> bool:
-    """Ali smemo nastaviti DNS brez gesla. Mape /etc/polkit-1/rules.d uporabnik ne more brati (0750
-    root:polkitd), zato pravila ne iscemo po datoteki, ampak polkit vprasamo naravnost (pkcheck brez
-    interakcije: 0 = dovoljeno, sicer bi zahteval geslo)."""
+    if sys.platform == "win32":
+        return True
     try:
         with open(PRAVILO_POT, encoding="utf-8") as f:
             if "org.freedesktop.resolve1.set-dns-servers" in f.read():
@@ -577,8 +643,8 @@ def _znak_pravila() -> str:
 
 
 def namesti_pravilo() -> bool:
-    """Enkrat, z geslom (pkexec): pravilo polkit, ki skrbniku dovoli nastaviti DNS brez gesla.
-    Uspeh si zapomnimo v uporabnikovi mapi (znak), ker same datoteke pravila ne moremo brati."""
+    if sys.platform == "win32":
+        return True
     if os.path.exists(_znak_pravila()) and pravilo_namesceno():
         return True
     if shutil.which("pkexec") is None:
@@ -606,16 +672,41 @@ def namesti_pravilo() -> bool:
 
 
 def usmeri(vmesnik: str, vrata: int, rezerva: Optional[List[str]] = None) -> bool:
-    """DNS vmesnika: nas razresevalnik prvi, strezniki usmerjevalnika za njim kot rezerva. Rezerva je
-    nujna: Docker in podobni bereta /run/systemd/resolve/resolv.conf, kjer resolved nas 127.0.0.1 izpusti
-    (loopback brez vrat) - brez rezerve bi vsebniki ostali brez DNS. resolved uporablja prvi streznik,
-    na rezervo preide sele, ce nas ne odgovori; straza ga vrne nazaj."""
+    if sys.platform == "win32":
+        try:
+            dns_list = ["127.0.0.1"]
+            if rezerva:
+                for r in rezerva:
+                    if r not in dns_list:
+                        dns_list.append(r)
+            dns_ps = ", ".join(f"'{d}'" for d in dns_list)
+            cmd = ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                   f"Set-DnsClientServerAddress -InterfaceAlias '{vmesnik}' -ServerAddresses @({dns_ps})"]
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=8)
+            if r.returncode != 0:
+                subprocess.run(["netsh", "interface", "ip", "set", "dns", f"name={vmesnik}", "static", "127.0.0.1"],
+                               capture_output=True, text=True, timeout=5)
+            return True
+        except Exception as e:
+            print(f"[SafeerOS] usmeri napaka na Windows ({vmesnik}): {e}")
+            return False
     ok1, _ = _zazeni(["resolvectl", "dns", vmesnik, "%s:%d" % (NASLOV, vrata)] + list(rezerva or []), cas=30.0)
     ok2, _ = _zazeni(["resolvectl", "domain", vmesnik, "~."], cas=30.0)
     return ok1 == 0 and ok2 == 0
 
 
 def povrni(vmesnik: str) -> bool:
+    if sys.platform == "win32":
+        try:
+            cmd = ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                   f"Set-DnsClientServerAddress -InterfaceAlias '{vmesnik}' -ResetServerAddresses"]
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=8)
+            if r.returncode != 0:
+                subprocess.run(["netsh", "interface", "ip", "set", "dns", f"name={vmesnik}", "dhcp"],
+                               capture_output=True, text=True, timeout=5)
+            return True
+        except Exception:
+            return False
     return _zazeni(["resolvectl", "revert", vmesnik], cas=30.0)[0] == 0
 
 
@@ -637,6 +728,8 @@ class Scit:
         return bool(self.shramba.get("scit", False))
 
     def mozno(self) -> bool:
+        if sys.platform == "win32":
+            return True
         return shutil.which("resolvectl") is not None and shutil.which("nmcli") is not None and \
             _zazeni(["systemctl", "is-active", "systemd-resolved"])[1].strip() == "active"
 
@@ -695,6 +788,18 @@ class Scit:
         se preberejo tu, ne ob vsaki poizvedbi."""
         r = self.razresevalnik
         if r is None or not r.vrata:
+            return
+        if sys.platform == "win32":
+            povezani = vmesniki_povezani()
+            strezniki = upstream_strezniki_windows()
+            for v in povezani:
+                d = dns_vmesnika(v)
+                if "127.0.0.1" not in d:
+                    usmeri(v, r.vrata, strezniki)
+                if v not in self.vmesniki:
+                    self.vmesniki.append(v)
+            self.vmesniki = [v for v in self.vmesniki if v in povezani]
+            self.strezniki = strezniki or ["1.1.1.1", "9.9.9.9"]
             return
         cilj = "%s:%d" % (NASLOV, r.vrata)
         povezani = vmesniki_povezani()

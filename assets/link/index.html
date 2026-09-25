@@ -77,6 +77,12 @@
        6-mestna koda ali nadaljevanje brez povezave naprav. Brez menija in glave, na sredini okna. -->
   <section class="zaslon" id="zaslonPrijava" hidden>
     <div class="prijavaOkno">
+      <div class="prijavaVrh">
+        <button class="gumbNazajOs" id="gumbPrijavaNazaj" title="Safeer OS Domov">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+          <span data-t="prijavaNazajOs">Safeer OS Domov</span>
+        </button>
+      </div>
       <div class="prijavaZnak"><span class="znakOs" aria-hidden="true">S</span><span>Safeer OS</span></div>
       <h2 data-t="prijavaNaslov">Prijava</h2>
       <p class="prijavaPodnaslov" data-t="prijavaPodnaslov">Poveži ta računalnik s svojimi napravami.</p>
@@ -88,6 +94,16 @@
           <p data-t="prijavaQrOpis">Usmeri kamero telefona ali tablice, ki je že v Safeer Linku, v kodo in potrdi na telefonu.</p>
           <p class="opomba" id="opombaQr"></p>
           <button class="drobniGumb" id="gumbQrZnova" data-t="prijavaPoisci" hidden>Poišči znova</button>
+        </div>
+
+        <div class="prijavaLoci" data-t="prijavaAli">ali</div>
+
+        <div class="prijavaNacin" id="prijavaLokalnaKoda">
+          <div class="kodaIkona" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 6h16v12H4z M9 10h6 M12 7v6"/></svg></div>
+          <h3 data-t="prijavaLokalnaKodaNaslov">Koda tega računalnika</h3>
+          <p data-t="prijavaLokalnaKodaOpis">To 6-mestno kodo vpiši na televizorju ali telefonu v Safeer aplikaciji.</p>
+          <div class="stevilkePrikaz" id="lokalnaKodaStevilke">------</div>
+          <button class="drobniGumb" id="gumbNovaLokalnaKoda" data-t="prijavaNovaKoda">Nova koda</button>
         </div>
 
         <div class="prijavaLoci" data-t="prijavaAli">ali</div>
@@ -117,6 +133,12 @@
   <!-- Po »Nadaljuj brez povezave naprav«: Safeer OS dela na tem racunalniku, naprave se povezejo, ko uporabnik zeli. -->
   <section class="zaslon" id="zaslonBrezPovezave" hidden>
     <div class="prijavaOkno">
+      <div class="prijavaVrh">
+        <button class="gumbNazajOs" id="gumbBrezPovezaveNazaj" title="Safeer OS Domov">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+          <span data-t="prijavaNazajOs">Safeer OS Domov</span>
+        </button>
+      </div>
       <div class="prijavaZnak"><span class="znakOs" aria-hidden="true">S</span><span>Safeer OS</span></div>
       <div class="prijavaNacin brezPovezaveKartica">
         <div class="kodaIkona" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 5h18v11H3z M8 20h8 M12 16v4 M9 9l6 4 M15 9l-6 4"/></svg></div>
