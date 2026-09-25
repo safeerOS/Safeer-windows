@@ -90,7 +90,81 @@
 
       <!-- SAFEER MEDIA -->
       <section class="razdelek" id="r-media">
-        <div class="media-glava"><div><h1>Safeer Media</h1><p data-t="mediaOpis">Vsa tvoja vsebina, ne glede na vir.</p></div><button class="gumb" id="mediaOsvezi"><svg data-ikona="ponovno"></svg><span data-t="mediaOsvezi">Osveži vire</span></button></div>
+        <div class="media-glava">
+          <div>
+            <h1>Safeer Media</h1>
+            <p data-t="mediaOpis">Vsa tvoja vsebina, ne glede na vir.</p>
+          </div>
+          <div class="media-glava-akcije">
+            <button class="gumb" id="mediaOsvezi"><svg data-ikona="ponovno"></svg><span data-t="mediaOsvezi">Osveži vire</span></button>
+            <button class="gumb" id="mediaNastavitveGumb"><svg data-ikona="drsniki"></svg><span data-t="mediaNastavitve">Nastavitve</span></button>
+          </div>
+        </div>
+
+        <!-- NASTAVITVE SAFEER MEDIA (Uvoz/Izvoz JSON, koda, viri) -->
+        <div class="media-nastavitve-plosca" id="mediaNastavitvePlosca" hidden>
+          <div class="media-nastavitve-glava">
+            <div>
+              <h2 data-t="mediaNastavitveNaslov">Nastavitve Safeer Media</h2>
+              <p data-t="mediaNastavitveOpis">Uvoz in izvoz JSON knjižnic, neposreden vnos kode ter upravljanje virov.</p>
+            </div>
+            <button class="gumb-ikona" id="mediaZapriNastavitve" title="Zapri"><svg data-ikona="x"></svg></button>
+          </div>
+
+          <div class="media-nastavitve-kartice">
+            <!-- 1. Naloži izvoženo JSON datoteko -->
+            <div class="media-nastavitev-kartica">
+              <div class="media-nastavitev-naslov">
+                <svg data-ikona="arhiv"></svg>
+                <div>
+                  <b data-t="mediaUvozDatoteke">Naloži izvoženo JSON datoteko</b>
+                  <small data-t="mediaUvozDatotekeOpis">Izberite .json datoteko kataloga ali virov, ki ste jo izvozili prej ali prejeli iz druge naprave.</small>
+                </div>
+              </div>
+              <div class="media-datoteka-vrstica">
+                <input type="file" id="mediaJsonDatoteka" accept=".json,application/json" hidden>
+                <button class="gumb" type="button" id="mediaIzberiDatoteko"><svg data-ikona="dokument"></svg><span data-t="mediaIzberiDatoteko">Izberi .json datoteko</span></button>
+                <span class="media-datoteka-ime" id="mediaDatotekaIme" data-t="mediaNobenaDatoteka">Nobena datoteka ni izbrana</span>
+                <button class="gumb glavni" type="button" id="mediaUvoziDatotekoGumb" disabled><svg data-ikona="plus"></svg><span data-t="mediaUvoziDatoteko">Uvozi datoteko</span></button>
+              </div>
+            </div>
+
+            <!-- 2. Vnesi svojo JSON kodo -->
+            <div class="media-nastavitev-kartica">
+              <div class="media-nastavitev-naslov">
+                <svg data-ikona="program"></svg>
+                <div>
+                  <b data-t="mediaVnosJson">Vnesi svojo JSON kodo</b>
+                  <small data-t="mediaVnosJsonOpis">Prilepite JSON seznam medijev, prilagojeno konfiguracijo ali vir s tokovi.</small>
+                </div>
+              </div>
+              <div class="media-json-obrazec">
+                <input type="text" id="mediaJsonIme" maxlength="80" data-ph="mediaJsonImePh" placeholder="Ime zbirke ali vira (neobvezno)">
+                <textarea id="mediaJsonKoda" rows="5" spellcheck="false" placeholder='[&#10;  {&#10;    "title": "Primer videa",&#10;    "url": "https://primer.si/video.mp4",&#10;    "kind": "film"&#10;  }&#10;]'></textarea>
+                <div class="media-json-akcije">
+                  <button class="gumb glavni" type="button" id="mediaUvoziKodoGumb"><svg data-ikona="plus"></svg><span data-t="mediaUvoziKodo">Uvozi JSON kodo</span></button>
+                  <button class="gumb" type="button" id="mediaPocistiKodoGumb"><span>Počisti</span></button>
+                </div>
+              </div>
+            </div>
+
+            <!-- 3. Izvoz kataloga v JSON -->
+            <div class="media-nastavitev-kartica">
+              <div class="media-nastavitev-naslov">
+                <svg data-ikona="poslji"></svg>
+                <div>
+                  <b data-t="mediaIzvozJson">Izvozi vsebine v JSON</b>
+                  <small data-t="mediaIzvozJsonOpis">Prenesite celotno zbirko vaših virov in nastavitev v datoteko za varnostno kopijo ali prenos.</small>
+                </div>
+              </div>
+              <div class="media-izvoz-vrstica">
+                <button class="gumb" type="button" id="mediaIzvoziGumb"><svg data-ikona="disk"></svg><span data-t="mediaPrenesiIzvoz">Prenesi izvoženi JSON</span></button>
+              </div>
+            </div>
+          </div>
+
+          <p class="namig" id="mediaNastavitveSporocilo"></p>
+        </div>
 
         <div class="media-predvajalnik" id="mediaPredvajalnik" hidden>
           <div class="media-predvajalnik-glava"><div><small data-t="mediaPredvaja">PREDVAJA SE V SAFEER OS</small><h2 id="mediaPredvajalnikNaslov"></h2><p id="mediaPredvajalnikMeta"></p></div><button class="gumb-ikona" id="mediaZapri" data-naslov="zapri"><svg data-ikona="x"></svg></button></div>

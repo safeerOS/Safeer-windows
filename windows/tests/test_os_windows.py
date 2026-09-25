@@ -711,6 +711,69 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
         self.assertIn("--control", vsebina)
         self.assertIn("--okno", vsebina)
 
+    def test_media_center_import_and_export_json(self):
+        with tempfile.TemporaryDirectory() as td:
+            mc = os_media.MediaCenter(td, roots=[])
+            izvoz = mc.export_json()
+            self.assertEqual(izvoz.get("razlicica"), 1)
+            self.assertEqual(izvoz.get("aplikacija"), "Safeer Media")
+            self.assertIsInstance(izvoz.get("viri"), list)
+
+            # Neveljaven JSON
+            res_bad = mc.import_json("neveljaven { json")
+            self.assertFalse(res_bad["ok"])
+            self.assertIn("Neveljaven JSON", res_bad["napaka"])
+
+            # Uvoz seznama medijskih vsebin
+            primer_json = json.dumps([
+                {
+                    "title": "Sintel (Odprti film)",
+                    "url": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
+                    "type": "film",
+                    "year": 2010
+                },
+                {
+                    "title": "Big Buck Bunny",
+                    "url": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+                    "type": "film",
+                    "year": 2008
+                }
+            ])
+            res_import = mc.import_json(primer_json, default_name="Moj testni vir")
+            self.assertTrue(res_import["ok"])
+            self.assertEqual(res_import["st_vnosov"], 2)
+            self.assertEqual(res_import["vir"], "Moj testni vir")
+
+            kat = mc.catalog()
+            self.assertEqual(kat["skupaj"], 2)
+            naslovi = [x["naslov"] for x in kat["vnosi"]]
+            self.assertIn("Sintel (Odprti film)", naslovi)
+            self.assertIn("Big Buck Bunny", naslovi)
+
+    def test_media_center_import_full_export_structure(self):
+        with tempfile.TemporaryDirectory() as td:
+            mc = os_media.MediaCenter(td, roots=[])
+            izvozen_paket = {
+                "razlicica": 1,
+                "viri": [
+                    {
+                        "id": "vir-test-1",
+                        "url": "https://primer.si/vir1.json",
+                        "ime": "Prvi vir",
+                        "vnosi": [
+                            {"naslov": "Film 1", "url": "https://primer.si/film1.mp4", "vrsta": "film"}
+                        ]
+                    }
+                ]
+            }
+            res = mc.import_json(izvozen_paket)
+            self.assertTrue(res["ok"])
+            self.assertEqual(res["st_dodanih"], 1)
+
+            kat = mc.catalog()
+            self.assertEqual(kat["skupaj"], 1)
+            self.assertEqual(kat["vnosi"][0]["naslov"], "Film 1")
+
 
 if __name__ == "__main__":
     unittest.main()
