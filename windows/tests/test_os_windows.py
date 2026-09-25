@@ -89,11 +89,20 @@ class TestOsWindows(unittest.TestCase):
             backend = control_backend.SafeerControlBackend(config_pot=cfg)
             st_os = backend.stanje_povezave()
             self.assertTrue(st_os["control"])
-            self.assertIn(st_os["stanje"], ("nov", "brez", "povezan"))
+            self.assertEqual(st_os["stanje"], "nov")
 
             st_link = backend.stanje_linka()
             self.assertTrue(st_link["control"])
             self.assertEqual(st_link["id"], backend.device_id)
+            self.assertTrue(st_link["brezPovezave"], "brezPovezave mora biti True, da stran prikaze gumb Nadaljuj brez povezave")
+            self.assertFalse(st_link["brezPovezaveIzbrano"])
+
+            backend.nadaljuj_brez_povezave()
+            st_os_brez = backend.stanje_povezave()
+            self.assertEqual(st_os_brez["stanje"], "brez")
+            st_link_brez = backend.stanje_linka()
+            self.assertTrue(st_link_brez["brezPovezave"])
+            self.assertTrue(st_link_brez["brezPovezaveIzbrano"])
 
     def test_control_backend_settings(self):
         with tempfile.TemporaryDirectory() as td:

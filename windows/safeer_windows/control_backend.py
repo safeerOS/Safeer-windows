@@ -170,7 +170,7 @@ class SafeerControlBackend:
             "clanKroga": False,
             "brezPovezaveIzbrano": bool(self.nastavitve.get("brez_povezave")),
             "zaupajOkno": bool(self.nastavitve.get("zaupana", True)),
-            "brezPovezave": bool(self.nastavitve.get("brez_povezave")),
+            "brezPovezave": True,
             "deljeneMape": self.deljene_mape(),
             "standardneDeljene": False,
         }
