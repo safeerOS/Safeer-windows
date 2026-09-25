@@ -574,6 +574,15 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
 
             backend.navidezni_zaslon.ustavi_sejo()
 
+    def test_enotni_program_vstopna_tocka(self):
+        pot = os.path.join(os.path.dirname(__file__), "..", "safeer_control_windows.py")
+        self.assertTrue(os.path.exists(pot))
+        with open(pot, "r", encoding="utf-8") as f:
+            vsebina = f.read()
+        self.assertIn("from safeer_windows.os_app import main", vsebina)
+        self.assertIn("--control", vsebina)
+        self.assertIn("--okno", vsebina)
+
 
 if __name__ == "__main__":
     unittest.main()

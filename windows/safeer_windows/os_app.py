@@ -79,16 +79,17 @@ class SafeerOsPage(QWebEnginePage):
 
 
 class SafeerOsWindow(QMainWindow):
-    def __init__(self, v_oknu: bool = False):
+    def __init__(self, v_oknu: bool = False, zacetni_razdelek: str = ""):
         super().__init__()
         self.v_oknu = v_oknu
+        self.zacetni_razdelek = zacetni_razdelek
         self.setWindowTitle("Safeer OS")
         self.setMinimumSize(960, 600)
 
         # Dispečer za varno izvajanje klicev na glavni GUI niti
         self.dispatcher = GuiDispatcher(self)
 
-        # Safeer Control & Safeer Link zaledje
+        # Safeer Control & Safeer Link zaledje (enotni program)
         self.control_backend = control_backend.get_backend()
         self.control_window: Optional[control_window.SafeerControlWindow] = None
         self.control_backend.dodaj_poslusalca(self._na_dogodek_linka)
@@ -137,11 +138,16 @@ class SafeerOsWindow(QMainWindow):
         # Nalozi domaco stran
         self.nalozi_vmesnik()
 
-        # Ce racunalnik se ni povezan in uporabnik se ni izbral »brez povezave«,
-        # takoj prikazemo vgrajen prijavni zaslon (QR / 6-mestna koda / nadaljuj brez)
-        st = self.control_backend.stanje_povezave().get("stanje")
-        if st == "nov":
-            self.odpri_control(prijava_ob_zagonu=True)
+        # Ce je dolocen zacetni razdelek (npr. 'control', 'daljinec', 'novaNaprava'),
+        # odpri neposredno ta razdelek v vgrajenem Safeer Controlu!
+        if self.zacetni_razdelek:
+            self.odpri_control(razdelek=self.zacetni_razdelek)
+        else:
+            # Ce racunalnik se ni povezan in uporabnik se ni izbral »brez povezave«,
+            # takoj prikazemo vgrajen prijavni zaslon (QR / 6-mestna koda / nadaljuj brez)
+            st = self.control_backend.stanje_povezave().get("stanje")
+            if st == "nov":
+                self.odpri_control(prijava_ob_zagonu=True)
 
         if self.v_oknu:
             self.resize(1280, 800)
@@ -193,6 +199,7 @@ class SafeerOsWindow(QMainWindow):
                 self.control_window.pojdi_na_razdelek(razdelek, id_naprave)
             self.control_window.show()
             self.zaslon.setCurrentWidget(self.control_window)
+            self.setWindowTitle("Safeer OS — Safeer Control")
         self.dispatcher.dispatch(_odpri)
         return True
 
@@ -200,6 +207,7 @@ class SafeerOsWindow(QMainWindow):
         """Prijava/Control je koncan (zapri, uspesna povezava ali "nadaljuj brez") - nazaj na Safeer OS."""
         def _preklopi():
             self.zaslon.setCurrentWidget(self.view)
+            self.setWindowTitle("Safeer OS")
             self.poslji_dogodek("fokus", None)
         self.dispatcher.dispatch(_preklopi)
 
@@ -443,16 +451,33 @@ class SafeerOsWindow(QMainWindow):
             return False
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Safeer OS za Windows")
+def main(argv: Optional[List[str]] = None) -> int:
+    parser = argparse.ArgumentParser(description="Safeer OS za Windows (z vgrajenim Safeer Controlom)")
     parser.add_argument("--okno", action="store_true", help="Odpri v oknu namesto celozaslonsko")
-    args = parser.parse_args()
+    parser.add_argument("--control", "-c", action="store_true", help="Odpri neposredno v razdelku Safeer Control")
+    parser.add_argument("--razdelek", type=str, default="", help="Zacetni razdelek (npr. control, daljinec, naprave, novaNaprava)")
+    parser.add_argument("--ozadje", action="store_true", help="Zazeni le v ozadju")
+    args = parser.parse_args(argv)
 
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("SafeerOS")
     app.setOrganizationName("Safeer")
 
-    window = SafeerOsWindow(v_oknu=args.okno)
+    zacetni = ""
+    if args.control:
+        zacetni = args.razdelek or "naprave"
+    elif args.razdelek:
+        zacetni = args.razdelek
+
+    # Ce je izbran control razdelek ali --okno, odpri v oknu
+    v_oknu = True if (args.control or args.razdelek or args.okno) else False
+
+    window = SafeerOsWindow(v_oknu=v_oknu, zacetni_razdelek=zacetni)
+
+    if args.ozadje:
+        window.control_backend.povezi_se()
+        window.hide()
+
     return app.exec()
 
 
