@@ -1060,6 +1060,10 @@
       prijavaPrevec: "Preveč hkratnih prijav. Poskusi čez minuto.",
       prijavaBrezQr: "Kode QR tu ni mogoče narisati. Uporabi 6-mestno kodo.",
       prijavaAli: "ali",
+      prijavaLokalnaKodaNaslov: "Koda tega računalnika",
+      prijavaLokalnaKodaOpis: "To 6-mestno kodo vpiši na televizorju ali v Safeer aplikaciji na telefonu.",
+      prijavaNovaKoda: "Nova koda",
+      prijavaNazajOs: "Safeer OS Domov",
       prijavaKodaNaslov: "Vpiši 6-mestno kodo",
       prijavaKodaOpis: "Klikni v polje – koda se pokaže na televizorju ali tablici, kjer teče Safeer Link.",
       prijavaKodaNaSredisce: "Koda je zdaj na zaslonu naprave s Safeer Linkom. Prepiši jo sem.",
@@ -1090,6 +1094,10 @@
       prijavaPrevec: "Too many sign-ins at once. Try again in a minute.",
       prijavaBrezQr: "The QR code can't be drawn here. Use the 6-digit code.",
       prijavaAli: "or",
+      prijavaLokalnaKodaNaslov: "This computer's code",
+      prijavaLokalnaKodaOpis: "Enter this 6-digit code on your TV or phone in the Safeer app.",
+      prijavaNovaKoda: "New code",
+      prijavaNazajOs: "Safeer OS Home",
       prijavaKodaNaslov: "Enter the 6-digit code",
       prijavaKodaOpis: "Click the field – the code appears on the TV or tablet running Safeer Link.",
       prijavaKodaNaSredisce: "The code is now on the screen of the Safeer Link device. Type it here.",
@@ -1120,6 +1128,10 @@
       prijavaPrevec: "Zu viele gleichzeitige Anmeldungen. Versuche es in einer Minute erneut.",
       prijavaBrezQr: "Der QR-Code kann hier nicht angezeigt werden. Nutze den 6-stelligen Code.",
       prijavaAli: "oder",
+      prijavaLokalnaKodaNaslov: "Code dieses Computers",
+      prijavaLokalnaKodaOpis: "Gib diesen 6-stelligen Code am Fernseher oder in der Safeer-App auf dem Handy ein.",
+      prijavaNovaKoda: "Neuer Code",
+      prijavaNazajOs: "Safeer OS Startseite",
       prijavaKodaNaslov: "6-stelligen Code eingeben",
       prijavaKodaOpis: "Klicke ins Feld – der Code erscheint auf dem Fernseher oder Tablet mit Safeer Link.",
       prijavaKodaNaSredisce: "Der Code steht jetzt auf dem Bildschirm des Safeer-Link-Geräts. Gib ihn hier ein.",
@@ -1150,6 +1162,10 @@
       prijavaPrevec: "Demasiados inicios de sesión a la vez. Inténtalo en un minuto.",
       prijavaBrezQr: "Aquí no se puede mostrar el código QR. Usa el código de 6 cifras.",
       prijavaAli: "o",
+      prijavaLokalnaKodaNaslov: "Código de este ordenador",
+      prijavaLokalnaKodaOpis: "Introduce este código de 6 cifras en la televisión o móvil con la app Safeer.",
+      prijavaNovaKoda: "Nuevo código",
+      prijavaNazajOs: "Safeer OS Inicio",
       prijavaKodaNaslov: "Introduce el código de 6 cifras",
       prijavaKodaOpis: "Haz clic en el campo: el código aparece en el televisor o la tableta con Safeer Link.",
       prijavaKodaNaSredisce: "El código está ahora en la pantalla del dispositivo con Safeer Link. Escríbelo aquí.",
@@ -1180,6 +1196,10 @@
       prijavaPrevec: "Trop de connexions simultanées. Réessaie dans une minute.",
       prijavaBrezQr: "Le code QR ne peut pas être affiché ici. Utilise le code à 6 chiffres.",
       prijavaAli: "ou",
+      prijavaLokalnaKodaNaslov: "Code de cet ordinateur",
+      prijavaLokalnaKodaOpis: "Saisis ce code à 6 chiffres sur ton téléviseur ou dans l'app Safeer de ton téléphone.",
+      prijavaNovaKoda: "Nouveau code",
+      prijavaNazajOs: "Safeer OS Accueil",
       prijavaKodaNaslov: "Saisis le code à 6 chiffres",
       prijavaKodaOpis: "Clique dans le champ : le code s'affiche sur le téléviseur ou la tablette avec Safeer Link.",
       prijavaKodaNaSredisce: "Le code est maintenant à l'écran de l'appareil Safeer Link. Saisis-le ici.",
@@ -1210,6 +1230,10 @@
       prijavaPrevec: "Troppi accessi contemporanei. Riprova tra un minuto.",
       prijavaBrezQr: "Qui il codice QR non può essere mostrato. Usa il codice di 6 cifre.",
       prijavaAli: "oppure",
+      prijavaLokalnaKodaNaslov: "Codice di questo computer",
+      prijavaLokalnaKodaOpis: "Inserisci questo codice a 6 cifre sulla TV o nell'app Safeer sullo smartphone.",
+      prijavaNovaKoda: "Nuovo codice",
+      prijavaNazajOs: "Safeer OS Home",
       prijavaKodaNaslov: "Inserisci il codice di 6 cifre",
       prijavaKodaOpis: "Fai clic nel campo: il codice appare sul televisore o sul tablet con Safeer Link.",
       prijavaKodaNaSredisce: "Il codice è ora sullo schermo del dispositivo con Safeer Link. Scrivilo qui.",
@@ -1477,7 +1501,8 @@
     control: false,
     hubPovezanih: 0,
     prijave: [],
-    hubNaprave: []
+    hubNaprave: [],
+    lokalnaKoda: ""
   };
 
   function besedilo(id, vsebina) {
@@ -1587,6 +1612,14 @@
   // Izris
   // ----------------------------------------------------------------
 
+  /** Izris lokalne 6-mestne kode tega racunalnika za vpis v TV ali telefon */
+  function narisiLokalnoKodo() {
+    var okvir = el("lokalnaKodaStevilke");
+    if (okvir) {
+      okvir.textContent = stanje.lokalnaKoda || "------";
+    }
+  }
+
   /** Stanje je barva, ne stavek: zelena povezano, siva ni ga, rumena tezava. */
   function narisiStanje() {
     var pika = el("pika");
@@ -1624,7 +1657,12 @@
     if (prijavno || brezPovezave) {
       ["zaslonHubTu", "zaslonBrezHuba", "zaslonPreseljen", "zaslonSeznanitev", "zaslonPovezan", "hubStikalo"]
         .forEach(function (id) { pokazi(id, false); });
-      if (prijavno) zacniPrijavo(); else koncajPrijavo();
+      if (prijavno) {
+        zacniPrijavo();
+        narisiLokalnoKodo();
+      } else {
+        koncajPrijavo();
+      }
       narisiStanje();
       return;
     }
@@ -2218,7 +2256,15 @@
     }
   }
   window.safeerLinkOdpri = function (kaj, napravaId) {
-    if (kaj === "novaNaprava") {
+    if (kaj === "prijava") {
+      stanje.brezPovezaveIzbrano = false;
+      document.body.classList.add("prijava");
+      pokazi("zaslonPrijava", true);
+      ["zaslonHubTu", "zaslonBrezHuba", "zaslonPreseljen", "zaslonSeznanitev", "zaslonPovezan", "zaslonBrezPovezave", "hubStikalo"].forEach(function (id) { pokazi(id, false); });
+      zacniPrijavo();
+      narisiLokalnoKodo();
+      return;
+    } else if (kaj === "novaNaprava") {
       if (typeof izberiRazdelek === "function") izberiRazdelek("naprave");
       preklopiVabilo(true);
       var p = el("panelDodaj");
@@ -2289,10 +2335,12 @@
       pokazi("gumbQrZnova", false);
       return;
     }
-    okvir.innerHTML = "";
-    okvir.classList.add("prazno");
     var n = (podatki && podatki.napaka) || "";
     prijava.qr = false;
+    if (!okvir.querySelector("svg")) {
+      okvir.innerHTML = "";
+      okvir.classList.add("prazno");
+    }
     if (!n) {
       besedilo("opombaQr", t("prijavaBrezQr"));
       return;
@@ -2375,6 +2423,9 @@
         if (g) g.disabled = true;
       } else if (vrsta === "qr") {
         narisiQr(podatki);
+      } else if (vrsta === "lokalnaKoda") {
+        stanje.lokalnaKoda = String(podatki || "");
+        narisiLokalnoKodo();
       } else if (vrsta === "brezPovezave") {
         var sporociloOs = podatki && podatki.os === false ? t("prijavaOsSeNastaja") : "";
         besedilo("opombaBrezPovezave", sporociloOs);
@@ -2858,6 +2909,8 @@
     stanje.brezPovezave = !!s.brezPovezave;
     stanje.deljeneMape = s.deljeneMape || [];
     stanje.standardneDeljene = !!s.standardneDeljene;
+    stanje.lokalnaKoda = s.lokalnaKoda || "";
+    narisiLokalnoKodo();
     besedilo("naslovHuba", prijaznaHisa(s.hub));
     narisiVse();
     if (stanje.znan && stanje.seznanjen) poveziSe();
@@ -2902,6 +2955,21 @@
     naKlik("gumbQrZnova", function () {
       prijava.qr = false;
       zacniPrijavo();
+    });
+    naKlik("gumbPrijavaNazaj", function () {
+      if (most && most.zapri) most.zapri();
+    });
+    naKlik("gumbBrezPovezaveNazaj", function () {
+      if (most && most.zapri) most.zapri();
+    });
+    naKlik("gumbNovaLokalnaKoda", function () {
+      if (most && most.novaLokalnaKoda) {
+        var nova = most.novaLokalnaKoda();
+        if (nova) {
+          stanje.lokalnaKoda = String(nova);
+          narisiLokalnoKodo();
+        }
+      }
     });
     naKlik("gumbPrijavaKoda", posljiKodo);
     naKlik("gumbPoveziNaprave", function () {

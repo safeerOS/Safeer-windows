@@ -12,6 +12,11 @@ import threading
 import urllib.parse
 from typing import Any, List, Optional
 
+# Nastavitve za Chromium v Qt WebEngine za predvajanje vdelanih tokov in preprecevanje zrusitev podokvirjev
+_cr_flags = os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
+_needed_flags = "--no-sandbox --disable-features=SitePerProcess,IsolateOrigins --autoplay-policy=no-user-gesture-required --disable-web-security"
+os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = f"{_cr_flags} {_needed_flags}".strip()
+
 from PySide6.QtCore import QObject, QTimer, QUrl, Qt, Signal, Slot
 from PySide6.QtGui import QIcon, QKeySequence, QShortcut
 from PySide6.QtWebEngineCore import (QWebEnginePage, QWebEngineProfile, QWebEngineScript,
@@ -19,9 +24,18 @@ from PySide6.QtWebEngineCore import (QWebEnginePage, QWebEngineProfile, QWebEngi
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import QApplication, QMainWindow, QStackedWidget
 
-from core import os_media
+from core import os_media, os_scit
 
 from . import control_backend, control_window, os_backend_win, policy, vlc_player
+
+class ShrambaWrapper:
+    def get(self, key: str, default: Any = None) -> Any:
+        return os_backend_win.nalozi_shrambo().get(key, default)
+
+    def set(self, key: str, value: Any) -> None:
+        s = os_backend_win.nalozi_shrambo()
+        s[key] = value
+        os_backend_win.shrani_shrambo(s)
 
 BRIDGE_PREFIX = "__safeer_os_bridge__:"
 
@@ -69,14 +83,30 @@ class SafeerOsPage(QWebEnginePage):
         super().__init__(profile, window)
         self.window_ref = window
 
+    def createWindow(self, _type):
+        # Blokiraj vsa nova / pojavna okna iz vdelanih spletnih strani ali oglasov
+        return None
+
+    def acceptNavigationRequest(self, url, nav_type, is_main_frame):
+        # Glavno okno Safeer OS sme nalagati le lokalni UI; zunanji preusmeritveni poskusi
+        # (npr. top-navigation iz oglasnih skript) so blokirani.
+        if is_main_frame:
+            url_str = url.toString() if hasattr(url, "toString") else str(url)
+            if url_str.startswith("file:") or url_str.startswith("qrc:") or "assets/os" in url_str:
+                return True
+            print(f"[SafeerOS] Blokirana zunanja navigacija glavnega okna na: {url_str}")
+            return False
+        return True
+
     def javaScriptConsoleMessage(self, level, message: str, line: int, source: str) -> None:
         if message.startswith(BRIDGE_PREFIX):
             try:
                 payload = json.loads(message[len(BRIDGE_PREFIX):])
                 self.window_ref.obdelaj_klic(payload)
             except Exception as e:
-                print(f"[SafeerOS] Napaka pri razclenjevanju mostu: {e}")
+                print(f"[SafeerOS] Napaka pri razclenjevanju mostu: {e}", flush=True)
         else:
+            print(f"[CONSOLE {level}] {message} ({source}:{line})", flush=True)
             super().javaScriptConsoleMessage(level, message, line, source)
 
 
@@ -97,6 +127,10 @@ class SafeerOsWindow(QMainWindow):
         self.control_backend.dodaj_poslusalca(self._na_dogodek_linka)
         self.media_center = os_media.MediaCenter(os_backend_win.CONFIG_DIR)
 
+        # Safeer Ščit za zaščito celotne naprave (DNS filtriranje na napravi)
+        self.scit = os_scit.Scit(ShrambaWrapper())
+        self.scit.zacni_ce_vklopljen()
+
         # Ikona
         try:
             icon_p = policy.shared_path("assets/icon.png")
@@ -107,6 +141,7 @@ class SafeerOsWindow(QMainWindow):
 
         # Profil in nastavitve
         self.profile = QWebEngineProfile("SafeerOSProfile", self)
+        self.profile.setHttpUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
         settings = self.profile.settings()
         attr = QWebEngineSettings.WebAttribute
         settings.setAttribute(attr.LocalContentCanAccessRemoteUrls, True)
@@ -114,6 +149,9 @@ class SafeerOsWindow(QMainWindow):
         settings.setAttribute(attr.ScrollAnimatorEnabled, True)
         settings.setAttribute(attr.FullScreenSupportEnabled, True)
         settings.setAttribute(attr.PlaybackRequiresUserGesture, False)
+        settings.setAttribute(attr.AllowRunningInsecureContent, True)
+        settings.setAttribute(attr.JavascriptCanOpenWindows, False)
+        settings.setAttribute(attr.PluginsEnabled, True)
 
         # Registriraj skripto mostu
         script = QWebEngineScript()
@@ -126,6 +164,9 @@ class SafeerOsWindow(QMainWindow):
         # Pogled
         self.view = QWebEngineView(self)
         self.page_obj = SafeerOsPage(self.profile, self)
+        self.page_obj.renderProcessTerminated.connect(
+            lambda status, code: print(f"[SafeerOS] RenderProcessTerminated: status={status}, code={code}", flush=True)
+        )
         self.view.setPage(self.page_obj)
 
         self.zaslon = QStackedWidget(self)
@@ -153,10 +194,53 @@ class SafeerOsWindow(QMainWindow):
         self.nalozi_vmesnik()
         QTimer.singleShot(0, self._osvezi_media_v_ozadju)
 
-        # Ce je dolocen zacetni razdelek (npr. 'control', 'daljinec', 'novaNaprava'),
-        # odpri neposredno ta razdelek v vgrajenem Safeer Controlu!
+        # Ce je dolocen zacetni razdelek (npr. 'control', 'daljinec', 'novaNaprava', 'media', 'nastavitve'),
+        # odpri ustrezen vgrajen razdelek!
         if self.zacetni_razdelek:
-            self.odpri_control(razdelek=self.zacetni_razdelek)
+            if self.zacetni_razdelek in ("control", "daljinec", "naprave", "novaNaprava", "prijava"):
+                self.odpri_control(razdelek=self.zacetni_razdelek)
+            elif self.zacetni_razdelek == "media-nastavitve":
+                def _odpri_media_nastavitve():
+                    js = (
+                        "if (window.safeerOsPojdi) window.safeerOsPojdi('media');"
+                        "var pl = document.getElementById('mediaNastavitvePlosca');"
+                        "if (pl) { pl.hidden = false; pl.scrollIntoView(); }"
+                        "var bg = document.getElementById('mediaPrimerKodeGumb');"
+                        "if (bg) { bg.click(); }"
+                    )
+                    self.view.page().runJavaScript(js)
+            elif self.zacetni_razdelek == "media-serije":
+                def _odpri_media_serije():
+                    js = (
+                        "if (window.safeerOsPojdi) window.safeerOsPojdi('media');"
+                        "var b = document.querySelector('[data-media-filter=\"serija\"]');"
+                        "if (b) { b.click(); }"
+                    )
+                    self.view.page().runJavaScript(js)
+                QTimer.singleShot(700, _odpri_media_serije)
+            elif self.zacetni_razdelek == "media-predvajaj":
+                def _odpri_media_predvajaj():
+                    js = (
+                        "if (window.safeerOsPojdi) window.safeerOsPojdi('media');"
+                        "var b = document.querySelector('[data-media-filter=\"serija\"]');"
+                        "if (b) { b.click(); }"
+                        "function klikniKoJePripravljeno(poskusi) {"
+                        "  var kartice = document.querySelectorAll('.media-kartica');"
+                        "  for (var i = 0; i < kartice.length; i++) {"
+                        "    if (kartice[i].innerText.indexOf('Igra prestolov') >= 0 || kartice[i].innerText.indexOf('Inception') >= 0) {"
+                        "      kartice[i].click(); return;"
+                        "    }"
+                        "  }"
+                        "  if ((poskusi || 0) < 20) {"
+                        "    setTimeout(function () { klikniKoJePripravljeno((poskusi || 0) + 1); }, 200);"
+                        "  }"
+                        "}"
+                        "setTimeout(function () { klikniKoJePripravljeno(0); }, 300);"
+                    )
+                    self.view.page().runJavaScript(js)
+                QTimer.singleShot(700, _odpri_media_predvajaj)
+            else:
+                QTimer.singleShot(600, lambda: self.view.page().runJavaScript(f"window.safeerOsPojdi && window.safeerOsPojdi('{self.zacetni_razdelek}');"))
         else:
             # Ce racunalnik se ni povezan in uporabnik se ni izbral »brez povezave«,
             # takoj prikazemo vgrajen prijavni zaslon (QR / 6-mestna koda / nadaljuj brez)
@@ -383,10 +467,11 @@ class SafeerOsWindow(QMainWindow):
             return True
 
         if metoda == "scit":
-            # Sistemski DNS ščit na Windows še ni podprt. Vmesnik dobi izrecno,
-            # stabilno stanje namesto zavajajočega prikaza »aktiven«.
-            return {"mozno": False, "vklop": False, "tece": False, "blokiranih": 0,
-                    "poizvedb": 0, "domen": 0, "zadnje": []}
+            return self.scit.stanje()
+
+        if metoda == "scitVklop":
+            vklop = bool(a[0]) if a else False
+            return self.scit.nastavi(vklop)
 
         # Safeer Link & Safeer Control metode
         if metoda == "povezava":
@@ -501,7 +586,20 @@ class SafeerOsWindow(QMainWindow):
             item = self.media_center.resolve(str(a[0]) if a else "")
             if not item:
                 return None
-            native = self.media_player.available
+            url = str(item.get("url") or "")
+            is_embed = (
+                item.get("vrsta") == "embed" or
+                "/embed/" in url.lower() or
+                any(x in url.lower() for x in ("vidsrc", "vidlink", "superembed", "embed.su", "multiembed", "youtube", "vimeo", "dailymotion", "streamtape", "vidbox"))
+            )
+            parsed_path = urllib.parse.urlsplit(url).path.lower()
+            _, ext = os.path.splitext(parsed_path)
+            is_direct_stream = (
+                url.startswith("file:") or
+                ext in os_media.MEDIA_EXT or
+                parsed_path.endswith((".m3u8", ".mpd", ".ts"))
+            )
+            native = self.media_player.available and is_direct_stream and not is_embed
             if native:
                 self.dispatcher.dispatch(lambda: self._odpri_media(item))
             return dict(item, native=native)
@@ -535,6 +633,14 @@ class SafeerOsWindow(QMainWindow):
             print(f"[SafeerOS] Napaka pri odpiranju URL {url}: {e}")
             return False
 
+    def closeEvent(self, event) -> None:
+        try:
+            if hasattr(self, "scit") and self.scit is not None:
+                self.scit.koncaj()
+        except Exception:
+            pass
+        event.accept()
+
 
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Safeer OS za Windows (z vgrajenim Safeer Controlom)")
@@ -543,6 +649,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--razdelek", type=str, default="", help="Zacetni razdelek (npr. control, daljinec, naprave, novaNaprava)")
     parser.add_argument("--ozadje", action="store_true", help="Zazeni le v ozadju")
     args = parser.parse_args(argv)
+
+    for f in ["--disable-web-security", "--no-sandbox", "--disable-site-isolation-trials", "--disable-features=SitePerProcess,IsolateOrigins", "--autoplay-policy=no-user-gesture-required"]:
+        if f not in sys.argv:
+            sys.argv.append(f)
 
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("SafeerOS")

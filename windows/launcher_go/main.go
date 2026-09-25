@@ -281,6 +281,8 @@ func main() {
 	cmd.Dir = targetDir
 	cmd.Env = append(os.Environ(),
 		"PYTHONPATH="+filepath.Join(targetDir, "windows")+";"+targetDir,
+		"PYTHONUNBUFFERED=1",
+		"QTWEBENGINE_CHROMIUM_FLAGS=--disable-web-security --no-sandbox --disable-site-isolation-trials --disable-features=SitePerProcess,IsolateOrigins --autoplay-policy=no-user-gesture-required",
 	)
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000}
 
