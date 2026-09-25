@@ -193,6 +193,101 @@ class TestOsWindows(unittest.TestCase):
         self.assertIn("<svg", svg)
         self.assertIn("</svg>", svg)
 
+    def test_control_backend_stanje_linka_identity(self):
+        with tempfile.TemporaryDirectory() as td:
+            cfg = os.path.join(td, "link.json")
+            backend = control_backend.SafeerControlBackend(config_pot=cfg)
+            st = backend.stanje_linka()
+            self.assertEqual(st["idNaprave"], backend.device_id)
+            self.assertEqual(st["imeNaprave"], backend.device_ime)
+            self.assertEqual(st["id"], backend.device_id)
+            self.assertEqual(st["naprava"], backend.device_ime)
+            self.assertTrue(st["control"])
+
+    def test_control_backend_cast_devices_metadata(self):
+        with tempfile.TemporaryDirectory() as td:
+            cfg = os.path.join(td, "link.json")
+            backend = control_backend.SafeerControlBackend(config_pot=cfg)
+
+            dogodki = []
+            backend.dodaj_poslusalca(lambda v, p: dogodki.append((v, p)))
+
+            msg = {
+                "type": "cast.devices",
+                "devices": [
+                    {
+                        "id": "tv-1",
+                        "name": "Philips Android TV",
+                        "role": "receiver",
+                        "capabilities": ["remote", "apps"],
+                        "platform": "tv",
+                        "kind": "screen",
+                        "ip": "192.168.0.77",
+                        "busy_by": "phone-1",
+                        "busy_by_name": "Galaxy S25"
+                    }
+                ]
+            }
+            backend._na_sporocilo(msg)
+            self.assertEqual(len(backend.naprave), 1)
+            tv = backend.naprave[0]
+            self.assertEqual(tv["naslov"], "192.168.0.77")
+            self.assertEqual(tv["ip"], "192.168.0.77")
+            self.assertEqual(tv["zasedenaOd"], "phone-1")
+            self.assertEqual(tv["zasedenaOdIme"], "Galaxy S25")
+            self.assertIn("remote", tv["zmoznosti"])
+
+            vse = backend.vse_naprave()
+            self.assertEqual(len(vse), 1)
+            self.assertIn("remote", vse[0]["zmoznosti"])
+
+    def test_control_backend_ukaz_and_result(self):
+        with tempfile.TemporaryDirectory() as td:
+            cfg = os.path.join(td, "link.json")
+            backend = control_backend.SafeerControlBackend(config_pot=cfg)
+
+            poslana = []
+            class MockPovezava:
+                tece = True
+                def poslji(self, sporocilo):
+                    poslana.append(sporocilo)
+                    return True
+
+            backend.povezava = MockPovezava()
+
+            # Ukaz z JSON nizom za parametre
+            uspeh = backend.ukaz("tv-1", "key", json.dumps({"key": "up"}), "ref-123")
+            self.assertTrue(uspeh)
+            self.assertEqual(len(poslana), 1)
+            u = poslana[0]
+            self.assertEqual(u["type"], "control.command")
+            self.assertEqual(u["target"], "tv-1")
+            self.assertEqual(u["id"], "ref-123")
+            self.assertEqual(u["payload"]["action"], "key")
+            self.assertEqual(u["payload"]["params"], {"key": "up"})
+
+            # Prejem control.result
+            dogodki = []
+            backend.dodaj_poslusalca(lambda v, p: dogodki.append((v, p)))
+            res_msg = {
+                "type": "control.result",
+                "ref_id": "ref-123",
+                "target": backend.device_id,
+                "payload": {
+                    "ok": True,
+                    "message": "Key received",
+                    "action": "key",
+                    "data": {"volume": 25}
+                }
+            }
+            backend._na_sporocilo(res_msg)
+            self.assertTrue(any(v == "ukaz" for v, _ in dogodki))
+            ukaz_dogodek = next(p for v, p in dogodki if v == "ukaz")
+            self.assertEqual(ukaz_dogodek["ref"], "ref-123")
+            self.assertEqual(ukaz_dogodek["ref_id"], "ref-123")
+            self.assertTrue(ukaz_dogodek["ok"])
+            self.assertEqual(ukaz_dogodek["data"], {"volume": 25})
+
 
 if __name__ == "__main__":
     unittest.main()

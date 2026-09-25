@@ -292,7 +292,7 @@
   /** Odgovor naprave (control.result) ali zavrnitev sredisca (control.ack). */
   function odziv(podatki) {
     if (!podatki) return;
-    var ref = String(podatki.ref || "");
+    var ref = String(podatki.ref || podatki.ref_id || "");
     var vnos = stanje.cakajoci[ref];
     if (!vnos) return;
     clearTimeout(vnos.timer);

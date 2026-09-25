@@ -141,7 +141,7 @@ class SafeerOsWindow(QMainWindow):
         # takoj prikazemo vgrajen prijavni zaslon (QR / 6-mestna koda / nadaljuj brez)
         st = self.control_backend.stanje_povezave().get("stanje")
         if st == "nov":
-            self.odpri_control()
+            self.odpri_control(prijava_ob_zagonu=True)
 
         if self.v_oknu:
             self.resize(1280, 800)
@@ -179,7 +179,7 @@ class SafeerOsWindow(QMainWindow):
         if vrsta in ("povezava", "stanje", "naprave"):
             self.poslji_dogodek("fokus", None)
 
-    def odpri_control(self, razdelek: str = "") -> bool:
+    def odpri_control(self, razdelek: str = "", id_naprave: str = "", prijava_ob_zagonu: bool = False) -> bool:
         def _odpri():
             if self.control_window is None:
                 self.control_window = control_window.SafeerControlWindow(
@@ -188,8 +188,9 @@ class SafeerOsWindow(QMainWindow):
                 self.zaslon.addWidget(self.control_window)
             else:
                 self.control_window.osvezi_stran()
+            self.control_window.v_prijavi = bool(prijava_ob_zagonu)
             if razdelek:
-                self.control_window.pojdi_na_razdelek(razdelek)
+                self.control_window.pojdi_na_razdelek(razdelek, id_naprave)
             self.control_window.show()
             self.zaslon.setCurrentWidget(self.control_window)
         self.dispatcher.dispatch(_odpri)
@@ -348,7 +349,14 @@ class SafeerOsWindow(QMainWindow):
             return self.control_backend.stanje_povezave()
 
         if metoda in ("control", "prijava"):
-            self.odpri_control()
+            razdelek = str(a[0]) if a else ""
+            id_nap = str(a[1]) if len(a) > 1 else ""
+            self.odpri_control(razdelek, id_nap)
+            return True
+
+        if metoda == "daljinec":
+            id_nap = str(a[0]) if a else ""
+            self.odpri_control("daljinec", id_nap)
             return True
 
         if metoda == "novaNaprava":
