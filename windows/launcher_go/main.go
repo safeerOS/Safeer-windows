@@ -157,10 +157,11 @@ func findPython() *PythonInfo {
 
 func checkAndInstallPySide6(py *PythonInfo) error {
 	var cmd *exec.Cmd
+	checkScript := "import PySide6, qrcode"
 	if py.IsLauncher {
-		cmd = exec.Command(py.ExePath, "-3", "-c", "import PySide6, vlc")
+		cmd = exec.Command(py.ExePath, "-3", "-c", checkScript)
 	} else {
-		cmd = exec.Command(py.ExePath, "-c", "import PySide6, vlc")
+		cmd = exec.Command(py.ExePath, "-c", checkScript)
 	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000}
 	if err := cmd.Run(); err == nil {
