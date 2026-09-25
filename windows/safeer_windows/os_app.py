@@ -137,6 +137,12 @@ class SafeerOsWindow(QMainWindow):
         # Nalozi domaco stran
         self.nalozi_vmesnik()
 
+        # Ce racunalnik se ni povezan in uporabnik se ni izbral »brez povezave«,
+        # takoj prikazemo vgrajen prijavni zaslon (QR / 6-mestna koda / nadaljuj brez)
+        st = self.control_backend.stanje_povezave().get("stanje")
+        if st == "nov":
+            self.odpri_control()
+
         if self.v_oknu:
             self.resize(1280, 800)
             self.show()
@@ -180,15 +186,21 @@ class SafeerOsWindow(QMainWindow):
                     backend=self.control_backend, parent=self, na_skritje=self._na_skritje_controla)
                 self.control_window.setWindowFlags(Qt.Widget)
                 self.zaslon.addWidget(self.control_window)
+            else:
+                self.control_window.osvezi_stran()
             if razdelek:
                 self.control_window.pojdi_na_razdelek(razdelek)
+            self.control_window.show()
             self.zaslon.setCurrentWidget(self.control_window)
         self.dispatcher.dispatch(_odpri)
         return True
 
     def _na_skritje_controla(self) -> None:
         """Prijava/Control je koncan (zapri, uspesna povezava ali "nadaljuj brez") - nazaj na Safeer OS."""
-        self.dispatcher.dispatch(lambda: self.zaslon.setCurrentWidget(self.view))
+        def _preklopi():
+            self.zaslon.setCurrentWidget(self.view)
+            self.poslji_dogodek("fokus", None)
+        self.dispatcher.dispatch(_preklopi)
 
     def vrni_odgovor(self, klic_id: int, ok: bool, podatki: Any) -> None:
         payload_js = json.dumps(podatki, ensure_ascii=False)

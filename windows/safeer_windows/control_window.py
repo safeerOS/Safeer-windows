@@ -132,14 +132,16 @@ class SafeerControlPage(QWebEnginePage):
 class SafeerControlWindow(QMainWindow):
     def __init__(self, backend: Optional[control_backend.SafeerControlBackend] = None, parent: Optional[QMainWindow] = None,
                  na_skritje: Optional[Any] = None):
-        super().__init__(parent, Qt.Window)
+        flags = Qt.Widget if parent is not None else Qt.Window
+        super().__init__(parent, flags)
         self.backend = backend or control_backend.get_backend()
         #: Ko je vgrajen v Safeer OS (namesto lastnega vrha-okna): klice se ob "zapri", uspesni
         #: seznanitvi ali "nadaljuj brez povezave", da starsevsko okno preklopi nazaj na svoj pogled.
         self.na_skritje = na_skritje
         self.setWindowTitle("Safeer Control")
-        self.resize(960, 640)
-        self.setMinimumSize(800, 520)
+        if parent is None:
+            self.resize(960, 640)
+            self.setMinimumSize(800, 520)
 
         # Dispečer za varno izvajanje klicev na glavni GUI niti
         self.dispatcher = GuiDispatcher(self)
@@ -220,7 +222,9 @@ class SafeerControlWindow(QMainWindow):
 
     def _na_dogodek_zaledja(self, vrsta: str, podatki: Any) -> None:
         self.dispatcher.dispatch(lambda: self.osvezi_stran(vrsta, podatki))
-        if self.na_skritje is not None and vrsta in ("povezava", "stanje") and self.backend.stanje_linka().get("stanje") == "povezan":
+        if self.na_skritje is not None and vrsta in ("povezava", "stanje", "seznanitev") and (
+            self.backend.stanje_linka().get("povezan") or self.backend.stanje_povezave().get("stanje") == "povezan"
+        ):
             self.dispatcher.dispatch(self.na_skritje)
 
     def pojdi_na_razdelek(self, razdelek: str) -> None:
