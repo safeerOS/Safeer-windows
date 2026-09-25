@@ -79,6 +79,86 @@
     return b;
   }
   var LOKALE = { sl: "sl-SI", en: "en-GB", de: "de-DE", es: "es-ES", fr: "fr-FR", it: "it-IT" };
+  var BESEDILA_WINDOWS = {
+    sl: {
+      naprednoPod: "IP, DNS, VPN in druge nastavitve sistema Windows.",
+      zvokNaprednoPod: "Izhodne naprave, mikrofon in druge nastavitve zvoka sistema Windows.",
+      samozagonPod: "Upravljaš ga lahko tudi v zagonskih aplikacijah sistema Windows.",
+      nazajVMint: "Nazaj v Windows", nazajVMintPod: "Zapri Safeer OS in pokaži namizje Windows.",
+      nazajOpis: "Safeer OS se zapre in prikaže običajno namizje Windows. Znova ga lahko odpreš iz menija Start.",
+      nastavitveOpis: "Najpomembnejše nastavitve sistema Windows na enem preglednem mestu.",
+      pokaziNamizje: "Pokaži namizje Windows", pokaziNamizjePod: "Safeer OS se umakne v opravilno vrstico.",
+      razlicica: "Safeer OS {v} · za Windows",
+      scitNiMozno: "Sistemski Ščit v tej izdaji Windows še ni na voljo. Safeer Browser še vedno ščiti splet.",
+      scitNapaka_ni_resolved: "Sistemski Ščit v tej izdaji Windows še ni na voljo."
+    },
+    en: {
+      naprednoPod: "IP, DNS, VPN and other Windows settings.",
+      zvokNaprednoPod: "Output devices, microphone and other Windows sound settings.",
+      samozagonPod: "You can also manage this in Windows Startup apps.",
+      nazajVMint: "Back to Windows", nazajVMintPod: "Close Safeer OS and show the Windows desktop.",
+      nazajOpis: "Safeer OS closes and shows the regular Windows desktop. Open it again from the Start menu.",
+      nastavitveOpis: "The most important Windows settings in one clear place.",
+      pokaziNamizje: "Show the Windows desktop", pokaziNamizjePod: "Safeer OS moves to the taskbar.",
+      razlicica: "Safeer OS {v} · for Windows",
+      scitNiMozno: "System-wide Shield is not available in this Windows release yet. Safeer Browser still protects the web.",
+      scitNapaka_ni_resolved: "System-wide Shield is not available in this Windows release yet."
+    },
+    de: {
+      naprednoPod: "IP, DNS, VPN und weitere Windows-Einstellungen.",
+      zvokNaprednoPod: "Ausgabegeräte, Mikrofon und weitere Windows-Soundeinstellungen.",
+      samozagonPod: "Auch unter Windows-Autostart-Apps verwaltbar.",
+      nazajVMint: "Zurück zu Windows", nazajVMintPod: "Safeer OS schließen und den Windows-Desktop anzeigen.",
+      nazajOpis: "Safeer OS wird geschlossen und der normale Windows-Desktop angezeigt. Über das Startmenü kannst du es erneut öffnen.",
+      nastavitveOpis: "Die wichtigsten Windows-Einstellungen übersichtlich an einem Ort.",
+      pokaziNamizje: "Windows-Desktop anzeigen", pokaziNamizjePod: "Safeer OS wird in die Taskleiste minimiert.",
+      razlicica: "Safeer OS {v} · für Windows",
+      scitNiMozno: "Der systemweite Schutz ist in dieser Windows-Version noch nicht verfügbar. Safeer Browser schützt weiterhin das Web.",
+      scitNapaka_ni_resolved: "Der systemweite Schutz ist in dieser Windows-Version noch nicht verfügbar."
+    },
+    es: {
+      naprednoPod: "IP, DNS, VPN y otros ajustes de Windows.",
+      zvokNaprednoPod: "Dispositivos de salida, micrófono y otros ajustes de sonido de Windows.",
+      samozagonPod: "También puedes gestionarlo en Aplicaciones de inicio de Windows.",
+      nazajVMint: "Volver a Windows", nazajVMintPod: "Cerrar Safeer OS y mostrar el escritorio de Windows.",
+      nazajOpis: "Safeer OS se cierra y muestra el escritorio habitual de Windows. Ábrelo de nuevo desde Inicio.",
+      nastavitveOpis: "Los ajustes más importantes de Windows en un solo lugar.",
+      pokaziNamizje: "Mostrar el escritorio de Windows", pokaziNamizjePod: "Safeer OS se minimiza en la barra de tareas.",
+      razlicica: "Safeer OS {v} · para Windows",
+      scitNiMozno: "El Escudo de todo el sistema aún no está disponible en esta versión para Windows. Safeer Browser sigue protegiendo la web.",
+      scitNapaka_ni_resolved: "El Escudo de todo el sistema aún no está disponible en esta versión para Windows."
+    },
+    fr: {
+      naprednoPod: "IP, DNS, VPN et autres paramètres Windows.",
+      zvokNaprednoPod: "Périphériques de sortie, microphone et autres paramètres audio Windows.",
+      samozagonPod: "Également gérable dans les applications de démarrage Windows.",
+      nazajVMint: "Retour à Windows", nazajVMintPod: "Fermer Safeer OS et afficher le bureau Windows.",
+      nazajOpis: "Safeer OS se ferme et affiche le bureau Windows habituel. Rouvrez-le depuis le menu Démarrer.",
+      nastavitveOpis: "Les principaux paramètres Windows réunis clairement au même endroit.",
+      pokaziNamizje: "Afficher le bureau Windows", pokaziNamizjePod: "Safeer OS se réduit dans la barre des tâches.",
+      razlicica: "Safeer OS {v} · pour Windows",
+      scitNiMozno: "Le Bouclier système n'est pas encore disponible dans cette version Windows. Safeer Browser continue de protéger le Web.",
+      scitNapaka_ni_resolved: "Le Bouclier système n'est pas encore disponible dans cette version Windows."
+    },
+    it: {
+      naprednoPod: "IP, DNS, VPN e altre impostazioni di Windows.",
+      zvokNaprednoPod: "Dispositivi di uscita, microfono e altre impostazioni audio di Windows.",
+      samozagonPod: "Puoi gestirlo anche nelle app di avvio di Windows.",
+      nazajVMint: "Torna a Windows", nazajVMintPod: "Chiudi Safeer OS e mostra il desktop di Windows.",
+      nazajOpis: "Safeer OS si chiude e mostra il normale desktop di Windows. Riaprilo dal menu Start.",
+      nastavitveOpis: "Le impostazioni principali di Windows in un unico posto chiaro.",
+      pokaziNamizje: "Mostra il desktop di Windows", pokaziNamizjePod: "Safeer OS si riduce nella barra delle applicazioni.",
+      razlicica: "Safeer OS {v} · per Windows",
+      scitNiMozno: "Lo Scudo di sistema non è ancora disponibile in questa versione Windows. Safeer Browser continua a proteggere il Web.",
+      scitNapaka_ni_resolved: "Lo Scudo di sistema non è ancora disponibile in questa versione Windows."
+    }
+  };
+  function prilagodiPlatformo(platforma) {
+    if (platforma !== "windows") return;
+    Object.keys(BESEDILA_WINDOWS).forEach(function (koda) {
+      if (BESEDILA_OS[koda]) Object.assign(BESEDILA_OS[koda], BESEDILA_WINDOWS[koda]);
+    });
+  }
   function prevedi() {
     document.documentElement.lang = jezik;
     document.querySelectorAll("[data-t]").forEach(function (el) { el.textContent = t(el.getAttribute("data-t")); });
@@ -1388,6 +1468,13 @@
     return izhod;
   }
   function odpriNastavitev(n) {
+    // Windows ze ima varna, dostopna in celovita sistemska pogleda za omrezje in zvok.
+    // Ne prikazuj praznega Linux pogleda, kadar namesto njega lahko odpremo pravi Windows pogled.
+    if (S.zacetek && S.zacetek.namizje === "windows" && (n.modul === "omrezje" || n.modul === "sound")) {
+      obvesti(t("odpiram", { ime: n.ime }));
+      klic("nastavitve", [n.modul]);
+      return;
+    }
     // Omrezje ima Safeer OS svojo stran; Mintovo okno ostane pod »Napredno«.
     if (n.modul === "omrezje") { pojdi("omrezje"); return; }
     // Zvok ima Safeer OS svojo stran (izhodi, programi, naprave v Linku); Mintovo okno je pod »Napredno«.
@@ -1722,6 +1809,7 @@
     if (!most) return;
     klic("zacetek").then(function (z) {
       S.zacetek = z;
+      prilagodiPlatformo(z.namizje);
       if (BESEDILA_OS[z.jezik]) jezik = z.jezik;
       prevedi();
       if (Array.isArray(z.spletne)) S.spletne = z.spletne;
@@ -1801,4 +1889,3 @@
   setInterval(mediaStanje, 2000);
 
 })();
-

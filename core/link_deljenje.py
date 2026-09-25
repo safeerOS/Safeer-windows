@@ -16,7 +16,6 @@ korenskega okna (X11); na Waylandu zajem ni na voljo in to povemo naravnost.
 from __future__ import annotations
 
 import hashlib
-import io
 import json
 import os
 import socket

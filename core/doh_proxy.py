@@ -15,7 +15,7 @@ import math
 import gi
 gi.require_version("Soup", "3.0")
 from gi.repository import Soup, Gio, GLib
-from typing import Dict, Tuple, Optional, List
+from typing import Dict, Optional, Tuple
 
 # Znani zanesljivi DoH ponudniki
 DOH_PROVIDERS = {

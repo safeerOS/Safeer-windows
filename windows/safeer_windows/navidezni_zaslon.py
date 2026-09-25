@@ -20,8 +20,7 @@ import ssl
 import sys
 import threading
 import time
-import uuid
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
 CORE_DIR = os.path.abspath(os.path.join(PACKAGE_DIR, "..", ".."))
@@ -29,7 +28,7 @@ if CORE_DIR not in sys.path:
     sys.path.insert(0, CORE_DIR)
 
 from core.link_datoteke import TLS_MAPA, zagotovi_potrdilo
-from safeer_windows import os_backend_win
+from safeer_windows import os_backend_win, policy
 
 # Dimenzije navideznega zaslona
 PRIVZETA_SIRINA = 1920
@@ -132,7 +131,7 @@ class NavidezniZaslon:
         """Stanje za ukaz 'status' daljinca."""
         return {
             "app": "safeer-control-windows",
-            "version": "0.5.0",
+            "version": policy.APP_VERSION,
             "foreground": True,
             "screen": "virtual",
             "secure": True,

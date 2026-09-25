@@ -10,14 +10,14 @@ import subprocess
 import sys
 import threading
 import urllib.parse
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 
-from PySide6.QtCore import QByteArray, QObject, QTimer, QUrl, Qt, Signal, Slot
+from PySide6.QtCore import QObject, QUrl, Qt, Signal, Slot
 from PySide6.QtGui import QIcon, QKeySequence, QShortcut
 from PySide6.QtWebEngineCore import (QWebEnginePage, QWebEngineProfile, QWebEngineScript,
                                      QWebEngineSettings)
 from PySide6.QtWebEngineWidgets import QWebEngineView
-from PySide6.QtWidgets import QApplication, QMainWindow, QStackedWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QMainWindow, QStackedWidget
 
 from . import control_backend, control_window, os_backend_win, policy
 
@@ -199,7 +199,7 @@ class SafeerOsWindow(QMainWindow):
                 self.control_window.pojdi_na_razdelek(razdelek, id_naprave)
             self.control_window.show()
             self.zaslon.setCurrentWidget(self.control_window)
-            self.setWindowTitle("Safeer OS — Safeer Control")
+            self.setWindowTitle("Safeer OS · Naprave")
         self.dispatcher.dispatch(_odpri)
         return True
 
@@ -240,15 +240,7 @@ class SafeerOsWindow(QMainWindow):
                 "ime": os.environ.get("USERNAME", "Uporabnik"),
                 "racunalnik": platform.node(),
                 "ozadje": "",
-                "razpolozljivo": {
-                    "programi": True,
-                    "datoteke": True,
-                    "naprave": True,
-                    "nastavitve": True,
-                    "zvok": False,
-                    "jbl": False,
-                    "omrezje": True,
-                },
+                "razpolozljivo": os_backend_win.razpolozljive_nastavitve(),
                 "mape": os_backend_win.uporabniske_mape(),
                 "celozaslonsko": self.isFullScreen(),
                 "namizje": "windows",
@@ -258,9 +250,9 @@ class SafeerOsWindow(QMainWindow):
                     {"ime": "Google", "url": "https://www.google.com"},
                     {"ime": "Safeer", "url": "https://safeer.si"}
                 ]),
-                "razlicica": "0.5.0",
+                "razlicica": policy.APP_VERSION,
                 "sistem": f"Windows {platform.release()}",
-                "samozagon": False,
+                "samozagon": os_backend_win.samozagon_vklopljen(),
                 "povezava": self.control_backend.stanje_povezave(),
             }
 
@@ -312,6 +304,9 @@ class SafeerOsWindow(QMainWindow):
             self.dispatcher.dispatch(lambda: self.showFullScreen() if novo else self.showNormal())
             return novo
 
+        if metoda == "samozagon":
+            return os_backend_win.nastavi_samozagon(bool(a[0]) if a else False)
+
         if metoda in ("nazajVMint", "nazajVWindows", "namizje"):
             self.dispatcher.dispatch(self.showMinimized)
             return True
@@ -350,7 +345,10 @@ class SafeerOsWindow(QMainWindow):
             return True
 
         if metoda == "scit":
-            return {"stanje": "aktiven", "oglasi": 0, "groznje": 0}
+            # Sistemski DNS ščit na Windows še ni podprt. Vmesnik dobi izrecno,
+            # stabilno stanje namesto zavajajočega prikaza »aktiven«.
+            return {"mozno": False, "vklop": False, "tece": False, "blokiranih": 0,
+                    "poizvedb": 0, "domen": 0, "zadnje": []}
 
         # Safeer Link & Safeer Control metode
         if metoda == "povezava":
@@ -425,8 +423,25 @@ class SafeerOsWindow(QMainWindow):
         if metoda == "nedavne":
             return []
 
-        if metoda in ("omrezje", "zvok", "jbl", "mediaKatalog", "mediaStanje"):
-            return {}
+        if metoda == "omrezje":
+            return {"naprave": [], "omrezja": [], "shranjene": [],
+                    "wifi_vklopljen": False, "napredno": True}
+
+        if metoda == "zvok":
+            return {"izhodi": [], "vhodi": [], "programi": [],
+                    "link": {"naprave": [], "zvok": {}, "povezan": False}, "napredno": True}
+
+        if metoda == "jbl":
+            return {"vklop": False, "najdena": False}
+
+        if metoda == "mediaKatalog":
+            return {"vnosi": []}
+
+        if metoda == "mediaStanje":
+            return {"na_voljo": False}
+
+        if metoda in ("odprtaOkna", "mediaNaprave"):
+            return []
 
         return None
 
@@ -454,7 +469,7 @@ class SafeerOsWindow(QMainWindow):
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Safeer OS za Windows (z vgrajenim Safeer Controlom)")
     parser.add_argument("--okno", action="store_true", help="Odpri v oknu namesto celozaslonsko")
-    parser.add_argument("--control", "-c", action="store_true", help="Odpri neposredno v razdelku Safeer Control")
+    parser.add_argument("--control", "-c", action="store_true", help="Odpri neposredno v razdelku Naprave")
     parser.add_argument("--razdelek", type=str, default="", help="Zacetni razdelek (npr. control, daljinec, naprave, novaNaprava)")
     parser.add_argument("--ozadje", action="store_true", help="Zazeni le v ozadju")
     args = parser.parse_args(argv)

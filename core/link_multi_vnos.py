@@ -5,7 +5,7 @@ Android sejo. Nic se ne vklopi samodejno: lastnik UI mora poklicati `vklopi()`.
 Modul nikoli ne grabi (/EVIOCGRAB) naprav, zato lokalni Linux ostane uporaben.
 """
 from __future__ import annotations
-import glob, os, select, struct, threading, time
+import glob, select, struct, threading
 from typing import Callable, Dict, Optional
 
 EV_KEY, EV_REL, EV_ABS = 0x01, 0x02, 0x03

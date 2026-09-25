@@ -2,15 +2,11 @@
 
 from __future__ import annotations
 
-import glob
 import json
 import os
-import platform
-import shutil
 import subprocess
 import sys
-import time
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 CONFIG_DIR = os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~/.config"), "SafeerOS")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "os.json")
@@ -291,15 +287,53 @@ NASTAVITVE_URI = {
     "varnost": "ms-settings:windowsdefender",
     "racuni": "ms-settings:yourinfo",
     "nadzorna_plosca": "control.exe",
+    # Ključi, ki jih uporablja skupni Safeer OS vmesnik.
+    "display": "ms-settings:display",
+    "nightlight": "ms-settings:nightlight",
+    "screensaver": "control.exe desk.cpl,,1",
+    "sound": "ms-settings:sound",
+    "power": "ms-settings:powersleep",
+    "mouse": "ms-settings:mousetouchpad",
+    "keyboard": "ms-settings:typing",
+    "user": "ms-settings:yourinfo",
+    "privacy": "ms-settings:privacy",
+    "default": "ms-settings:defaultapps",
+    "startup": "ms-settings:startupapps",
+    "calendar": "ms-settings:dateandtime",
+    "notifications": "ms-settings:notifications",
+    "accessibility": "ms-settings:easeofaccess",
+    "windows": "ms-settings:multitasking",
+    "bluetooth": "ms-settings:bluetooth",
+    "opravila": "taskmgr.exe",
+    "diski": "diskmgmt.msc",
+    # cmd.exe je prisoten na vseh podprtih Windows 10/11; Windows Terminal ni.
+    "terminal": "cmd.exe",
+    "datoteke": "explorer.exe",
 }
+
+WINDOWS_MODULI = (
+    "display", "nightlight", "screensaver", "sound", "power", "mouse", "keyboard",
+    "user", "privacy", "default", "startup", "calendar", "notifications",
+    "accessibility", "windows",
+)
+WINDOWS_ORODJA = (
+    "omrezje", "bluetooth", "posodobitve", "opravila", "diski", "terminal", "datoteke",
+)
+
+
+def razpolozljive_nastavitve() -> dict:
+    """Vrne pogodbo, ki jo pričakuje skupni spletni vmesnik Safeer OS."""
+    return {"moduli": list(WINDOWS_MODULI), "orodja": list(WINDOWS_ORODJA)}
 
 
 def odpri_nastavitve(razdelek: str = "") -> bool:
     target = NASTAVITVE_URI.get(razdelek.lower(), "ms-settings:")
     try:
         if sys.platform == "win32":
-            if target == "control.exe":
-                subprocess.Popen(["control.exe"])
+            if target.startswith("control.exe"):
+                subprocess.Popen(target.split())
+            elif target.endswith(".exe"):
+                subprocess.Popen([target])
             else:
                 os.startfile(target)  # noqa: S606
             return True
@@ -316,18 +350,24 @@ def napajanje(dejanje: str) -> bool:
         if sys.platform == "win32":
             if dejanje in ("izklop", "shutdown"):
                 subprocess.Popen(["shutdown.exe", "/s", "/t", "0"])
-            elif dejanje in ("ponovni_zagon", "restart", "reboot"):
+            elif dejanje in ("ponovni-zagon", "ponovni_zagon", "restart", "reboot"):
                 subprocess.Popen(["shutdown.exe", "/r", "/t", "0"])
-            elif dejanje in ("zaklep", "lock"):
+            elif dejanje in ("zakleni", "zaklep", "lock"):
                 subprocess.Popen(["rundll32.exe", "user32.dll,LockWorkStation"])
             elif dejanje in ("spanje", "sleep"):
                 subprocess.Popen(["rundll32.exe", "powrprof.dll,SetSuspendState", "0", "1", "0"])
+            elif dejanje in ("odjava", "logoff", "signout"):
+                subprocess.Popen(["shutdown.exe", "/l"])
+            else:
+                return False
             return True
         # Linux fallback
         if dejanje in ("izklop", "shutdown"):
             subprocess.Popen(["systemctl", "poweroff"])
         elif dejanje in ("ponovni_zagon", "restart"):
             subprocess.Popen(["systemctl", "reboot"])
+        else:
+            return False
         return True
     except Exception as e:
         print(f"[SafeerOS] Napaka pri ukazu napajanja {dejanje}: {e}")
@@ -346,7 +386,7 @@ def stanje_sistema() -> dict:
 
     try:
         import shutil
-        total, used, free = shutil.disk_usage(os.path.expanduser("~"))
+        total, used, _ = shutil.disk_usage(os.path.expanduser("~"))
         disk_odstotek = int((used / total) * 100) if total else 0
     except Exception:
         pass
@@ -385,3 +425,47 @@ def stanje_sistema() -> dict:
         "disk": disk_odstotek,
         "baterija": None,
     }
+
+
+def _ukaz_samozagona() -> str:
+    """Ukaz za HKCU Run, pravilno citiran tudi pri poteh s presledki."""
+    if getattr(sys, "frozen", False):
+        deli = [sys.executable, "--ozadje"]
+    else:
+        deli = [sys.executable, os.path.abspath(sys.argv[0]), "--ozadje"]
+    return subprocess.list2cmdline(deli)
+
+
+def samozagon_vklopljen() -> bool:
+    if sys.platform != "win32":
+        return False
+    try:
+        import winreg
+
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run") as key:
+            vrednost, _ = winreg.QueryValueEx(key, "SafeerOS")
+        return bool(vrednost)
+    except (FileNotFoundError, OSError):
+        return False
+
+
+def nastavi_samozagon(vklop: bool) -> bool:
+    """Vključi ali izključi zagon Safeer OS za trenutnega uporabnika."""
+    if sys.platform != "win32":
+        return False
+    try:
+        import winreg
+
+        pot = r"Software\Microsoft\Windows\CurrentVersion\Run"
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, pot) as key:
+            if vklop:
+                winreg.SetValueEx(key, "SafeerOS", 0, winreg.REG_SZ, _ukaz_samozagona())
+            else:
+                try:
+                    winreg.DeleteValue(key, "SafeerOS")
+                except FileNotFoundError:
+                    pass
+        return samozagon_vklopljen() == bool(vklop)
+    except OSError as e:
+        print(f"[SafeerOS] Samozagona ni bilo mogoče spremeniti: {e}")
+        return samozagon_vklopljen()

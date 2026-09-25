@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import base64
 import http.client
 import json
 import os
@@ -20,7 +19,7 @@ CORE_DIR = os.path.abspath(os.path.join(PACKAGE_DIR, "..", ".."))
 if CORE_DIR not in sys.path:
     sys.path.insert(0, CORE_DIR)
 
-from core import link_hub, link_deljenje, link_seja, link_tls
+from core import link_deljenje, link_hub, link_tls
 from safeer_windows import os_backend_win
 from safeer_windows.navidezni_zaslon import NavidezniZaslon
 

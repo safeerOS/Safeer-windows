@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
 from core.os_sistem import _razdeli
 

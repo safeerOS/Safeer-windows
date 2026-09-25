@@ -5,6 +5,8 @@ import json
 import os
 import tempfile
 import unittest
+from pathlib import Path
+from unittest import mock
 
 from safeer_windows import control_backend, os_backend_win, policy
 from core import link_hub
@@ -76,6 +78,59 @@ class TestOsWindows(unittest.TestCase):
         self.assertIn("ram_gb", st)
         self.assertIn("disk", st)
 
+    def test_windows_nastavitve_uporabljajo_pogodbo_vmesnika(self):
+        razpolozljivo = os_backend_win.razpolozljive_nastavitve()
+        self.assertIsInstance(razpolozljivo["moduli"], list)
+        self.assertIsInstance(razpolozljivo["orodja"], list)
+        self.assertIn("display", razpolozljivo["moduli"])
+        self.assertIn("omrezje", razpolozljivo["orodja"])
+
+    def test_napajalni_ukazi_iz_vmesnika_so_preslikani_na_windows(self):
+        primeri = {
+            "zakleni": ["rundll32.exe", "user32.dll,LockWorkStation"],
+            "ponovni-zagon": ["shutdown.exe", "/r", "/t", "0"],
+            "odjava": ["shutdown.exe", "/l"],
+        }
+        with mock.patch.object(os_backend_win.sys, "platform", "win32"), \
+             mock.patch.object(os_backend_win.subprocess, "Popen") as popen:
+            for dejanje, pricakovano in primeri.items():
+                popen.reset_mock()
+                self.assertTrue(os_backend_win.napajanje(dejanje))
+                popen.assert_called_once_with(pricakovano)
+            self.assertFalse(os_backend_win.napajanje("neznano-dejanje"))
+
+    def test_windows_vmesnik_ne_uporablja_zastarele_trdo_zapisane_razlicice(self):
+        koren = Path(__file__).resolve().parents[2]
+        os_app = (koren / "windows" / "safeer_windows" / "os_app.py").read_text(encoding="utf-8")
+        zaslon = (koren / "windows" / "safeer_windows" / "navidezni_zaslon.py").read_text(encoding="utf-8")
+        self.assertIn('"razlicica": policy.APP_VERSION', os_app)
+        self.assertIn('"version": policy.APP_VERSION', zaslon)
+        self.assertNotIn('"razlicica": "0.5.0"', os_app)
+        self.assertNotIn('"version": "0.5.0"', zaslon)
+
+    def test_windows_besedila_in_prazna_stanja_so_varna(self):
+        koren = Path(__file__).resolve().parents[2]
+        skripta = (koren / "assets" / "os" / "os.js").read_text(encoding="utf-8")
+        self.assertIn('prilagodiPlatformo(z.namizje);', skripta)
+        self.assertIn('nazajVMint: "Nazaj v Windows"', skripta)
+        self.assertIn('S.zacetek.namizje === "windows"', skripta)
+        os_app = (koren / "windows" / "safeer_windows" / "os_app.py").read_text(encoding="utf-8")
+        self.assertIn('"naprave": [], "omrezja": [], "shranjene": []', os_app)
+        self.assertIn('"izhodi": [], "vhodi": [], "programi": []', os_app)
+
+    def test_link_in_control_sta_predstavljena_kot_del_safeer_os(self):
+        koren = Path(__file__).resolve().parents[2]
+        html = (koren / "assets" / "link" / "index.html").read_text(encoding="utf-8")
+        skripta = (koren / "assets" / "link" / "link.js").read_text(encoding="utf-8")
+        okno = (koren / "windows" / "safeer_windows" / "control_window.py").read_text(encoding="utf-8")
+
+        self.assertIn('id="naslovAplikacije"', html)
+        self.assertIn('id="podrocjeAplikacije"', html)
+        self.assertIn('document.title = "Safeer OS · Naprave"', skripta)
+        self.assertIn('besedilo("naslovAplikacije", "Safeer OS")', skripta)
+        self.assertNotIn('naslov.textContent = "Safeer Control"', skripta)
+        self.assertIn('self.setWindowTitle("Safeer OS · Naprave")', okno)
+
     # ------------------------------------------------------------------ Safeer Control testi
     def test_control_backend_identity(self):
         with tempfile.TemporaryDirectory() as td:
@@ -146,7 +201,6 @@ class TestOsWindows(unittest.TestCase):
             self.assertEqual(len(s_programi), 1)
             self.assertEqual(s_programi[0]["id"], "tv-1")
 
-            s_datotekami = backend.naprave_s_datotekami()
             # tv-1 ima capabilities brez files, phone-1 pa share (torej ni files). Dodajmo napravo s files:
             backend.naprave.append({"id": "pc-2", "name": "Linux PC", "platform": "linux", "kind": "desktop", "capabilities": ["files"]})
             s_datotekami2 = backend.naprave_s_datotekami()
@@ -359,7 +413,7 @@ class TestNavidezniZaslon(unittest.TestCase):
         seznam = self.zaslon.seznam_programov_za_daljinec(z_ikonami=True)
         self.assertIn("apps", seznam)
         self.assertIn("items", seznam)
-        self.assertGreaterEqual(len(seznam["apps"]), len(PRIVZETI_PROGRAMI if "PRIVZETI_PROGRAMI" in dir() else [1,2,3]))
+        self.assertGreaterEqual(len(seznam["apps"]), 3)
 
     def test_pretocna_seja(self):
         seja = self.zaslon.zacni_sejo("tv-naprava")
@@ -586,4 +640,3 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

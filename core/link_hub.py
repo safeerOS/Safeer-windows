@@ -19,13 +19,10 @@ import base64
 import json
 import os
 import socket
-import ssl
 import struct
 import threading
 import time
 import sys
-import urllib.error
-import urllib.request
 from typing import Callable, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
