@@ -12,6 +12,7 @@ import sys
 import threading
 import time
 import urllib.parse
+import uuid
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -21,6 +22,7 @@ if CORE_DIR not in sys.path:
 
 from core import link_hub, link_deljenje, link_seja, link_tls
 from safeer_windows import os_backend_win
+from safeer_windows.navidezni_zaslon import NavidezniZaslon
 
 CONFIG_DIR = os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~/.config"), "SafeerControl")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "link.json")
@@ -43,6 +45,7 @@ class SafeerControlBackend:
         self.nalozi_nastavitve()
 
         self.device_id, self.device_ime = self._doloci_identiteto()
+        self.navidezni_zaslon = NavidezniZaslon()
         self.povezava: Optional[link_hub.Povezava] = None
         self.naprave: List[dict] = []
         self._prijava: Optional[dict] = None
@@ -519,7 +522,8 @@ class SafeerControlBackend:
                 ime=self.device_ime,
                 sinhronizira=False,
                 odtis=odtis or None,
-                dodatne_zmoznosti=["files", "remote"],
+                dodatne_zmoznosti=["files", "remote", "desktop", "screen", "apps"],
+                katalog=self.navidezni_zaslon.katalog_aplikacij,
                 v_krog=bool(self.nastavitve.get("zaupana", True)),
             )
             p.ob_sporocilu = self._na_sporocilo
@@ -578,11 +582,179 @@ class SafeerControlBackend:
                 odziv_podatki["ok"] = True
             self._oddaj_dogodek("ukaz", odziv_podatki)
 
+        elif vrsta == "control.command":
+            self._obdelaj_nadzorni_ukaz(sporocilo)
+
         elif vrsta == "share.text":
             self._oddaj_dogodek("besedilo", sporocilo.get("payload"))
 
         elif vrsta == "cast.status":
             self._oddaj_dogodek("predvajanje", sporocilo.get("payload"))
+
+    def _obdelaj_nadzorni_ukaz(self, sporocilo: dict) -> None:
+        """Obdela dohodni ukaz daljinca z druge naprave (TV, telefon) na ločenem navideznem zaslonu."""
+        posiljatelj = str(sporocilo.get("sender") or sporocilo.get("source") or "")
+        id_ukaza = str(sporocilo.get("id") or "")
+        payload = sporocilo.get("payload") or {}
+        akcija = str(payload.get("action") or "").strip().lower()
+        params = payload.get("params") or {}
+        if isinstance(params, str):
+            try:
+                params = json.loads(params)
+            except Exception:
+                params = {}
+
+        izid: Dict[str, Any] = {"ok": True, "message": "Ukaz izveden"}
+
+        try:
+            if akcija == "status":
+                izid = {
+                    "ok": True,
+                    "message": "Stanje",
+                    "data": self.navidezni_zaslon.stanje_naprave(),
+                }
+
+            elif akcija in ("key", "key_down", "key_up"):
+                k = str(params.get("key") or "")
+                self.navidezni_zaslon.obdelaj_tipko(k)
+                izid = {"ok": True, "message": f"Tipka {k}"}
+
+            elif akcija == "scroll":
+                smer = str(params.get("direction") or "down")
+                self.navidezni_zaslon.obdelaj_pomik(smer)
+                izid = {"ok": True, "message": f"Drsenje {smer}"}
+
+            elif akcija == "volume":
+                podatki = self.navidezni_zaslon.nastavi_glasnost(
+                    smer=str(params.get("direction") or ""),
+                    raven=params.get("level"),
+                )
+                izid = {"ok": True, "message": f"Glasnost {podatki['level']} %", "data": podatki}
+
+            elif akcija in ("screenshot", "screen.capture"):
+                posnetek = self.navidezni_zaslon.zajemi_posnetek()
+                izid = {"ok": True, "message": "Posnetek navideznega zaslona", "data": posnetek}
+
+            elif akcija == "open_url":
+                url = str(params.get("url") or "").strip()
+                if not (url.startswith("http://") or url.startswith("https://") or url.startswith("safeer://")):
+                    izid = {"ok": False, "message": "Dovoljeni so samo naslovi http(s) ali safeer://"}
+                else:
+                    self.navidezni_zaslon.odpri_url(url)
+                    izid = {"ok": True, "message": "Stran se odpira na ločenem navideznem zaslonu"}
+
+            elif akcija in ("apps", "apps.list"):
+                ikone = params.get("icons") is not False
+                od = int(params.get("offset") or 0)
+                meja = int(params.get("limit") or 50)
+                podatki = self.navidezni_zaslon.seznam_programov_za_daljinec(z_ikonami=ikone, od=od, meja=meja)
+                izid = {"ok": True, "message": f"{len(podatki['items'])} programov", "data": podatki}
+
+            elif akcija in ("apps.launch", "launch_app"):
+                app_id = str(params.get("app") or params.get("package") or "").strip()
+                stream = bool(params.get("stream"))
+                if app_id:
+                    self.navidezni_zaslon.zazeni_program(app_id)
+                    odgovor_data = {"stream": "pending"} if stream else None
+                    izid = {"ok": True, "message": "Program se odpira na ločenem navideznem zaslonu", "data": odgovor_data}
+                else:
+                    izid = {"ok": False, "message": "Manjka oznaka programa"}
+
+            elif akcija == "apps.running":
+                tecejo = self.navidezni_zaslon.tecejo_programi()
+                izid = {"ok": True, "message": "Odprti programi", "data": {"running": tecejo}}
+
+            elif akcija == "apps.close":
+                app_id = str(params.get("app") or params.get("package") or "").strip()
+                zaprti = self.navidezni_zaslon.zapri_program(app_id)
+                izid = {"ok": True, "message": "Program se zapira", "data": {"closed": zaprti}}
+
+            elif akcija == "screen.start":
+                kakovost = str(params.get("quality") or "srednja")
+                seja = self.navidezni_zaslon.zacni_sejo(posiljatelj, kakovost=kakovost)
+                izid = {"ok": True, "message": "Navidezni zaslon se deli", "data": seja}
+
+            elif akcija == "screen.stop":
+                self.navidezni_zaslon.ustavi_sejo()
+                izid = {"ok": True, "message": "Deljenje navideznega zaslona je končano"}
+
+            elif akcija == "screen.status":
+                stanje_zaslona = self.navidezni_zaslon.stanje_seje()
+                izid = {"ok": True, "message": "Stanje navideznega zaslona", "data": stanje_zaslona}
+
+            elif akcija in ("mouse.move", "mouse.click", "touch"):
+                x = params.get("x")
+                y = params.get("y")
+                vrsta_m = "klik" if akcija in ("mouse.click", "touch") else "premik"
+                self.navidezni_zaslon.obdelaj_misko(
+                    vrsta_m,
+                    int(x if x is not None else self.navidezni_zaslon.kazalec_x),
+                    int(y if y is not None else self.navidezni_zaslon.kazalec_y),
+                )
+                izid = {"ok": True, "message": "Vnos izveden na navideznem zaslonu"}
+
+            elif akcija == "host.info":
+                izid = {"ok": True, "message": "Podatki o računalniku", "data": os_backend_win.stanje_sistema()}
+
+            elif akcija == "files.list":
+                mapa = str(params.get("folder") or "")
+                try:
+                    from core import link_datoteke
+                    d = link_datoteke.Datoteke(poti=self.deljene_mape(), tls_mapa=self.navidezni_zaslon.tls_mapa)
+                    podatki = d.seznam(mapa, posiljatelj, self.hub_url())
+                    izid = {"ok": True, "message": f"{len(podatki.get('items', []))} vnosov", "data": podatki}
+                except Exception as e:
+                    izid = {"ok": False, "message": f"Napaka pri branju map: {e}", "data": {"items": []}}
+
+            elif akcija == "files.open":
+                dat_id = str(params.get("id") or "")
+                try:
+                    from core import link_datoteke
+                    d = link_datoteke.Datoteke(poti=self.deljene_mape(), tls_mapa=self.navidezni_zaslon.tls_mapa)
+                    if d.odpri(dat_id):
+                        izid = {"ok": True, "message": "Datoteka se odpira na ločenem navideznem zaslonu"}
+                    else:
+                        izid = {"ok": False, "message": "Datoteke ni bilo mogoče odpreti"}
+                except Exception as e:
+                    izid = {"ok": False, "message": str(e)}
+
+            elif akcija == "files.search":
+                poizvedba = str(params.get("q") or "")
+                try:
+                    from core import link_datoteke
+                    d = link_datoteke.Datoteke(poti=self.deljene_mape(), tls_mapa=self.navidezni_zaslon.tls_mapa)
+                    podatki = d.isci(poizvedba, posiljatelj, self.hub_url())
+                    izid = {"ok": True, "message": f"{len(podatki.get('items', []))} zadetkov", "data": podatki}
+                except Exception as e:
+                    izid = {"ok": False, "message": str(e)}
+
+            else:
+                izid = {"ok": False, "message": f"Neznano dejanje: {akcija}", "code": "neznano_dejanje"}
+
+        except Exception as e:
+            izid = {"ok": False, "message": f"Napaka pri izvedbi ukaza: {e}", "code": "napaka_izvedbe"}
+
+        # Pošlji odgovor nazaj pošiljatelju
+        if posiljatelj and id_ukaza and self.povezava:
+            self.povezava.poslji({
+                "id": str(uuid.uuid4()),
+                "type": "control.result",
+                "target": posiljatelj,
+                "ref_id": id_ukaza,
+                "payload": {
+                    "ok": bool(izid.get("ok", True)),
+                    "action": akcija,
+                    "message": str(izid.get("message") or ""),
+                    "code": str(izid.get("code") or ""),
+                    "data": izid.get("data"),
+                }
+            })
+
+        self._oddaj_dogodek("nadzor_prejet", {
+            "posiljatelj": posiljatelj,
+            "akcija": akcija,
+            "izid": izid,
+        })
 
     # ------------------------------------------------------------------ RPC ukazi napravam
     def ukaz_pocakaj(self, id_naprave: str, dejanje: str, parametri: Optional[dict] = None, cas: float = 12.0) -> dict:
