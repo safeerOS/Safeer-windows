@@ -1,5 +1,6 @@
 """Unit testi za Safeer OS Windows zaledje, Safeer Control in Google avtentikacijo."""
 
+import base64
 import json
 import os
 import tempfile
@@ -289,5 +290,239 @@ class TestOsWindows(unittest.TestCase):
             self.assertEqual(ukaz_dogodek["data"], {"volume": 25})
 
 
+class TestNavidezniZaslon(unittest.TestCase):
+    def setUp(self):
+        from safeer_windows.navidezni_zaslon import NavidezniZaslon
+        self.zaslon = NavidezniZaslon()
+
+    def tearDown(self):
+        self.zaslon.ustavi_sejo()
+
+    def test_inicializacija_in_geometrija(self):
+        self.assertEqual(self.zaslon.sirina, 1920)
+        self.assertEqual(self.zaslon.visina, 1080)
+        self.assertEqual(self.zaslon.kazalec_x, 960)
+        self.assertEqual(self.zaslon.kazalec_y, 540)
+        self.assertEqual(self.zaslon.nacin, "namizje")
+
+    def test_izolacija_tipk_in_dpad(self):
+        # D-pad desno in dol
+        self.assertEqual(self.zaslon.izbrani_indeks, 0)
+        self.zaslon.obdelaj_tipko("right")
+        self.assertEqual(self.zaslon.izbrani_indeks, 1)
+        self.zaslon.obdelaj_tipko("down")
+        self.assertEqual(self.zaslon.izbrani_indeks, 5)
+
+        # OK sprozi program
+        self.zaslon.obdelaj_tipko("ok")
+        self.assertIn(self.zaslon.nacin, ("brskalnik", "program"))
+
+        # Domov vrne na namizje
+        self.zaslon.obdelaj_tipko("home")
+        self.assertEqual(self.zaslon.nacin, "namizje")
+        self.assertEqual(self.zaslon.izbrani_indeks, 0)
+
+    def test_izolacija_miske_in_pomika(self):
+        self.zaslon.obdelaj_misko("premik", 350, 450)
+        self.assertEqual(self.zaslon.kazalec_x, 350)
+        self.assertEqual(self.zaslon.kazalec_y, 450)
+
+        self.zaslon.obdelaj_pomik("down")
+        self.assertGreater(self.zaslon.scroll_odmik, 0)
+        self.zaslon.obdelaj_pomik("top")
+        self.assertEqual(self.zaslon.scroll_odmik, 0)
+
+        # Vnos prek vmesnika NavidezniVnos
+        self.assertTrue(self.zaslon.vnos.mozno)
+        self.zaslon.vnos.izvedi({"vrsta": "tocka", "x": 500, "y": 600})
+        self.assertEqual(self.zaslon.kazalec_x, 500)
+        self.assertEqual(self.zaslon.kazalec_y, 600)
+
+    def test_posnetek_zaslona(self):
+        posnetek = self.zaslon.zajemi_posnetek()
+        self.assertIsInstance(posnetek, dict)
+        self.assertEqual(posnetek["width"], 1920)
+        self.assertEqual(posnetek["height"], 1080)
+        self.assertTrue(posnetek["image"].startswith("data:image/jpeg;base64,"))
+
+        # Preveri, da je vsebina veljaven JPEG
+        b64_podatki = posnetek["image"].split(",", 1)[1]
+        raw_bajti = base64.b64decode(b64_podatki)
+        self.assertTrue(raw_bajti.startswith(b"\xff\xd8"))
+
+    def test_katalog_in_programi(self):
+        kat = self.zaslon.katalog_aplikacij()
+        self.assertIsInstance(kat, dict)
+        self.assertIn("app_brskalnik", kat)
+        self.assertEqual(kat["app_brskalnik"]["name"], "Brskalnik")
+
+        seznam = self.zaslon.seznam_programov_za_daljinec(z_ikonami=True)
+        self.assertIn("apps", seznam)
+        self.assertIn("items", seznam)
+        self.assertGreaterEqual(len(seznam["apps"]), len(PRIVZETI_PROGRAMI if "PRIVZETI_PROGRAMI" in dir() else [1,2,3]))
+
+    def test_pretocna_seja(self):
+        seja = self.zaslon.zacni_sejo("tv-naprava", kakovost="visoka")
+        self.assertIsInstance(seja, dict)
+        self.assertGreater(seja["port"], 0)
+        self.assertTrue(bool(seja["token"]))
+        self.assertTrue(bool(seja["fp"]))
+        self.assertEqual(seja["codec"], "h264")
+        self.assertEqual(seja["screen"], "virtual")
+
+        stanje = self.zaslon.stanje_seje()
+        self.assertTrue(stanje["tece"])
+        self.assertEqual(stanje["vrata"], seja["port"])
+
+        self.zaslon.ustavi_sejo()
+        stanje_po = self.zaslon.stanje_seje()
+        self.assertFalse(stanje_po["tece"])
+        self.assertEqual(stanje_po["vrata"], 0)
+
+
+class TestControlBackendDohodniNadzor(unittest.TestCase):
+    def test_dohodni_ukaz_status_in_odziv(self):
+        with tempfile.TemporaryDirectory() as td:
+            cfg = os.path.join(td, "link.json")
+            backend = control_backend.SafeerControlBackend(config_pot=cfg)
+
+            poslana = []
+            class MockPovezava:
+                tece = True
+                def poslji(self, sporocilo):
+                    poslana.append(sporocilo)
+                    return True
+
+            backend.povezava = MockPovezava()
+
+            # Televizor poslje ukaz status
+            cmd = {
+                "id": "ukaz-status-1",
+                "type": "control.command",
+                "sender": "tv-1",
+                "payload": {"action": "status", "params": {}}
+            }
+            backend._na_sporocilo(cmd)
+
+            # Preveri odgovor control.result
+            self.assertEqual(len(poslana), 1)
+            res = poslana[0]
+            self.assertEqual(res["type"], "control.result")
+            self.assertEqual(res["target"], "tv-1")
+            self.assertEqual(res["ref_id"], "ukaz-status-1")
+            self.assertTrue(res["payload"]["ok"])
+            self.assertEqual(res["payload"]["action"], "status")
+            podatki = res["payload"]["data"]
+            self.assertEqual(podatki["app"], "safeer-control-windows")
+            self.assertEqual(podatki["screen"], "virtual")
+            self.assertIn("key", podatki["actions"])
+            self.assertIn("screenshot", podatki["actions"])
+
+    def test_dohodni_ukaz_key_in_screenshot(self):
+        with tempfile.TemporaryDirectory() as td:
+            cfg = os.path.join(td, "link.json")
+            backend = control_backend.SafeerControlBackend(config_pot=cfg)
+
+            poslana = []
+            class MockPovezava:
+                tece = True
+                def poslji(self, sporocilo):
+                    poslana.append(sporocilo)
+                    return True
+
+            backend.povezava = MockPovezava()
+
+            # Tipka z daljinca
+            cmd_key = {
+                "id": "ukaz-key-1",
+                "type": "control.command",
+                "sender": "telefon-1",
+                "payload": {"action": "key", "params": {"key": "right"}}
+            }
+            backend._na_sporocilo(cmd_key)
+            self.assertEqual(backend.navidezni_zaslon.izbrani_indeks, 1)
+
+            # Posnetek zaslona z daljinca
+            cmd_ss = {
+                "id": "ukaz-ss-1",
+                "type": "control.command",
+                "sender": "telefon-1",
+                "payload": {"action": "screenshot", "params": {}}
+            }
+            backend._na_sporocilo(cmd_ss)
+            self.assertEqual(len(poslana), 2)
+            res_ss = poslana[1]
+            self.assertEqual(res_ss["payload"]["action"], "screenshot")
+            self.assertTrue(res_ss["payload"]["ok"])
+            self.assertTrue(res_ss["payload"]["data"]["image"].startswith("data:image/jpeg;base64,"))
+
+    def test_dohodni_ukaz_apps_in_open_url(self):
+        with tempfile.TemporaryDirectory() as td:
+            cfg = os.path.join(td, "link.json")
+            backend = control_backend.SafeerControlBackend(config_pot=cfg)
+
+            poslana = []
+            class MockPovezava:
+                tece = True
+                def poslji(self, sporocilo):
+                    poslana.append(sporocilo)
+                    return True
+
+            backend.povezava = MockPovezava()
+
+            # Zahteva po programih
+            cmd_apps = {
+                "id": "ukaz-apps-1",
+                "type": "control.command",
+                "sender": "tv-1",
+                "payload": {"action": "apps.list", "params": {"limit": 10}}
+            }
+            backend._na_sporocilo(cmd_apps)
+            self.assertEqual(len(poslana), 1)
+            res_apps = poslana[0]
+            self.assertTrue(res_apps["payload"]["ok"])
+            self.assertIn("items", res_apps["payload"]["data"])
+            self.assertIn("apps", res_apps["payload"]["data"])
+
+            # Odpiranje URL na ločenem navideznem zaslonu
+            cmd_url = {
+                "id": "ukaz-url-1",
+                "type": "control.command",
+                "sender": "tv-1",
+                "payload": {"action": "open_url", "params": {"url": "https://safeer.si"}}
+            }
+            backend._na_sporocilo(cmd_url)
+            self.assertEqual(len(poslana), 2)
+            self.assertEqual(backend.navidezni_zaslon.nacin, "brskalnik")
+            self.assertEqual(backend.navidezni_zaslon.aktivni_url, "https://safeer.si")
+
+    def test_dohodni_ukaz_volume(self):
+        with tempfile.TemporaryDirectory() as td:
+            cfg = os.path.join(td, "link.json")
+            backend = control_backend.SafeerControlBackend(config_pot=cfg)
+
+            poslana = []
+            class MockPovezava:
+                tece = True
+                def poslji(self, sporocilo):
+                    poslana.append(sporocilo)
+                    return True
+
+            backend.povezava = MockPovezava()
+
+            cmd_vol = {
+                "id": "ukaz-vol-1",
+                "type": "control.command",
+                "sender": "tv-1",
+                "payload": {"action": "volume", "params": {"level": 60}}
+            }
+            backend._na_sporocilo(cmd_vol)
+            self.assertEqual(len(poslana), 1)
+            res_vol = poslana[0]
+            self.assertEqual(res_vol["payload"]["data"]["level"], 60)
+            self.assertEqual(backend.navidezni_zaslon.glasnost, 60)
+
+
 if __name__ == "__main__":
     unittest.main()
+
