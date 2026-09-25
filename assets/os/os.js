@@ -136,6 +136,9 @@
     zacetek: null, programi: [], skupina: "vse", razdelek: "domov", pot: "", stanje: null,
     // Multi-host: programi drugih naprav v Safeer Linku (id naprave -> seznam), izbrana naprava ("" = ta racunalnik).
     naprave: [], programiNaprav: {}, nalagam: {}, naprava: "",
+    // Multi-host: datoteke drugih naprav v Safeer Linku
+    napraveDatoteke: [], izbranaNapravaDatoteke: "", daljinskaPot: [],
+    daljinskiKoreni: {}, daljinskiServer: {},
     povezava: { stanje: "nov", control: true }, spletne: null, nedavne: []
   };
   var PRIVZETE_SPLETNE = [
@@ -153,7 +156,10 @@
     });
     document.querySelectorAll(".razdelek").forEach(function (r) { r.classList.toggle("viden", r.id === "r-" + razdelek); });
     $("vsebina").scrollTop = 0;
-    if (razdelek === "datoteke" && !S.pot) odpriNedavne();
+    if (razdelek === "datoteke") {
+      nalozNapraveSDatoteki();
+      if (!S.izbranaNapravaDatoteke && !S.pot) odpriNedavne();
+    }
     if (razdelek === "naprave") { osveziPovezavo(); napraveZanka(); }
     if (razdelek === "nastavitve") { narisiNastavitve(); nalozScit(); scitZanka(); }
     if (razdelek === "programi") nalozNaprave();
@@ -508,6 +514,7 @@
   function dom() { return (S.zacetek && S.zacetek.mape && S.zacetek.mape[0] && S.zacetek.mape[0].pot) || ""; }
   function skrajsajPot(p) { var d = dom(); return d && p.indexOf(d) === 0 ? "~" + p.slice(d.length) : p; }
   function narisiMape() {
+    narisiFiltreNapravDatoteke();
     var seznam = $("mapeSeznam");
     seznam.innerHTML = "";
     var ned = el("button", S.pot === "" ? "izbran" : "", svg("ura") + "<span>" + ubezi(t("nedavno")) + "</span>");
@@ -572,6 +579,226 @@
       if (!r.elementi.length) { v.appendChild(el("div", "prazno", ubezi(t("prazno")))); return; }
       r.elementi.forEach(function (e) { v.appendChild(vrsticaDatoteke(e, false)); });
     }, function () {});
+  }
+
+  function normalizirajVrsto(vrsta, jeMapa) {
+    if (jeMapa || vrsta === "folder" || vrsta === "mapa") return "mapa";
+    if (vrsta === "image" || vrsta === "slika") return "slika";
+    if (vrsta === "video") return "video";
+    if (vrsta === "audio" || vrsta === "zvok" || vrsta === "music") return "zvok";
+    if (vrsta === "document" || vrsta === "dokument") return "dokument";
+    if (vrsta === "archive" || vrsta === "arhiv") return "arhiv";
+    if (vrsta === "app" || vrsta === "program") return "program";
+    return "drugo";
+  }
+
+  function vrsticaDaljinskeDatoteke(d, idNaprave, server) {
+    var jeMapa = (d.type === "folder" || d.vrsta === "folder" || d.vrsta === "mapa");
+    var vrsta = normalizirajVrsto(d.type || d.vrsta, jeMapa);
+    var imeDat = d.name || d.ime || "";
+    var idDat = d.id || "";
+    var b = el("button", "vrstica");
+    b.innerHTML = svg(IKONA_VRSTE[vrsta] || "datoteka") + '<span class="ime">' + ubezi(imeDat) + '</span>' +
+      '<span class="pod">' + (jeMapa ? "" : ubezi(velikost(d.size || d.velikost || 0)) + " · ") + ubezi(datum(d.mtime || d.spremenjeno || 0)) + '</span>';
+
+    if (jeMapa) {
+      b.addEventListener("click", function () {
+        S.daljinskaPot.push({ id: idDat, ime: imeDat });
+        naloziMapoNaprave(idNaprave, idDat, imeDat);
+      });
+    } else {
+      b.addEventListener("click", function () {
+        if (server && server.base_url) {
+          obvesti(t("prenasamDatoteko", { ime: imeDat }));
+          klic("prenesiDatotekoNaprave", [idNaprave, idDat, imeDat, server]).then(function (r) {
+            if (r && r.ok) obvesti(t("datotekaPrenesena", { ime: imeDat }));
+            else obvesti(t("napakaPrenosa"));
+          }, function () { obvesti(t("napakaPrenosa")); });
+        } else {
+          var n = S.napraveDatoteke.find(function (x) { return x.id === idNaprave; }) || { ime: "" };
+          obvesti(t("odpiramNaNapravi", { ime: imeDat, naprava: n.ime }));
+          klic("odpriDatotekoNaprave", [idNaprave, idDat]);
+        }
+      });
+
+      var gOdpri = el("span", "dejanje", svg("zaslon"));
+      gOdpri.title = t("odpriNaNapravi");
+      gOdpri.addEventListener("click", function (e) {
+        e.stopPropagation();
+        var n = S.napraveDatoteke.find(function (x) { return x.id === idNaprave; }) || { ime: "" };
+        obvesti(t("odpiramNaNapravi", { ime: imeDat, naprava: n.ime }));
+        klic("odpriDatotekoNaprave", [idNaprave, idDat]);
+      });
+      b.appendChild(gOdpri);
+    }
+    return b;
+  }
+
+  function nalozNapraveSDatoteki() {
+    if (S.povezava.stanje !== "povezan") {
+      S.napraveDatoteke = [];
+      if (S.izbranaNapravaDatoteke) {
+        S.izbranaNapravaDatoteke = "";
+        odpriNedavne();
+      }
+      narisiFiltreNapravDatoteke();
+      return;
+    }
+    klic("napraveSDatoteki").then(function (n) {
+      S.napraveDatoteke = n || [];
+      if (S.izbranaNapravaDatoteke && !S.napraveDatoteke.some(function (x) { return x.id === S.izbranaNapravaDatoteke; })) {
+        S.izbranaNapravaDatoteke = "";
+        odpriNedavne();
+      }
+      narisiFiltreNapravDatoteke();
+    }, function () {});
+  }
+
+  function narisiFiltreNapravDatoteke() {
+    var fn = $("filtriNapravDatoteke");
+    if (!fn) return;
+    fn.innerHTML = "";
+    fn.hidden = !S.napraveDatoteke.length;
+    var opis = $("datotekeOpis");
+    if (S.napraveDatoteke.length) {
+      var ta = el("button", S.izbranaNapravaDatoteke === "" ? "izbran" : "", svg("namizje") + ubezi(t("taRacunalnik")));
+      ta.addEventListener("click", function () {
+        if (S.izbranaNapravaDatoteke === "") return;
+        S.izbranaNapravaDatoteke = "";
+        narisiFiltreNapravDatoteke();
+        odpriNedavne();
+      });
+      fn.appendChild(ta);
+      S.napraveDatoteke.forEach(function (n) {
+        var b = el("button", S.izbranaNapravaDatoteke === n.id ? "izbran" : "", svg(ikonaNaprave(n)) + ubezi(n.ime));
+        b.addEventListener("click", function () {
+          S.izbranaNapravaDatoteke = n.id;
+          narisiFiltreNapravDatoteke();
+          odpriKorenNaprave(n);
+        });
+        fn.appendChild(b);
+      });
+    }
+    if (opis) {
+      if (S.izbranaNapravaDatoteke) {
+        var izbrana = S.napraveDatoteke.find(function (x) { return x.id === S.izbranaNapravaDatoteke; });
+        opis.textContent = t("datotekeNaprave", { n: "", naprava: izbrana ? izbrana.ime : "" });
+      } else {
+        opis.textContent = S.napraveDatoteke.length
+          ? t("datotekePodNaprave", { n: ((S.zacetek && S.zacetek.mape) || []).length, k: S.napraveDatoteke.length })
+          : t("datotekeOpis");
+      }
+    }
+  }
+
+  function odpriKorenNaprave(n) {
+    S.daljinskaPot = [{ id: "", ime: n.ime }];
+    naloziMapoNaprave(n.id, "", n.ime);
+  }
+
+  function naloziMapoNaprave(idNaprave, mapaId, mapaIme) {
+    var izbrana = S.napraveDatoteke.find(function (x) { return x.id === idNaprave; });
+    var imeNaprave = izbrana ? izbrana.ime : "";
+    var dr = $("drobtine");
+    if (dr) {
+      dr.innerHTML = "";
+      S.daljinskaPot.forEach(function (korak, idx) {
+        if (idx > 0) dr.appendChild(el("span", "loc", "›"));
+        var g = el("button", "", ubezi(korak.ime));
+        g.addEventListener("click", function () {
+          S.daljinskaPot = S.daljinskaPot.slice(0, idx + 1);
+          naloziMapoNaprave(idNaprave, korak.id, korak.ime);
+        });
+        dr.appendChild(g);
+      });
+      var desno = el("div", "desno");
+      var osvez = el("button", "gumb", svg("ponovno") + "<span>" + ubezi(t("osvezi")) + "</span>");
+      osvez.addEventListener("click", function () {
+        naloziMapoNaprave(idNaprave, mapaId, mapaIme);
+      });
+      desno.appendChild(osvez);
+      dr.appendChild(desno);
+    }
+
+    narisiMapeNaprave(idNaprave, mapaId);
+
+    var v = $("vsebinaMape");
+    if (v) {
+      v.innerHTML = '<div class="prazno">' + ubezi(t("nalagamDatoteke")) + '</div>';
+    }
+
+    klic("datotekeNaprave", [idNaprave, mapaId]).then(function (r) {
+      if (S.izbranaNapravaDatoteke !== idNaprave) return;
+      if (!v) return;
+      v.innerHTML = "";
+      if (!r || !r.ok) {
+        v.appendChild(el("div", "prazno", ubezi(t("napravaNiOdgovorilaDatoteke"))));
+        return;
+      }
+      if (r.server) {
+        S.daljinskiServer[idNaprave] = r.server;
+      }
+      if (mapaId === "") {
+        S.daljinskiKoreni[idNaprave] = (r.items || []).filter(function (x) { return x.type === "folder" || x.vrsta === "folder" || x.vrsta === "mapa"; });
+        narisiMapeNaprave(idNaprave, mapaId);
+      }
+      var opis = $("datotekeOpis");
+      if (opis) {
+        opis.textContent = t("datotekeNaprave", { n: r.items ? r.items.length : 0, naprava: imeNaprave });
+      }
+      if (!r.shared) {
+        v.appendChild(el("div", "prazno", ubezi(t("napravaNeDeliDatotek"))));
+        return;
+      }
+      var elementi = r.items || [];
+      if (!elementi.length) {
+        v.appendChild(el("div", "prazno", ubezi(t("prazno"))));
+        return;
+      }
+      var razvrsceni = elementi.slice().sort(function (a, b) {
+        var am = (a.type === "folder" || a.vrsta === "folder" || a.vrsta === "mapa");
+        var bm = (b.type === "folder" || b.vrsta === "folder" || b.vrsta === "mapa");
+        if (am !== bm) return am ? -1 : 1;
+        var na = (a.name || a.ime || "").toLowerCase();
+        var nb = (b.name || b.ime || "").toLowerCase();
+        return na.localeCompare(nb);
+      });
+      razvrsceni.forEach(function (e) {
+        v.appendChild(vrsticaDaljinskeDatoteke(e, idNaprave, r.server || S.daljinskiServer[idNaprave]));
+      });
+    }, function () {
+      if (S.izbranaNapravaDatoteke !== idNaprave) return;
+      if (v) {
+        v.innerHTML = "";
+        v.appendChild(el("div", "prazno", ubezi(t("napravaNiOdgovorilaDatoteke"))));
+      }
+    });
+  }
+
+  function narisiMapeNaprave(idNaprave, aktivnaMapaId) {
+    var seznam = $("mapeSeznam");
+    if (!seznam) return;
+    seznam.innerHTML = "";
+    var izbrana = S.napraveDatoteke.find(function (x) { return x.id === idNaprave; });
+    var imeNaprave = izbrana ? izbrana.ime : "";
+    var koren = el("button", aktivnaMapaId === "" ? "izbran" : "", svg("mapa") + "<span>" + ubezi(t("korenMape")) + "</span>");
+    koren.addEventListener("click", function () {
+      S.daljinskaPot = [{ id: "", ime: imeNaprave }];
+      naloziMapoNaprave(idNaprave, "", imeNaprave);
+    });
+    seznam.appendChild(koren);
+
+    var koreni = S.daljinskiKoreni[idNaprave] || [];
+    koreni.forEach(function (m) {
+      var mId = m.id || "";
+      var mIme = m.name || m.ime || "";
+      var b = el("button", aktivnaMapaId === mId ? "izbran" : "", svg("mapa") + "<span>" + ubezi(mIme) + "</span>");
+      b.addEventListener("click", function () {
+        S.daljinskaPot = [{ id: "", ime: imeNaprave }, { id: mId, ime: mIme }];
+        naloziMapoNaprave(idNaprave, mId, mIme);
+      });
+      seznam.appendChild(b);
+    });
   }
   function narisiNedavneDomov() {
     klic("nedavne").then(function (seznam) {
@@ -1315,11 +1542,16 @@
     if (vrsta === "stanje") narisiStanje(podatki);
     if (vrsta === "okna") narisiOkna(podatki);
     if (vrsta === "pojdi") window.safeerOsPojdi(podatki);
+    if (vrsta === "naprave") {
+      if (S.razdelek === "programi") nalozNaprave();
+      if (S.razdelek === "datoteke") nalozNapraveSDatoteki();
+    }
     if (vrsta === "fokus") {
       osveziOkna();
       osveziStanje();
       osveziPovezavo();
       narisiNedavneDomov();
+      if (S.razdelek === "datoteke") nalozNapraveSDatoteki();
     }
   };
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import http.client
 import json
 import os
 import secrets
@@ -10,6 +11,7 @@ import socket
 import sys
 import threading
 import time
+import urllib.parse
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -17,7 +19,8 @@ CORE_DIR = os.path.abspath(os.path.join(PACKAGE_DIR, "..", ".."))
 if CORE_DIR not in sys.path:
     sys.path.insert(0, CORE_DIR)
 
-from core import link_hub, link_deljenje, link_seja
+from core import link_hub, link_deljenje, link_seja, link_tls
+from safeer_windows import os_backend_win
 
 CONFIG_DIR = os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~/.config"), "SafeerControl")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "link.json")
@@ -662,6 +665,115 @@ class SafeerControlBackend:
             })
 
         return {"ok": True, "programi": programi, "deli": True}
+
+    def naprave_s_datotekami(self) -> List[dict]:
+        """Naprave, ki delijo datoteke ali podpirajo brskanje po datotekah (brez tega racunalnika)."""
+        rez = []
+        for n in self.naprave:
+            if n.get("ta") or n.get("id") == self.device_id:
+                continue
+            z = n.get("zmoznosti") or n.get("capabilities") or []
+            if "files" in z or not z:
+                ime = n.get("ime") or n.get("name") or n.get("id", "")
+                rez.append({
+                    "id": n.get("id", ""),
+                    "ime": ime,
+                    "platforma": n.get("platforma") or n.get("platform", ""),
+                    "vrsta": n.get("vrsta") or n.get("kind", ""),
+                })
+        return rez
+
+    def datoteke_naprave(self, id_naprave: str, mapa: str = "") -> dict:
+        """Pridobi seznam datotek ali map z oddaljene naprave prek files.list."""
+        if not id_naprave:
+            return {"ok": False, "items": [], "shared": False, "koda": "manjka_naprava"}
+        r = self.ukaz_pocakaj(id_naprave, "files.list", {"folder": mapa}, cas=12.0)
+        if not r.get("ok"):
+            return {
+                "ok": False,
+                "koda": r.get("koda") or r.get("code") or "napaka",
+                "sporocilo": r.get("message") or "Naprava ni odgovorila.",
+                "items": [],
+                "shared": False,
+            }
+        podatki = r.get("data") if isinstance(r.get("data"), dict) else r
+        return {
+            "ok": True,
+            "items": podatki.get("items") or [],
+            "folder": podatki.get("folder") or "",
+            "shared": bool(podatki.get("shared", True)),
+            "edit": bool(podatki.get("edit", False)),
+            "server": podatki.get("server"),
+        }
+
+    def odpri_datoteko_naprave(self, id_naprave: str, id_datoteke: str) -> dict:
+        """Zaprosi oddaljeno napravo, naj odpre datoteko s svojim programom."""
+        if not id_naprave or not id_datoteke:
+            return {"ok": False, "koda": "manjkajo_parametri"}
+        r = self.ukaz_pocakaj(id_naprave, "files.open", {"id": id_datoteke}, cas=8.0)
+        return {
+            "ok": bool(r.get("ok")),
+            "message": r.get("message") or "",
+            "koda": r.get("koda") or r.get("code") or "",
+        }
+
+    def prenesi_datoteko_naprave(self, id_naprave: str, id_datoteke: str, ime_datoteke: str, streznik: Optional[dict] = None) -> dict:
+        """Prenese datoteko z oddaljene naprave v mapo Prenosi in jo odpre."""
+        if not id_datoteke:
+            return {"ok": False, "koda": "manjka_datoteka"}
+        if not streznik or not isinstance(streznik, dict) or not streznik.get("base_url"):
+            return self.odpri_datoteko_naprave(id_naprave, id_datoteke)
+
+        base_url = str(streznik.get("base_url") or "").rstrip("/")
+        fp = streznik.get("fp")
+        token = str(streznik.get("token") or "")
+        u = urllib.parse.urlparse(base_url)
+        gostitelj = u.hostname or "127.0.0.1"
+        vrata = u.port or (443 if u.scheme == "https" else 80)
+
+        mapa = os.path.join(os.path.expanduser("~"), "Downloads")
+        os.makedirs(mapa, exist_ok=True)
+        ime = link_deljenje.varno_ime(ime_datoteke or os.path.basename(id_datoteke) or "datoteka")
+        cilj = link_deljenje.enolicna_pot(mapa, ime)
+
+        pot_zahteve = f"/d/{urllib.parse.quote(id_datoteke)}"
+        glave = {}
+        if token:
+            glave["X-Safeer-Token"] = token
+
+        povezava = None
+        try:
+            if u.scheme == "https":
+                povezava = link_tls._PripetaHttps(gostitelj, vrata, fp, timeout=30.0)
+            else:
+                povezava = http.client.HTTPConnection(gostitelj, vrata, timeout=30.0)
+            povezava.request("GET", pot_zahteve, headers=glave)
+            odgovor = povezava.getresponse()
+            if odgovor.status != 200:
+                return {"ok": False, "koda": f"http_{odgovor.status}", "sporocilo": f"Naprava je vrnila kodo {odgovor.status}"}
+
+            with open(cilj, "wb") as f:
+                while True:
+                    kos = odgovor.read(65536)
+                    if not kos:
+                        break
+                    f.write(kos)
+
+            os_backend_win.odpri_datoteko(cilj)
+            return {"ok": True, "pot": cilj}
+        except Exception as e:
+            if os.path.isfile(cilj):
+                try:
+                    os.remove(cilj)
+                except OSError:
+                    pass
+            return {"ok": False, "koda": "napaka_prenosa", "sporocilo": str(e)}
+        finally:
+            if povezava:
+                try:
+                    povezava.close()
+                except Exception:
+                    pass
 
     def zazeni_na_napravi(self, id_naprave: str, app: str) -> bool:
         r = self.ukaz_pocakaj(id_naprave, "apps.launch", {"app": app}, cas=6.0)

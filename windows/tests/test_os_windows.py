@@ -145,6 +145,49 @@ class TestOsWindows(unittest.TestCase):
             self.assertEqual(len(s_programi), 1)
             self.assertEqual(s_programi[0]["id"], "tv-1")
 
+            s_datotekami = backend.naprave_s_datotekami()
+            # tv-1 ima capabilities brez files, phone-1 pa share (torej ni files). Dodajmo napravo s files:
+            backend.naprave.append({"id": "pc-2", "name": "Linux PC", "platform": "linux", "kind": "desktop", "capabilities": ["files"]})
+            s_datotekami2 = backend.naprave_s_datotekami()
+            ids_dat = [d["id"] for d in s_datotekami2]
+            self.assertIn("pc-2", ids_dat)
+            self.assertNotIn(backend.device_id, ids_dat)
+
+    def test_control_backend_datoteke_rpc(self):
+        with tempfile.TemporaryDirectory() as td:
+            cfg = os.path.join(td, "link.json")
+            backend = control_backend.SafeerControlBackend(config_pot=cfg)
+
+            # Simuliraj ukaz_pocakaj
+            def mock_ukaz(id_n, dejanje, parametri=None, cas=12.0):
+                if dejanje == "files.list":
+                    return {
+                        "ok": True,
+                        "data": {
+                            "items": [
+                                {"id": "share:0:video.mp4", "name": "video.mp4", "type": "video", "size": 1024},
+                                {"id": "share:0:podmapa", "name": "podmapa", "type": "folder"}
+                            ],
+                            "folder": parametri.get("folder", "") if parametri else "",
+                            "shared": True,
+                            "server": {"base_url": "https://192.168.1.50:8992", "fp": "abc", "token": "xyz"}
+                        }
+                    }
+                if dejanje == "files.open":
+                    return {"ok": True, "message": "Datoteka se odpira"}
+                return {"ok": False}
+
+            backend.ukaz_pocakaj = mock_ukaz
+
+            res = backend.datoteke_naprave("pc-2", "")
+            self.assertTrue(res["ok"])
+            self.assertEqual(len(res["items"]), 2)
+            self.assertTrue(res["shared"])
+            self.assertEqual(res["server"]["token"], "xyz")
+
+            res_odpri = backend.odpri_datoteko_naprave("pc-2", "share:0:video.mp4")
+            self.assertTrue(res_odpri["ok"])
+
     def test_link_qr_svg_generation(self):
         svg = link_hub.qr_svg("safeer-link://join?a=192.168.0.135:8990")
         self.assertIn("<svg", svg)
