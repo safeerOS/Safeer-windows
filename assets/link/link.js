@@ -1906,14 +1906,15 @@
     for (var i = 0; i < gumbi.length; i++) {
       var ime = gumbi[i].getAttribute("data-razdelek");
       var naVoljo = true;
-      if (ime === "poslji") naVoljo = !el("panelCast").hidden;
+      if (ime === "domov") naVoljo = true;
+      else if (ime === "poslji") naVoljo = !el("panelCast").hidden;
       else if (ime === "sync") naVoljo = !el("panelSync").hidden;
       else if (ime === "mape") naVoljo = !el("panelMape").hidden;
       else if (ime === "daljinec") naVoljo = napravaZaDaljinec() !== null;
       gumbi[i].hidden = !naVoljo;
     }
     if (!razdelek) izberiRazdelek("naprave");
-    else if (razdelek !== "daljinec" && el("stranskiMeni").querySelector('button[data-razdelek="' + razdelek + '"]').hidden) izberiRazdelek("naprave");
+    else if (razdelek !== "daljinec" && razdelek !== "domov" && el("stranskiMeni").querySelector('button[data-razdelek="' + razdelek + '"]').hidden) izberiRazdelek("naprave");
   }
 
   function najdiNapravo(id) {
@@ -1944,6 +1945,10 @@
   }
 
   function izberiRazdelek(ime) {
+    if (ime === "domov") {
+      if (most && most.zapri) most.zapri();
+      return;
+    }
     if (ime === "daljinec") {
       var n = napravaZaDaljinec();
       if (!n || !window.SafeerDaljinec) { izberiRazdelek("naprave"); return; }

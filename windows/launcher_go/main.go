@@ -234,16 +234,12 @@ func main() {
 
 	baseName := strings.ToLower(filepath.Base(os.Args[0]))
 	targetScript := "windows/safeer_os_windows.py"
-	if strings.Contains(baseName, "control") {
-		targetScript = "windows/safeer_control_windows.py"
-	} else if strings.Contains(baseName, "browser") {
+	if strings.Contains(baseName, "browser") {
 		targetScript = "windows/launcher.py"
 	}
 
 	for _, a := range os.Args[1:] {
-		if a == "--control" || a == "-c" {
-			targetScript = "windows/safeer_control_windows.py"
-		} else if a == "--browser" || a == "-b" {
+		if a == "--browser" || a == "-b" {
 			targetScript = "windows/launcher.py"
 		}
 	}
@@ -257,8 +253,13 @@ func main() {
 	args = append(args, scriptFullPath)
 
 	hasMode := false
+	isControl := strings.Contains(baseName, "control")
 	for _, a := range os.Args[1:] {
-		if a == "--control" || a == "-c" || a == "--browser" || a == "-b" {
+		if a == "--browser" || a == "-b" {
+			continue
+		}
+		if a == "--control" || a == "-c" {
+			isControl = true
 			continue
 		}
 		if a == "--okno" || a == "--celozaslonsko" {
@@ -266,8 +267,13 @@ func main() {
 		}
 		args = append(args, a)
 	}
-	if targetScript == "windows/safeer_os_windows.py" && !hasMode {
-		args = append(args, "--okno")
+
+	if targetScript == "windows/safeer_os_windows.py" {
+		if isControl {
+			args = append(args, "--control", "--okno")
+		} else if !hasMode {
+			args = append(args, "--okno")
+		}
 	}
 
 	cmd := exec.Command(py.ExePath, args...)
