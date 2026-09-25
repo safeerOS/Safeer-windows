@@ -362,17 +362,22 @@ class TestNavidezniZaslon(unittest.TestCase):
         self.assertGreaterEqual(len(seznam["apps"]), len(PRIVZETI_PROGRAMI if "PRIVZETI_PROGRAMI" in dir() else [1,2,3]))
 
     def test_pretocna_seja(self):
-        seja = self.zaslon.zacni_sejo("tv-naprava", kakovost="visoka")
+        seja = self.zaslon.zacni_sejo("tv-naprava")
         self.assertIsInstance(seja, dict)
         self.assertGreater(seja["port"], 0)
         self.assertTrue(bool(seja["token"]))
         self.assertTrue(bool(seja["fp"]))
         self.assertEqual(seja["codec"], "h264")
         self.assertEqual(seja["screen"], "virtual")
+        self.assertEqual(seja["quality"], "najvisja")
+        self.assertEqual(seja["fps"], 60)
+        self.assertTrue(seja["secure"])
 
         stanje = self.zaslon.stanje_seje()
         self.assertTrue(stanje["tece"])
         self.assertEqual(stanje["vrata"], seja["port"])
+        self.assertTrue(stanje["varno"])
+        self.assertEqual(stanje["kakovost"], "najvisja")
 
         self.zaslon.ustavi_sejo()
         stanje_po = self.zaslon.stanje_seje()
@@ -521,6 +526,53 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
             res_vol = poslana[0]
             self.assertEqual(res_vol["payload"]["data"]["level"], 60)
             self.assertEqual(backend.navidezni_zaslon.glasnost, 60)
+
+    def test_stanje_visoka_kakovost_in_varnost(self):
+        with tempfile.TemporaryDirectory() as td:
+            cfg = os.path.join(td, "link.json")
+            backend = control_backend.SafeerControlBackend(config_pot=cfg)
+
+            stanje_p = backend.stanje_povezave()
+            self.assertTrue(stanje_p.get("varno"))
+            self.assertEqual(stanje_p.get("kakovost"), "najvisja")
+
+            stanje_l = backend.stanje_linka()
+            self.assertTrue(stanje_l.get("varno"))
+            self.assertEqual(stanje_l.get("kakovost"), "najvisja")
+            self.assertEqual(stanje_l.get("sifriranje"), "TLS 1.2+ (ECDHE/AEAD)")
+            self.assertTrue(stanje_l.get("navidezni_zaslon"))
+
+    def test_dohodni_ukaz_screen_start_privzeto_najvisja(self):
+        with tempfile.TemporaryDirectory() as td:
+            cfg = os.path.join(td, "link.json")
+            backend = control_backend.SafeerControlBackend(config_pot=cfg)
+
+            poslana = []
+            class MockPovezava:
+                tece = True
+                def poslji(self, sporocilo):
+                    poslana.append(sporocilo)
+                    return True
+
+            backend.povezava = MockPovezava()
+
+            cmd_screen = {
+                "id": "ukaz-scr-1",
+                "type": "control.command",
+                "sender": "tv-dnevna",
+                "payload": {"action": "screen.start", "params": {}}
+            }
+            backend._na_sporocilo(cmd_screen)
+            self.assertEqual(len(poslana), 1)
+            res = poslana[0]
+            self.assertTrue(res["payload"]["ok"])
+            seja = res["payload"]["data"]
+            self.assertEqual(seja["quality"], "najvisja")
+            self.assertEqual(seja["fps"], 60)
+            self.assertTrue(seja["secure"])
+            self.assertEqual(seja["screen"], "virtual")
+
+            backend.navidezni_zaslon.ustavi_sejo()
 
 
 if __name__ == "__main__":
