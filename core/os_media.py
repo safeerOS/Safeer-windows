@@ -666,11 +666,35 @@ def _embed_url_for_provider(netloc: str, scheme: str, imdb_id: str,
     """Sestavi embed URL za danega ponudnika glede na tip vsebine."""
     s, e = max(1, season), max(1, episode)
     is_tv = (media_type == "serija")
+    # Ponudniki ne uporabljajo iste vrste identifikatorja. Izberemo ID, ki ga
+    # njihov javni embed sprejme, brez ugibanja ali razčlenjevanja zasebnih API-jev.
+    imdb_or_tmdb = imdb_id or tmdb_id
+    tmdb_or_imdb = tmdb_id or imdb_id
 
     if "vidlink" in netloc:
         if is_tv:
-            return f"https://vidlink.pro/tv/{tmdb_id}/{s}/{e}?primaryColor=00e5ff&autoplay=true&sub=0&subtitles=false"
-        return f"https://vidlink.pro/movie/{tmdb_id}?primaryColor=00e5ff&autoplay=true&sub=0&subtitles=false"
+            return f"https://vidlink.pro/tv/{tmdb_or_imdb}/{s}/{e}?primaryColor=00e5ff&autoplay=true&sub=0&subtitles=false"
+        return f"https://vidlink.pro/movie/{tmdb_or_imdb}?primaryColor=00e5ff&autoplay=true&sub=0&subtitles=false"
+
+    if "videasy" in netloc:
+        if is_tv:
+            return f"https://player.videasy.net/tv/{tmdb_or_imdb}/{s}/{e}"
+        return f"https://player.videasy.net/movie/{tmdb_or_imdb}"
+
+    if "vidrock" in netloc:
+        if is_tv:
+            return f"https://vidrock.net/embed/tv/{tmdb_or_imdb}/{s}/{e}"
+        return f"https://vidrock.net/embed/movie/{tmdb_or_imdb}"
+
+    if "vidsrc.to" in netloc:
+        if is_tv:
+            return f"https://vidsrc.to/embed/tv/{imdb_or_tmdb}/{s}/{e}"
+        return f"https://vidsrc.to/embed/movie/{imdb_or_tmdb}"
+
+    if "vidsrc.cc" in netloc:
+        if is_tv:
+            return f"https://vidsrc.cc/v2/embed/tv/{imdb_or_tmdb}/{s}/{e}"
+        return f"https://vidsrc.cc/v2/embed/movie/{imdb_or_tmdb}"
 
     if "vidsrc.me" in netloc:
         if is_tv:
@@ -709,13 +733,13 @@ def _embed_url_for_provider(netloc: str, scheme: str, imdb_id: str,
 
     # Privzeto: vidsrc.cc format
     if is_tv:
-        return f"{scheme}://{netloc}/v2/embed/tv/{imdb_id}/{s}/{e}"
-    return f"{scheme}://{netloc}/v2/embed/movie/{imdb_id}"
+        return f"{scheme}://{netloc}/v2/embed/tv/{imdb_or_tmdb}/{s}/{e}"
+    return f"{scheme}://{netloc}/v2/embed/movie/{imdb_or_tmdb}"
 
 
 # Vse prepoznane embed domene (razširjeno)
-_EMBED_DOMAINS = ("vidsrc", "vidlink", "embed.su", "superembed", "multiembed",
-                  "2embed", "autoembed", "111movies")
+_EMBED_DOMAINS = ("vidsrc", "vidlink", "videasy", "vidrock", "embed.su",
+                  "superembed", "multiembed", "2embed", "autoembed", "111movies")
 
 _PREDLOGA_TOKEN = re.compile(r"\{\s*(tmdb_?id|imdb_?id|season|episode|sezona|epizoda)\s*\}", re.I)
 
