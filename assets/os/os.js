@@ -1857,6 +1857,7 @@
   function mediaIkona(vrsta) { return vrsta === "glasba" ? "glasba" : "video"; }
   function mediaOznaka(vrsta) {
     if (vrsta === "glasba") return t("mediaGlasba");
+    if (vrsta === "podcast") return "Podcast";
     if (vrsta === "radio") return "Radio";
     if (vrsta === "tv-v-zivo") return "TV v živo";
     return t(vrsta === "serija" ? "mediaSerije" : "mediaFilmi");
@@ -1917,7 +1918,7 @@
   }
   function predvajajHtml(item, index) {
     var variants = item.razlicice && item.razlicice.length ? item.razlicice : [{ url:item.url, vir:item.vir, kakovost:item.kakovost, vrsta:item.vrsta }];
-    var variant = variants[index || 0] || variants[0], audio = item.vrsta === "glasba" || item.vrsta === "radio";
+    var variant = variants[index || 0] || variants[0], audio = item.vrsta === "glasba" || item.vrsta === "radio" || item.vrsta === "podcast";
     var url = variant.url || "";
     var isDirectMedia = /\.(mp4|mkv|webm|avi|mov|m4v|mp3|flac|ogg|opus|m4a|aac|wav|m3u8)($|\?)/i.test(url) || url.startsWith("file:");
     var video = $("mediaVideo"), playerAudio = $("mediaAudio"), iframe = $("mediaIframe");
@@ -1947,8 +1948,18 @@
         player.style.display = "block";
         player.src = url;
         player.load();
+        try {
+          var shranjenCas = Number(localStorage.getItem("safeer_media_progress_" + (item.id || url)) || 0);
+          if (shranjenCas > 3) player.currentTime = shranjenCas;
+          player.ontimeupdate = function () {
+            if (player.currentTime > 3) localStorage.setItem("safeer_media_progress_" + (item.id || url), String(Math.floor(player.currentTime)));
+          };
+        } catch (e) {}
         player.onerror = function () { if (media.timer) window.clearTimeout(media.timer); media.timer = 0; $("mediaNapaka").hidden = false; };
         player.play().catch(function () {});
+        if (navigator.mediaSession) {
+          try { navigator.mediaSession.metadata = new MediaMetadata({title: item.naslov || "Safeer Media", artist: item.izvajalec || item.vir || "Safeer OS", artwork: item.slika ? [{src: item.slika}] : []}); } catch (e) {}
+        }
         media.timer = window.setTimeout(function () {
           media.timer = 0;
           if (player.readyState < 2) $("mediaNapaka").hidden = false;
