@@ -534,4 +534,14 @@ div.vrstica { cursor: default; }
 #mediaNastavitveSporocilo{margin-top:14px;padding:8px 12px;border-radius:8px;font-size:14px}
 #mediaNastavitveSporocilo.uspeh{color:var(--zelena);background:rgba(84,214,165,.1)}
 #mediaNastavitveSporocilo.napaka{color:var(--rdeca);background:rgba(235,87,87,.1)}
+/* Zaključni vizualni sloj Safeer Media: jasna hierarhija, manj šuma in TV-berljivost. */
+.media-orodja .filtri{display:flex;flex-wrap:wrap;gap:7px}
+.media-orodja .filtri button{min-height:36px;padding:7px 13px;border:1px solid var(--rob);border-radius:999px;background:rgba(255,255,255,.035);color:var(--medlo);font-weight:700;transition:transform .16s ease,background .16s ease,border-color .16s ease}
+.media-orodja .filtri button:hover,.media-orodja .filtri button:focus-visible{border-color:var(--zelena);color:var(--besedilo);transform:translateY(-1px);outline:0}
+.media-orodja .filtri button.izbran{background:var(--zelena);border-color:var(--zelena);color:#06110d;box-shadow:0 0 18px rgba(84,214,165,.2)}
+.media-predvajalnik-glava{padding:4px 4px 14px;border-bottom:1px solid rgba(255,255,255,.09)}
+.media-napaka{max-width:680px;margin:18px auto;padding:18px 22px;border:1px solid rgba(235,87,87,.45);border-radius:14px;background:rgba(235,87,87,.09);text-align:center;font-weight:650}
+.media-kartica{transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease}
+.media-kartica:focus-visible{box-shadow:0 0 0 3px rgba(84,214,165,.24),0 16px 34px rgba(0,0,0,.32)}
+@media(max-width:700px){.media-katalog{grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:10px}.media-kartica{min-height:245px}.media-kartica img,.media-kartica .media-brez-slike{height:190px}.media-predvajalnik{inset:8px;padding:12px;border-radius:14px}.media-predvajalnik-glava h2{font-size:20px}}
 @media(max-width:1100px){.domov-hero{padding:30px}.media-orodja{align-items:stretch;flex-direction:column}.media-dodaj-vir{grid-template-columns:1fr}.media-dodaj-vir .gumb{justify-content:center}.media-glava{align-items:stretch;flex-direction:column}.media-glava-akcije{align-self:flex-start}}
