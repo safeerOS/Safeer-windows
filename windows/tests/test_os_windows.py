@@ -202,6 +202,16 @@ class TestOsWindows(unittest.TestCase):
         self.assertEqual(m3u[0]["vrsta"], "glasba")
         self.assertEqual(html[0]["kakovost"], "4K")
 
+    def test_media_podpira_youtube_music_radio_in_tv_v_zivo(self):
+        youtube = os_media._resolve_embed_or_direct_source(
+            "https://music.youtube.com/watch?v=dQw4w9WgXcQ", "yt", "YouTube Music")
+        radio = os_media.parse_payload(
+            b'#EXTM3U\n#EXTINF:-1 group-title="Radio",Moj radio\nhttps://radio.test/live.m3u8\n',
+            "audio/x-mpegurl", "https://radio.test/radio.m3u")
+        self.assertEqual(youtube[0]["vrsta"], "glasba")
+        self.assertIn("youtube.com/embed/dQw4w9WgXcQ", youtube[0]["url"])
+        self.assertEqual(radio[0]["vrsta"], "radio")
+
     def test_media_razbere_in_podeduje_imdb_in_tmdb_id(self):
         payload = json.dumps({
             "results": [{

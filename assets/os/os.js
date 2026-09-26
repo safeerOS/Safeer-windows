@@ -1855,7 +1855,12 @@
   // LibVLC ga predvaja v lastnem Qt pogledu, HTML5 pa je rezervni predvajalnik.
   var media = { katalog: [], viri: [], filter: "vse", genre: "", query: "", aktivni: null, zahteva: 0, timer: 0 };
   function mediaIkona(vrsta) { return vrsta === "glasba" ? "glasba" : "video"; }
-  function mediaOznaka(vrsta) { return t(vrsta === "glasba" ? "mediaGlasba" : (vrsta === "serija" ? "mediaSerije" : "mediaFilmi")); }
+  function mediaOznaka(vrsta) {
+    if (vrsta === "glasba") return t("mediaGlasba");
+    if (vrsta === "radio") return "Radio";
+    if (vrsta === "tv-v-zivo") return "TV v živo";
+    return t(vrsta === "serija" ? "mediaSerije" : "mediaFilmi");
+  }
   function narisiMedia() {
     var mreza = $("mediaMreza"); if (!mreza) return; mreza.innerHTML = "";
     var iskano = media.query.trim().toLocaleLowerCase();
@@ -1912,7 +1917,7 @@
   }
   function predvajajHtml(item, index) {
     var variants = item.razlicice && item.razlicice.length ? item.razlicice : [{ url:item.url, vir:item.vir, kakovost:item.kakovost, vrsta:item.vrsta }];
-    var variant = variants[index || 0] || variants[0], audio = item.vrsta === "glasba";
+    var variant = variants[index || 0] || variants[0], audio = item.vrsta === "glasba" || item.vrsta === "radio";
     var url = variant.url || "";
     var isDirectMedia = /\.(mp4|mkv|webm|avi|mov|m4v|mp3|flac|ogg|opus|m4a|aac|wav|m3u8)($|\?)/i.test(url) || url.startsWith("file:");
     var video = $("mediaVideo"), playerAudio = $("mediaAudio"), iframe = $("mediaIframe");

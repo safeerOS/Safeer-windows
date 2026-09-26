@@ -278,6 +278,7 @@ class SafeerOsWindow(QMainWindow):
         self.zaslon.addWidget(self.view)
         self.media_player = vlc_player.VlcPlayerWidget(self)
         self.media_player.nazaj.connect(self._zapri_media)
+        self.media_player.ozadje.connect(self._media_v_ozadju)
         self.zaslon.addWidget(self.media_player)
 
         # Safeer Browser ni ločen program: ista zaščitena brskalna seja je tretji
@@ -302,6 +303,8 @@ class SafeerOsWindow(QMainWindow):
 
         self.shortcut_esc = QShortcut(QKeySequence("Escape"), self)
         self.shortcut_esc.activated.connect(self.na_escape)
+        self.shortcut_media = QShortcut(QKeySequence("Ctrl+Shift+M"), self)
+        self.shortcut_media.activated.connect(self._pokazi_media_predvajalnik)
 
         # Uporabnik vir doda enkrat; Safeer OS nato zastarele kataloge tiho
         # osvežuje ob zagonu in na šest ur, ne da bi blokiral glavno okno.
@@ -423,6 +426,16 @@ class SafeerOsWindow(QMainWindow):
         self.media_player.stop()
         self.zaslon.setCurrentWidget(self.view)
         self.setWindowTitle("Safeer OS")
+
+    def _media_v_ozadju(self) -> None:
+        """Skrije predvajalnik, vendar pusti zvok teči; Ctrl+Shift+M vrne kontrole."""
+        self.zaslon.setCurrentWidget(self.view)
+        self.setWindowTitle("Safeer OS · Media · predvajanje v ozadju")
+
+    def _pokazi_media_predvajalnik(self) -> None:
+        if self.media_player.player and self.media_player.player.is_playing():
+            self.zaslon.setCurrentWidget(self.media_player)
+            self.setWindowTitle(f"Safeer OS · Media · {self.media_player.current_item.get('naslov', '')}")
 
     def _odpri_notranji_splet(self, url: str, *, media: bool = False) -> None:
         self._browser_media_active = media
