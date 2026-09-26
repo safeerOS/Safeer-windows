@@ -108,6 +108,18 @@ class TestOsWindows(unittest.TestCase):
         self.assertNotIn('"razlicica": "0.5.0"', os_app)
         self.assertNotIn('"version": "0.5.0"', zaslon)
 
+    def test_namestitveni_zaganjalnik_deluje_neodvisno_od_trenutne_mape(self):
+        koren = Path(__file__).resolve().parents[2]
+        bat = (koren / "install.bat").read_text(encoding="utf-8")
+        ps1 = (koren / "install.ps1").read_text(encoding="utf-8")
+
+        self.assertIn('cd /d "%~dp0"', bat)
+        self.assertIn('-File "%~dp0install.ps1" -Clean -LaunchOS', bat)
+        self.assertIn("Start-Process -FilePath '%~f0' -Verb RunAs", bat)
+        self.assertIn('$requiredPackageFiles = @(', ps1)
+        self.assertIn('"windows\\SafeerOS.exe"', ps1)
+        self.assertIn('"assets\\os\\index.html"', ps1)
+
     def test_windows_besedila_in_prazna_stanja_so_varna(self):
         koren = Path(__file__).resolve().parents[2]
         skripta = (koren / "assets" / "os" / "os.js").read_text(encoding="utf-8")

@@ -91,6 +91,34 @@ if (Test-Path (Join-Path $ScriptDir "windows\safeer_control_windows.py")) {
 Write-Info "Izvorna mapa: $RepoRoot"
 Write-Info "Ciljna mapa:  $InstallDir"
 
+# Uporabniku takoj povej, ce je zagnal samo eno preneseno datoteko namesto
+# celotnega razsirjenega paketa. Brez teh datotek namestitev ne more ustvariti
+# delujocega Safeer OS, tudi ce sta Python in PowerShell pravilno namescena.
+$requiredPackageFiles = @(
+    "windows\safeer_os_windows.py",
+    "windows\SafeerOS.exe",
+    "windows\SafeerControl.exe",
+    "core\link_datoteke.py",
+    "assets\os\index.html",
+    "assets\link\index.html"
+)
+$missingPackageFiles = @(
+    $requiredPackageFiles | Where-Object {
+        -not (Test-Path (Join-Path $RepoRoot $_))
+    }
+)
+if ($missingPackageFiles.Count -gt 0) {
+    Write-Err "Namestitveni paket ni popoln. Manjkajo naslednje datoteke:"
+    foreach ($missingFile in $missingPackageFiles) {
+        Write-Host "      - $missingFile" -ForegroundColor Red
+    }
+    Write-Host ""
+    Write-Host "Razsirite CELOTEN SafeerOS-Windows ZIP v eno mapo in nato" -ForegroundColor Yellow
+    Write-Host "z dvojnim klikom zazenite install.bat." -ForegroundColor Yellow
+    exit 2
+}
+Write-Success "Celovit namestitveni paket je potrjen."
+
 # -----------------------------------------------------------------------------
 # 1. Preverjanje sistema in arhitekture
 # -----------------------------------------------------------------------------
