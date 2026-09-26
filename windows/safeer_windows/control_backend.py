@@ -994,13 +994,45 @@ class SafeerControlBackend:
             })
         return rez
 
+    @staticmethod
+    def _zmoznosti_naprave(naprava: dict) -> set[str]:
+        """Poenoti oznake zmoznosti starejsih in novih odjemalcev.
+
+        Nekateri odjemalci oglasujejo splosno zmoznost (``apps``/``files``),
+        drugi pa posamezna dejanja (``apps.list``/``files.list``). Android
+        zaslon poleg tega objavi katalog aplikacij, zato je tudi ta varen in
+        nedvoumen dokaz, da zna odgovoriti na ``apps.list``.
+        """
+        surove = naprava.get("zmoznosti") or naprava.get("capabilities") or []
+        if isinstance(surove, str):
+            surove = [surove]
+        z = {str(v).strip().lower() for v in surove if str(v).strip()}
+        if any(v.startswith("apps.") for v in z):
+            z.add("apps")
+        if any(v.startswith("files.") for v in z) or "file" in z:
+            z.add("files")
+        if any(v.startswith("screen.") for v in z):
+            z.add("screen")
+        katalog = naprava.get("aplikacije") or naprava.get("apps")
+        if isinstance(katalog, dict) and katalog:
+            z.add("apps")
+        return z
+
+    @staticmethod
+    def _seznam_iz_odgovora(podatki: dict, *imena: str) -> list:
+        for ime in imena:
+            vrednost = podatki.get(ime)
+            if isinstance(vrednost, list):
+                return vrednost
+        return []
+
     def naprave_s_programi(self) -> List[dict]:
         """Naprave, ki znajo zagnati programe ali sprejemati daljinec (brez tega racunalnika)."""
         rez = []
         for n in self.naprave:
             if n.get("ta") or n.get("id") == self.device_id:
                 continue
-            z = n.get("zmoznosti") or n.get("capabilities") or []
+            z = self._zmoznosti_naprave(n)
             if "apps" in z or "remote" in z:
                 ime = n.get("ime") or n.get("name") or n.get("id", "")
                 rez.append({
@@ -1016,14 +1048,23 @@ class SafeerControlBackend:
         if not id_naprave:
             return {"ok": False, "programi": []}
 
+        naprava = next((n for n in self.naprave if str(n.get("id") or "") == str(id_naprave)), {})
         vsi = []
         od = 0
         for _ in range(10):
             r = self.ukaz_pocakaj(id_naprave, "apps.list", {"icons": True, "offset": od, "limit": 50}, cas=8.0)
             if not r.get("ok"):
-                return {"ok": False, "koda": r.get("koda", "napaka"), "programi": []}
+                # Protocol v1 ze ob registraciji nosi majhen katalog brez ikon.
+                # Ta rezervna pot prepreči prazen zaslon, kadar je Android ravno
+                # v ozadju ali ko starejsi odjemalec se ne odgovarja na strani.
+                katalog = naprava.get("aplikacije") or naprava.get("apps") or {}
+                if isinstance(katalog, dict) and katalog:
+                    vsi = [dict(v if isinstance(v, dict) else {}, id=k)
+                           for k, v in katalog.items() if str(k)]
+                    break
+                return {"ok": False, "koda": r.get("koda") or r.get("code") or "napaka", "programi": []}
             podatki = r.get("data") if isinstance(r.get("data"), dict) else r
-            kos = podatki.get("items") or []
+            kos = self._seznam_iz_odgovora(podatki, "items", "apps", "programi")
             vsi.extend(kos)
             skupaj = int(podatki.get("total") or len(vsi))
             od = int(podatki.get("offset") or 0) + len(kos)
@@ -1032,21 +1073,25 @@ class SafeerControlBackend:
 
         programi = []
         for item in vsi:
-            if not isinstance(item, dict) or not item.get("id"):
+            if not isinstance(item, dict):
+                continue
+            app_id = item.get("id") or item.get("package") or item.get("paket")
+            if not app_id:
                 continue
             ikona = str(item.get("icon") or "")
             if not ikona and item.get("icon_png"):
                 ikona = "data:image/png;base64," + str(item["icon_png"])
             programi.append({
-                "id": str(item["id"]),
-                "ime": str(item.get("name") or item["id"]),
-                "opis": str(item.get("comment") or ""),
-                "skupina": str(item.get("group") or "drugo"),
+                "id": str(app_id),
+                "ime": str(item.get("name") or item.get("label") or item.get("ime") or app_id),
+                "opis": str(item.get("comment") or item.get("description") or item.get("opis") or ""),
+                "skupina": str(item.get("group") or item.get("kind") or item.get("skupina") or "drugo"),
                 "ikona": ikona,
                 "naprava": str(id_naprave),
             })
 
-        return {"ok": True, "programi": programi, "deli": True}
+        return {"ok": True, "programi": programi,
+                "deli": bool((podatki if 'podatki' in locals() else {}).get("enabled", True))}
 
     def naprave_s_datotekami(self) -> List[dict]:
         """Naprave, ki delijo datoteke ali podpirajo brskanje po datotekah (brez tega racunalnika)."""
@@ -1054,7 +1099,7 @@ class SafeerControlBackend:
         for n in self.naprave:
             if n.get("ta") or n.get("id") == self.device_id:
                 continue
-            z = n.get("zmoznosti") or n.get("capabilities") or []
+            z = self._zmoznosti_naprave(n)
             if "files" in z or not z:
                 ime = n.get("ime") or n.get("name") or n.get("id", "")
                 rez.append({
@@ -1079,13 +1124,15 @@ class SafeerControlBackend:
                 "shared": False,
             }
         podatki = r.get("data") if isinstance(r.get("data"), dict) else r
+        items = self._seznam_iz_odgovora(podatki, "items", "files", "datoteke", "elementi")
         return {
             "ok": True,
-            "items": podatki.get("items") or [],
-            "folder": podatki.get("folder") or "",
-            "shared": bool(podatki.get("shared", True)),
+            "items": items,
+            "folder": podatki.get("folder") or podatki.get("mapa") or podatki.get("path") or "",
+            "shared": bool(podatki.get("shared", podatki.get("deli", True))),
             "edit": bool(podatki.get("edit", False)),
             "server": podatki.get("server"),
+            "reason": podatki.get("reason") or podatki.get("razlog") or "",
         }
 
     def odpri_datoteko_naprave(self, id_naprave: str, id_datoteke: str) -> dict:

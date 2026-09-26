@@ -98,6 +98,7 @@ $requiredPackageFiles = @(
     "windows\safeer_os_windows.py",
     "windows\SafeerOS.exe",
     "windows\SafeerControl.exe",
+    "windows\SafeerMediaWebView.exe",
     "core\link_datoteke.py",
     "assets\os\index.html",
     "assets\link\index.html"
@@ -338,6 +339,22 @@ Write-Step 4 6 "Namestitev datotek Safeer OS & Control"
 
 $configBackup = $null
 if ($Clean -and (Test-Path $InstallDir)) {
+    # Zapri samo procese te namestitve. Brez tega Windows ob nadgradnji lahko
+    # pusti star Safeer OS v pomnilniku, uporabnik pa po uspešni namestitvi še
+    # vedno vidi prejšnjo različico. Drugih Python programov se ne dotikamo.
+    $normalizedInstallDir = [System.IO.Path]::GetFullPath($InstallDir).TrimEnd('\')
+    $safeerProcesses = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+        $_.CommandLine -and
+        ($_.Name -in @('python.exe', 'pythonw.exe', 'SafeerMediaWebView.exe', 'SafeerOS.exe', 'SafeerControl.exe')) -and
+        $_.CommandLine.IndexOf($normalizedInstallDir + '\', [System.StringComparison]::OrdinalIgnoreCase) -ge 0
+    }
+    foreach ($process in $safeerProcesses) {
+        Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+    if ($safeerProcesses) {
+        Start-Sleep -Milliseconds 500
+        Write-Info "Prejšnji proces Safeer OS je zaprt; nadgradnja bo uporabljena takoj."
+    }
     $existingConfig = Join-Path $InstallDir "config"
     if (Test-Path $existingConfig) {
         $configBackup = Join-Path $env:TEMP ("SafeerOS-config-" + [guid]::NewGuid().ToString("N"))

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 import shutil
@@ -330,8 +331,11 @@ def poisci_start_menu_programe() -> List[dict]:
                         continue
                     videni.add(ime.lower())
                     polna = os.path.join(root, file)
+                    stabilni_id = "win_app_" + hashlib.sha256(
+                        os.path.normcase(os.path.abspath(polna)).encode("utf-8", "replace")
+                    ).hexdigest()[:16]
                     programi.append({
-                        "id": f"win_app_{len(programi)}",
+                        "id": stabilni_id,
                         "ime": ime,
                         "pot": polna.replace("/", "\\"),
                         "skupina": doloci_skupino(ime, polna),

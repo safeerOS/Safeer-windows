@@ -228,8 +228,53 @@ class TestOsWindows(unittest.TestCase):
         self.assertEqual(got[0]["sezona"], 0)
         self.assertEqual(got[0]["epizoda"], 0)
         self.assertIn("1XS1oqL89opfnbLl8WnZY1O1uJx", got[0]["slika"])
-        episode = os_media.MediaCenter("/tmp/safeer-media-test", roots=[]).episode_item(1399, 1, 4, "Winter Is Coming")
-        self.assertIn("/tv/1399/1/4", episode["url"])
+        with tempfile.TemporaryDirectory() as td:
+            center = os_media.MediaCenter(td, roots=[])
+            center._save({"viri": [{"id": "v1", "url": "https://vidlink.pro", "ime": "VidLink", "vnosi": []}]})
+            episode = center.episode_item(1399, 1, 4, "Winter Is Coming")
+            self.assertIn("/tv/1399/1/4", episode["url"])
+
+    def test_stari_epizodni_cache_se_zdruzi_v_serijo_s_pravim_plakatom(self):
+        with tempfile.TemporaryDirectory() as td:
+            center = os_media.MediaCenter(td, roots=[])
+            cached = []
+            for episode in range(1, 6):
+                url = f"https://vidsrc.cc/v2/embed/tv/tt0944947/1/{episode}"
+                cached.append(os_media._item(
+                    f"Igra prestolov S01E{episode:02d}",
+                    url, base=url,
+                    source_id="v1", source_name="VidSrc", kind="serija",
+                    season=1, episode=episode,
+                    image="https://example.test/napačen-plakat.jpg"))
+            center._save({"viri": [{"id": "v1", "url": "https://vidsrc.cc", "ime": "VidSrc", "vnosi": cached}]})
+            with mock.patch.object(center, "_tmdb_catalog", return_value=[]):
+                got = center.catalog("", "serija")["vnosi"]
+            self.assertEqual(len(got), 1)
+            self.assertEqual(got[0]["sezona"], 0)
+            self.assertEqual(got[0]["epizoda"], 0)
+            self.assertEqual(got[0]["tmdb_id"], 1399)
+            self.assertIn("1XS1oqL89opfnbLl8WnZY1O1uJx", got[0]["slika"])
+
+    def test_epizoda_uporabi_dejansko_dodan_vidsrc_vir(self):
+        with tempfile.TemporaryDirectory() as td:
+            center = os_media.MediaCenter(td, roots=[])
+            center._save({"viri": [{"id": "v1", "url": "https://vidsrc.cc", "ime": "VidSrc", "vnosi": []}]})
+            episode = center.episode_item(1399, 1, 4, "Igra prestolov S01E04")
+            self.assertIsNotNone(episode)
+            self.assertIn("vidsrc.cc/v2/embed/tv/tt0944947/1/4", episode["url"])
+            self.assertNotIn("vidlink.pro", episode["url"])
+
+    def test_predvajanje_spostuje_vrstni_red_uporabnikovih_virov(self):
+        with tempfile.TemporaryDirectory() as td:
+            center = os_media.MediaCenter(td, roots=[])
+            center._save({"viri": [
+                {"id": "prvi", "url": "https://vidsrc.to", "ime": "VidSrc", "vnosi": []},
+                {"id": "drugi", "url": "https://vidlink.pro", "ime": "VidLink", "vnosi": []},
+            ]})
+            episode = center.episode_item(1399, 1, 1, "Winter Is Coming")
+            resolved = center.resolve(episode["id"])
+            self.assertTrue(resolved["url"].startswith("https://vidsrc.to/"))
+            self.assertEqual(resolved["razlicice"][0]["vir_id"], "prvi")
 
     def test_predvajanje_uporabi_le_uporabnikove_vire_in_pravilno_epizodo(self):
         with tempfile.TemporaryDirectory() as td:
@@ -250,11 +295,38 @@ class TestOsWindows(unittest.TestCase):
         app = (koren / "windows" / "safeer_windows" / "os_app.py").read_text(encoding="utf-8")
         brskalnik = (koren / "windows" / "safeer_windows" / "browser.py").read_text(encoding="utf-8")
         self.assertIn("private=True, embedded=True", app)
-        self.assertIn("self._odpri_notranji_splet(url, media=True)", app)
+        self.assertIn("self._odpri_notranji_splet(url, media=True, item=item)", app)
         self.assertIn('"block-media-popup"', brskalnik)
         self.assertIn('"block-media-navigation"', brskalnik)
         self.assertIn('"block-media-download"', brskalnik)
         self.assertIn("if self.media_mode:\n            permission.deny()", brskalnik)
+
+    def test_windows_media_uporabi_pravi_webview2_z_varnostnimi_mejami(self):
+        koren = Path(__file__).resolve().parent.parent.parent
+        app = (koren / "windows" / "safeer_windows" / "os_app.py").read_text(encoding="utf-8")
+        widget = (koren / "windows" / "safeer_windows" / "webview2_media.py").read_text(encoding="utf-8")
+        host = (koren / "windows" / "webview2_host" / "Program.cs").read_text(encoding="utf-8")
+        vlc = (koren / "windows" / "safeer_windows" / "vlc_player.py").read_text(encoding="utf-8")
+        self.assertIn("WebView2MediaWidget", app)
+        self.assertIn("self.webview2_media.open_item(item)", app)
+        self.assertIn("SafeerMediaWebView.exe", widget)
+        self.assertIn("MEDIA_RESPONSE", host)
+        self.assertIn("PLAYBACK_STARTED", host)
+        self.assertIn("CallDevToolsProtocolMethodAsync", host)
+        self.assertIn("CoreWebView2WebResourceContext.Media", host)
+        self.assertIn("core.IsMuted = false", host)
+        self.assertIn("t.mode = 'disabled'", host)
+        self.assertIn("video_set_spu(-1)", vlc)
+        self.assertIn("video_get_spu_description", vlc)
+        self.assertIn("⛶ Celozaslonsko", widget)
+        self.assertIn("self.bar.setVisible(not enabled)", widget)
+        self.assertIn("self.variant_index + 1 < len(self.variants)", widget)
+        self.assertIn("CoreWebView2PermissionState.Deny", host)
+        self.assertIn("e.Cancel = true", host)
+        self.assertIn("NewWindowRequested", host)
+        self.assertIn("DownloadStarting", host)
+        self.assertIn("NavigationStarting", host)
+        self.assertNotIn("--disable-web-security", host)
 
     def test_media_razbere_in_podeduje_imdb_in_tmdb_id(self):
         payload = json.dumps({
@@ -412,7 +484,7 @@ class TestOsWindows(unittest.TestCase):
         self.assertIn("embedded=True", app)
         self.assertIn("private=True", app)
         self.assertIn("embedded = is_embed", app)
-        self.assertIn("self._odpri_notranji_splet(url, media=True)", app)
+        self.assertIn("self._odpri_notranji_splet(url, media=True, item=item)", app)
         self.assertNotIn("subprocess.Popen", app)
         for source in (app, launcher):
             self.assertNotIn("--disable-web-security", source)
@@ -529,6 +601,49 @@ class TestOsWindows(unittest.TestCase):
             ids_dat = [d["id"] for d in s_datotekami2]
             self.assertIn("pc-2", ids_dat)
             self.assertNotIn(backend.device_id, ids_dat)
+
+    def test_control_backend_normalizes_mobile_capabilities_and_catalog(self):
+        """Telefon je viden tudi s podrobnimi action oznakami; ob uspavanem
+        Android procesu se uporabi Protocol v1 katalog iz cast.register."""
+        with tempfile.TemporaryDirectory() as td:
+            backend = control_backend.SafeerControlBackend(config_pot=os.path.join(td, "link.json"))
+            backend.naprave = [{
+                "id": "phone-1", "ime": "Telefon", "platforma": "android",
+                "zmoznosti": ["apps.list", "apps.launch", "files.list"],
+                "aplikacije": {
+                    "si.safeer.mobile": {"name": "Safeer Mobile", "kind": "android"},
+                    "org.videolan.vlc": {"name": "VLC", "kind": "android"},
+                },
+            }]
+            self.assertEqual([n["id"] for n in backend.naprave_s_programi()], ["phone-1"])
+            self.assertEqual([n["id"] for n in backend.naprave_s_datotekami()], ["phone-1"])
+            backend.ukaz_pocakaj = lambda *args, **kwargs: {"ok": False, "koda": "cas"}
+            odgovor = backend.programi_naprave("phone-1")
+            self.assertTrue(odgovor["ok"])
+            self.assertEqual({p["id"] for p in odgovor["programi"]},
+                             {"si.safeer.mobile", "org.videolan.vlc"})
+
+    def test_control_backend_accepts_legacy_mobile_response_shapes(self):
+        with tempfile.TemporaryDirectory() as td:
+            backend = control_backend.SafeerControlBackend(config_pot=os.path.join(td, "link.json"))
+
+            def odgovor(_id, dejanje, _parametri=None, cas=0):
+                if dejanje == "apps.list":
+                    return {"ok": True, "data": {"apps": [
+                        {"package": "app.test", "label": "Test", "description": "Opis"}
+                    ]}}
+                return {"ok": True, "data": {"datoteke": [
+                    {"id": "media:video:1", "name": "Film.mp4", "type": "video"}
+                ], "mapa": "media:video", "deli": True}}
+
+            backend.ukaz_pocakaj = odgovor
+            apps = backend.programi_naprave("phone-1")
+            self.assertEqual(apps["programi"][0]["id"], "app.test")
+            self.assertEqual(apps["programi"][0]["ime"], "Test")
+            dat = backend.datoteke_naprave("phone-1", "media:video")
+            self.assertTrue(dat["shared"])
+            self.assertEqual(dat["folder"], "media:video")
+            self.assertEqual(dat["items"][0]["name"], "Film.mp4")
 
     def test_control_backend_datoteke_rpc(self):
         with tempfile.TemporaryDirectory() as td:
@@ -1302,8 +1417,10 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
                 # Preveri, da imajo filmi vrsto film in serije vrsto serija
                 self.assertTrue(all(x["vrsta"] == "film" for x in cat_filmi["vnosi"]))
                 self.assertTrue(all(x["vrsta"] == "serija" for x in cat_serije["vnosi"]))
-                # Preveri, da imajo serije nastavljeno sezono in epizodo
-                self.assertTrue(any(x["sezona"] == 1 and x["epizoda"] == 5 for x in cat_serije["vnosi"]))
+                # Glavni katalog vsebuje eno kartico na serijo; epizode se
+                # prikažejo šele v podrobnostih izbrane serije.
+                self.assertTrue(all(x["sezona"] == 0 and x["epizoda"] == 0 for x in cat_serije["vnosi"]))
+                self.assertEqual(len([x for x in cat_serije["vnosi"] if x.get("tmdb_id") == 1399]), 1)
 
         # 3. Dodajanje specifične povezave do serije
         with tempfile.TemporaryDirectory() as td:
@@ -1311,12 +1428,13 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
             with mock.patch.object(center, "_download", side_effect=Exception("HTTP Error 403: Forbidden")):
                 rez_tv = center.add_source("https://vidsrc.cc/v2/embed/tv/tt0944947/1/5", "GoT Epizoda")
                 self.assertTrue(rez_tv["ok"])
-                cat = center.catalog("", "vse")
+                with mock.patch.object(center, "_tmdb_catalog", return_value=[]):
+                    cat = center.catalog("", "vse")
                 self.assertEqual(len(cat["vnosi"]), 1)
                 item = cat["vnosi"][0]
                 self.assertEqual(item["vrsta"], "serija")
-                self.assertEqual(item["sezona"], 1)
-                self.assertEqual(item["epizoda"], 5)
+                self.assertEqual(item["sezona"], 0)
+                self.assertEqual(item["epizoda"], 0)
                 self.assertIn("tt0944947", item["url"])
 
     def test_os_app_media_predvajaj_embed_is_not_native(self):
@@ -1341,20 +1459,20 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
         episode = ("tt0944947", "1399", "serija", 1, 5)
         cases = {
             "vidsrc.cc": (
-                "https://vidsrc.cc/v2/embed/movie/tt1375666",
-                "https://vidsrc.cc/v2/embed/tv/tt0944947/1/5"),
+                "https://vidsrc.cc/v2/embed/movie/tt1375666?sub=0&subtitles=false",
+                "https://vidsrc.cc/v2/embed/tv/tt0944947/1/5?sub=0&subtitles=false"),
             "vidsrc.to": (
-                "https://vidsrc.to/embed/movie/tt1375666",
-                "https://vidsrc.to/embed/tv/tt0944947/1/5"),
+                "https://vidsrc.to/embed/movie/tt1375666?sub=0&subtitles=false",
+                "https://vidsrc.to/embed/tv/tt0944947/1/5?sub=0&subtitles=false"),
             "vidlink.pro": (
                 "https://vidlink.pro/movie/27205?primaryColor=00e5ff&autoplay=true&sub=0&subtitles=false",
                 "https://vidlink.pro/tv/1399/1/5?primaryColor=00e5ff&autoplay=true&sub=0&subtitles=false"),
             "player.videasy.net": (
-                "https://player.videasy.net/movie/27205",
-                "https://player.videasy.net/tv/1399/1/5"),
+                "https://player.videasy.net/movie/27205?sub=0&subtitles=false",
+                "https://player.videasy.net/tv/1399/1/5?sub=0&subtitles=false"),
             "vidrock.net": (
-                "https://vidrock.net/embed/movie/27205",
-                "https://vidrock.net/embed/tv/1399/1/5"),
+                "https://vidrock.net/embed/movie/27205?sub=0&subtitles=false",
+                "https://vidrock.net/embed/tv/1399/1/5?sub=0&subtitles=false"),
         }
         for host, expected in cases.items():
             with self.subTest(host=host, kind="movie"):

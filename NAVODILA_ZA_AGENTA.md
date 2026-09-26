@@ -139,6 +139,12 @@ python3 tests/_zip_obnovi.py
 ```
 Preveri, da skripta izpiše novih vnosov (cca. 132 vnosov) in velikost zipa.
 
+Vdelani ZIP mora vsebovati tudi `windows/SafeerMediaWebView.exe`. To je 64-bitni
+WebView2 gostitelj za spletne predvajalne vire; njegova izvorna koda je v
+`windows/webview2_host/`, Python/Qt ovoj pa v
+`windows/safeer_windows/webview2_media.py`. Po obnovi preveri vnos z
+`unzip -l windows/launcher_go/safeer-os-windows.zip | grep SafeerMediaWebView.exe`.
+
 ### KORAK 4: Znova prevedi Go zaganjalnik (`SafeerOS.exe`)
 Z orodjem Go navzkrižno prevedi binarno kodo za Windows x64:
 
@@ -180,11 +186,13 @@ Nikoli ne uporabljaj `git push origin main` ali `git checkout main`.
 
 ---
 
-## 6. Trenutno stanje Windows integracije (1.0.4-test4)
+## 6. Trenutno stanje Windows integracije (1.0.4-test15)
 
 - Safeer Control se odpre kot vgrajen `QWidget` v istem `QStackedWidget` kot domači zaslon, Safeer Media in Safeer Browser.
 - Povezave iz Safeer Controla mora odpirati `SafeerOsWindow._odpri_notranji_splet()`; uporaba `webbrowser.open()` ni dovoljena.
 - Most v `control_window.py` oglašuje samo funkcije, ki imajo dejansko Python izvedbo. Dostop do celotnega računalnika se nastavlja na posamezno napravo s profili `polno`, `izbrano` in `zaslon`; nikoli ga ne vklopi globalno ali brez uporabnikove izbire.
 - Deljenje zaslona uporablja `_WindowsDeljenjeZaslona` in slike iz `NavidezniZaslon`, zato oddaljena naprava ne prevzame fizične miške, tipkovnice ali namizja uporabnika.
 - Safeer Media združuje rezultate po IMDb/TMDb identiteti in normaliziranih metapodatkih; viri se dodajajo izključno v nastavitvah.
+- Spletne embed vire na Windows predvaja `windows/SafeerMediaWebView.exe`. Enkraten nativni WebView2 klik zažene video brez podvojenega play/pause ukaza; popupi, prenosi, dovoljenja in zunanje navigacije ostanejo blokirani.
+- Celozaslonski gumb v `webview2_media.py` mora skriti lastno orodno vrstico in uporabiti `SafeerOsWindow.showFullScreen()`, da izgine tudi Windows opravilna vrstica. `Esc` naj samo zapusti celozaslonski način, ne zapre filma.
 - Namestitev na testnem Windows računalniku: razširi celoten distribucijski ZIP, dvoklikni `install.bat`, nato po želji zaženi `PREIZKUSI-SAFEER.ps1 -Launch`.

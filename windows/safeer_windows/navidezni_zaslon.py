@@ -107,6 +107,8 @@ class NavidezniZaslon:
 
         # Seznam programov na navideznem namizju
         self.programi = list(PRIVZETI_PROGRAMI)
+        self._sistemski_programi: List[dict] = []
+        self._sistemski_osvezeni = 0.0
         self.odprti_programi: Dict[str, dict] = {}
 
         # Pretočna strežniška seja (screen.start)
@@ -343,6 +345,31 @@ class NavidezniZaslon:
             return {"level": self.glasnost, "muted": self.utisano}
 
     # ------------------------------------------------------------------ Programi in URL
+    def _vsi_programi(self) -> List[dict]:
+        """Vgrajene Safeer ploščice in dejanski Windows Start meni brez dvojnikov.
+
+        Iskanje ikon je razmeroma drago, zato katalog osvežimo največ enkrat na
+        minuto. ID-ji iz ``os_backend_win`` so stabilni med ponovnimi zagoni.
+        """
+        zdaj = time.monotonic()
+        if not self._sistemski_programi or zdaj - self._sistemski_osvezeni > 60:
+            try:
+                self._sistemski_programi = os_backend_win.poisci_start_menu_programe()
+            except Exception:
+                self._sistemski_programi = []
+            self._sistemski_osvezeni = zdaj
+        rezultat, videni = [], set()
+        for p in list(self.programi) + list(self._sistemski_programi):
+            kljuc = str(p.get("id") or "")
+            ime = str(p.get("ime") or "").strip().casefold()
+            if not kljuc or kljuc in videni or (ime and ("ime:" + ime) in videni):
+                continue
+            videni.add(kljuc)
+            if ime:
+                videni.add("ime:" + ime)
+            rezultat.append(p)
+        return rezultat
+
     def odpri_url(self, url: str) -> bool:
         """Odpri spletno stran na ločenem navideznem zaslonu."""
         if not url:
@@ -368,8 +395,8 @@ class NavidezniZaslon:
                     self.odprti_programi[app_id] = dict(p)
                     return True
 
-            # Poskusi najti med sistemskimi programi
-            sistemski = os_backend_win.poisci_start_menu_programe()
+            # Poskusi najti med dejanskimi programi Start menija.
+            sistemski = self._vsi_programi()
             for sp in sistemski:
                 if sp["id"] == app_id or sp["ime"].lower() == app_id.lower():
                     self.aktivni_program_id = sp["id"]
@@ -408,7 +435,7 @@ class NavidezniZaslon:
     def katalog_aplikacij(self) -> dict:
         """Katalog za prijavo v Safeer Hub (Protocol v1)."""
         kat = {}
-        for p in self.programi:
+        for p in self._vsi_programi()[:200]:
             kat[p["id"]] = {
                 "name": p["ime"],
                 "kind": p["skupina"],
@@ -418,7 +445,7 @@ class NavidezniZaslon:
     def seznam_programov_za_daljinec(self, z_ikonami: bool = True, od: int = 0, meja: int = 50) -> dict:
         """Vrne seznam programov v obliki, ki jo podpirata tako daljinec.js kot apps.list."""
         vsi = []
-        for p in self.programi:
+        for p in self._vsi_programi():
             vsi.append({
                 "id": p["id"],
                 "package": p["id"],
@@ -428,22 +455,6 @@ class NavidezniZaslon:
                 "group": p["skupina"],
                 "comment": p["opis"],
             })
-
-        # Dodaj še sistemske programe
-        try:
-            sistemski = os_backend_win.poisci_start_menu_programe()
-            for sp in sistemski[:40]:
-                vsi.append({
-                    "id": sp["id"],
-                    "package": sp["id"],
-                    "name": sp["ime"],
-                    "label": sp["ime"],
-                    "icon": sp.get("ikona") if z_ikonami else "",
-                    "group": sp.get("skupina", "drugo"),
-                    "comment": sp.get("opis", ""),
-                })
-        except Exception:
-            pass
 
         kos = vsi[od:od + meja]
         return {
