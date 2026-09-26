@@ -344,6 +344,31 @@ class SafeerOsWindow(QMainWindow):
                     )
                     self.view.page().runJavaScript(js)
                 QTimer.singleShot(700, _odpri_media_serije)
+            elif self.zacetni_razdelek == "media-film-predvajaj":
+                def _odpri_media_film():
+                    js = (
+                        "if (window.safeerOsPojdi) window.safeerOsPojdi('media');"
+                        "function klikniFilm(poskusi) {"
+                        "  var kartice = document.querySelectorAll('.media-kartica');"
+                        "  for (var i = 0; i < kartice.length; i++) {"
+                        "    if (kartice[i].innerText.indexOf('Gladiator') >= 0 || kartice[i].innerText.indexOf('Inception') >= 0) {"
+                        "      kartice[i].click();"
+                        "      function klikniPredvajaj(n) {"
+                        "        var p = document.querySelector('#mediaEpizode button');"
+                        "        if (p) { p.click(); return; }"
+                        "        if ((n || 0) < 40) setTimeout(function () { klikniPredvajaj((n || 0) + 1); }, 250);"
+                        "      }"
+                        "      setTimeout(function () { klikniPredvajaj(0); }, 500); return;"
+                        "    }"
+                        "  }"
+                        "  if ((poskusi || 0) < 20) {"
+                        "    setTimeout(function () { klikniFilm((poskusi || 0) + 1); }, 200);"
+                        "  }"
+                        "}"
+                        "setTimeout(function () { klikniFilm(0); }, 500);"
+                    )
+                    self.view.page().runJavaScript(js)
+                QTimer.singleShot(1500, _odpri_media_film)
             elif self.zacetni_razdelek == "media-predvajaj":
                 def _odpri_media_predvajaj():
                     js = (
@@ -376,11 +401,8 @@ class SafeerOsWindow(QMainWindow):
             else:
                 QTimer.singleShot(600, lambda: self.view.page().runJavaScript(f"window.safeerOsPojdi && window.safeerOsPojdi('{self.zacetni_razdelek}');"))
         else:
-            # Ce racunalnik se ni povezan in uporabnik se ni izbral »brez povezave«,
-            # takoj prikazemo vgrajen prijavni zaslon (QR / 6-mestna koda / nadaljuj brez)
-            st = self.control_backend.stanje_povezave().get("stanje")
-            if st == "nov":
-                self.odpri_control(prijava_ob_zagonu=True)
+            # Safeer OS se vedno odpre neposredno v domačem vmesniku
+            pass
 
         if False:
             self.resize(1280, 800)

@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import difflib
 import json
+import math
 import mimetypes
 import os
 import re
@@ -741,6 +742,14 @@ def _embed_url_for_provider(netloc: str, scheme: str, imdb_id: str,
 _EMBED_DOMAINS = ("vidsrc", "vidlink", "videasy", "vidrock", "embed.su",
                   "superembed", "multiembed", "2embed", "autoembed", "111movies")
 
+_TOP_PROVIDERS = [
+    ("vidlink", "VidLink (1080p)", "https://vidlink.pro"),
+    ("vidsrc_me", "VidSrc (Strežnik 2)", "https://vidsrc.me"),
+    ("videasy", "Videasy (Strežnik 3)", "https://player.videasy.net"),
+    ("autoembed", "AutoEmbed (Strežnik 4)", "https://player.autoembed.cc"),
+    ("vidsrc_cc", "VidSrc CC (Rezerva)", "https://vidsrc.cc"),
+]
+
 _PREDLOGA_TOKEN = re.compile(r"\{\s*(tmdb_?id|imdb_?id|season|episode|sezona|epizoda)\s*\}", re.I)
 
 
@@ -1238,11 +1247,26 @@ class MediaCenter:
         return out
 
     def _load(self) -> dict:
+        data = None
         try:
-            data = json.loads(self.store_path.read_text(encoding="utf-8"))
-            return data if isinstance(data, dict) else {"viri": []}
+            if self.store_path.exists():
+                data = json.loads(self.store_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
-            return {"viri": []}
+            pass
+        if not isinstance(data, dict):
+            data = {"viri": []}
+        if not data.get("viri"):
+            data["viri"] = [
+                {"id": "vidlink", "ime": "VidLink Pro (1080p)", "url": "https://vidlink.pro",
+                 "tip": "predvajalni_vir", "posodobljeno": int(time.time()), "napaka": "", "stevilo": 1000},
+                {"id": "vidsrc", "ime": "VidSrc (HD)", "url": "https://vidsrc.me",
+                 "tip": "predvajalni_vir", "posodobljeno": int(time.time()), "napaka": "", "stevilo": 1000},
+            ]
+            try:
+                self._save(data)
+            except Exception:
+                pass
+        return data
 
     def _save(self, data: dict) -> None:
         self.config_dir.mkdir(parents=True, exist_ok=True)
@@ -1388,14 +1412,7 @@ class MediaCenter:
         return items
 
     def _ima_embed_vir(self, data: Optional[dict] = None) -> bool:
-        podatki = data if data is not None else self._load()
-        for source in podatki.get("viri", []):
-            if not isinstance(source, dict):
-                continue
-            host = (urllib.parse.urlsplit(str(source.get("url") or "")).hostname or "").lower()
-            if any(domain in host for domain in _EMBED_DOMAINS):
-                return True
-        return False
+        return True
 
     def _tmdb(self, endpoint: str, params: Optional[dict] = None) -> dict:
         query = dict(params or {})
@@ -1436,33 +1453,51 @@ class MediaCenter:
             return None
         year = int(date[:4]) if len(date) >= 4 and date[:4].isdigit() else 0
         imdb_id = TMDB_TO_IMDB.get(str(tmdb_id), "")
-        url = _embed_url_for_provider("vidlink.pro", "https", imdb_id, str(tmdb_id), kind, 1, 1)
-        item = _item(title, url, base=url, source_id=str(source.get("id") or "vidlink"),
-                     source_name=str(source.get("ime") or "VidLink"), kind=kind, year=year,
-                     image=f"{TMDB_IMAGE}/w500{raw['poster_path']}" if raw.get("poster_path") else "",
-                     description=raw.get("overview") or "", tmdb_id=tmdb_id, imdb_id=imdb_id,
-                     # Serija je katalogski naslov; epizodo določi podrobni
-                     # pogled in jo nato sestavi z natančnim ID-jem.
-                     season=0, episode=0,
-                     quality="1080p")
-        if not item:
-            return None
-        item.update({
+        poster = f"{TMDB_IMAGE}/w500{raw['poster_path']}" if raw.get("poster_path") else ""
+        overview = raw.get("overview") or ""
+        backdrop = f"{TMDB_IMAGE}/original{raw['backdrop_path']}" if raw.get("backdrop_path") else ""
+        rating = round(float(raw.get("vote_average") or 0), 1)
+        genres = raw.get("genre_ids") or []
+
+        if kind == "film":
+            items = []
+            for prov_id, prov_name, prov_url in _TOP_PROVIDERS:
+                parsed = urllib.parse.urlsplit(prov_url)
+                u = _embed_url_for_provider((parsed.hostname or "").lower(), parsed.scheme or "https",
+                                              imdb_id, str(tmdb_id), "film", 0, 0)
+                it = _item(title, u, base=u, source_id=prov_id, source_name=prov_name,
+                           kind="film", year=year, image=poster, description=overview,
+                           tmdb_id=tmdb_id, imdb_id=imdb_id, quality="1080p HD")
+                if it:
+                    items.append(it)
+            if not items:
+                return None
+            prepared = merge_duplicates(items)[0]
+        else:
+            url = _embed_url_for_provider("vidlink.pro", "https", imdb_id, str(tmdb_id), kind, 1, 1)
+            item = _item(title, url, base=url, source_id=str(source.get("id") or "vidlink"),
+                         source_name=str(source.get("ime") or "VidLink"), kind=kind, year=year,
+                         image=poster, description=overview, tmdb_id=tmdb_id, imdb_id=imdb_id,
+                         season=0, episode=0, quality="1080p")
+            if not item:
+                return None
+            prepared = merge_duplicates([item])[0]
+
+        prepared.update({
             "datum": date,
-            "ocena": round(float(raw.get("vote_average") or 0), 1),
-            "zanri": raw.get("genre_ids") or [],
-            "ozadje": f"{TMDB_IMAGE}/original{raw['backdrop_path']}" if raw.get("backdrop_path") else "",
+            "ocena": rating,
+            "zanri": genres,
+            "ozadje": backdrop,
             "media_type": media_type,
         })
-        prepared = merge_duplicates([item])[0]
-        prepared.update({key: item[key] for key in ("ocena", "zanri", "ozadje", "media_type")})
         self._dynamic_items[prepared["id"]] = prepared
         return prepared
 
-    def _tmdb_catalog(self, data: dict, query: str, kind: str, genre: str, page: int) -> list[dict]:
+    def _tmdb_catalog(self, data: dict, query: str, kind: str, genre: str, page: int) -> tuple[list[dict], int]:
         source = next((s for s in data.get("viri", []) if "vidlink.pro" in str(s.get("url") or "").lower()), {})
         media_type = "tv" if kind == "serija" else "movie" if kind == "film" else "all"
-        params: dict[str, Any] = {"page": max(1, min(int(page or 1), 500))}
+        current_page = max(1, min(int(page or 1), 500))
+        params: dict[str, Any] = {"page": current_page}
         if query:
             endpoint = "/search/multi"
             params["query"] = query
@@ -1473,10 +1508,13 @@ class MediaCenter:
             endpoint = "/trending/all/week"
         else:
             endpoint = f"/{media_type}/popular"
+        tmdb_total_pages = 500
         try:
-            raw = self._tmdb(endpoint, params).get("results", [])
+            resp = self._tmdb(endpoint, params)
+            raw = resp.get("results", [])
+            tmdb_total_pages = min(int(resp.get("total_pages") or 500), 500)
         except Exception:
-            return []
+            return [], 1
         found = []
         for row in raw:
             if not isinstance(row, dict):
@@ -1486,15 +1524,17 @@ class MediaCenter:
             item = self._tmdb_vnos(row, source)
             if item and (kind in ("", "vse") or item["vrsta"] == kind):
                 found.append(item)
-        return found
+        return found, tmdb_total_pages
 
     def catalog(self, query: str = "", kind: str = "vse", genre: str = "", page: int = 1) -> dict:
         with self._lock:
             data = self._load()
+        page_num = max(1, int(page or 1))
+        local = [item for item in self._local_items() if (kind in ("", "vse") or item.get("vrsta") == kind)] if page_num == 1 else []
         remote = [_series_catalog_card(item) for source in data.get("viri", []) for item in source.get("vnosi", [])
-                  if isinstance(item, dict)]
-        dynamic = self._tmdb_catalog(data, _text(query, 120), kind, _text(genre, 20), page) if self._ima_embed_vir(data) else []
-        merged = merge_duplicates(self._local_items() + remote + dynamic)
+                  if isinstance(item, dict) and (kind in ("", "vse") or item.get("vrsta") == kind)] if page_num == 1 else []
+        dynamic, tmdb_pages = self._tmdb_catalog(data, _text(query, 120), kind, _text(genre, 20), page_num) if self._ima_embed_vir(data) else ([], 1)
+        merged = merge_duplicates(local + remote + dynamic)
         needle = _text(query, 120).casefold()
         if needle:
             def zadetek(item: dict) -> bool:
@@ -1503,16 +1543,15 @@ class MediaCenter:
                                 str(item.get("tmdb_id") or ""))).casefold()
                 if needle in hay:
                     return True
-                # Toleranten zadetek za tipkarske napake v naslovu/izvajalcu.
                 return any(difflib.SequenceMatcher(None, needle, token).ratio() >= 0.72
                            for token in re.findall(r"[\wÀ-ž]{3,}", hay))
             merged = [item for item in merged if zadetek(item)]
-        total_pages = 500 if self._ima_embed_vir(data) else max(1, math.ceil(len(merged) / 24))
+        total_pages = tmdb_pages if (self._ima_embed_vir(data) and tmdb_pages > 1) else max(1, math.ceil(len(merged) / 24))
         return {
             "vnosi": merged,
             "viri": self.sources(),
             "skupaj": len(merged),
-            "stran": int(page or 1),
+            "stran": page_num,
             "skupaj_strani": total_pages,
             "mape": [str(path) for path in self.roots]
         }
@@ -1553,66 +1592,51 @@ class MediaCenter:
         return {"tmdb_id": int(tmdb_id), "sezona": int(season_number), "epizode": episodes}
 
     def episode_item(self, tmdb_id: int, season: int, episode: int, title: str = "") -> Optional[dict]:
-        sources = self._load().get("viri", [])
-        source, parsed = {}, None
-        for candidate in sources:
-            if not isinstance(candidate, dict):
-                continue
-            candidate_parsed = urllib.parse.urlsplit(str(candidate.get("url") or ""))
-            host = (candidate_parsed.hostname or "").lower()
-            if any(domain in host for domain in _EMBED_DOMAINS):
-                source, parsed = candidate, candidate_parsed
-                break
-        if not source or parsed is None:
-            return None
         tmdb = str(int(tmdb_id))
         imdb = TMDB_TO_IMDB.get(tmdb, "")
-        source_url = str(source.get("url") or "")
-        if _PREDLOGA_TOKEN.search(source_url):
-            url = _izpolni_predlogo(source_url, imdb, tmdb, int(season), int(episode))
-        else:
+        s, ep = max(1, int(season or 1)), max(1, int(episode or 1))
+        ep_title = title or f"S{s:02d}E{ep:02d}"
+        items = []
+        for prov_id, prov_name, prov_url in _TOP_PROVIDERS:
+            parsed = urllib.parse.urlsplit(prov_url)
             url = _embed_url_for_provider((parsed.hostname or "").lower(), parsed.scheme or "https",
-                                          imdb, tmdb, "serija", int(season), int(episode))
-        item = _item(title or f"S{int(season):02d}E{int(episode):02d}", url, base=url,
-                     source_id=str(source.get("id") or "embed"),
-                     source_name=str(source.get("ime") or parsed.hostname or "Predvajalni vir"),
-                     kind="serija", season=int(season), episode=int(episode),
-                     imdb_id=imdb, tmdb_id=int(tmdb_id), quality="1080p")
-        if item:
-            item = merge_duplicates([item])[0]
-            self._dynamic_items[item["id"]] = item
-        return item
+                                          imdb, tmdb, "serija", s, ep)
+            it = _item(ep_title, url, base=url,
+                       source_id=prov_id, source_name=prov_name,
+                       kind="serija", season=s, episode=ep,
+                       imdb_id=imdb, tmdb_id=int(tmdb_id), quality="1080p HD")
+            if it:
+                items.append(it)
+        if not items:
+            return None
+        merged = merge_duplicates(items)
+        if merged:
+            res = merged[0]
+            self._dynamic_items[res["id"]] = res
+            return res
+        return None
 
     def movie_item(self, tmdb_id: int, title: str = "") -> Optional[dict]:
-        sources = self._load().get("viri", [])
-        source, parsed = {}, None
-        for candidate in sources:
-            if not isinstance(candidate, dict):
-                continue
-            candidate_parsed = urllib.parse.urlsplit(str(candidate.get("url") or ""))
-            host = (candidate_parsed.hostname or "").lower()
-            if any(domain in host for domain in _EMBED_DOMAINS):
-                source, parsed = candidate, candidate_parsed
-                break
-        if not source or parsed is None:
-            parsed = urllib.parse.urlsplit("https://vidlink.pro")
-            source = {"id": "vidlink", "ime": "VidLink", "url": "https://vidlink.pro"}
         tmdb = str(int(tmdb_id))
         imdb = TMDB_TO_IMDB.get(tmdb, "")
-        source_url = str(source.get("url") or "")
-        if _PREDLOGA_TOKEN.search(source_url):
-            url = _izpolni_predlogo(source_url, imdb, tmdb, 0, 0)
-        else:
+        items = []
+        for prov_id, prov_name, prov_url in _TOP_PROVIDERS:
+            parsed = urllib.parse.urlsplit(prov_url)
             url = _embed_url_for_provider((parsed.hostname or "").lower(), parsed.scheme or "https",
                                           imdb, tmdb, "film", 0, 0)
-        item = _item(title or "Film", url, base=url,
-                     source_id=str(source.get("id") or "embed"),
-                     source_name=str(source.get("ime") or parsed.hostname or "Predvajalni vir"),
-                     kind="film", imdb_id=imdb, tmdb_id=int(tmdb_id), quality="1080p HD")
-        if item:
-            item = merge_duplicates([item])[0]
-            self._dynamic_items[item["id"]] = item
-        return item
+            it = _item(title or "Film", url, base=url,
+                       source_id=prov_id, source_name=prov_name,
+                       kind="film", imdb_id=imdb, tmdb_id=int(tmdb_id), quality="1080p HD")
+            if it:
+                items.append(it)
+        if not items:
+            return None
+        merged = merge_duplicates(items)
+        if merged:
+            res = merged[0]
+            self._dynamic_items[res["id"]] = res
+            return res
+        return None
 
     def export_json(self) -> dict:
         """Izvozi celotno konfiguracijo in shranjene vire za prenos ali varnostno kopijo."""

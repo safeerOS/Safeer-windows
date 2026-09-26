@@ -43,9 +43,8 @@
       <div class="vrh-naprave">
         <span class="naprava-znacka"><svg data-ikona="namizje"></svg> Povezan Linux PC</span>
         <span class="naprava-znacka"><svg data-ikona="tv"></svg> Povezan Android TV</span>
-        <span class="naprava-znacka"><svg data-ikona="telefon"></svg> Povezan Telefon</span>
-        <span class="vrh-ikona"><svg data-ikona="wifi"></svg></span>
-        <span class="vrh-ikona" data-pojdi="nastavitve"><svg data-ikona="drsniki"></svg></span>
+        <span class="omrezje-znacka" id="stanjeOmrezje" title="Omrežje"><svg data-ikona="wifi"></svg><span>Povezano</span></span>
+        <span class="vrh-ikona" data-pojdi="nastavitve" title="Nastavitve"><svg data-ikona="drsniki"></svg></span>
       </div>
       <div class="ura"><b id="ura">21:04</b><span id="datum">Sob, 26. sep. 2025</span></div>
     </header>
@@ -58,11 +57,6 @@
           <div class="domov-hero-vsebina">
             <h1 id="pozdrav">Dober večer, User!</h1>
             <p>Vse tvoje naprave, mediji in programi – na enem mestu.</p>
-            <div class="hero-akcije">
-              <button class="gumb glavni" data-pojdi="media"><svg data-ikona="predvajaj"></svg><span>Nadaljuj z gledanjem</span></button>
-              <button class="gumb" data-pojdi="media"><svg data-ikona="glasba"></svg><span>Predvajaj glasbo</span></button>
-              <button class="gumb" data-pojdi="naprave"><svg data-ikona="naprave"></svg><span>Odpri naprave</span></button>
-            </div>
           </div>
           <div class="domov-hero-link">
             <div class="hero-link-kartica" data-pojdi="naprave">
@@ -142,107 +136,9 @@
           </div>
         </div>
 
-        <!-- Nadaljuj z gledanjem -->
-        <h2>Nadaljuj z gledanjem</h2>
-        <div class="karusel-vrsta" id="domovNadaljuj">
-          <div class="karusel-kartica" data-pojdi="media">
-            <div class="slika-ovitek"><span class="napredek-trak" style="width: 65%;"></span></div>
-            <b>Dune: Part Two</b>
-            <small>2h 46min • 65 %</small>
-          </div>
-          <div class="karusel-kartica" data-pojdi="media">
-            <div class="slika-ovitek"><span class="napredek-trak" style="width: 42%;"></span></div>
-            <b>The Last of Us</b>
-            <small>S1 E3 • 42 min</small>
-          </div>
-          <div class="karusel-kartica" data-pojdi="media">
-            <div class="slika-ovitek"><span class="napredek-trak" style="width: 35%;"></span></div>
-            <b>Oppenheimer</b>
-            <small>2h 12min • 35 %</small>
-          </div>
-          <div class="karusel-kartica" data-pojdi="media">
-            <div class="slika-ovitek"><span class="napredek-trak" style="width: 12%;"></span></div>
-            <b>Interstellar</b>
-            <small>2h 49min • 12 %</small>
-          </div>
-          <div class="karusel-kartica" data-pojdi="media">
-            <div class="slika-ovitek"><span class="napredek-trak" style="width: 78%;"></span></div>
-            <b>Avatar: The Way of Water</b>
-            <small>2h 12min • 78 %</small>
-          </div>
-        </div>
-
-        <!-- Nedavno predvajano -->
-        <h2>Nedavno predvajano</h2>
-        <div class="nedavno-vrsta">
-          <div class="nedavno-kartica" data-pojdi="media">
-            <div class="glasba-slika"></div>
-            <div>
-              <b>The Weeknd</b>
-              <small>Blinding Lights</small>
-            </div>
-          </div>
-          <div class="nedavno-kartica" data-pojdi="media">
-            <div class="radio-slika"></div>
-            <div>
-              <b>Radio Antena</b>
-              <small>V živo</small>
-            </div>
-          </div>
-          <div class="nedavno-kartica" data-pojdi="media">
-            <div class="video-slika"><button class="predvajaj-ikona"><svg data-ikona="predvajaj"></svg></button></div>
-            <div>
-              <b>Narava.mp4</b>
-              <small>00:12:36</small>
-            </div>
-          </div>
-        </div>
-
-        <!-- Hitri dostop (6 tiles matching mockup 1) -->
-        <h2>Hitri dostop</h2>
-        <div class="hitri-vrsta-nov">
-          <button class="hitri-tile" data-pojdi="media">
-            <svg data-ikona="glasba"></svg>
-            <div>
-              <b>Medijski center</b>
-              <span>Filmi, serije, glasba, radio, TV</span>
-            </div>
-          </button>
-          <button class="hitri-tile" data-pojdi="datoteke">
-            <svg data-ikona="mapa"></svg>
-            <div>
-              <b>Moje datoteke</b>
-              <span>Lokalne in spletne vsebine</span>
-            </div>
-          </button>
-          <button class="hitri-tile" data-pojdi="naprave">
-            <svg data-ikona="naprave"></svg>
-            <div>
-              <b>Naprave</b>
-              <span>Upravljanje in povezava</span>
-            </div>
-          </button>
-          <button class="hitri-tile" data-pojdi="programi">
-            <svg data-ikona="programi"></svg>
-            <div>
-              <b>Programi</b>
-              <span>Aplikacije na vseh napravah</span>
-            </div>
-          </button>
-          <button class="hitri-tile" data-pojdi="splet">
-            <svg data-ikona="splet"></svg>
-            <div>
-              <b>Spletni brskalnik</b>
-              <span>Hiter, varen, brez oglasov</span>
-            </div>
-          </button>
-          <button class="hitri-tile" data-pojdi="nastavitve">
-            <svg data-ikona="drsniki"></svg>
-            <div>
-              <b>Nastavitve</b>
-              <span>Prilagodi Safeer OS</span>
-            </div>
-          </button>
+        <div id="blokNedavne" hidden>
+          <h2><span data-t="nedavnoUporabljeno">Nedavno uporabljeno</span></h2>
+          <div class="karusel-vrsta" id="domovNadaljuj"></div>
         </div>
       </section>
 
@@ -259,7 +155,7 @@
           </div>
         </div>
 
-        <!-- Top Category Tiles Row (6 tiles matching mockup 2) -->
+        <!-- Top Category Tiles Row -->
         <div class="kategorije-vrsta">
           <button class="kategorija-ploscica izbrana" data-media-filter="film">
             <svg data-ikona="film"></svg>
@@ -281,45 +177,24 @@
             <svg data-ikona="tv"></svg>
             <b>TV v živo</b>
           </button>
-          <button class="kategorija-ploscica" data-pojdi="datoteke">
-            <svg data-ikona="mapa"></svg>
-            <b>Lokalne datoteke</b>
-          </button>
-        </div>
-
-        <!-- Section: Nadaljuj z gledanjem -->
-        <h2>Nadaljuj z gledanjem</h2>
-        <div class="karusel-vrsta">
-          <div class="karusel-kartica">
-            <div class="slika-ovitek"><span class="napredek-trak" style="width: 65%;"></span></div>
-            <b>Dune: Part Two</b>
-            <small>2h 46min • 65 %</small>
-          </div>
-          <div class="karusel-kartica">
-            <div class="slika-ovitek"><span class="napredek-trak" style="width: 42%;"></span></div>
-            <b>The Last of Us</b>
-            <small>S1 E3 • 42 min</small>
-          </div>
-          <div class="karusel-kartica">
-            <div class="slika-ovitek"><span class="napredek-trak" style="width: 0%;"></span></div>
-            <b>Oppenheimer</b>
-            <small>2h 12min</small>
-          </div>
-          <div class="karusel-kartica">
-            <div class="slika-ovitek"><span class="napredek-trak" style="width: 0%;"></span></div>
-            <b>Interstellar</b>
-            <small>2h 49min</small>
-          </div>
-          <div class="karusel-kartica">
-            <div class="slika-ovitek"><span class="napredek-trak" style="width: 0%;"></span></div>
-            <b>Avatar: The Way of Water</b>
-            <small>2h 12min</small>
-          </div>
         </div>
 
         <!-- Dynamic Main Grid / Content Section -->
         <div class="media-predvajalnik" id="mediaPredvajalnik" hidden>
-          <div class="media-predvajalnik-glava"><div><small data-t="mediaPredvaja">PREDVAJA SE V SAFEER OS</small><h2 id="mediaPredvajalnikNaslov"></h2><p id="mediaPredvajalnikMeta"></p></div><div class="media-predvajalnik-akcije"><button class="gumb-ikona" id="mediaKino" title="Kino način (celozaslonsko)"><svg data-ikona="celozaslonsko"></svg></button><button class="gumb-ikona" id="mediaZapri" data-naslov="zapri"><svg data-ikona="x"></svg></button></div></div>
+          <div class="media-predvajalnik-glava">
+            <div class="media-predvajalnik-glava-levo">
+              <button class="gumb media-predvajalnik-nazaj" id="mediaPredvajalnikNazaj"><svg data-ikona="nazaj"></svg><span>Nazaj</span></button>
+              <div>
+                <small data-t="mediaPredvaja">PREDVAJA SE V SAFEER OS</small>
+                <h2 id="mediaPredvajalnikNaslov"></h2>
+                <p id="mediaPredvajalnikMeta"></p>
+              </div>
+            </div>
+            <div class="media-predvajalnik-akcije">
+              <button class="gumb-ikona" id="mediaKino" title="Kino način (celozaslonsko)"><svg data-ikona="celozaslonsko"></svg></button>
+              <button class="gumb-ikona" id="mediaZapri" data-naslov="zapri" title="Zapri"><svg data-ikona="x"></svg></button>
+            </div>
+          </div>
           <video id="mediaVideo" controls playsinline preload="metadata" hidden></video>
           <audio id="mediaAudio" controls preload="metadata" hidden></audio>
           <iframe id="mediaIframe" title="Safeer Media predvajalnik"
@@ -331,9 +206,8 @@
 
         <div class="media-orodja">
           <label class="media-iskanje"><svg data-ikona="isci"></svg><input id="mediaIskanje" type="search" autocomplete="off" placeholder="Išči filme, serije, glasbo, radio ..."></label>
-          <div class="filtri"><button class="izbran" data-media-filter="vse">Vse</button><button data-media-filter="film">Filmi</button><button data-media-filter="serija">Serije</button><button data-media-filter="glasba">Glasba</button><button data-media-filter="podcast">Podcasti</button><button data-media-filter="radio">Radio</button><button data-media-filter="tv-v-zivo">TV v živo</button></div>
         </div>
-        <div class="media-zanri" aria-label="Žanri">
+        <div class="media-zanri" id="mediaZanri" aria-label="Žanri">
           <button class="izbran" data-media-genre="">Vse vsebine</button>
           <button data-media-genre="28">Akcija</button><button data-media-genre="878">Sci-Fi</button>
           <button data-media-genre="35">Komedija</button><button data-media-genre="27">Grozljivka</button>
@@ -351,7 +225,7 @@
             <button class="gumb-ikona" id="mediaPodrobnostiZapri" title="Zapri"><svg data-ikona="x"></svg></button>
           </div>
           <div class="media-podrobnosti-junak" id="mediaPodrobnostiJunak"></div>
-          <h3>Sezone</h3><div class="media-sezone" id="mediaSezone"></div>
+          <h3 id="mediaSezoneNaslov">Sezone</h3><div class="media-sezone" id="mediaSezone"></div>
           <h3 id="mediaEpizodeNaslov">Epizode</h3><div class="media-epizode" id="mediaEpizode"></div>
         </div>
 
