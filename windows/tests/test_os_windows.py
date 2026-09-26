@@ -999,6 +999,12 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
         self.assertNotIn("webbrowser.open", okno)
         self.assertIn("self.na_odpiranje(url)", okno)
 
+    def test_control_po_nalozitvi_vedno_poslje_sestmestno_kodo(self):
+        koren = Path(__file__).resolve().parent.parent.parent
+        okno = (koren / "windows" / "safeer_windows" / "control_window.py").read_text(encoding="utf-8")
+        self.assertIn('window.safeerLinkOdziv(\"lokalnaKoda\"', okno)
+        self.assertIn("self.backend.lokalna_koda", okno)
+
     def test_control_poslje_url_po_enotnem_protokolu(self):
         with tempfile.TemporaryDirectory() as td:
             cb = control_backend.SafeerControlBackend(config_pot=os.path.join(td, "control.json"))
@@ -1106,10 +1112,36 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
         css = (koren / "assets" / "os" / "os.css").read_text(encoding="utf-8")
         self.assertIn("Splet, aplikacije, datoteke in računalniki", html)
         self.assertIn("Brez oblaka, računa in naročnine", html)
-        self.assertIn("Brez dvojnikov", html)
-        self.assertIn("Predvajanje v Safeer OS", html)
         self.assertIn(".domov-hero", css)
-        self.assertIn(".media-kartica.izpostavljena", css)
+        self.assertNotIn('class="hero-mreza"', html)
+        self.assertNotIn(".media-kartica.izpostavljena", css)
+        self.assertIn("repeat(auto-fill,minmax(190px,1fr))", css)
+
+    def test_media_vidlink_predloga_vstavi_pravi_tmdb_id_in_ni_lazna_kartica(self):
+        with tempfile.TemporaryDirectory() as td:
+            center = os_media.MediaCenter(td, roots=[])
+            result = center.add_source("https://vidlink.pro/movie/{tmdbId}", "VidLink")
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["vir"]["tip"], "predvajalni_vir")
+            catalog = center.catalog("", "film")["vnosi"]
+            self.assertGreater(len(catalog), 5)
+            self.assertFalse(any("{tmdb" in item["url"].lower() for item in catalog))
+            inception = next(item for item in catalog if item.get("tmdb_id") == 27205)
+            self.assertEqual(inception["url"], "https://vidlink.pro/movie/27205")
+            self.assertNotIn("tmdbid", inception["naslov"].lower())
+
+    def test_media_korenski_vidlink_je_en_vir_za_filme_in_serije(self):
+        with tempfile.TemporaryDirectory() as td:
+            center = os_media.MediaCenter(td, roots=[])
+            with mock.patch.object(center, "_download", side_effect=AssertionError("Ponudnika ne beremo kot katalog")):
+                result = center.add_source("https://vidlink.pro", "VidLink")
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["vir"]["tip"], "predvajalni_vir")
+            catalog = center.catalog()["vnosi"]
+            self.assertTrue(any(item["vrsta"] == "film" for item in catalog))
+            self.assertTrue(any(item["vrsta"] == "serija" for item in catalog))
+            self.assertTrue(all("{" not in item["url"] for item in catalog))
+            self.assertTrue(all(item["url"].startswith("https://vidlink.pro/") for item in catalog))
 
     def test_media_embed_vir_vidsrc_in_iframe_podpora(self):
         # 1. HTML z vdelanim iframe in povezavami

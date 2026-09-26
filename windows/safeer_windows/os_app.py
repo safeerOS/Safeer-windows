@@ -426,6 +426,7 @@ class SafeerOsWindow(QMainWindow):
 
     def _odpri_notranji_splet(self, url: str, *, media: bool = False) -> None:
         self._browser_media_active = media
+        self.browser_window.set_media_mode(media)
         self.browser_window.load_in_current(url)
         self.zaslon.setCurrentWidget(self.browser_window)
         self.setWindowTitle("Safeer OS · Media" if media else "Safeer OS · Splet")
@@ -436,6 +437,7 @@ class SafeerOsWindow(QMainWindow):
             if view is not None:
                 view.setUrl(QUrl("about:blank"))
         self._browser_media_active = False
+        self.browser_window.set_media_mode(False)
         self.zaslon.setCurrentWidget(self.view)
         self.setWindowTitle("Safeer OS")
         self.poslji_dogodek("fokus", None)
@@ -781,6 +783,10 @@ class SafeerOsWindow(QMainWindow):
         return True
 
     def closeEvent(self, event) -> None:
+        try:
+            self.control_backend.koncaj()
+        except Exception:
+            pass
         try:
             if hasattr(self, "scit") and self.scit is not None:
                 self.scit.koncaj()

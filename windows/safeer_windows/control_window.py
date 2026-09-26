@@ -212,7 +212,14 @@ class SafeerControlWindow(QWidget):
             podatki_json = json.dumps(podatki, ensure_ascii=False)
             cmd += f" if (window.safeerLinkOdziv) window.safeerLinkOdziv({json.dumps(vrsta)}, {podatki_json});"
         else:
-            cmd += ' if (window.safeerLinkOdziv) window.safeerLinkOdziv("stanje", window.__safeerLink.stanje);'
+            # Stran ob prvem DOMContentLoaded prebere še začetno prazno stanje mostu.
+            # Zato trajne vrednosti, predvsem 6-mestno kodo, izrecno pošljemo tudi
+            # po loadFinished; sicer na zaslonu ostane "------" do naslednjega dogodka.
+            lokalna_koda_json = json.dumps(self.backend.lokalna_koda, ensure_ascii=False)
+            cmd += (' if (window.safeerLinkOdziv) {'
+                    ' window.safeerLinkOdziv("stanje", window.__safeerLink.stanje);'
+                    f' window.safeerLinkOdziv("lokalnaKoda", {lokalna_koda_json});'
+                    ' }')
         self.dispatcher.dispatch(lambda: self.view.page().runJavaScript(cmd))
 
     def _na_dogodek_zaledja(self, vrsta: str, podatki: Any) -> None:

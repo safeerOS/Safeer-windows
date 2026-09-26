@@ -1650,10 +1650,10 @@
 
   /** Izris lokalne 6-mestne kode tega racunalnika za vpis v TV ali telefon */
   function narisiLokalnoKodo() {
-    var okvir = el("lokalnaKodaStevilke");
-    if (okvir) {
-      okvir.textContent = stanje.lokalnaKoda || "------";
-    }
+    ["lokalnaKodaStevilke", "vabiloLokalnaKoda"].forEach(function (id) {
+      var okvir = el(id);
+      if (okvir) okvir.textContent = stanje.lokalnaKoda || "------";
+    });
   }
 
   /** Stanje je barva, ne stavek: zelena povezano, siva ni ga, rumena tezava. */
@@ -2320,6 +2320,7 @@
     besedilo("gumbVabilo", t(vabiloOdprto ? "vabiloZapri" : "vabiloGumb"));
     if (vabiloOdprto) {
       besedilo("opombaVabilo", t("prijavaQrPripravljam"));
+      if (most.novaLokalnaKoda) most.novaLokalnaKoda();
       most.zacniVabilo();
     } else {
       el("vabiloQr").hidden = true;
@@ -3067,6 +3068,9 @@
       if (most && most.nadaljujBrezPovezave) most.nadaljujBrezPovezave();
     });
     naKlik("gumbVabilo", function () { preklopiVabilo(); });
+    naKlik("gumbNovaKodaVabilo", function () {
+      if (most && most.novaLokalnaKoda) most.novaLokalnaKoda();
+    });
     var zaupaj = el("prijavaZaupaj");
     if (zaupaj) {
       zaupaj.addEventListener("change", function () {
