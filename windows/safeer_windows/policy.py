@@ -41,6 +41,11 @@ PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 def resource_roots() -> List[str]:
     roots = []
+    local_appdata = os.environ.get("LOCALAPPDATA", "")
+    if local_appdata:
+        app_dir = os.path.join(local_appdata, "SafeerOS", "app")
+        if os.path.isdir(app_dir):
+            roots.append(app_dir)
     bundle = getattr(sys, "_MEIPASS", None)
     if bundle:
         roots.append(os.path.join(bundle, "shared"))

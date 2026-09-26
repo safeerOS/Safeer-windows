@@ -12,23 +12,25 @@
   <aside id="stranska">
     <div class="znamka">
       <img src="znak.svg" alt="">
-      <div><b>Safeer OS</b><span data-t="podnaslov"></span></div>
+      <div><b>Safeer OS</b><span>Tvoje naprave. En zaslon.</span></div>
     </div>
     <nav id="meni">
-      <button data-razdelek="domov" class="izbran"><svg data-ikona="domov"></svg><span data-t="domov"></span></button>
-      <button data-razdelek="media"><svg data-ikona="glasba"></svg><span>Safeer Media</span></button>
-      <button data-razdelek="programi"><svg data-ikona="programi"></svg><span data-t="programi"></span></button>
-      <button data-razdelek="datoteke"><svg data-ikona="mapa"></svg><span data-t="datoteke"></span></button>
-      <button data-razdelek="naprave"><svg data-ikona="povezava"></svg><span data-t="naprave"></span></button>
-      <button data-razdelek="nastavitve"><svg data-ikona="drsniki"></svg><span data-t="nastavitve"></span></button>
+      <button data-razdelek="domov" class="izbran"><svg data-ikona="domov"></svg><span data-t="domov">Domov</span></button>
+      <button data-razdelek="media"><svg data-ikona="glasba"></svg><span>Medijski center</span></button>
+      <button data-razdelek="naprave"><svg data-ikona="povezava"></svg><span data-t="naprave">Naprave</span></button>
+      <button data-razdelek="programi"><svg data-ikona="programi"></svg><span data-t="programi">Programi</span></button>
+      <button data-razdelek="datoteke"><svg data-ikona="mapa"></svg><span data-t="datoteke">Datoteke</span></button>
+      <button data-razdelek="splet"><svg data-ikona="splet"></svg><span>Splet</span></button>
+      <button data-razdelek="ai"><svg data-ikona="iskra"></svg><span>AI Asistent</span></button>
+      <button data-razdelek="komunikacija"><svg data-ikona="sporocilo"></svg><span>Komunikacija</span></button>
+      <button data-razdelek="nastavitve"><svg data-ikona="drsniki"></svg><span data-t="nastavitve">Nastavitve</span></button>
     </nav>
     <div class="stranska-dno">
       <div class="uporabnik">
-        <div class="zacetnica" id="zacetnica">S</div>
-        <div class="ime"><b id="imeUporabnika"></b><span id="imeRacunalnika"></span></div>
+        <div class="zacetnica" id="zacetnica">U</div>
+        <div class="ime"><b id="imeUporabnika">User</b><span id="imeRacunalnika"><i class="pika zelena"></i> Povezan</span></div>
         <button class="gumb-ikona" id="gumbNapajanje" data-naslov="napajanje"><svg data-ikona="napajanje"></svg></button>
       </div>
-      <div class="poganja"><span data-t="poganja"></span><b><svg data-ikona="povezava"></svg>Safeer Link</b></div>
     </div>
   </aside>
 
@@ -36,134 +38,286 @@
     <header id="vrh">
       <label class="iskanje">
         <svg data-ikona="isci"></svg>
-        <input id="iskanje" type="text" autocomplete="off" spellcheck="false" data-ph="isci">
-        <kbd data-t="tipkaj"></kbd>
+        <input id="iskanje" type="text" autocomplete="off" spellcheck="false" placeholder="Išči programe, datoteke, splet, naprave ...">
       </label>
-      <div class="presledek"></div>
-      <button class="stanje" id="gumbStanje">
-        <span id="stanjePovezava"><i class="pika siva"></i><span data-t="brezNaprav"></span></span>
-        <span id="stanjeOmrezje"></span>
-        <span id="stanjeZvok"></span>
-        <span id="stanjeBaterija"></span>
-      </button>
-      <div class="ura"><b id="ura">--:--</b><span id="datum"></span></div>
+      <div class="vrh-naprave">
+        <span class="naprava-znacka"><svg data-ikona="namizje"></svg> Povezan Linux PC</span>
+        <span class="naprava-znacka"><svg data-ikona="tv"></svg> Povezan Android TV</span>
+        <span class="naprava-znacka"><svg data-ikona="telefon"></svg> Povezan Telefon</span>
+        <span class="vrh-ikona"><svg data-ikona="wifi"></svg></span>
+        <span class="vrh-ikona" data-pojdi="nastavitve"><svg data-ikona="drsniki"></svg></span>
+      </div>
+      <div class="ura"><b id="ura">21:04</b><span id="datum">Sob, 26. sep. 2025</span></div>
     </header>
 
     <div id="vsebina">
       <!-- DOMOV -->
       <section class="razdelek viden" id="r-domov">
+        <!-- Hero Banner -->
         <div class="domov-hero">
           <div class="domov-hero-vsebina">
-            <span class="hero-oznaka"><i></i> SAFEER OS</span>
-            <h1 id="pozdrav"></h1>
-            <p data-t="pozdravPod"></p>
-            <p class="hero-vizija">Splet, aplikacije, datoteke in računalniki — končno skupaj. Brez oblaka, računa in naročnine.</p>
+            <h1 id="pozdrav">Dober večer, User!</h1>
+            <p>Vse tvoje naprave, mediji in programi – na enem mestu.</p>
+            <div class="hero-akcije">
+              <button class="gumb glavni" data-pojdi="media"><svg data-ikona="predvajaj"></svg><span>Nadaljuj z gledanjem</span></button>
+              <button class="gumb" data-pojdi="media"><svg data-ikona="glasba"></svg><span>Predvajaj glasbo</span></button>
+              <button class="gumb" data-pojdi="naprave"><svg data-ikona="naprave"></svg><span>Odpri naprave</span></button>
+            </div>
+          </div>
+          <div class="domov-hero-link">
+            <div class="hero-link-kartica" data-pojdi="naprave">
+              <svg data-ikona="povezava" class="link-ikona"></svg>
+              <div>
+                <b>Safeer Link</b>
+                <span>Vse naprave povezane</span>
+                <small>3 naprave online</small>
+              </div>
+              <svg data-ikona="desno" class="puscica"></svg>
+            </div>
           </div>
         </div>
-        <h2><span data-t="nedavnoUporabljeno"></span><button class="dodatno" data-pojdi="programi" data-t="vsiProgrami"></button></h2>
-        <div class="vrsta-plosc" id="domaciProgrami"></div>
-        <div id="blokOkna" hidden>
-          <h2><span data-t="odprtoZdaj"></span></h2>
-          <div class="okna" id="okna"></div>
+
+        <!-- Top Category Tiles Row (6 tiles matching mockup 1) -->
+        <div class="kategorije-vrsta">
+          <button class="kategorija-ploscica" data-pojdi="media" data-filter="film">
+            <svg data-ikona="film"></svg>
+            <b>Filmi</b>
+          </button>
+          <button class="kategorija-ploscica" data-pojdi="media" data-filter="serija">
+            <svg data-ikona="tv"></svg>
+            <b>Serije</b>
+          </button>
+          <button class="kategorija-ploscica" data-pojdi="media" data-filter="glasba">
+            <svg data-ikona="glasba"></svg>
+            <b>Glasba</b>
+          </button>
+          <button class="kategorija-ploscica" data-pojdi="media" data-filter="radio">
+            <svg data-ikona="radio"></svg>
+            <b>Radio</b>
+          </button>
+          <button class="kategorija-ploscica" data-pojdi="media" data-filter="tv-v-zivo">
+            <svg data-ikona="tv"></svg>
+            <b>TV v živo</b>
+          </button>
+          <button class="kategorija-ploscica" data-pojdi="datoteke">
+            <svg data-ikona="mapa"></svg>
+            <b>Lokalne datoteke</b>
+          </button>
         </div>
-        <div class="plosce">
-          <div class="plosca-dom">
-            <button class="glava-plosce" data-pojdi="naprave"><b data-t="povezaneNaprave"></b><svg data-ikona="desno"></svg></button>
-            <div class="vrstica-naprave"><svg data-ikona="naprave"></svg><div><b data-t="taRacunalnik"></b><span id="domNapravaStanje"><i class="pika siva"></i><span data-t="niPovezano"></span></span></div></div>
-            <p class="drobno" id="domNapraveOpis" data-t="napraveVControl"></p>
-            <button class="gumb" id="domControl"><svg data-ikona="qr"></svg><span id="domControlBesedilo" data-t="poveziNaprave"></span></button>
+
+        <!-- Middle Widgets Row (Naprave, Programi, AI Asistent) -->
+        <div class="domov-sredina-mreza">
+          <!-- Naprave -->
+          <div class="domov-kartica">
+            <div class="kartica-glava">
+              <b data-pojdi="naprave">Naprave</b>
+              <svg data-ikona="desno" data-pojdi="naprave"></svg>
+            </div>
+            <div class="naprave-pilule">
+              <div class="naprava-pilula povezana"><svg data-ikona="tv"></svg><b>Android TV</b><span><i class="pika zelena"></i> Povezan</span></div>
+              <div class="naprava-pilula povezana"><svg data-ikona="namizje"></svg><b>Linux PC</b><span><i class="pika zelena"></i> Povezan</span></div>
+              <div class="naprava-pilula povezana"><svg data-ikona="telefon"></svg><b>Telefon</b><span><i class="pika zelena"></i> Povezan</span></div>
+              <div class="naprava-pilula"><svg data-ikona="tablica"></svg><b>Tablica</b><span><i class="pika siva"></i> Offline</span></div>
+            </div>
           </div>
-          <div class="plosca-dom">
-            <button class="glava-plosce" data-pojdi="nastavitve"><b data-t="sistem"></b><svg data-ikona="desno"></svg></button>
-            <div class="sistem-vrstica"><svg data-ikona="namizje"></svg><div><b id="sistemIme">Windows</b><span id="sistemRacunalnik"></span></div></div>
-            <dl class="sistem-podatki" id="sistemPodatki"></dl>
+
+          <!-- Programi -->
+          <div class="domov-kartica">
+            <div class="kartica-glava">
+              <b data-pojdi="programi">Programi</b>
+              <span class="povezava-link" data-pojdi="programi">Vse aplikacije &gt;</span>
+            </div>
+            <div class="programi-vrsta-mini" id="domaciProgrami"></div>
+          </div>
+
+          <!-- AI Asistent -->
+          <div class="domov-kartica">
+            <div class="kartica-glava">
+              <span><svg data-ikona="iskra"></svg> <b>AI Asistent</b></span>
+            </div>
+            <div class="ai-vnos-okvir">
+              <input type="text" placeholder="Vprašaj o svojih medijih, napravah ali naredi nekaj ...">
+              <button class="gumb-ikona glavni"><svg data-ikona="desno"></svg></button>
+            </div>
           </div>
         </div>
-        <div id="blokNedavne" hidden>
-          <h2><span data-t="nedavneDatoteke"></span><button class="dodatno" id="gumbNedavnePocistiDomov" data-t="pocistiSeznam"></button><button class="dodatno" data-pojdi="datoteke" data-t="vseDatoteke"></button></h2>
-          <div class="vrstice" id="nedavneDomov"></div>
+
+        <!-- Nadaljuj z gledanjem -->
+        <h2>Nadaljuj z gledanjem</h2>
+        <div class="karusel-vrsta" id="domovNadaljuj">
+          <div class="karusel-kartica" data-pojdi="media">
+            <div class="slika-ovitek"><span class="napredek-trak" style="width: 65%;"></span></div>
+            <b>Dune: Part Two</b>
+            <small>2h 46min • 65 %</small>
+          </div>
+          <div class="karusel-kartica" data-pojdi="media">
+            <div class="slika-ovitek"><span class="napredek-trak" style="width: 42%;"></span></div>
+            <b>The Last of Us</b>
+            <small>S1 E3 • 42 min</small>
+          </div>
+          <div class="karusel-kartica" data-pojdi="media">
+            <div class="slika-ovitek"><span class="napredek-trak" style="width: 35%;"></span></div>
+            <b>Oppenheimer</b>
+            <small>2h 12min • 35 %</small>
+          </div>
+          <div class="karusel-kartica" data-pojdi="media">
+            <div class="slika-ovitek"><span class="napredek-trak" style="width: 12%;"></span></div>
+            <b>Interstellar</b>
+            <small>2h 49min • 12 %</small>
+          </div>
+          <div class="karusel-kartica" data-pojdi="media">
+            <div class="slika-ovitek"><span class="napredek-trak" style="width: 78%;"></span></div>
+            <b>Avatar: The Way of Water</b>
+            <small>2h 12min • 78 %</small>
+          </div>
+        </div>
+
+        <!-- Nedavno predvajano -->
+        <h2>Nedavno predvajano</h2>
+        <div class="nedavno-vrsta">
+          <div class="nedavno-kartica" data-pojdi="media">
+            <div class="glasba-slika"></div>
+            <div>
+              <b>The Weeknd</b>
+              <small>Blinding Lights</small>
+            </div>
+          </div>
+          <div class="nedavno-kartica" data-pojdi="media">
+            <div class="radio-slika"></div>
+            <div>
+              <b>Radio Antena</b>
+              <small>V živo</small>
+            </div>
+          </div>
+          <div class="nedavno-kartica" data-pojdi="media">
+            <div class="video-slika"><button class="predvajaj-ikona"><svg data-ikona="predvajaj"></svg></button></div>
+            <div>
+              <b>Narava.mp4</b>
+              <small>00:12:36</small>
+            </div>
+          </div>
+        </div>
+
+        <!-- Hitri dostop (6 tiles matching mockup 1) -->
+        <h2>Hitri dostop</h2>
+        <div class="hitri-vrsta-nov">
+          <button class="hitri-tile" data-pojdi="media">
+            <svg data-ikona="glasba"></svg>
+            <div>
+              <b>Medijski center</b>
+              <span>Filmi, serije, glasba, radio, TV</span>
+            </div>
+          </button>
+          <button class="hitri-tile" data-pojdi="datoteke">
+            <svg data-ikona="mapa"></svg>
+            <div>
+              <b>Moje datoteke</b>
+              <span>Lokalne in spletne vsebine</span>
+            </div>
+          </button>
+          <button class="hitri-tile" data-pojdi="naprave">
+            <svg data-ikona="naprave"></svg>
+            <div>
+              <b>Naprave</b>
+              <span>Upravljanje in povezava</span>
+            </div>
+          </button>
+          <button class="hitri-tile" data-pojdi="programi">
+            <svg data-ikona="programi"></svg>
+            <div>
+              <b>Programi</b>
+              <span>Aplikacije na vseh napravah</span>
+            </div>
+          </button>
+          <button class="hitri-tile" data-pojdi="splet">
+            <svg data-ikona="splet"></svg>
+            <div>
+              <b>Spletni brskalnik</b>
+              <span>Hiter, varen, brez oglasov</span>
+            </div>
+          </button>
+          <button class="hitri-tile" data-pojdi="nastavitve">
+            <svg data-ikona="drsniki"></svg>
+            <div>
+              <b>Nastavitve</b>
+              <span>Prilagodi Safeer OS</span>
+            </div>
+          </button>
         </div>
       </section>
 
-      <!-- SAFEER MEDIA -->
+      <!-- SAFEER MEDIA (MEDIJSKI CENTER matching Mockup 2) -->
       <section class="razdelek" id="r-media">
         <div class="media-glava">
           <div>
-            <h1>Safeer Media</h1>
-            <p data-t="mediaOpis">Vsa tvoja vsebina, ne glede na vir.</p>
+            <h1>▶ Medijski center</h1>
+            <p>Filmi, serije, glasba, radio, TV v živo in tvoje datoteke. Vse na enem mestu.</p>
           </div>
           <div class="media-glava-akcije">
-            <button class="gumb" id="mediaOsvezi"><svg data-ikona="ponovno"></svg><span data-t="mediaOsvezi">Osveži vire</span></button>
-            <button class="gumb" id="mediaNastavitveGumb"><svg data-ikona="drsniki"></svg><span data-t="mediaNastavitve">Nastavitve</span></button>
+            <button class="gumb-ikona" id="mediaOsvezi" title="Osveži vire"><svg data-ikona="ponovno"></svg></button>
+            <button class="gumb-ikona" id="mediaNastavitveGumb" title="Nastavitve"><svg data-ikona="drsniki"></svg></button>
           </div>
         </div>
 
-        <!-- NASTAVITVE SAFEER MEDIA (Uvoz/Izvoz JSON, koda, viri) -->
-        <div class="media-nastavitve-plosca" id="mediaNastavitvePlosca" hidden>
-          <div class="media-nastavitve-glava">
-            <div>
-              <h2 data-t="mediaNastavitveNaslov">Nastavitve Safeer Media</h2>
-              <p data-t="mediaNastavitveOpis">Uvoz in izvoz JSON knjižnic, neposreden vnos kode ter upravljanje virov.</p>
-            </div>
-            <button class="gumb-ikona" id="mediaZapriNastavitve" title="Zapri"><svg data-ikona="x"></svg></button>
-          </div>
-
-          <div class="media-nastavitve-kartice">
-            <!-- 1. Naloži izvoženo JSON datoteko -->
-            <div class="media-nastavitev-kartica">
-              <div class="media-nastavitev-naslov">
-                <svg data-ikona="arhiv"></svg>
-                <div>
-                  <b data-t="mediaUvozDatoteke">Naloži izvoženo JSON datoteko</b>
-                  <small data-t="mediaUvozDatotekeOpis">Izberite .json datoteko kataloga ali virov, ki ste jo izvozili prej ali prejeli iz druge naprave.</small>
-                </div>
-              </div>
-              <div class="media-datoteka-vrstica">
-                <input type="file" id="mediaJsonDatoteka" accept=".json,application/json" hidden>
-                <button class="gumb" type="button" id="mediaIzberiDatoteko"><svg data-ikona="dokument"></svg><span data-t="mediaIzberiDatoteko">Izberi .json datoteko</span></button>
-                <span class="media-datoteka-ime" id="mediaDatotekaIme" data-t="mediaNobenaDatoteka">Nobena datoteka ni izbrana</span>
-                <button class="gumb glavni" type="button" id="mediaUvoziDatotekoGumb" disabled><svg data-ikona="plus"></svg><span data-t="mediaUvoziDatoteko">Uvozi datoteko</span></button>
-              </div>
-            </div>
-
-            <!-- 2. Vnesi svojo JSON kodo -->
-            <div class="media-nastavitev-kartica">
-              <div class="media-nastavitev-naslov">
-                <svg data-ikona="program"></svg>
-                <div>
-                  <b data-t="mediaVnosJson">Vnesi svojo JSON kodo</b>
-                  <small data-t="mediaVnosJsonOpis">Prilepite JSON seznam medijev, prilagojeno konfiguracijo ali vir s tokovi.</small>
-                </div>
-              </div>
-              <div class="media-json-obrazec">
-                <input type="text" id="mediaJsonIme" maxlength="80" data-ph="mediaJsonImePh" placeholder="Ime zbirke ali vira (neobvezno)">
-                <textarea id="mediaJsonKoda" rows="5" spellcheck="false" placeholder='[&#10;  {&#10;    "title": "Primer videa",&#10;    "url": "https://primer.si/video.mp4",&#10;    "kind": "film"&#10;  }&#10;]'></textarea>
-                <div class="media-json-akcije">
-                  <button class="gumb glavni" type="button" id="mediaUvoziKodoGumb"><svg data-ikona="plus"></svg><span data-t="mediaUvoziKodo">Uvozi JSON kodo</span></button>
-                  <button class="gumb" type="button" id="mediaPrimerKodeGumb" title="Vstavi primer veljavne JSON kode"><svg data-ikona="program"></svg><span data-t="mediaVstaviPrimer">Primer kode (Code Example)</span></button>
-                  <button class="gumb" type="button" id="mediaPocistiKodoGumb"><span data-t="mediaPocisti">Počisti</span></button>
-                </div>
-              </div>
-            </div>
-
-            <!-- 3. Izvoz kataloga v JSON -->
-            <div class="media-nastavitev-kartica">
-              <div class="media-nastavitev-naslov">
-                <svg data-ikona="poslji"></svg>
-                <div>
-                  <b data-t="mediaIzvozJson">Izvozi vsebine v JSON</b>
-                  <small data-t="mediaIzvozJsonOpis">Prenesite celotno zbirko vaših virov in nastavitev v datoteko za varnostno kopijo ali prenos.</small>
-                </div>
-              </div>
-              <div class="media-izvoz-vrstica">
-                <button class="gumb" type="button" id="mediaIzvoziGumb"><svg data-ikona="disk"></svg><span data-t="mediaPrenesiIzvoz">Prenesi izvoženi JSON</span></button>
-              </div>
-            </div>
-          </div>
-
-          <p class="namig" id="mediaNastavitveSporocilo"></p>
+        <!-- Top Category Tiles Row (6 tiles matching mockup 2) -->
+        <div class="kategorije-vrsta">
+          <button class="kategorija-ploscica izbrana" data-media-filter="film">
+            <svg data-ikona="film"></svg>
+            <b>Filmi</b>
+          </button>
+          <button class="kategorija-ploscica" data-media-filter="serija">
+            <svg data-ikona="tv"></svg>
+            <b>Serije</b>
+          </button>
+          <button class="kategorija-ploscica" data-media-filter="glasba">
+            <svg data-ikona="glasba"></svg>
+            <b>Glasba</b>
+          </button>
+          <button class="kategorija-ploscica" data-media-filter="radio">
+            <svg data-ikona="radio"></svg>
+            <b>Radio</b>
+          </button>
+          <button class="kategorija-ploscica" data-media-filter="tv-v-zivo">
+            <svg data-ikona="tv"></svg>
+            <b>TV v živo</b>
+          </button>
+          <button class="kategorija-ploscica" data-pojdi="datoteke">
+            <svg data-ikona="mapa"></svg>
+            <b>Lokalne datoteke</b>
+          </button>
         </div>
 
+        <!-- Section: Nadaljuj z gledanjem -->
+        <h2>Nadaljuj z gledanjem</h2>
+        <div class="karusel-vrsta">
+          <div class="karusel-kartica">
+            <div class="slika-ovitek"><span class="napredek-trak" style="width: 65%;"></span></div>
+            <b>Dune: Part Two</b>
+            <small>2h 46min • 65 %</small>
+          </div>
+          <div class="karusel-kartica">
+            <div class="slika-ovitek"><span class="napredek-trak" style="width: 42%;"></span></div>
+            <b>The Last of Us</b>
+            <small>S1 E3 • 42 min</small>
+          </div>
+          <div class="karusel-kartica">
+            <div class="slika-ovitek"><span class="napredek-trak" style="width: 0%;"></span></div>
+            <b>Oppenheimer</b>
+            <small>2h 12min</small>
+          </div>
+          <div class="karusel-kartica">
+            <div class="slika-ovitek"><span class="napredek-trak" style="width: 0%;"></span></div>
+            <b>Interstellar</b>
+            <small>2h 49min</small>
+          </div>
+          <div class="karusel-kartica">
+            <div class="slika-ovitek"><span class="napredek-trak" style="width: 0%;"></span></div>
+            <b>Avatar: The Way of Water</b>
+            <small>2h 12min</small>
+          </div>
+        </div>
+
+        <!-- Dynamic Main Grid / Content Section -->
         <div class="media-predvajalnik" id="mediaPredvajalnik" hidden>
           <div class="media-predvajalnik-glava"><div><small data-t="mediaPredvaja">PREDVAJA SE V SAFEER OS</small><h2 id="mediaPredvajalnikNaslov"></h2><p id="mediaPredvajalnikMeta"></p></div><div class="media-predvajalnik-akcije"><button class="gumb-ikona" id="mediaKino" title="Kino način (celozaslonsko)"><svg data-ikona="celozaslonsko"></svg></button><button class="gumb-ikona" id="mediaZapri" data-naslov="zapri"><svg data-ikona="x"></svg></button></div></div>
           <video id="mediaVideo" controls playsinline preload="metadata" hidden></video>
@@ -176,8 +330,8 @@
         </div>
 
         <div class="media-orodja">
-          <label class="media-iskanje"><svg data-ikona="isci"></svg><input id="mediaIskanje" type="search" autocomplete="off" data-ph="mediaIsci" placeholder="Išči filme, serije in glasbo"></label>
-          <div class="filtri"><button class="izbran" data-media-filter="vse" data-t="mediaVse">Vse</button><button data-media-filter="film" data-t="mediaFilmi">Filmi</button><button data-media-filter="serija" data-t="mediaSerije">Serije</button><button data-media-filter="glasba" data-t="mediaGlasba">Glasba</button><button data-media-filter="podcast">Podcasti</button><button data-media-filter="radio">Radio</button><button data-media-filter="tv-v-zivo">TV v živo</button></div>
+          <label class="media-iskanje"><svg data-ikona="isci"></svg><input id="mediaIskanje" type="search" autocomplete="off" placeholder="Išči filme, serije, glasbo, radio ..."></label>
+          <div class="filtri"><button class="izbran" data-media-filter="vse">Vse</button><button data-media-filter="film">Filmi</button><button data-media-filter="serija">Serije</button><button data-media-filter="glasba">Glasba</button><button data-media-filter="podcast">Podcasti</button><button data-media-filter="radio">Radio</button><button data-media-filter="tv-v-zivo">TV v živo</button></div>
         </div>
         <div class="media-zanri" aria-label="Žanri">
           <button class="izbran" data-media-genre="">Vse vsebine</button>
