@@ -32,17 +32,27 @@ if ($missing.Count) {
 }
 Write-Host "[OK] Vse programske datoteke so prisotne." -ForegroundColor Green
 
-$python = $null
+$pythonExe = $null
+$pythonIsLauncher = $false
 $pyLauncher = Get-Command py.exe -ErrorAction SilentlyContinue
 if ($pyLauncher) {
-    $python = @($pyLauncher.Source, "-3")
+    $pythonExe = $pyLauncher.Source
+    $pythonIsLauncher = $true
 } else {
-    $pythonExe = Get-Command python.exe -ErrorAction SilentlyContinue
-    if ($pythonExe) { $python = @($pythonExe.Source) }
+    $pythonCommand = Get-Command python.exe -ErrorAction SilentlyContinue
+    if ($pythonCommand) { $pythonExe = $pythonCommand.Source }
 }
-if (-not $python) {
+if (-not $pythonExe) {
     Write-Host "[NAPAKA] Python 3 ni dosegljiv." -ForegroundColor Red
     exit 3
+}
+
+function Invoke-SafeerTestPython([object[]]$PythonArgs) {
+    if ($pythonIsLauncher) {
+        & $pythonExe -3 @PythonArgs
+    } else {
+        & $pythonExe @PythonArgs
+    }
 }
 
 $smoke = @"
@@ -59,9 +69,7 @@ assert isinstance(mc.catalog(), dict)
 print('SAFEER_SMOKE_OK')
 "@
 
-$exe = $python[0]
-$prefix = if ($python.Count -gt 1) { @($python[1]) } else { @() }
-$result = & $exe @prefix -c $smoke 2>&1
+$result = Invoke-SafeerTestPython @("-c", $smoke) 2>&1
 if ($LASTEXITCODE -ne 0 -or $result -notmatch "SAFEER_SMOKE_OK") {
     Write-Host "[NAPAKA] Programsko jedro ni prestalo samopreizkusa:" -ForegroundColor Red
     Write-Host $result
@@ -76,7 +84,7 @@ $vlcCandidates = @(
 $vlc = $null
 foreach ($candidate in $vlcCandidates) {
     $candidateEscaped = $candidate.Replace("'", "''")
-    $load = & $exe @prefix -c "import ctypes; ctypes.CDLL(r'$candidateEscaped'); print('LIBVLC_OK')" 2>$null
+    $load = Invoke-SafeerTestPython @("-c", "import ctypes; ctypes.CDLL(r'$candidateEscaped'); print('LIBVLC_OK')") 2>$null
     if ($LASTEXITCODE -eq 0 -and $load -match "LIBVLC_OK") {
         $vlc = $candidate
         break

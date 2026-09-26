@@ -301,6 +301,10 @@ class TestOsWindows(unittest.TestCase):
             self.assertIn('Remove-Item (Join-Path $DesktopPath $_)', script)
             self.assertNotIn('Join-Path $DesktopPath "Safeer Control.lnk"', script)
             self.assertNotIn('Join-Path $DesktopPath "Safeer Browser.lnk"', script)
+        smoke = (koren / "PREIZKUSI-SAFEER.ps1").read_text(encoding="utf-8")
+        self.assertIn("function Invoke-SafeerTestPython", smoke)
+        self.assertIn('Invoke-SafeerTestPython @("-c", $smoke)', smoke)
+        self.assertNotIn("& $exe @prefix", smoke)
 
     def test_media_viri_so_samo_v_nastavitvah_in_z_vgrajenim_predvajalnikom(self):
         koren = Path(__file__).resolve().parents[2]
