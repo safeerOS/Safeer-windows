@@ -705,3 +705,20 @@ button.povezavaGumb:focus-visible { outline: 2px solid var(--zelena); outline-of
 
 .vabilo { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
 .vabilo .qrOkvir[hidden] { display: none; }
+
+/* Pravice so vezane na posamezno napravo. Poln dostop je viden in mogoč, vendar nikoli tih. */
+.dovoljenja-naprav { display: flex; flex-direction: column; gap: 12px; margin: 18px 0; }
+.dovoljenje-kartica { padding: 15px; border: 1px solid var(--crta); border-radius: 15px; background: rgba(255,255,255,.025); }
+.dovoljenje-kartica.zahteva-izbiro { border-color: rgba(247,190,83,.62); box-shadow: inset 3px 0 0 #f7be53; }
+.dovoljenje-glava { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 11px; }
+.dovoljenje-glava b { font-size: 16px; }
+.dovoljenje-glava span { color: var(--medlo); font-size: 12px; }
+.dovoljenje-izbire { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; }
+.dovoljenje-izbire button { min-height: 80px; padding: 11px; border: 1px solid var(--crta); border-radius: 11px; background: var(--plosca); color: var(--besedilo); text-align: left; cursor: pointer; }
+.dovoljenje-izbire button:hover,.dovoljenje-izbire button:focus-visible { border-color: var(--zelena); outline: 0; }
+.dovoljenje-izbire button.izbran { border-color: var(--zelena); background: rgba(84,214,165,.1); box-shadow: inset 0 0 0 1px rgba(84,214,165,.18); }
+.dovoljenje-izbire b,.dovoljenje-izbire small { display: block; }
+.dovoljenje-izbire b { margin-bottom: 4px; font-size: 13px; }
+.dovoljenje-izbire small { color: var(--medlo); font-size: 11px; line-height: 1.35; }
+.dovoljenja-mape-naslov { margin: 24px 0 8px; padding-top: 18px; border-top: 1px solid var(--crta); font-size: 14px; }
+@media (max-width: 760px) { .dovoljenje-izbire { grid-template-columns: 1fr; } }

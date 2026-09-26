@@ -461,7 +461,8 @@ class SafeerOsWindow(QMainWindow):
         def _odpri():
             if self.control_window is None:
                 self.control_window = control_window.SafeerControlWindow(
-                    backend=self.control_backend, parent=self, na_skritje=self._na_skritje_controla)
+                    backend=self.control_backend, parent=self, na_skritje=self._na_skritje_controla,
+                    na_odpiranje=self._odpri_notranji_splet)
                 self.control_window.setWindowFlags(Qt.Widget)
                 self.zaslon.addWidget(self.control_window)
             else:

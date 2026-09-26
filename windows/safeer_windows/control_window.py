@@ -66,7 +66,6 @@ MOST_JS = """
     jezik: function () { return window.__safeerLink.jezik || "sl"; },
     vzdevki: function () { return JSON.stringify(window.__safeerLink.vzdevki || {}); },
     shraniVzdevek: function (id, ime) { poslji("shraniVzdevek", [id, ime]); },
-    potrdiNovNaslov: function () { poslji("potrdiNovNaslov"); },
     pozabiNapravo: function () { poslji("pozabiNapravo"); },
     poisciHub: function () { poslji("poisciHub"); },
     seznani: function () { poslji("seznani"); },
@@ -91,22 +90,12 @@ MOST_JS = """
     nadzor: function (cilj, u, v) { poslji("nadzor", [cilj, u, v]); },
     odpri: function (url) { poslji("odpri", [url]); },
     deliStandardneMape: function () { poslji("deliStandardneMape"); },
+    nastaviDovoljenje: function (id, profil) { poslji("nastaviDovoljenje", [id, profil]); },
     poveziNaprave: function () { poslji("poveziNaprave"); },
     novaLokalnaKoda: function () { poslji("novaLokalnaKoda"); },
-    hubVklopi: function () { poslji("hubVklopi"); },
-    hubIzklopi: function () { poslji("hubIzklopi"); },
-    hubOsvezi: function () { poslji("hubOsvezi"); },
-    hubStanje: function () { return JSON.stringify(window.__safeerLink.hubStanje || {}); },
-    hubPrijave: function () { return JSON.stringify(window.__safeerLink.hubPrijave || []); },
-    hubSeznanjene: function () { return JSON.stringify(window.__safeerLink.hubSeznanjene || []); },
-    hubPotrdi: function (id) { poslji("hubPotrdi", [id]); },
-    hubZavrni: function (id) { poslji("hubZavrni", [id]); },
-    hubPreklici: function (id) { poslji("hubPreklici", [id]); },
     deljeneMape: function () { return JSON.stringify(window.__safeerLink.deljeneMape || []); },
     dodajDeljenoMapo: function () { poslji("dodajDeljenoMapo"); },
     odstraniDeljenoMapo: function (i) { poslji("odstraniDeljenoMapo", [i]); },
-    deljenVesDisk: function () { return !!window.__safeerLink.deljenVesDisk; },
-    nastaviVesDisk: function (v) { poslji("nastaviVesDisk", [!!v]); },
     zapri: function () { poslji("zapri"); }
   };
 })();
@@ -131,12 +120,13 @@ class SafeerControlPage(QWebEnginePage):
 
 class SafeerControlWindow(QWidget):
     def __init__(self, backend: Optional[control_backend.SafeerControlBackend] = None, parent: Optional[QWidget] = None,
-                 na_skritje: Optional[Any] = None):
+                 na_skritje: Optional[Any] = None, na_odpiranje: Optional[Any] = None):
         super().__init__(parent)
         self.backend = backend or control_backend.get_backend()
         #: Ko je vgrajen v Safeer OS (namesto lastnega vrha-okna): klice se ob "zapri", uspesni
         #: seznanitvi ob prvem zagonu ali "nadaljuj brez povezave", da starsevsko okno preklopi nazaj.
         self.na_skritje = na_skritje
+        self.na_odpiranje = na_odpiranje
         self.v_prijavi = False
         self.setWindowTitle("Safeer OS · Naprave")
         if parent is None:
@@ -211,9 +201,10 @@ class SafeerControlWindow(QWidget):
             "sinhronizacija": {"zaznamki": {"vklopljena": False, "stevilo": 0}},
             "konzola": "",
             "jezik": "sl",
-            "deljenje": {"tece": False, "cilj": "", "ime": "", "napaka": ""},
+            "deljenje": self.backend.stanje_deljenja(),
             "vzdevki": self.backend.nastavitve.get("link_vzdevki", {}),
-            "deljeneMape": self.backend.deljene_mape(),
+            "deljeneMape": self.backend.deljene_mape_za_vmesnik(),
+            "dovoljenja": dict(self.backend.nastavitve.get("dovoljenja_naprav") or {}),
         }
         stanje_json = json.dumps(stanje, ensure_ascii=False)
         cmd = f"window.__safeerLink = {stanje_json};"
@@ -280,9 +271,8 @@ class SafeerControlWindow(QWidget):
             self.backend.prekini_qr()
         elif metoda == "odpri":
             url = str(a[0]) if a else ""
-            if url:
-                import webbrowser
-                webbrowser.open(url)
+            if url and self.na_odpiranje is not None:
+                self.dispatcher.dispatch(lambda: self.na_odpiranje(url))
         elif metoda == "nadzor":
             cilj = str(a[0]) if len(a) > 0 else ""
             u = str(a[1]) if len(a) > 1 else ""
@@ -298,6 +288,22 @@ class SafeerControlWindow(QWidget):
             cilj = str(a[0]) if len(a) > 0 else ""
             txt = str(a[1]) if len(a) > 1 else ""
             self.backend.poslji_besedilo(cilj, txt)
+        elif metoda == "poslji":
+            cilj = str(a[0]) if len(a) > 0 else ""
+            url = str(a[1]) if len(a) > 1 else ""
+            naslov = str(a[2]) if len(a) > 2 else ""
+            self.backend.poslji_url(cilj, url, naslov)
+        elif metoda == "izberiDatoteko":
+            cilj = str(a[0]) if a else ""
+            self.dispatcher.dispatch(lambda: self._izberi_datoteko(cilj))
+        elif metoda == "zacniDeljenjeZaslona":
+            cilj = str(a[0]) if len(a) > 0 else ""
+            ime = str(a[1]) if len(a) > 1 else ""
+            self.backend.zacni_deljenje_zaslona(cilj, ime)
+        elif metoda == "koncajDeljenjeZaslona":
+            self.backend.koncaj_deljenje_zaslona()
+        elif metoda == "shraniVzdevek":
+            self.backend.shrani_vzdevek(str(a[0]) if a else "", str(a[1]) if len(a) > 1 else "")
         elif metoda == "preimenujNapravo":
             id_n = str(a[0]) if len(a) > 0 else ""
             novo = str(a[1]) if len(a) > 1 else ""
@@ -305,6 +311,10 @@ class SafeerControlWindow(QWidget):
             threading.Thread(target=lambda: self.backend.preimenuj_napravo(id_n, novo), daemon=True).start()
         elif metoda == "dodajDeljenoMapo":
             self.dispatcher.dispatch(self._izberi_mapo)
+        elif metoda == "deliStandardneMape":
+            self.backend.deli_standardne_mape()
+        elif metoda == "nastaviDovoljenje":
+            self.backend.nastavi_dovoljenje(str(a[0]) if a else "", str(a[1]) if len(a) > 1 else "")
         elif metoda == "odstraniDeljenoMapo":
             idx = int(a[0]) if a else -1
             self.backend.odstrani_deljeno_mapo(idx)
@@ -318,6 +328,11 @@ class SafeerControlWindow(QWidget):
         mapa = QFileDialog.getExistingDirectory(self, "Izberi mapo za deljenje")
         if mapa:
             self.backend.dodaj_deljeno_mapo(mapa)
+
+    def _izberi_datoteko(self, cilj: str) -> None:
+        pot, _ = QFileDialog.getOpenFileName(self, "Pošlji datoteko z aplikacijo Safeer OS")
+        if pot:
+            self.backend.poslji_datoteko(cilj, pot)
 
     def closeEvent(self, event) -> None:
         # Ce je vgrajen v Safeer OS, klik na X v vgrajenem pogledu ne pride sem (ni okvirja);

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import http.client
 import json
 import os
@@ -25,6 +26,25 @@ from safeer_windows.navidezni_zaslon import NavidezniZaslon
 
 CONFIG_DIR = os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~/.config"), "SafeerControl")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "link.json")
+
+
+class _WindowsDeljenjeZaslona(link_deljenje.DeljenjeZaslona):
+    """Hubu posreduje Safeerjev izolirani zaslon, ne uporabnikovega fizičnega namizja."""
+
+    def __init__(self, *args, navidezni_zaslon: NavidezniZaslon, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._navidezni_zaslon = navidezni_zaslon
+
+    def zajem_na_voljo(self) -> Tuple[bool, str]:
+        return True, ""
+
+    def _okvir(self) -> Optional[bytes]:
+        posnetek = self._navidezni_zaslon.zajemi_posnetek()
+        slika = str((posnetek or {}).get("image") or "")
+        if not slika:
+            return None
+        encoded = slika.split(",", 1)[1] if "," in slika else slika
+        return base64.b64decode(encoded, validate=True)
 
 
 class SafeerControlBackend:
@@ -57,6 +77,8 @@ class SafeerControlBackend:
         self._povezovanje = False
         self._zadnji_hubi: List[dict] = []
         self._cas_hubi = 0.0
+        self._deljenje_zaslona: Optional[link_deljenje.DeljenjeZaslona] = None
+        self._opozorjena_dovoljenja: set[str] = set()
 
     def nova_lokalna_koda(self) -> str:
         self.lokalna_koda = str(100000 + secrets.randbelow(900000))
@@ -194,9 +216,48 @@ class SafeerControlBackend:
             "zaupajOkno": bool(self.nastavitve.get("zaupana", True)),
             "brezPovezave": True,
             "lokalnaKoda": self.lokalna_koda,
-            "deljeneMape": self.deljene_mape(),
+            "deljeneMape": self.deljene_mape_za_vmesnik(),
             "standardneDeljene": False,
+            "dovoljenja": dict(self.nastavitve.get("dovoljenja_naprav") or {}),
         }
+
+    def dovoljenje_za(self, id_naprave: str) -> str:
+        """Vrne profil dostopa naprave: polno, izbrano, zaslon ali vprasaj."""
+        dovoljenja = self.nastavitve.get("dovoljenja_naprav") or {}
+        profil = str(dovoljenja.get(str(id_naprave or "")) or "")
+        if profil in ("polno", "izbrano", "zaslon", "vprasaj"):
+            return profil
+        # Stare namestitve ohranijo delovanje do prvega seznama naprav. Vsaka dejansko
+        # odkrita nova naprava pa spodaj dobi profil `vprasaj` in nima dostopa brez izbire.
+        if any(str(n.get("id") or "") == str(id_naprave or "") for n in self.naprave):
+            return "vprasaj"
+        return "polno"
+
+    def nastavi_dovoljenje(self, id_naprave: str, profil: str) -> bool:
+        id_naprave, profil = str(id_naprave or "").strip(), str(profil or "").strip().lower()
+        if not id_naprave or profil not in ("polno", "izbrano", "zaslon"):
+            return False
+        dovoljenja = dict(self.nastavitve.get("dovoljenja_naprav") or {})
+        dovoljenja[id_naprave] = profil
+        self.nastavitve["dovoljenja_naprav"] = dovoljenja
+        ok = self.shrani_nastavitve()
+        if ok:
+            self._opozorjena_dovoljenja.discard(id_naprave)
+            self._oddaj_dogodek("dovoljenja", dovoljenja)
+            self._oddaj_dogodek("stanje", self.stanje_linka())
+        return ok
+
+    def _dejanje_dovoljeno(self, id_naprave: str, akcija: str) -> bool:
+        if akcija == "status":
+            return True
+        profil = self.dovoljenje_za(id_naprave)
+        if profil == "polno":
+            return True
+        if profil == "izbrano":
+            return akcija.startswith("files.")
+        if profil == "zaslon":
+            return akcija in ("screenshot", "screen.capture", "screen.start", "screen.stop", "screen.status")
+        return False
 
     # ------------------------------------------------------------------ Odkrivanje Hubov v omrezju
     def _lokalni_ip(self) -> str:
@@ -590,6 +651,8 @@ class SafeerControlBackend:
 
         if vrsta == "cast.devices":
             seznam = []
+            nova_brez_dovoljenja = []
+            dovoljenja = dict(self.nastavitve.get("dovoljenja_naprav") or {})
             for d in sporocilo.get("devices") or []:
                 seznam.append({
                     "id": d.get("id", ""),
@@ -605,9 +668,20 @@ class SafeerControlBackend:
                     "aplikacije": d.get("apps") if isinstance(d.get("apps"), dict) else {},
                     "ta": d.get("id") == self.device_id,
                 })
+                id_n = str(d.get("id") or "")
+                if id_n and id_n != self.device_id and id_n not in dovoljenja:
+                    dovoljenja[id_n] = "vprasaj"
+                    nova_brez_dovoljenja.append({"id": id_n, "ime": d.get("name") or id_n})
+            if nova_brez_dovoljenja:
+                self.nastavitve["dovoljenja_naprav"] = dovoljenja
+                self.shrani_nastavitve()
             self.naprave = seznam
             self._oddaj_dogodek("naprave", self.naprave)
             self._oddaj_dogodek("stanje", self.stanje_linka())
+            for naprava in nova_brez_dovoljenja:
+                if naprava["id"] not in self._opozorjena_dovoljenja:
+                    self._opozorjena_dovoljenja.add(naprava["id"])
+                    self._oddaj_dogodek("dovoljenjeZahtevano", naprava)
 
         elif vrsta in ("control.result", "control.ack"):
             ref = str(sporocilo.get("ref_id", "") or sporocilo.get("id", "") or "")
@@ -649,7 +723,16 @@ class SafeerControlBackend:
         izid: Dict[str, Any] = {"ok": True, "message": "Ukaz izveden"}
 
         try:
-            if akcija == "status":
+            if not self._dejanje_dovoljeno(posiljatelj, akcija):
+                izid = {
+                    "ok": False,
+                    "message": "Na tem računalniku najprej izberi pravice za to napravo.",
+                    "code": "dovoljenje_potrebno",
+                    "data": {"permission": self.dovoljenje_za(posiljatelj)},
+                }
+                self._oddaj_dogodek("dovoljenjeZahtevano", {"id": posiljatelj, "ime": posiljatelj})
+
+            elif akcija == "status":
                 izid = {
                     "ok": True,
                     "message": "Stanje",
@@ -742,7 +825,10 @@ class SafeerControlBackend:
                 mapa = str(params.get("folder") or "")
                 try:
                     from core import link_datoteke
-                    d = link_datoteke.Datoteke(poti=self.deljene_mape(), tls_mapa=self.navidezni_zaslon.tls_mapa)
+                    d = link_datoteke.Datoteke(
+                        poti=self.deljene_mape(), tls_mapa=self.navidezni_zaslon.tls_mapa,
+                        ves_disk=self.dovoljenje_za(posiljatelj) == "polno",
+                    )
                     podatki = d.seznam(mapa, posiljatelj, self.hub_url())
                     izid = {"ok": True, "message": f"{len(podatki.get('items', []))} vnosov", "data": podatki}
                 except Exception as e:
@@ -752,7 +838,10 @@ class SafeerControlBackend:
                 dat_id = str(params.get("id") or "")
                 try:
                     from core import link_datoteke
-                    d = link_datoteke.Datoteke(poti=self.deljene_mape(), tls_mapa=self.navidezni_zaslon.tls_mapa)
+                    d = link_datoteke.Datoteke(
+                        poti=self.deljene_mape(), tls_mapa=self.navidezni_zaslon.tls_mapa,
+                        ves_disk=self.dovoljenje_za(posiljatelj) == "polno",
+                    )
                     if d.odpri(dat_id):
                         izid = {"ok": True, "message": "Datoteka se odpira na ločenem navideznem zaslonu"}
                     else:
@@ -764,7 +853,10 @@ class SafeerControlBackend:
                 poizvedba = str(params.get("q") or "")
                 try:
                     from core import link_datoteke
-                    d = link_datoteke.Datoteke(poti=self.deljene_mape(), tls_mapa=self.navidezni_zaslon.tls_mapa)
+                    d = link_datoteke.Datoteke(
+                        poti=self.deljene_mape(), tls_mapa=self.navidezni_zaslon.tls_mapa,
+                        ves_disk=self.dovoljenje_za(posiljatelj) == "polno",
+                    )
                     podatki = d.isci(poizvedba, posiljatelj, self.hub_url())
                     izid = {"ok": True, "message": f"{len(podatki.get('items', []))} zadetkov", "data": podatki}
                 except Exception as e:
@@ -1057,9 +1149,78 @@ class SafeerControlBackend:
             "payload": {"text": vsebina},
         })
 
+    def poslji_url(self, cilj: str, url: str, naslov: str = "") -> bool:
+        """Pošlje spletni naslov po istem protokolu kot Android Safeer Link."""
+        url = str(url or "").strip()
+        if not self.je_povezan() or not cilj or not url.startswith(("http://", "https://")):
+            return False
+        return bool(self.povezava.poslji_url(cilj, url, naslov or ""))
+
+    def poslji_datoteko(self, cilj: str, pot: str) -> bool:
+        """Datoteko pošlje asinhrono in vmesniku sproti javlja napredek."""
+        if not cilj or not os.path.isfile(pot) or not (self.hub_url() and self.zeton() and self.hub_fp()):
+            self._oddaj_dogodek("deljenje", {
+                "tece": False, "cilj": cilj, "ime": os.path.basename(pot),
+                "napaka": "Datoteke ni mogoče poslati brez varne povezave s Safeer Linkom.",
+            })
+            return False
+
+        ime = os.path.basename(pot)
+
+        def _delo() -> None:
+            def _napredek(odstotek: int) -> None:
+                self._oddaj_dogodek("deljenje", {
+                    "tece": True, "cilj": cilj, "ime": ime, "odstotek": odstotek, "napaka": "",
+                })
+
+            _napredek(0)
+            ok, napaka = link_deljenje.poslji_datoteko(
+                self.hub_url(), self.zeton(), self.hub_fp(), self.device_id, cilj, pot, _napredek
+            )
+            self._oddaj_dogodek("deljenje", {
+                "tece": False, "cilj": cilj, "ime": ime, "odstotek": 100 if ok else 0,
+                "uspeh": ok, "napaka": "" if ok else str(napaka.get("sporocilo") or "Pošiljanje ni uspelo."),
+            })
+
+        threading.Thread(target=_delo, name="SafeerFileShare", daemon=True).start()
+        return True
+
+    def zacni_deljenje_zaslona(self, cilj: str, ime: str = "") -> bool:
+        if not cilj or not (self.hub_url() and self.zeton() and self.hub_fp()):
+            self._oddaj_dogodek("deljenje", {
+                "tece": False, "cilj": cilj, "ime": ime,
+                "napaka": "Zaslon lahko deliš po varni povezavi s Safeer Linkom.",
+            })
+            return False
+        self.koncaj_deljenje_zaslona()
+        deljenje = _WindowsDeljenjeZaslona(
+            self.hub_url(), self.zeton(), self.hub_fp(), self.device_id, cilj, ime or cilj,
+            ob_spremembi=lambda stanje: self._oddaj_dogodek("deljenje", stanje),
+            navidezni_zaslon=self.navidezni_zaslon,
+        )
+        self._deljenje_zaslona = deljenje
+        deljenje.zacni()
+        return True
+
+    def koncaj_deljenje_zaslona(self) -> bool:
+        if self._deljenje_zaslona is None:
+            return False
+        self._deljenje_zaslona.ustavi()
+        self._deljenje_zaslona = None
+        return True
+
+    def stanje_deljenja(self) -> dict:
+        if self._deljenje_zaslona is None:
+            return {"tece": False, "cilj": "", "ime": "", "napaka": ""}
+        return self._deljenje_zaslona.stanje()
+
     # ------------------------------------------------------------------ Deljene mape
     def deljene_mape(self) -> List[str]:
         return list(self.nastavitve.get("deljene_mape", []))
+
+    def deljene_mape_za_vmesnik(self) -> List[dict]:
+        return [{"pot": pot, "ime": os.path.basename(os.path.normpath(pot)) or pot}
+                for pot in self.deljene_mape()]
 
     def dodaj_deljeno_mapo(self, pot: str) -> bool:
         mape = self.deljene_mape()
@@ -1071,6 +1232,31 @@ class SafeerControlBackend:
             self._oddaj_dogodek("stanje", self.stanje_linka())
             return True
         return False
+
+    def deli_standardne_mape(self) -> int:
+        """Enkrat doda obstoječe uporabnikove mape; podvojene poti se preskočijo."""
+        dodanih = 0
+        for mapa in os_backend_win.uporabniske_mape():
+            pot = str(mapa.get("pot") or "")
+            if pot and self.dodaj_deljeno_mapo(pot):
+                dodanih += 1
+        self._oddaj_dogodek("deljeneMape", {"mape": self.deljene_mape_za_vmesnik(), "standardne": True})
+        return dodanih
+
+    def shrani_vzdevek(self, id_naprave: str, ime: str) -> bool:
+        id_naprave, ime = str(id_naprave or "").strip(), str(ime or "").strip()[:80]
+        if not id_naprave:
+            return False
+        vzdevki = dict(self.nastavitve.get("link_vzdevki") or {})
+        if ime:
+            vzdevki[id_naprave] = ime
+        else:
+            vzdevki.pop(id_naprave, None)
+        self.nastavitve["link_vzdevki"] = vzdevki
+        ok = self.shrani_nastavitve()
+        if ok:
+            self._oddaj_dogodek("vzdevki", vzdevki)
+        return ok
 
     def odstrani_deljeno_mapo(self, indeks: int) -> bool:
         mape = self.deljene_mape()

@@ -1866,8 +1866,10 @@
     });
     $("mediaPrazno").hidden = !!list.length;
     $("mediaPovzetek").textContent = t("mediaZadetkov", { n: list.length });
-    list.slice(0, 300).forEach(function (x) {
+    list.slice(0, 300).forEach(function (x, indeks) {
       var card = el("button", "media-kartica");
+      if (!iskano && media.filter === "vse" && indeks === 0 && list.length > 3) card.classList.add("izpostavljena");
+      card.setAttribute("aria-label", (x.naslov || "Safeer Media") + " — " + mediaOznaka(x.vrsta));
       if (x.slika) {
         var image = document.createElement("img"); image.alt = ""; image.loading = "lazy"; image.src = x.slika;
         image.onerror = function () { image.replaceWith(el("span", "media-brez-slike", svg(mediaIkona(x.vrsta)))); };

@@ -660,7 +660,10 @@ class NavidezniZaslon:
             nit_vnos.join()
 
         except Exception as e:
-            print(f"[NavidezniZaslon] Seja prekinjena: {e}")
+            # Zapiranje poslušalca med običajnim `ustavi_sejo` prekine blokirani accept/recv.
+            # To ni napaka in ne sme onesnažiti dnevnika končnega uporabnika.
+            if self._tece:
+                print(f"[NavidezniZaslon] Seja prekinjena: {e}")
         finally:
             if odjemalec:
                 try:
