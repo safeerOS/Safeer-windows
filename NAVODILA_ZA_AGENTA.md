@@ -163,6 +163,17 @@ git add .
 git commit --no-gpg-sign -m "opis tvojega popravka ali izboljsave"
 ```
 
+### Izdaja za Windows
+
+Vsaki objavljeni testni ali končni različici obvezno priloži:
+
+- samostojni `SafeerOS-Windows-<razlicica>.exe`,
+- celotni ZIP paket,
+- `SafeerOS-Odstranitev.zip`, ki vsebuje `uninstall.bat` in `uninstall.ps1`.
+
+Odstranjevalnik mora biti iz iste revizije kot izdaja. Pred objavo preveri, da odstrani
+bližnjice, `%LOCALAPPDATA%\SafeerOS` in pravila požarnega zidu Safeer OS/Control.
+
 Nikoli ne uporabljaj `git push origin main` ali `git checkout main`.
 
 ---

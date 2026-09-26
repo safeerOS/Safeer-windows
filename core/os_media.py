@@ -1268,7 +1268,9 @@ class MediaCenter:
         """V ozadju osveži le vire, katerih uspešni podatki so že zastareli."""
         cutoff = int(time.time()) - max(60, int(max_age))
         ids = [source.get("id", "") for source in self.sources()
-               if int(source.get("posodobljeno") or 0) < cutoff]
+               if int(source.get("posodobljeno") or 0) < cutoff
+               or (_je_predvajalni_vir(str(source.get("url") or ""))
+                   and source.get("tip") != "predvajalni_vir")]
         results = [self.refresh_source(source_id) for source_id in ids]
         return {"ok": all(item.get("ok") for item in results), "osvezenih": len(results),
                 "rezultati": results}

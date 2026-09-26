@@ -1143,6 +1143,19 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
             self.assertTrue(all("{" not in item["url"] for item in catalog))
             self.assertTrue(all(item["url"].startswith("https://vidlink.pro/") for item in catalog))
 
+    def test_media_staro_vidlink_predlogo_samodejno_migrira(self):
+        with tempfile.TemporaryDirectory() as td:
+            center = os_media.MediaCenter(td, roots=[])
+            center.config_dir.mkdir(parents=True, exist_ok=True)
+            center.store_path.write_text(json.dumps({"viri": [{
+                "id": "star", "url": "https://vidlink.pro/movie/{tmdbId}", "ime": "filmi",
+                "posodobljeno": 2_000_000_000, "stevilo": 1,
+                "vnosi": [{"naslov": "filmi ({tmdbid})", "url": "https://vidlink.pro/movie/{tmdbId}"}],
+            }]}), encoding="utf-8")
+            result = center.refresh_stale()
+            self.assertEqual(result["osvezenih"], 1)
+            self.assertFalse(any("{" in item["url"] for item in center.catalog()["vnosi"]))
+
     def test_media_embed_vir_vidsrc_in_iframe_podpora(self):
         # 1. HTML z vdelanim iframe in povezavami
         html = '''<!DOCTYPE html><html><body><h1>Test Portal</h1>
