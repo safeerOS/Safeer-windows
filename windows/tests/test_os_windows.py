@@ -287,6 +287,8 @@ class TestOsWindows(unittest.TestCase):
             self.assertIn('$existingConfig = Join-Path $InstallDir "config"', script)
             self.assertIn('Copy-Item -Path $existingConfig -Destination $configBackup', script)
             self.assertIn('Copy-Item -Path $configBackup -Destination (Join-Path $InstallDir "config")', script)
+            self.assertIn("importlib.util.find_spec('vlc')", script)
+            self.assertNotIn("cryptography, qrcode, vlc; print('MODULI_OK')", script)
 
     def test_media_viri_so_samo_v_nastavitvah_in_z_vgrajenim_predvajalnikom(self):
         koren = Path(__file__).resolve().parents[2]

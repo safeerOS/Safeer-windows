@@ -258,7 +258,13 @@ function Invoke-SafeerPip([object[]]$PipArgs) {
 
 function Test-PythonModule($mod) {
     try {
-        Invoke-SafeerPython @("-c", "import $mod") 2>$null
+        # python-vlc ob uvozu takoj poskuša naložiti libvlc.dll. Prisotnost
+        # vezave zato preverimo brez uvoza; runtime se preveri ločeno spodaj.
+        if ($mod -eq "vlc") {
+            Invoke-SafeerPython @("-c", "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('vlc') else 1)") 2>$null
+        } else {
+            Invoke-SafeerPython @("-c", "import $mod") 2>$null
+        }
         return ($LASTEXITCODE -eq 0)
     } catch {
         return $false
@@ -284,7 +290,7 @@ if ($manjkajoce.Count -gt 0) {
 # Preveri uspešnost uvoza
 $testOk = $false
 try {
-    $res = Invoke-SafeerPython @("-c", "import PySide6.QtCore, PySide6.QtWidgets, PIL.Image, cryptography, qrcode, vlc; print('MODULI_OK')") 2>$null
+    $res = Invoke-SafeerPython @("-c", "import importlib.util, PySide6.QtCore, PySide6.QtWidgets, PySide6.QtWebEngineWidgets, PIL.Image, cryptography, qrcode; assert importlib.util.find_spec('vlc'); print('MODULI_OK')") 2>$null
     if ($res -match "MODULI_OK") {
         $testOk = $true
     }
@@ -309,10 +315,10 @@ if (-not $vlcDll) {
         Write-Info "Nameščam uradni LibVLC runtime za vgrajeni Safeer Media predvajalnik..."
         try {
             $vlcInstall = Start-Process -FilePath "winget.exe" -ArgumentList "install --id VideoLAN.VLC -e --silent --accept-package-agreements --accept-source-agreements" -Wait -PassThru
-            if ($vlcInstall.ExitCode -ne 0) { Write-Warn "LibVLC ni bil nameščen; spletni viri se bodo odprli v zaščitenem Safeer Browserju." }
-        } catch { Write-Warn "LibVLC ni bil nameščen; spletni viri se bodo odprli v zaščitenem Safeer Browserju." }
+            if ($vlcInstall.ExitCode -ne 0) { Write-Warn "LibVLC ni bil nameščen; neposredni tokovi bodo uporabili rezervni predvajalnik Safeer Media." }
+        } catch { Write-Warn "LibVLC ni bil nameščen; neposredni tokovi bodo uporabili rezervni predvajalnik Safeer Media." }
     } else {
-        Write-Warn "Windows Package Manager ni na voljo; spletni viri se bodo odprli v zaščitenem Safeer Browserju."
+        Write-Warn "Windows Package Manager ni na voljo; neposredni tokovi bodo uporabili rezervni predvajalnik Safeer Media."
     }
 }
 
