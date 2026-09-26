@@ -85,7 +85,15 @@ def _resolution(value: Any, *hints: str) -> int:
     if "4k" in joined or "2160" in joined or "uhd" in joined:
         return 2160
     matches = [int(x) for x in re.findall(r"(?<!\d)(360|480|576|720|1080|1440|2160|4320)p?", joined)]
-    return max(matches, default=0)
+    if matches:
+        return max(matches)
+    if re.search(r"\b(fhd|full[ -]?hd|auto|adaptive)\b", joined):
+        return 1080
+    if re.search(r"\bhd\b", joined):
+        return 720
+    if re.search(r"\bsd\b", joined):
+        return 480
+    return 0
 
 
 def _quality_label(resolution: int) -> str:
@@ -235,16 +243,112 @@ KNOWN_IMDB = {
     },
 }
 
-# TMDB aliasi za enotno prepoznavanje numeričnih ID-jev
-for _imdb_k, _tmdb_k in [
+ID_PAIRS = [
     ("tt0944947", "1399"), ("tt0903747", "1396"), ("tt4574334", "66732"),
     ("tt3581920", "100088"), ("tt8462636", "87108"), ("tt1375666", "27205"),
     ("tt0816692", "157336"), ("tt0468569", "155"), ("tt0111161", "278"),
     ("tt0110912", "680"), ("tt0133093", "603"), ("tt0172495", "98"),
     ("tt15239678", "693134"), ("tt15398776", "872585"), ("tt1630029", "76600")
-]:
+]
+IMDB_TO_TMDB = dict(ID_PAIRS)
+TMDB_TO_IMDB = {tmdb: imdb for imdb, tmdb in ID_PAIRS}
+
+# TMDb aliasi omogočajo enako obogatitev za oba standardna identifikatorja.
+for _imdb_k, _tmdb_k in ID_PAIRS:
     if _imdb_k in KNOWN_IMDB:
         KNOWN_IMDB[_tmdb_k] = KNOWN_IMDB[_imdb_k]
+
+
+def _imdb_id(value: Any) -> str:
+    """Vrne kanonični IMDb ID (tt + številke) ali prazen niz."""
+    text = _text(value, 300).lower()
+    match = re.search(r"(?<![a-z0-9])(tt\d{5,12})(?!\d)", text)
+    return match.group(1) if match else ""
+
+
+def _tmdb_id(value: Any) -> int:
+    """Vrne pozitiven TMDb ID; letnic in poljubnih števil v besedilu ne ugiba."""
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, (int, float)) and int(value) == value:
+        number = int(value)
+        return number if 0 < number <= 2_147_483_647 else 0
+    text = _text(value, 300).lower().strip()
+    match = re.fullmatch(r"(?:tmdb(?::|://)?)?(\d{1,10})", text)
+    if not match:
+        match = re.search(r"(?:[?&]tmdb=|/tmdb/|themoviedb\.org/(?:movie|tv)/)(\d{1,10})(?:\D|$)", text)
+    if not match:
+        return 0
+    number = int(match.group(1))
+    return number if 0 < number <= 2_147_483_647 else 0
+
+
+def _external_ids(mapping: dict, inherited: Optional[dict] = None) -> tuple[str, int]:
+    """Razbere pogoste IMDb/TMDb sheme brez zamenjave internega `id` za TMDb."""
+    inherited = inherited or {}
+    nested = []
+    for key in ("external_ids", "externalIds", "ids", "identifiers"):
+        value = mapping.get(key)
+        if isinstance(value, dict):
+            nested.append(value)
+
+    imdb_values = [
+        _first(mapping, ("imdb_id", "imdbId", "imdbID", "imdb", "imdb_key")),
+        *[_first(value, ("imdb_id", "imdbId", "imdbID", "imdb")) for value in nested],
+    ]
+    tmdb_values = [
+        _first(mapping, ("tmdb_id", "tmdbId", "tmdbID", "tmdb", "themoviedb_id")),
+        *[_first(value, ("tmdb_id", "tmdbId", "tmdbID", "tmdb")) for value in nested],
+    ]
+
+    generic_id = mapping.get("id")
+    imdb = next((found for found in (_imdb_id(value) for value in imdb_values) if found), "")
+    if not imdb:
+        imdb = _imdb_id(generic_id)
+    tmdb = next((found for found in (_tmdb_id(value) for value in tmdb_values) if found), 0)
+    # TMDb-jevi rezultati uporabljajo numerični `id` skupaj z značilnimi polji.
+    looks_like_tmdb = any(key in mapping for key in (
+        "media_type", "original_title", "original_name", "poster_path",
+        "backdrop_path", "vote_average", "first_air_date", "release_date",
+    ))
+    if not tmdb and looks_like_tmdb:
+        tmdb = _tmdb_id(generic_id)
+
+    imdb = imdb or _imdb_id(inherited.get("imdb_id"))
+    tmdb = tmdb or _tmdb_id(inherited.get("tmdb_id"))
+    if imdb and not tmdb:
+        tmdb = _tmdb_id(IMDB_TO_TMDB.get(imdb))
+    if tmdb and not imdb:
+        imdb = TMDB_TO_IMDB.get(str(tmdb), "")
+    return imdb, tmdb
+
+
+def _source_context(url: str) -> dict:
+    """Iz identitete dokumentiranega API-endpointa razbere naslovni ID in epizodo."""
+    parsed = urllib.parse.urlsplit(url or "")
+    query = dict(urllib.parse.parse_qsl(parsed.query))
+    context: dict[str, Any] = {}
+    match = re.search(
+        r"/(?:api/streams/(?:[^/]+/)?|embed/)?(movie|series|tv)/((?:tt)?\d+)(?:/|$)",
+        parsed.path,
+        re.IGNORECASE,
+    )
+    raw_id = match.group(2) if match else (query.get("tmdb") or query.get("imdb") or "")
+    imdb, tmdb = _imdb_id(raw_id), _tmdb_id(raw_id)
+    if imdb and not tmdb:
+        tmdb = _tmdb_id(IMDB_TO_TMDB.get(imdb))
+    if tmdb and not imdb:
+        imdb = TMDB_TO_IMDB.get(str(tmdb), "")
+    if imdb:
+        context["imdb_id"] = imdb
+    if tmdb:
+        context["tmdb_id"] = tmdb
+    if match:
+        context["kind"] = "serija" if match.group(1).lower() in ("series", "tv") else "film"
+    for source_key, target_key in (("season", "season"), ("episode", "episode"), ("s", "season"), ("e", "episode")):
+        if str(query.get(source_key) or "").isdigit():
+            context[target_key] = int(query[source_key])
+    return context
 
 
 def _safe_headers(value: Any) -> dict[str, str]:
@@ -264,7 +368,8 @@ def _item(title: Any, url: Any, *, base: str, source_id: str, source_name: str,
           kind: Any = "", year: Any = 0, image: Any = "", artist: Any = "",
           quality: Any = "", resolution: Any = 0, bitrate: Any = 0,
           season: Any = 0, episode: Any = 0, description: Any = "",
-          headers: Any = None, referer: Any = "") -> Optional[dict]:
+          headers: Any = None, referer: Any = "", imdb_id: Any = "",
+          tmdb_id: Any = 0) -> Optional[dict]:
     media_url = _absolute(base, url)
     clean_title = _text(title, 200)
     if not media_url or not clean_title:
@@ -272,7 +377,7 @@ def _item(title: Any, url: Any, *, base: str, source_id: str, source_name: str,
     try:
         year_int = int(year or 0)
     except (TypeError, ValueError):
-        match = re.search(r"\b(19\d{2}|20\d{2})\b", clean_title)
+        match = re.search(r"\b(19\d{2}|20\d{2})\b", f"{year or ''} {clean_title}")
         year_int = int(match.group(1)) if match else 0
     try:
         bitrate_int = int(float(bitrate or 0))
@@ -299,10 +404,21 @@ def _item(title: Any, url: Any, *, base: str, source_id: str, source_name: str,
                     season_int = int(match_x.group(1))
                     episode_int = int(match_x.group(2))
 
-    # Obogatitev z zbirko znanih IMDb in TMDB naslovov ter plakatov
-    imdb_match = re.search(r"\b(tt\d+|\d{2,7})\b", (clean_title + " " + media_url).lower())
-    if imdb_match and imdb_match.group(1) in KNOWN_IMDB:
-        k_info = KNOWN_IMDB[imdb_match.group(1)]
+    normalized_imdb = _imdb_id(imdb_id) or _imdb_id(clean_title + " " + media_url)
+    normalized_tmdb = _tmdb_id(tmdb_id)
+    if not normalized_tmdb:
+        known_numeric = re.search(r"/(?:movie|tv|series|embed/movie|embed/tv)/(\d{1,10})(?:/|\?|$)", media_url)
+        if known_numeric and known_numeric.group(1) in KNOWN_IMDB:
+            normalized_tmdb = int(known_numeric.group(1))
+    if normalized_imdb and not normalized_tmdb:
+        normalized_tmdb = _tmdb_id(IMDB_TO_TMDB.get(normalized_imdb))
+    if normalized_tmdb and not normalized_imdb:
+        normalized_imdb = TMDB_TO_IMDB.get(str(normalized_tmdb), "")
+
+    # Obogatitev z majhno lokalno zbirko deluje za oba standardna ID-ja.
+    lookup_id = normalized_imdb or (str(normalized_tmdb) if normalized_tmdb else "")
+    if lookup_id in KNOWN_IMDB:
+        k_info = KNOWN_IMDB[lookup_id]
         is_generic = (
             clean_title.lower().startswith("tt") or
             clean_title.isdigit() or
@@ -358,6 +474,8 @@ def _item(title: Any, url: Any, *, base: str, source_id: str, source_name: str,
         "vir": source_name,
         "glave": safe_headers,
         "referer": _text(referer, 2048) or header_referer,
+        "imdb_id": normalized_imdb,
+        "tmdb_id": normalized_tmdb,
     }
     return result
 
@@ -373,7 +491,9 @@ def _items_from_json(data: Any, base: str, source_id: str, source_name: str,
                      inherited: Optional[dict] = None) -> list[dict]:
     """Razbere običajne kataloge in tudi sezname različic znotraj enega vnosa."""
     out: list[dict] = []
-    inherited = inherited or {}
+    inherited = dict(inherited or {})
+    if not inherited:
+        inherited.update(_source_context(base))
     if isinstance(data, list):
         for value in data[:MAX_SOURCE_ITEMS]:
             out.extend(_items_from_json(value, base, source_id, source_name, inherited))
@@ -381,18 +501,24 @@ def _items_from_json(data: Any, base: str, source_id: str, source_name: str,
     if not isinstance(data, dict):
         return out
 
-    title = _first(data, ("title", "name", "naslov", "label")) or inherited.get("title", "")
+    title = _first(data, ("title", "name", "naslov", "label", "original_title", "original_name")) or inherited.get("title", "")
+    imdb_id, tmdb_id = _external_ids(data, inherited)
+    image = _first(data, ("image", "poster", "poster_url", "thumbnail", "artwork", "poster_path")) or inherited.get("image", "")
+    if isinstance(image, str) and image.startswith("/") and "poster_path" in data:
+        image = "https://image.tmdb.org/t/p/w500" + image
     context = {
         "title": title,
         "kind": _first(data, ("type", "kind", "media_type", "vrsta", "category")) or inherited.get("kind", ""),
-        "year": _first(data, ("year", "release_year", "datePublished")) or inherited.get("year", 0),
-        "image": _first(data, ("image", "poster", "poster_url", "thumbnail", "artwork")) or inherited.get("image", ""),
+        "year": _first(data, ("year", "release_year", "datePublished", "release_date", "first_air_date")) or inherited.get("year", 0),
+        "image": image,
         "artist": _first(data, ("artist", "author", "creator", "albumArtist")) or inherited.get("artist", ""),
         "season": _first(data, ("season", "season_number")) or inherited.get("season", 0),
         "episode": _first(data, ("episode", "episode_number")) or inherited.get("episode", 0),
         "description": _first(data, ("description", "overview", "summary")) or inherited.get("description", ""),
         "headers": _first(data, ("headers", "http_headers", "request_headers")) or inherited.get("headers", {}),
         "referer": _first(data, ("referer", "referrer", "origin")) or inherited.get("referer", ""),
+        "imdb_id": imdb_id,
+        "tmdb_id": tmdb_id,
     }
     url = _first(data, ("stream_url", "playback_url", "media_url", "file", "src", "url", "contentUrl"))
     if title and url and not isinstance(url, (dict, list)):
@@ -401,6 +527,7 @@ def _items_from_json(data: Any, base: str, source_id: str, source_name: str,
                       artist=context["artist"], season=context["season"], episode=context["episode"],
                       description=context["description"],
                       headers=context["headers"], referer=context["referer"],
+                      imdb_id=context["imdb_id"], tmdb_id=context["tmdb_id"],
                       quality=_first(data, ("quality", "label", "resolution_name")),
                       resolution=_first(data, ("resolution", "height")),
                       bitrate=_first(data, ("bitrate", "bandwidth")))
@@ -804,40 +931,133 @@ def _score(item: dict) -> int:
             + (40 if url.startswith("file:") else 0))
 
 
+def _id_scope(item: dict) -> str:
+    parts = [str(item.get("vrsta") or "film")]
+    if item.get("vrsta") == "serija":
+        parts.extend((str(item.get("sezona") or 0), str(item.get("epizoda") or 0)))
+    return "|".join(parts)
+
+
+def _metadata_score(item: dict) -> int:
+    title = _text(item.get("naslov"), 200)
+    generic = title.casefold() in ("film", "serija", "vir", "vsebina") or bool(_imdb_id(title))
+    return (0 if generic else 30) + (15 if item.get("slika") else 0) + (10 if item.get("opis") else 0) \
+        + (8 if item.get("leto") else 0) + (5 if item.get("imdb_id") else 0) + (5 if item.get("tmdb_id") else 0)
+
+
 def merge_duplicates(items: Iterable[dict]) -> list[dict]:
-    """En rezultat na vsebino; vse različice ostanejo dosegljive, najboljša je prva."""
-    title_groups: dict[str, list[dict]] = {}
-    seen_urls: set[str] = set()
+    """Združi po IMDb/TMDb ID-jih, nato varno še po naslovu, letniku in epizodi."""
+    unique_by_url: dict[str, dict] = {}
     for item in items:
         url = str(item.get("url") or "")
-        if not url or url in seen_urls:
+        if not url:
             continue
-        seen_urls.add(url)
-        title_groups.setdefault(_identity(item, include_year=False), []).append(dict(item))
+        candidate = dict(item)
+        imdb = _imdb_id(candidate.get("imdb_id")) or _imdb_id(f"{candidate.get('naslov', '')} {url}")
+        tmdb = _tmdb_id(candidate.get("tmdb_id"))
+        if imdb and not tmdb:
+            tmdb = _tmdb_id(IMDB_TO_TMDB.get(imdb))
+        if tmdb and not imdb:
+            imdb = TMDB_TO_IMDB.get(str(tmdb), "")
+        candidate["imdb_id"], candidate["tmdb_id"] = imdb, tmdb
+        existing = unique_by_url.get(url)
+        if existing is None:
+            unique_by_url[url] = candidate
+            continue
+        # Isti tok iz dveh katalogov ostane enkrat, vendar ne izgubimo boljših metapodatkov.
+        for field in ("imdb_id", "tmdb_id", "leto", "slika", "opis", "izvajalec", "referer", "glave"):
+            if not existing.get(field) and candidate.get(field):
+                existing[field] = candidate[field]
 
-    # Neznano leto združimo z edinim znanim letnikom. Če obstajata dve pravi
-    # predelavi z različnima letoma, ostaneta ločeni in neznani vnos ostane zase.
-    groups: dict[str, list[dict]] = {}
-    for base_identity, candidates in title_groups.items():
-        def item_year(value: dict) -> int:
+    normalized = list(unique_by_url.values())
+    parent = list(range(len(normalized)))
+
+    def find(index: int) -> int:
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    def union(left: int, right: int) -> None:
+        root_left, root_right = find(left), find(right)
+        if root_left != root_right:
+            parent[root_right] = root_left
+
+    # Uradni identifikator ima prednost pred naslovom. Oba ID-ja na enem vnosu
+    # ustvarita most med katalogi, ki poznajo samo enega od njiju.
+    id_owner: dict[str, int] = {}
+    title_groups: dict[str, list[int]] = {}
+    for index, item in enumerate(normalized):
+        scope = _id_scope(item)
+        imdb = _imdb_id(item.get("imdb_id"))
+        tmdb = _tmdb_id(item.get("tmdb_id"))
+        for token in filter(None, (
+            f"{scope}|imdb:{imdb}" if imdb else "",
+            f"{scope}|tmdb:{tmdb}" if tmdb else "",
+        )):
+            if token in id_owner:
+                union(index, id_owner[token])
+            else:
+                id_owner[token] = index
+        title_groups.setdefault(_identity(item, include_year=False), []).append(index)
+
+    # Naslov je rezervna identiteta za vire brez ID-ja. Različnih predelav z
+    # različnimi znanimi letnicami ne združimo; neznan letnik povežemo samo,
+    # kadar obstaja natanko en možen znani letnik.
+    for indices in title_groups.values():
+        by_year: dict[int, list[int]] = {}
+        for index in indices:
             try:
-                return int(value.get("leto") or 0)
+                year = int(normalized[index].get("leto") or 0)
             except (TypeError, ValueError):
-                return 0
+                year = 0
+            by_year.setdefault(year, []).append(index)
+        known_years = [year for year in by_year if year]
 
-        known_years = {item_year(item) for item in candidates if item_year(item)}
-        for item in candidates:
-            year = item_year(item)
-            effective_year = year or (next(iter(known_years)) if len(known_years) == 1 else 0)
-            groups.setdefault(f"{base_identity}|{effective_year}", []).append(item)
+        def union_if_unambiguous(candidates: list[int]) -> None:
+            imdb_ids = {_imdb_id(normalized[index].get("imdb_id")) for index in candidates
+                        if _imdb_id(normalized[index].get("imdb_id"))}
+            tmdb_ids = {_tmdb_id(normalized[index].get("tmdb_id")) for index in candidates
+                        if _tmdb_id(normalized[index].get("tmdb_id"))}
+            if len(imdb_ids) > 1 or len(tmdb_ids) > 1:
+                return
+            for index in candidates[1:]:
+                union(candidates[0], index)
+
+        if len(known_years) == 1:
+            union_if_unambiguous(by_year[known_years[0]] + by_year.get(0, []))
+        else:
+            for same_year in by_year.values():
+                union_if_unambiguous(same_year)
+
+    groups: dict[int, list[dict]] = {}
+    for index, item in enumerate(normalized):
+        groups.setdefault(find(index), []).append(item)
+
     result = []
-    for identity, variants in groups.items():
+    for variants in groups.values():
         variants.sort(key=_score, reverse=True)
         best = dict(variants[0])
+        metadata = max(variants, key=_metadata_score)
+        if _metadata_score(metadata) > _metadata_score(best):
+            best["naslov"] = metadata.get("naslov") or best.get("naslov")
+        for field in ("imdb_id", "tmdb_id", "leto", "slika", "opis", "izvajalec"):
+            if not best.get(field):
+                best[field] = next((item.get(field) for item in variants if item.get(field)), best.get(field))
+
+        scope = _id_scope(best)
+        imdb = next((_imdb_id(item.get("imdb_id")) for item in variants if _imdb_id(item.get("imdb_id"))), "")
+        tmdb = next((_tmdb_id(item.get("tmdb_id")) for item in variants if _tmdb_id(item.get("tmdb_id"))), 0)
+        if imdb:
+            identity = f"{scope}|imdb:{imdb}"
+        elif tmdb:
+            identity = f"{scope}|tmdb:{tmdb}"
+        else:
+            identity = _identity(best, include_year=True)
         best["id"] = hashlib.sha256(identity.encode()).hexdigest()[:20]
         best["razlicice"] = [{k: value for k, value in item.items()
                               if k in ("url", "vir", "vir_id", "kakovost", "locljivost", "bitrate",
-                                       "glave", "referer")}
+                                       "glave", "referer", "imdb_id", "tmdb_id")}
                              for item in variants]
         best["stevilo_razlicic"] = len(variants)
         best["viri"] = list(dict.fromkeys(item.get("vir", "") for item in variants if item.get("vir")))
@@ -1008,7 +1228,8 @@ class MediaCenter:
         needle = _text(query, 120).casefold()
         if needle:
             merged = [item for item in merged if needle in " ".join((item.get("naslov", ""), item.get("izvajalec", ""),
-                                                                      item.get("opis", ""))).casefold()]
+                                                                      item.get("opis", ""), item.get("imdb_id", ""),
+                                                                      str(item.get("tmdb_id") or ""))).casefold()]
         if kind not in ("", "vse"):
             merged = [item for item in merged if item.get("vrsta") == kind]
         return {"vnosi": merged, "viri": self.sources(), "skupaj": len(merged), "mape": [str(path) for path in self.roots]}

@@ -67,6 +67,7 @@ Safeer OS in Safeer Control **nista dva ločena programa**, temveč enotna aplik
 - **[`core/os_media.py`](core/os_media.py)** je enotno jedro kataloga za lokalne mape, javne JSON API-je, RSS/Atom, M3U in spletne strani oziroma aplikacije, ki medije objavijo prek HTML, OpenGraph, JSON-LD ali vdelanega JSON-a.
 - Vir se shrani enkrat in se v ozadju osvežuje na šest ur. Kanonični URL prepreči, da bi uporabnik isti vir dodal dvakrat.
 - Vsebina iz vseh virov se normalizira v filme, serije in glasbo. Podvojeni naslovi se združijo, različice pa razvrstijo po kakovosti; uporabniku se privzeto ponudi najboljša.
+- Identiteta vsebine uporablja ločena `imdb_id` in `tmdb_id` polja. Parser podpira pogoste oblike (`imdb_id`, `imdbId`, `imdbID`, `tmdb_id`, `tmdbId`, `external_ids`, `ids`) in ID iz dokumentiranih `/api/streams/.../:tmdbId` naslovov. Združevanje najprej uporabi zunanji ID, nato naslov + letnico + sezono/epizodo; različnih znanih ID-jev ne sme združiti.
 - **[`windows/safeer_windows/vlc_player.py`](windows/safeer_windows/vlc_player.py)** vgradi LibVLC neposredno v glavno Qt okno Safeer OS. Neposredni tokovi lahko iz uporabnikovega API-ja podedujejo `Referer` in `User-Agent`; zunanji VLC se ne odpre.
 - Spletne aplikacije in embed strani se ne nalagajo v `iframe`, ker jih `X-Frame-Options`/CSP pogosto zavrne in prikaže siv zaslon. Naložijo se kot vrhnja stran v **vgrajenem zaščitenem Safeer Browserju**, še vedno v istem oknu in procesu Safeer OS. Ne vračaj zastavic `--disable-web-security` ali `--no-sandbox`.
 - Dodajanje, odstranjevanje, uvoz in izvoz virov je izključno v skupnem razdelku **Nastavitve**. Safeer Media prikazuje katalog in iskanje, ne konfiguracije ponudnikov. V kodi ni privzeto aktivnega ponudnika; vir vnese uporabnik.
@@ -102,7 +103,7 @@ git branch  # mora biti: resava-poenotenje-wip
 # 2. Zaženi celotno zbirko testov
 PYTHONPATH=windows pytest windows/tests/
 
-# Pričakovani rezultat: Vseh 93 testov mora biti zelenih (93 passed)
+# Pričakovani rezultat: Vseh 97 testov mora biti zelenih (97 passed)
 ```
 
 Preveri tudi skladnost PowerShell skript (če je na voljo `pwsh`):

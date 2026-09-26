@@ -178,6 +178,85 @@ class TestOsWindows(unittest.TestCase):
         self.assertEqual(m3u[0]["vrsta"], "glasba")
         self.assertEqual(html[0]["kakovost"], "4K")
 
+    def test_media_razbere_in_podeduje_imdb_in_tmdb_id(self):
+        payload = json.dumps({
+            "results": [{
+                "id": 27205,
+                "media_type": "movie",
+                "title": "Inception",
+                "release_date": "2010-07-16",
+                "poster_path": "/poster.jpg",
+                "external_ids": {"imdb_id": "tt1375666"},
+                "streams": [
+                    {"url": "https://cdn-a.test/inception-720p.mp4", "quality": "720p"},
+                    {"url": "https://cdn-b.test/inception-1080p.mp4", "quality": "1080p"},
+                ],
+            }]
+        }).encode()
+        items = os_media.parse_payload(payload, "application/json", "https://api.test/catalog")
+        self.assertEqual(len(items), 2)
+        self.assertTrue(all(item["imdb_id"] == "tt1375666" for item in items))
+        self.assertTrue(all(item["tmdb_id"] == 27205 for item in items))
+        self.assertTrue(all(item["leto"] == 2010 for item in items))
+        self.assertTrue(all(item["slika"] == "https://image.tmdb.org/t/p/w500/poster.jpg" for item in items))
+
+        endpoint_items = os_media.parse_payload(
+            b'[{"title":"Fight Club","url":"https://cdn.test/fight.m3u8","quality":"Auto"}]',
+            "application/json",
+            "https://localhost/api/streams/movie/550",
+        )
+        self.assertEqual(endpoint_items[0]["tmdb_id"], 550)
+        self.assertEqual(endpoint_items[0]["kakovost"], "1080p")
+
+    def test_media_zdruzi_razlicne_naslove_po_zunanjem_id(self):
+        english = os_media._item(
+            "The Dark Knight", "https://a.test/dark-knight-720p.mp4", base="",
+            source_id="a", source_name="A", kind="movie", year=2008,
+            imdb_id="tt0468569", tmdb_id=155, quality="720p",
+        )
+        slovenian = os_media._item(
+            "Vitez teme", "https://b.test/dark-knight-2160p.m3u8", base="",
+            source_id="b", source_name="B", kind="movie", year=2008,
+            imdb_id="tt0468569", quality="4K", description="Boljši opis",
+        )
+        merged = os_media.merge_duplicates([english, slovenian])
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0]["imdb_id"], "tt0468569")
+        self.assertEqual(merged[0]["tmdb_id"], 155)
+        self.assertEqual(merged[0]["kakovost"], "4K")
+        self.assertEqual(merged[0]["stevilo_razlicic"], 2)
+
+    def test_media_ne_zdruzi_razlicnih_id_ali_epizod(self):
+        first = os_media._item(
+            "Enak naslov", "https://a.test/one.mp4", base="", source_id="a",
+            source_name="A", kind="movie", year=2024, imdb_id="tt1234567",
+        )
+        second = os_media._item(
+            "Enak naslov", "https://b.test/two.mp4", base="", source_id="b",
+            source_name="B", kind="movie", year=2024, imdb_id="tt7654321",
+        )
+        episode_one = os_media._item(
+            "Oddaja", "https://a.test/s1e1.mp4", base="", source_id="a",
+            source_name="A", kind="series", imdb_id="tt9999999", season=1, episode=1,
+        )
+        episode_two = os_media._item(
+            "Oddaja", "https://a.test/s1e2.mp4", base="", source_id="a",
+            source_name="A", kind="series", imdb_id="tt9999999", season=1, episode=2,
+        )
+        merged = os_media.merge_duplicates([first, second, episode_one, episode_two])
+        self.assertEqual(len(merged), 4)
+
+    def test_media_isce_tudi_po_imdb_in_tmdb_id(self):
+        with tempfile.TemporaryDirectory() as td:
+            center = os_media.MediaCenter(td, roots=[])
+            payload = json.dumps([{
+                "title": "Film", "url": "https://cdn.test/film.mp4",
+                "imdb_id": "tt1234567", "tmdb_id": 98765,
+            }])
+            self.assertTrue(center.import_json(payload)["ok"])
+            self.assertEqual(center.catalog("tt1234567")["skupaj"], 1)
+            self.assertEqual(center.catalog("98765")["skupaj"], 1)
+
     def test_media_vmesnik_uporablja_vgrajeni_predvajalnik(self):
         koren = Path(__file__).resolve().parents[2]
         html = (koren / "assets" / "os" / "index.html").read_text(encoding="utf-8")
