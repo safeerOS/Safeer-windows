@@ -21,8 +21,6 @@
       <button data-razdelek="programi"><svg data-ikona="programi"></svg><span data-t="programi">Programi</span></button>
       <button data-razdelek="datoteke"><svg data-ikona="mapa"></svg><span data-t="datoteke">Datoteke</span></button>
       <button data-razdelek="splet"><svg data-ikona="splet"></svg><span>Splet</span></button>
-      <button data-razdelek="ai"><svg data-ikona="iskra"></svg><span>AI Asistent</span></button>
-      <button data-razdelek="komunikacija"><svg data-ikona="sporocilo"></svg><span>Komunikacija</span></button>
       <button data-razdelek="nastavitve"><svg data-ikona="drsniki"></svg><span data-t="nastavitve">Nastavitve</span></button>
     </nav>
     <div class="stranska-dno">
@@ -41,8 +39,6 @@
         <input id="iskanje" type="text" autocomplete="off" spellcheck="false" placeholder="Išči programe, datoteke, splet, naprave ...">
       </label>
       <div class="vrh-naprave">
-        <span class="naprava-znacka"><svg data-ikona="namizje"></svg> Povezan Linux PC</span>
-        <span class="naprava-znacka"><svg data-ikona="tv"></svg> Povezan Android TV</span>
         <span class="omrezje-znacka" id="stanjeOmrezje" title="Omrežje"><svg data-ikona="wifi"></svg><span>Povezano</span></span>
         <span class="vrh-ikona" data-pojdi="nastavitve" title="Nastavitve"><svg data-ikona="drsniki"></svg></span>
       </div>
@@ -115,24 +111,46 @@
             </div>
           </div>
 
-          <!-- Programi -->
-          <div class="domov-kartica">
+          <!-- Spletne aplikacije -->
+          <div class="domov-kartica" id="karticaSpletneApp">
             <div class="kartica-glava">
-              <b data-pojdi="programi">Programi</b>
-              <span class="povezava-link" data-pojdi="programi">Vse aplikacije &gt;</span>
+              <b>Spletne aplikacije</b>
+              <button class="gumb-mini-dodaj" id="gumbOdpriDodajApp" title="Dodaj spletno stran kot namizno aplikacijo">+ Dodaj</button>
             </div>
-            <div class="programi-vrsta-mini" id="domaciProgrami"></div>
+            <div class="spletne-mreza-mini" id="domaceSpletneApp"></div>
           </div>
 
-          <!-- AI Asistent -->
-          <div class="domov-kartica">
+          <!-- Nedavne aplikacije -->
+          <div class="domov-kartica" id="karticaNedavneApp">
             <div class="kartica-glava">
-              <span><svg data-ikona="iskra"></svg> <b>AI Asistent</b></span>
+              <b>Nedavne aplikacije</b>
+              <button class="gumb-povezava-pocisti" id="gumbPocistiNedavne" title="Počisti nedavne vsebine">Počisti</button>
             </div>
-            <div class="ai-vnos-okvir">
-              <input type="text" placeholder="Vprašaj o svojih medijih, napravah ali naredi nekaj ...">
-              <button class="gumb-ikona glavni"><svg data-ikona="desno"></svg></button>
+            <div class="nedavne-seznam-mini" id="domaceNedavne"></div>
+          </div>
+        </div>
+
+        <!-- Modal za dodajanje spletne aplikacije -->
+        <div class="modal-dialog-ozadje" id="modalDodajApp" hidden>
+          <div class="modal-dialog">
+            <div class="modal-dialog-glava">
+              <h3>Dodaj spletno aplikacijo</h3>
+              <button class="gumb-ikona" id="zapriModalDodajApp" type="button"><svg data-ikona="x"></svg></button>
             </div>
+            <form id="obrazecDodajApp">
+              <label>
+                <span>Ime aplikacije</span>
+                <input type="text" id="vnosImeApp" placeholder="npr. ChatGPT, YouTube, RTV SLO, Netflix ..." required autocomplete="off">
+              </label>
+              <label>
+                <span>Spletni naslov (URL)</span>
+                <input type="url" id="vnosUrlApp" placeholder="https://..." required autocomplete="off">
+              </label>
+              <div class="modal-dialog-gumbi">
+                <button type="button" class="gumb" id="prekliciModalDodajApp">Prekliči</button>
+                <button type="submit" class="gumb glavni">Dodaj v Safeer OS</button>
+              </div>
+            </form>
           </div>
         </div>
 
@@ -199,7 +217,7 @@
           <audio id="mediaAudio" controls preload="metadata" hidden></audio>
           <iframe id="mediaIframe" title="Safeer Media predvajalnik"
                   allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
-                  allowfullscreen referrerpolicy="strict-origin-when-cross-origin" hidden></iframe>
+                  allowfullscreen referrerpolicy="no-referrer" hidden></iframe>
           <p class="media-napaka" id="mediaNapaka" hidden data-t="mediaNapaka">Tega toka ni mogoče predvajati. Poskusi drugo različico.</p>
           <div class="media-razlicice" id="mediaRazlicice"></div>
         </div>

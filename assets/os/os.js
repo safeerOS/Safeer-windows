@@ -38,6 +38,15 @@
     zvezda: "M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z",
     x: "M6 6l12 12 M18 6L6 18",
     plus: "M12 5v14 M5 12h14",
+    film: "M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z M2 9h20 M2 15h20 M7 4v5 M12 4v5 M17 4v5 M7 15v5 M12 15v5 M17 15v5",
+    serija: "M4 6h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z M8 2l4 4 4-4 M8 20v2 M16 20v2",
+    tv: "M2 5h20v13H2z M8 21h8 M12 18v3",
+    radio: "M3 7h18a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2z M6 7l12-4 M6.5 14.5a2.5 2.5 0 1 0 5 0 2.5 2.5 0 0 0-5 0z M15 12h3 M15 15h3",
+    "tv-v-zivo": "M2 6h15v12H2z M6 21h7 M9.5 18v3 M19 9a3 3 0 0 1 0 6 M21 7a6 6 0 0 1 0 10",
+    telefon: "M6 2h12a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z M12 18h.01",
+    tablica: "M4 2h16a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z M12 18h.01",
+    iskra: "M12 2l2.4 5.6L20 10l-5.6 2.4L12 18l-2.4-5.6L4 10l5.6-2.4z M19 16l1.2 2.8L23 20l-2.8 1.2L19 24l-1.2-2.8L15 20l2.8-1.2z",
+    sporocilo: "M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z",
     slika: "M4 4h16v16H4z M4 16l5-5 4 4 3-3 4 4 M15 8.5v.1",
     video: "M3 6h13v12H3z M16 10l5-3v10l-5-3",
     glasba: "M9 18V5l11-2v13 M9 18a3 3 0 1 1-3-3 3 3 0 0 1 3 3z M20 16a3 3 0 1 1-3-3 3 3 0 0 1 3 3z",
@@ -1895,7 +1904,13 @@
   // ------------------------------------------------------------------ Safeer Media
   // En katalog ne glede na vir. Zaledje zdruzi dvojnike in izbere najboljsi tok;
   var media = { katalog: [], viri: [], filter: "vse", genre: "", query: "", page: 1, skupaj_strani: 1, aktivni: null, zahteva: 0, timer: 0 };
-  function mediaIkona(vrsta) { return vrsta === "glasba" ? "glasba" : "video"; }
+  function mediaIkona(vrsta) {
+    if (vrsta === "glasba") return "glasba";
+    if (vrsta === "radio") return "radio";
+    if (vrsta === "serija") return "serija";
+    if (vrsta === "tv-v-zivo") return "tv-v-zivo";
+    return "film";
+  }
   function mediaOznaka(vrsta) {
     if (vrsta === "glasba") return t("mediaGlasba");
     if (vrsta === "podcast") return "Podcast";
@@ -2053,15 +2068,20 @@
       if (iframe && /^https?:\/\//i.test(url)) {
         iframe.hidden = false;
         $("mediaNapaka").hidden = true;
-        iframe.onload = function () {
-          if (media.timer) { window.clearTimeout(media.timer); media.timer = 0; }
-        };
+        // onload pomeni samo, da je HTML prispel - embed player se sele inicializira.
+        // Watchdog ostane aktiven, da zazna stall (prazna stran, blokiran domain).
+        iframe.onload = function () {};
         iframe.onerror = function () {
           if (media.timer) window.clearTimeout(media.timer);
           media.timer = 0;
           if (!poskusiNaslednjo()) $("mediaNapaka").hidden = false;
         };
         iframe.src = url;
+        // 18 sekund za inicializacijo; ce ne zacne, preidemo na naslednji vir.
+        media.timer = window.setTimeout(function () {
+          media.timer = 0;
+          if (!poskusiNaslednjo()) { iframe.hidden = true; $("mediaNapaka").hidden = false; }
+        }, 18000);
       } else $("mediaNapaka").hidden = false;
     }
     var choices = $("mediaRazlicice"); choices.innerHTML = "";
