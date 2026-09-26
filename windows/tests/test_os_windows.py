@@ -280,7 +280,7 @@ class TestOsWindows(unittest.TestCase):
         self.assertIn("set_hwnd", player)
         self.assertIn("SAFEER OS · MEDIA", player)
 
-    def test_media_viri_so_samo_v_nastavitvah_in_brez_iframe_predvajalnika(self):
+    def test_media_viri_so_samo_v_nastavitvah_in_z_vgrajenim_predvajalnikom(self):
         koren = Path(__file__).resolve().parents[2]
         html = (koren / "assets" / "os" / "index.html").read_text(encoding="utf-8")
         javascript = (koren / "assets" / "os" / "os.js").read_text(encoding="utf-8")
@@ -289,8 +289,10 @@ class TestOsWindows(unittest.TestCase):
         source_form = html.index('id="mediaDodajVir"')
         self.assertLess(media_start, settings_start)
         self.assertGreater(source_form, settings_start)
-        self.assertNotIn('id="mediaIframe"', html)
-        self.assertNotIn('$("mediaIframe")', javascript)
+        self.assertIn('id="mediaIframe"', html)
+        self.assertIn('$("mediaIframe")', javascript)
+        self.assertIn('id="mediaPodrobnosti"', html)
+        self.assertIn('data-media-genre="28"', html)
 
     def test_safeer_os_uporablja_notranji_zasciteni_brskalnik(self):
         koren = Path(__file__).resolve().parents[2]
@@ -298,7 +300,8 @@ class TestOsWindows(unittest.TestCase):
         launcher = (koren / "windows" / "safeer_os_windows.py").read_text(encoding="utf-8")
         self.assertIn("browser.BrowserWindow", app)
         self.assertIn("embedded=True", app)
-        self.assertIn("self._odpri_notranji_splet(url, media=True)", app)
+        self.assertIn("embedded = is_embed", app)
+        self.assertNotIn("self._odpri_notranji_splet(url, media=True)", app)
         self.assertNotIn("subprocess.Popen", app)
         for source in (app, launcher):
             self.assertNotIn("--disable-web-security", source)
@@ -1115,7 +1118,7 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
         self.assertIn(".domov-hero", css)
         self.assertNotIn('class="hero-mreza"', html)
         self.assertNotIn(".media-kartica.izpostavljena", css)
-        self.assertIn("repeat(auto-fill,minmax(190px,1fr))", css)
+        self.assertIn("repeat(auto-fill,minmax(145px,1fr))", css)
 
     def test_media_vidlink_predloga_vstavi_pravi_tmdb_id_in_ni_lazna_kartica(self):
         with tempfile.TemporaryDirectory() as td:
@@ -1212,6 +1215,7 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
         self.assertIn("is_embed = (", os_app_src)
         self.assertIn("native = self.media_player.available and is_direct_stream and not is_embed", os_app_src)
         self.assertIn('"vidsrc"', os_app_src)
+        self.assertIn("embedded = is_embed", os_app_src)
 
         # Preveri prepoznavo embed vira v core/os_media.py
         item = os_media._item("tt1375666", "https://vidsrc.cc/v2/embed/movie/tt1375666",
@@ -1220,6 +1224,34 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
         self.assertEqual(item["naslov"], "Inception (Izvor)")
         self.assertEqual(item["vrsta"], "film")
         self.assertEqual(item["leto"], 2010)
+
+    def test_media_vidlink_uporabnikov_vir_odpre_tmdb_katalog_in_epizode(self):
+        with tempfile.TemporaryDirectory() as td:
+            center = os_media.MediaCenter(td, roots=[])
+            with mock.patch.object(center, "refresh_source", return_value={"ok": True, "vir": {}}):
+                result = center.add_source("https://vidlink.pro", "Moj VidLink")
+            self.assertTrue(result["ok"])
+
+            def fake_tmdb(endpoint, params=None):
+                if endpoint == "/trending/all/week":
+                    return {"results": [{"id": 27205, "media_type": "movie", "title": "Inception",
+                                          "release_date": "2010-07-15", "poster_path": "/poster.jpg",
+                                          "vote_average": 8.4, "genre_ids": [28]}]}
+                if endpoint == "/tv/1399/season/1":
+                    return {"episodes": [{"episode_number": 1, "name": "Winter Is Coming",
+                                           "runtime": 62, "vote_average": 8.2, "still_path": "/still.jpg"}]}
+                return {}
+
+            with mock.patch.object(center, "_tmdb", side_effect=fake_tmdb):
+                catalog = center.catalog()["vnosi"]
+                movie = next(item for item in catalog if item.get("tmdb_id") == 27205)
+                self.assertEqual(movie["url"].split("?")[0], "https://vidlink.pro/movie/27205")
+                self.assertEqual(movie["ocena"], 8.4)
+                season = center.season(1399, 1)
+                self.assertEqual(season["epizode"][0]["naslov"], "Winter Is Coming")
+                episode = center.episode_item(1399, 1, 1, "Igra prestolov · Winter Is Coming")
+                self.assertEqual(episode["url"].split("?")[0], "https://vidlink.pro/tv/1399/1/1")
+                self.assertIsNotNone(center.resolve(episode["id"]))
 
 
 if __name__ == "__main__":

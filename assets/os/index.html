@@ -181,6 +181,7 @@
           <div class="media-predvajalnik-glava"><div><small data-t="mediaPredvaja">PREDVAJA SE V SAFEER OS</small><h2 id="mediaPredvajalnikNaslov"></h2><p id="mediaPredvajalnikMeta"></p></div><div class="media-predvajalnik-akcije"><button class="gumb-ikona" id="mediaKino" title="Kino način (celozaslonsko)"><svg data-ikona="celozaslonsko"></svg></button><button class="gumb-ikona" id="mediaZapri" data-naslov="zapri"><svg data-ikona="x"></svg></button></div></div>
           <video id="mediaVideo" controls playsinline preload="metadata" hidden></video>
           <audio id="mediaAudio" controls preload="metadata" hidden></audio>
+          <iframe id="mediaIframe" title="Safeer Media predvajalnik" allow="autoplay; fullscreen; picture-in-picture; encrypted-media" allowfullscreen referrerpolicy="origin" hidden></iframe>
           <p class="media-napaka" id="mediaNapaka" hidden data-t="mediaNapaka">Tega toka ni mogoče predvajati. Poskusi drugo različico.</p>
           <div class="media-razlicice" id="mediaRazlicice"></div>
         </div>
@@ -189,9 +190,26 @@
           <label class="media-iskanje"><svg data-ikona="isci"></svg><input id="mediaIskanje" type="search" autocomplete="off" data-ph="mediaIsci" placeholder="Išči filme, serije in glasbo"></label>
           <div class="filtri"><button class="izbran" data-media-filter="vse" data-t="mediaVse">Vse</button><button data-media-filter="film" data-t="mediaFilmi">Filmi</button><button data-media-filter="serija" data-t="mediaSerije">Serije</button><button data-media-filter="glasba" data-t="mediaGlasba">Glasba</button></div>
         </div>
+        <div class="media-zanri" aria-label="Žanri">
+          <button class="izbran" data-media-genre="">Vse vsebine</button>
+          <button data-media-genre="28">Akcija</button><button data-media-genre="878">Sci-Fi</button>
+          <button data-media-genre="35">Komedija</button><button data-media-genre="27">Grozljivka</button>
+          <button data-media-genre="18">Drama</button><button data-media-genre="53">Triler</button>
+          <button data-media-genre="16">Animirani</button><button data-media-genre="10749">Romantika</button>
+        </div>
         <div class="media-povzetek" id="mediaPovzetek"></div>
         <div class="media-katalog" id="mediaMreza"></div>
         <p class="namig" id="mediaPrazno" hidden data-t="mediaPrazno">Ni zadetkov. Dodaj vir ali spremeni iskanje.</p>
+
+        <div class="media-podrobnosti" id="mediaPodrobnosti" hidden>
+          <div class="media-podrobnosti-glava">
+            <button class="gumb" id="mediaPodrobnostiNazaj">← Nazaj</button>
+            <button class="gumb-ikona" id="mediaPodrobnostiZapri" title="Zapri"><svg data-ikona="x"></svg></button>
+          </div>
+          <div class="media-podrobnosti-junak" id="mediaPodrobnostiJunak"></div>
+          <h3>Sezone</h3><div class="media-sezone" id="mediaSezone"></div>
+          <h3 id="mediaEpizodeNaslov">Epizode</h3><div class="media-epizode" id="mediaEpizode"></div>
+        </div>
 
       </section>
 
@@ -313,7 +331,7 @@
         <div class="media-viri-glava"><div><h2 data-t="mediaViri">Viri Safeer Media</h2><p data-t="mediaViriOpis">Spletno stran, javni API, RSS ali M3U dodaš samo enkrat.</p></div></div>
         <form class="media-dodaj-vir" id="mediaDodajVir">
           <input id="mediaVirIme" type="text" maxlength="80" data-ph="mediaVirIme" placeholder="Ime vira (neobvezno)">
-          <input id="mediaVirUrl" type="url" required data-ph="mediaVirUrl" placeholder="https://primer.si/katalog.json">
+          <input id="mediaVirUrl" type="url" required data-ph="mediaVirUrl" placeholder="https://vidlink.pro">
           <button class="gumb glavni" type="submit"><svg data-ikona="plus"></svg><span data-t="mediaDodaj">Dodaj vir</span></button>
         </form>
         <p class="namig" id="mediaVirSporocilo"></p>

@@ -713,7 +713,24 @@ class SafeerOsWindow(QMainWindow):
         if metoda == "mediaKatalog":
             query = str(a[0]) if a else ""
             kind = str(a[1]) if len(a) > 1 else "vse"
-            return self.media_center.catalog(query, kind)
+            genre = str(a[2]) if len(a) > 2 else ""
+            page = int(a[3]) if len(a) > 3 else 1
+            return self.media_center.catalog(query, kind, genre, page)
+
+        if metoda == "mediaPodrobnosti":
+            return self.media_center.details(str(a[0]) if a else "")
+
+        if metoda == "mediaSezona":
+            tmdb_id = int(a[0]) if a else 0
+            season = int(a[1]) if len(a) > 1 else 1
+            return self.media_center.season(tmdb_id, season)
+
+        if metoda == "mediaEpizoda":
+            tmdb_id = int(a[0]) if a else 0
+            season = int(a[1]) if len(a) > 1 else 1
+            episode = int(a[2]) if len(a) > 2 else 1
+            title = str(a[3]) if len(a) > 3 else ""
+            return self.media_center.episode_item(tmdb_id, season, episode, title)
 
         if metoda == "mediaDodajVir":
             url = str(a[0]) if a else ""
@@ -754,17 +771,16 @@ class SafeerOsWindow(QMainWindow):
                 bool(item.get("glave"))
             )
             native = self.media_player.available and is_direct_stream and not is_embed
-            internal = False
             if native:
                 self.dispatcher.dispatch(lambda: self._odpri_media(item))
-            elif url.startswith(("http://", "https://", "file:")):
-                self.dispatcher.dispatch(lambda: self._odpri_notranji_splet(url, media=True))
-                internal = True
-            return dict(item, native=native, internal=internal)
+            # Spletni embed ostane v namenskem predvajalniku Safeer Media. Ne
+            # odpremo ločenega okna brskalnika in uporabnik ne zapusti aplikacije.
+            embedded = is_embed and url.startswith(("http://", "https://"))
+            return dict(item, native=native, internal=False, embedded=embedded)
 
         if metoda == "mediaStanje":
             return {"na_voljo": True, "native": self.media_player.available,
-                    "predvajalnik": "LibVLC + zaščiteni Safeer Browser"}
+                    "predvajalnik": "LibVLC + vgrajeni Safeer Media predvajalnik"}
 
         if metoda in ("odprtaOkna", "mediaNaprave"):
             return []
