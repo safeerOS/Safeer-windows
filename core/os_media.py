@@ -21,6 +21,7 @@ import unicodedata
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
+from datetime import date as _date
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Iterable, Optional
@@ -1341,6 +1342,13 @@ class MediaCenter:
         if not title:
             return None
         date = str(raw.get("release_date") or raw.get("first_air_date") or "")
+        # TMDb lahko med popularne/trending uvrsti tudi napovedane naslove.
+        # Takih kartic ne prikazuj, dokler uradni datum izdaje ni dosežen.
+        try:
+            if not date or _date.fromisoformat(date) > _date.today():
+                return None
+        except ValueError:
+            return None
         year = int(date[:4]) if len(date) >= 4 and date[:4].isdigit() else 0
         imdb_id = TMDB_TO_IMDB.get(str(tmdb_id), "")
         url = _embed_url_for_provider("vidlink.pro", "https", imdb_id, str(tmdb_id), kind, 1, 1)
@@ -1353,6 +1361,7 @@ class MediaCenter:
         if not item:
             return None
         item.update({
+            "datum": date,
             "ocena": round(float(raw.get("vote_average") or 0), 1),
             "zanri": raw.get("genre_ids") or [],
             "ozadje": f"{TMDB_IMAGE}/original{raw['backdrop_path']}" if raw.get("backdrop_path") else "",
