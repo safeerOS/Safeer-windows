@@ -1957,7 +1957,7 @@
     pokazi("panelSync", false);
     pokazi("predvajalnik", false);
     pokazi("panelMape", stanje.znan && stanje.seznanjen);
-    pokazi("panelDodaj", stanje.znan && (stanje.seznanjen || stanje.vKrogu));
+    pokazi("panelDodaj", (stanje.znan && (stanje.seznanjen || stanje.vKrogu)) || !!(most && most.zacniVabilo));
     pokazi("vabiloBlok", !!(most && most.zacniVabilo));
     var sredisce = imeSredisca() || t("televizor");
     besedilo("dodajKorak3", t("dodajKorak3", { sredisce: sredisce }));
@@ -2303,8 +2303,11 @@
   var vabiloOdprto = false;
   function narisiVabilo(p) {
     var qr = el("vabiloQr");
+    if (!qr) return;
     if (p.svg) {
-      qr.innerHTML = p.svg;
+      pokazi("panelDodaj", true);
+      pokazi("vabiloBlok", true);
+      qr.innerHTML = String(p.svg).replace(/^<\?xml[^>]*>\s*/, "");
       qr.hidden = false;
       besedilo("opombaVabilo", t("prijavaQrOsvezi"));
     } else if (p.pridruzen) {
@@ -2324,11 +2327,13 @@
     vabiloOdprto = odpri === undefined ? !vabiloOdprto : !!odpri;
     besedilo("gumbVabilo", t(vabiloOdprto ? "vabiloZapri" : "vabiloGumb"));
     if (vabiloOdprto) {
+      pokazi("panelDodaj", true);
+      pokazi("vabiloBlok", true);
       besedilo("opombaVabilo", t("prijavaQrPripravljam"));
       if (most.novaLokalnaKoda) most.novaLokalnaKoda();
       most.zacniVabilo();
     } else {
-      el("vabiloQr").hidden = true;
+      if (el("vabiloQr")) el("vabiloQr").hidden = true;
       besedilo("opombaVabilo", "");
       most.prekiniVabilo();
     }

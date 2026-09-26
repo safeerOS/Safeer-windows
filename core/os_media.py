@@ -1436,27 +1436,35 @@ class MediaCenter:
 
     def _tmdb_vnos(self, raw: dict, source: dict) -> Optional[dict]:
         tmdb_id = _tmdb_id(raw.get("id"))
-        media_type = str(raw.get("media_type") or source.get("media_type") or "movie")
+        media_type = str(raw.get("media_type") or source.get("media_type") or ("tv" if raw.get("first_air_date") else "movie"))
         if not tmdb_id or media_type not in ("movie", "tv"):
             return None
         kind = self._tmdb_tip(media_type)
         title = _text(raw.get("title") or raw.get("name"), 200)
         if not title:
             return None
+        # Prikazujemo samo resnično izdane vsebine s plakatom.
+        if not raw.get("poster_path"):
+            return None
         date = str(raw.get("release_date") or raw.get("first_air_date") or "")
-        # TMDb lahko med popularne/trending uvrsti tudi napovedane naslove.
-        # Takih kartic ne prikazuj, dokler uradni datum izdaje ni dosežen.
+        if not date:
+            return None
         try:
-            if not date or _date.fromisoformat(date) > _date.today():
+            if _date.fromisoformat(date) > _date.today():
                 return None
         except ValueError:
             return None
         year = int(date[:4]) if len(date) >= 4 and date[:4].isdigit() else 0
+        if year < 1920:
+            return None
+        rating = round(float(raw.get("vote_average") or 0), 1)
+        vote_count = int(raw.get("vote_count") or 0)
+        if rating <= 0 or vote_count < 10:
+            return None
         imdb_id = TMDB_TO_IMDB.get(str(tmdb_id), "")
-        poster = f"{TMDB_IMAGE}/w500{raw['poster_path']}" if raw.get("poster_path") else ""
+        poster = f"{TMDB_IMAGE}/w500{raw['poster_path']}"
         overview = raw.get("overview") or ""
         backdrop = f"{TMDB_IMAGE}/original{raw['backdrop_path']}" if raw.get("backdrop_path") else ""
-        rating = round(float(raw.get("vote_average") or 0), 1)
         genres = raw.get("genre_ids") or []
 
         if kind == "film":
@@ -1744,7 +1752,7 @@ class MediaCenter:
         item = self._dynamic_items.get(item_id) or next((item for item in self.catalog()["vnosi"] if item.get("id") == item_id), None)
         if not item:
             return None
-        return self._izberi_najhitrejsi(self._dodaj_predvajalne_razlicice(item))
+        return self._dodaj_predvajalne_razlicice(item)
 
     def _dodaj_predvajalne_razlicice(self, item: dict) -> dict:
         """Sestavi razlicice samo iz virov, ki jih je dodal uporabnik.
@@ -1754,6 +1762,9 @@ class MediaCenter:
         vmesnik ob nedosegljivem viru varno nadaljuje z naslednjim.
         """
         if item.get("vrsta") not in ("film", "serija"):
+            return item
+        existing = list(item.get("razlicice") or [])
+        if len(existing) >= 2:
             return item
         tmdb_id = str(int(item.get("tmdb_id") or 0)) if item.get("tmdb_id") else ""
         imdb_id = str(item.get("imdb_id") or "")
@@ -1774,8 +1785,8 @@ class MediaCenter:
         # uporabnik dejansko dodal, in sicer v njegovem vrstnem redu. URL iz
         # TMDb kataloga je le katalogska predloga in ne sme potisniti prvega
         # uporabnikovega vira na drugo mesto.
-        existing = [] if embed_sources else list(item.get("razlicice") or [])
-        if not embed_sources and item.get("url"):
+        existing = list(item.get("razlicice") or [])
+        if not existing and item.get("url"):
             existing.insert(0, {k: item.get(k) for k in (
                 "url", "vir", "vir_id", "kakovost", "locljivost", "glave", "referer"
             ) if item.get(k) not in (None, "")})
