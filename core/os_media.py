@@ -75,6 +75,10 @@ def _kind(value: Any, url: str = "", title: str = "", season: int = 0, episode: 
         return "serija"
     hint = f"{value or ''} {url} {title}".lower()
     ext = Path(urllib.parse.urlsplit(url).path).suffix.lower()
+    if any(x in hint for x in ("radio", "radijska", "radiostream", "icecast", "shoutcast")):
+        return "radio"
+    if any(x in hint for x in ("live tv", "livetv", "live television", "televizija v živo", "/live/")):
+        return "tv-v-zivo"
     if ext in AUDIO or any(x in hint for x in ("audio", "music", "song", "track", "album", "glasba", "/music/")):
         return "glasba"
     if any(x in hint for x in ("series", "episode", "season", "show", "tv", "serija", "epizoda", "/tv/", "/series/")):
@@ -783,6 +787,32 @@ def _resolve_embed_or_direct_source(url: str, source_id: str, source_name: str) 
     parsed = urllib.parse.urlsplit(url)
     netloc = parsed.netloc.lower()
     path = parsed.path
+
+    # YouTube Music je spletna aplikacija, ne javni katalog JSON. V Safeer Media
+    # jo odpremo kot notranji glasbeni vir; posamezne povezave do videa pa
+    # pretvorimo v embed, da ostanejo znotraj našega predvajalnika.
+    if "youtube.com" in netloc or netloc == "youtu.be":
+        video_id = ""
+        if netloc == "youtu.be":
+            video_id = path.strip("/").split("/", 1)[0]
+        else:
+            video_id = urllib.parse.parse_qs(parsed.query).get("v", [""])[0]
+            if not video_id:
+                match = re.search(r"/(?:embed|shorts)/([^/?#]+)", path, re.I)
+                video_id = match.group(1) if match else ""
+        if video_id:
+            video_id = re.sub(r"[^A-Za-z0-9_-]", "", video_id)[:32]
+            embed = f"https://www.youtube.com/embed/{video_id}?autoplay=1&playsinline=1"
+            image = f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
+            item = _item(source_name or "YouTube Music", embed, base=embed,
+                         source_id=source_id, source_name=source_name or "YouTube Music",
+                         kind="glasba", image=image)
+            return [item] if item else []
+        if "music.youtube.com" in netloc:
+            item = _item("YouTube Music · brskanje", url, base=url,
+                         source_id=source_id, source_name=source_name or "YouTube Music",
+                         kind="glasba", description="Izberi glasbo v vgrajeni aplikaciji Safeer Media.")
+            return [item] if item else []
     is_embed_domain = any(dom in netloc for dom in _EMBED_DOMAINS)
 
     # 1. Specifična povezava do TV serije ali epizode (/tv/ ali /series/ ali SxxExx)
@@ -904,7 +934,7 @@ def _parse_m3u(text: str, base: str, source_id: str, source_name: str) -> list[d
     # najboljšo različico glede na povezavo in zmogljivost naprave.
     if "#EXT-X-TARGETDURATION" in text or "#EXT-X-STREAM-INF" in text:
         found = _item(source_name, base, base=base, source_id=source_id,
-                      source_name=source_name, kind="film", quality="adaptive")
+                      source_name=source_name, kind=_kind("", base, source_name), quality="adaptive")
         return [found] if found else []
     out, pending = [], {}
     for raw in text.splitlines():

@@ -41,6 +41,7 @@ VLC = _load_vlc()
 
 class VlcPlayerWidget(QWidget):
     nazaj = Signal()
+    ozadje = Signal()
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -127,6 +128,10 @@ class VlcPlayerWidget(QWidget):
         self.volume.valueChanged.connect(self._set_volume)
         self.variants = QComboBox()
         self.variants.currentIndexChanged.connect(self._change_variant)
+        self.background = QPushButton("♫  Ozadje")
+        self.background.setToolTip("Nadaljuj predvajanje v ozadju (Ctrl+Shift+M odpre upravljanje)")
+        self.background.clicked.connect(self.ozadje.emit)
+        self.background.setVisible(False)
         controls.addWidget(self.play_button)
         controls.addWidget(stop)
         controls.addWidget(self.position, 1)
@@ -134,6 +139,7 @@ class VlcPlayerWidget(QWidget):
         controls.addWidget(volume_label)
         controls.addWidget(self.volume)
         controls.addWidget(self.variants)
+        controls.addWidget(self.background)
         root.addLayout(controls)
 
     def _init_vlc(self) -> None:
@@ -179,9 +185,10 @@ class VlcPlayerWidget(QWidget):
         self.variants.setCurrentIndex(variant_index)
         self.variants.setVisible(len(variants) > 1)
         self.variants.blockSignals(False)
-        is_audio = item.get("vrsta") == "glasba"
+        is_audio = item.get("vrsta") in ("glasba", "radio")
         self.video.setVisible(not is_audio)
         self.audio_visual.setVisible(is_audio)
+        self.background.setVisible(is_audio)
         variant = variants[variant_index]
         media = self.instance.media_new(str(variant.get("url") or ""))
         headers = variant.get("glave") if isinstance(variant.get("glave"), dict) else {}
