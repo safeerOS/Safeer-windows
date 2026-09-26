@@ -218,7 +218,7 @@ class SafeerControlBackend:
             "brezPovezave": True,
             "lokalnaKoda": self.lokalna_koda,
             "deljeneMape": self.deljene_mape_za_vmesnik(),
-            "standardneDeljene": False,
+            "standardneDeljene": self._standardne_mape_deljene(),
             "dovoljenja": dict(self.nastavitve.get("dovoljenja_naprav") or {}),
         }
 
@@ -1298,12 +1298,22 @@ class SafeerControlBackend:
     def deli_standardne_mape(self) -> int:
         """Enkrat doda obstoječe uporabnikove mape; podvojene poti se preskočijo."""
         dodanih = 0
-        for mapa in os_backend_win.uporabniske_mape():
+        for mapa in os_backend_win.medijske_mape():
             pot = str(mapa.get("pot") or "")
             if pot and self.dodaj_deljeno_mapo(pot):
                 dodanih += 1
-        self._oddaj_dogodek("deljeneMape", {"mape": self.deljene_mape_za_vmesnik(), "standardne": True})
+        self._oddaj_dogodek("deljeneMape", {
+            "mape": self.deljene_mape_za_vmesnik(),
+            "standardne": self._standardne_mape_deljene(),
+            "dodanih": dodanih,
+        })
         return dodanih
+
+    def _standardne_mape_deljene(self) -> bool:
+        standardne = {os.path.normcase(os.path.abspath(str(m.get("pot") or "")))
+                      for m in os_backend_win.medijske_mape() if m.get("pot")}
+        deljene = {os.path.normcase(os.path.abspath(p)) for p in self.deljene_mape()}
+        return bool(standardne) and standardne.issubset(deljene)
 
     def shrani_vzdevek(self, id_naprave: str, ime: str) -> bool:
         id_naprave, ime = str(id_naprave or "").strip(), str(ime or "").strip()[:80]

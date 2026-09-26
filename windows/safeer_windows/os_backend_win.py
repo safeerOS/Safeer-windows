@@ -78,6 +78,50 @@ def uporabniske_mape() -> List[dict]:
     return izhod
 
 
+def medijske_mape() -> List[dict]:
+    """Vrne samo uporabnikove mape Slike, Glasba in Videi.
+
+    Na Windowsu so znane mape lahko prestavljene (npr. v OneDrive), zato najprej
+    preberemo dejanske poti iz registra in sele nato uporabimo varne privzetke.
+    """
+    kljuci = {
+        "PICTURES": ("My Pictures", "Pictures", "Slike"),
+        "MUSIC": ("My Music", "Music", "Glasba"),
+        "VIDEOS": ("My Video", "Videos", "Videoposnetki"),
+    }
+    registrske: dict[str, str] = {}
+    if sys.platform == "win32":
+        try:
+            import winreg
+            pot_kljuca = r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders"
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, pot_kljuca) as kljuc:
+                for vrsta, (ime_vrednosti, _mapa, _opis) in kljuci.items():
+                    try:
+                        vrednost, _ = winreg.QueryValueEx(kljuc, ime_vrednosti)
+                        registrske[vrsta] = os.path.expandvars(str(vrednost))
+                    except OSError:
+                        pass
+        except (ImportError, OSError):
+            pass
+
+    rezultat = []
+    videne = set()
+    dom = os.path.expanduser("~")
+    onedrive = os.environ.get("OneDrive") or os.environ.get("OneDriveConsumer") or ""
+    for vrsta, (_ime_vrednosti, privzeta, opis) in kljuci.items():
+        kandidati = [registrske.get(vrsta, ""), os.path.join(dom, privzeta)]
+        if onedrive:
+            kandidati.append(os.path.join(onedrive, privzeta))
+        for kandidat in kandidati:
+            pot = os.path.normpath(kandidat) if kandidat else ""
+            oznaka = os.path.normcase(os.path.abspath(pot)) if pot else ""
+            if pot and os.path.isdir(pot) and oznaka not in videne:
+                videne.add(oznaka)
+                rezultat.append({"vrsta": vrsta, "pot": pot, "ime": os.path.basename(pot) or opis})
+                break
+    return rezultat
+
+
 def vrsta_datoteke(ime: str, je_mapa: bool = False) -> str:
     if je_mapa:
         return "mapa"

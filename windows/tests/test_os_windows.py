@@ -221,6 +221,30 @@ class TestOsWindows(unittest.TestCase):
                                       source_id="podcast", source_name="Podcast")
         self.assertEqual(items[0]["vrsta"], "podcast")
 
+    def test_vidlink_katalog_uporabi_eno_serijsko_kartico_in_pravi_plakat(self):
+        items = os_media._resolve_embed_or_direct_source("https://vidlink.pro", "vidlink", "VidLink")
+        got = [item for item in items if item.get("tmdb_id") == 1399]
+        self.assertEqual(len(got), 1)
+        self.assertEqual(got[0]["sezona"], 0)
+        self.assertEqual(got[0]["epizoda"], 0)
+        self.assertIn("1XS1oqL89opfnbLl8WnZY1O1uJx", got[0]["slika"])
+        episode = os_media.MediaCenter("/tmp/safeer-media-test", roots=[]).episode_item(1399, 1, 4, "Winter Is Coming")
+        self.assertIn("/tv/1399/1/4", episode["url"])
+
+    def test_predvajanje_uporabi_le_uporabnikove_vire_in_pravilno_epizodo(self):
+        with tempfile.TemporaryDirectory() as td:
+            center = os_media.MediaCenter(td, roots=[])
+            center._save({"viri": [
+                {"id": "v1", "url": "https://vidlink.pro", "ime": "VidLink", "vnosi": []},
+                {"id": "v2", "url": "https://vidsrc.me", "ime": "Moj rezervni vir", "vnosi": []},
+            ]})
+            episode = center.episode_item(1399, 1, 4, "Igra prestolov S01E04")
+            resolved = center.resolve(episode["id"])
+            urls = [v["url"] for v in resolved["razlicice"]]
+            self.assertTrue(any("vidlink.pro/tv/1399/1/4" in url for url in urls))
+            self.assertTrue(any("vidsrc.me/embed/tv?tmdb=1399&season=1&episode=4" in url for url in urls))
+            self.assertFalse(any("/1/1" in url or "episode=1" in url for url in urls))
+
     def test_media_razbere_in_podeduje_imdb_in_tmdb_id(self):
         payload = json.dumps({
             "results": [{
@@ -1102,7 +1126,7 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
             os.makedirs(druga)
             cb = control_backend.SafeerControlBackend(config_pot=os.path.join(td, "control.json"))
             mape = [{"pot": prva}, {"pot": prva}, {"pot": druga}]
-            with mock.patch.object(os_backend_win, "uporabniske_mape", return_value=mape):
+            with mock.patch.object(os_backend_win, "medijske_mape", return_value=mape):
                 self.assertEqual(cb.deli_standardne_mape(), 2)
                 self.assertEqual(cb.deli_standardne_mape(), 0)
             self.assertEqual(len(cb.deljene_mape()), 2)
