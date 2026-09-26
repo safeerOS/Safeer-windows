@@ -1957,15 +1957,19 @@
     } else {
       if (iframe && /^https?:\/\//i.test(url)) {
         iframe.hidden = false;
-        iframe.onload = function () { if (media.timer) { window.clearTimeout(media.timer); media.timer = 0; } };
+        // load pomeni samo, da je embed HTML prispel; VidLink lahko nato še
+        // dolgo vrti svoj spinner ali vrne »content not found«. Časovnika zato
+        // ne prekličemo ob load, sicer uporabnik ostane brez končnega stanja.
+        iframe.onload = function () {};
         iframe.onerror = function () { if (media.timer) window.clearTimeout(media.timer); media.timer = 0; $("mediaNapaka").hidden = false; };
         iframe.src = url;
         // Oddaljeni embed lahko vrne prazno stran brez omrežne napake. Po
-        // 20 sekundah pokažemo napako in pustimo izbiro druge različice.
+        // 12 sekundah skrijemo nedelujoči embed in pokažemo jasno napako.
         media.timer = window.setTimeout(function () {
           media.timer = 0;
+          iframe.hidden = true;
           $("mediaNapaka").hidden = false;
-        }, 20000);
+        }, 12000);
       } else $("mediaNapaka").hidden = false;
     }
     var choices = $("mediaRazlicice"); choices.innerHTML = "";
