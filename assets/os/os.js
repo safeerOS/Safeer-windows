@@ -940,7 +940,6 @@
     $("gumbControl").querySelector("svg").innerHTML = '<path d="' + IK[povezan ? "naprave" : "qr"] + '"/>';
     $("kNapravePod").textContent = t(povezan ? "napravePodPovezan" : "napravePodNov");
     $("blokZaupanje").hidden = !povezan;
-    $("gumbNovaNaprava").hidden = !povezan || !p.control;
     $("gumbOdjava").hidden = !povezan || !p.control;
     $("gumbOdjava").classList.toggle("opozorilo", odjavaPotrjujem);
     $("gumbOdjavaBesedilo").textContent = t(odjavaPotrjujem ? "odjavaPotrdi" : "odjaviRacunalnik");
@@ -1701,10 +1700,6 @@
       // Povezan racunalnik: Control z napravami; sicer prijavno okno (QR / koda / brez povezave).
       klic(S.povezava.stanje === "povezan" ? "control" : "prijava");
     });
-    $("gumbNovaNaprava").addEventListener("click", function () {
-      obvesti(t("odpiram", { ime: "Safeer Control" }));
-      klic("novaNaprava");
-    });
     $("gumbOdjava").addEventListener("click", function () {
       if (!odjavaPotrjujem) {
         odjavaPotrjujem = true;
@@ -1941,6 +1936,15 @@
     metaSeznam.push(item.leto, variant.vir, variant.kakovost);
     $("mediaPredvajalnikMeta").textContent = metaSeznam.filter(Boolean).join(" · ");
 
+    function poskusiNaslednjo() {
+      var naslednja = (index || 0) + 1;
+      if (naslednja < variants.length) {
+        predvajajHtml(item, naslednja);
+        return true;
+      }
+      return false;
+    }
+
     if (isDirectMedia) {
       var player = audio ? playerAudio : video;
       if (player) {
@@ -1955,14 +1959,18 @@
             if (player.currentTime > 3) localStorage.setItem("safeer_media_progress_" + (item.id || url), String(Math.floor(player.currentTime)));
           };
         } catch (e) {}
-        player.onerror = function () { if (media.timer) window.clearTimeout(media.timer); media.timer = 0; $("mediaNapaka").hidden = false; };
+        player.onerror = function () {
+          if (media.timer) window.clearTimeout(media.timer);
+          media.timer = 0;
+          if (!poskusiNaslednjo()) $("mediaNapaka").hidden = false;
+        };
         player.play().catch(function () {});
         if (navigator.mediaSession) {
           try { navigator.mediaSession.metadata = new MediaMetadata({title: item.naslov || "Safeer Media", artist: item.izvajalec || item.vir || "Safeer OS", artwork: item.slika ? [{src: item.slika}] : []}); } catch (e) {}
         }
         media.timer = window.setTimeout(function () {
           media.timer = 0;
-          if (player.readyState < 2) $("mediaNapaka").hidden = false;
+          if (player.readyState < 2 && !poskusiNaslednjo()) $("mediaNapaka").hidden = false;
         }, 20000);
       }
     } else {
@@ -1972,14 +1980,18 @@
         // dolgo vrti svoj spinner ali vrne »content not found«. Časovnika zato
         // ne prekličemo ob load, sicer uporabnik ostane brez končnega stanja.
         iframe.onload = function () {};
-        iframe.onerror = function () { if (media.timer) window.clearTimeout(media.timer); media.timer = 0; $("mediaNapaka").hidden = false; };
+        iframe.onerror = function () {
+          if (media.timer) window.clearTimeout(media.timer);
+          media.timer = 0;
+          if (!poskusiNaslednjo()) $("mediaNapaka").hidden = false;
+        };
         iframe.src = url;
         // Oddaljeni embed lahko vrne prazno stran brez omrežne napake. Po
         // 12 sekundah skrijemo nedelujoči embed in pokažemo jasno napako.
         media.timer = window.setTimeout(function () {
           media.timer = 0;
           iframe.hidden = true;
-          $("mediaNapaka").hidden = false;
+          if (!poskusiNaslednjo()) $("mediaNapaka").hidden = false;
         }, 12000);
       } else $("mediaNapaka").hidden = false;
     }

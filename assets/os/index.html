@@ -181,7 +181,10 @@
           <div class="media-predvajalnik-glava"><div><small data-t="mediaPredvaja">PREDVAJA SE V SAFEER OS</small><h2 id="mediaPredvajalnikNaslov"></h2><p id="mediaPredvajalnikMeta"></p></div><div class="media-predvajalnik-akcije"><button class="gumb-ikona" id="mediaKino" title="Kino način (celozaslonsko)"><svg data-ikona="celozaslonsko"></svg></button><button class="gumb-ikona" id="mediaZapri" data-naslov="zapri"><svg data-ikona="x"></svg></button></div></div>
           <video id="mediaVideo" controls playsinline preload="metadata" hidden></video>
           <audio id="mediaAudio" controls preload="metadata" hidden></audio>
-          <iframe id="mediaIframe" title="Safeer Media predvajalnik" allow="autoplay; fullscreen; picture-in-picture; encrypted-media" allowfullscreen referrerpolicy="origin" hidden></iframe>
+          <iframe id="mediaIframe" title="Safeer Media predvajalnik"
+                  sandbox="allow-scripts allow-presentation"
+                  allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
+                  allowfullscreen referrerpolicy="strict-origin-when-cross-origin" hidden></iframe>
           <p class="media-napaka" id="mediaNapaka" hidden data-t="mediaNapaka">Tega toka ni mogoče predvajati. Poskusi drugo različico.</p>
           <div class="media-razlicice" id="mediaRazlicice"></div>
         </div>
@@ -246,7 +249,6 @@
           <p class="namig" id="napraveNamig" hidden></p>
           <div class="gumbi-naprav">
             <button class="gumb glavni" id="gumbControl"><svg data-ikona="qr"></svg><span id="gumbControlBesedilo"></span></button>
-            <button class="gumb" id="gumbNovaNaprava" hidden><svg data-ikona="plus"></svg><span data-t="poveziNovoNapravo"></span></button>
             <button class="gumb" id="gumbOdjava" hidden><svg data-ikona="odjava"></svg><span id="gumbOdjavaBesedilo"></span></button>
           </div>
         </div>

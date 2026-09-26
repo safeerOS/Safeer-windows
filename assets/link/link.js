@@ -2069,6 +2069,11 @@
     cilj.innerHTML = "";
     var naprave = (stanje.naprave || []).filter(function (n) { return n.id && n.id !== stanje.idNaprave; });
     pokazi("opombaDovoljenja", naprave.length === 0);
+    var polni = el("gumbPolniDostop");
+    if (polni) {
+      polni.disabled = naprave.length === 0;
+      polni.hidden = false;
+    }
     naprave.forEach(function (n) {
       var profil = (stanje.dovoljenja || {})[n.id] || "vprasaj";
       var kartica = document.createElement("article");
@@ -2495,7 +2500,11 @@
         var g = el("gumbSeznani");
         if (g) g.disabled = true;
       } else if (vrsta === "qr") {
-        narisiQr(podatki);
+        // Isti varen QR dogodek se uporablja pri prijavi in pri dodajanju nove
+        // naprave. Prej je vedno koncal v prijavnem okvirju, zato ga v odprtem
+        // vabilu izrisemo v pravilni kartici.
+        if (vabiloOdprto) narisiVabilo(podatki || {});
+        else narisiQr(podatki);
       } else if (vrsta === "lokalnaKoda") {
         stanje.lokalnaKoda = String(podatki || "");
         narisiLokalnoKodo();
@@ -2598,6 +2607,11 @@
       } else if (vrsta === "deljeneMape") {
         stanje.deljeneMape = (podatki && podatki.mape) || [];
         stanje.standardneDeljene = !!(podatki && podatki.standardne);
+        if (podatki && typeof podatki.dodanih === "number") {
+          besedilo("opombaStandardneMape", podatki.dodanih > 0
+            ? "Mape Videi, Glasba in Slike so zdaj v skupni rabi."
+            : (stanje.standardneDeljene ? "Te mape so že v skupni rabi." : "Na tem računalniku teh map ni bilo mogoče najti."));
+        }
         narisiMape();
       } else if (vrsta === "dovoljenja") {
         stanje.dovoljenja = podatki || {};
@@ -3025,7 +3039,21 @@
       if (most && most.dodajDeljenoMapo) most.dodajDeljenoMapo();
     });
     naKlik("gumbStandardneMape", function () {
+      besedilo("opombaStandardneMape", "Dodajam mape Videi, Glasba in Slike …");
       if (most && most.deliStandardneMape) most.deliStandardneMape();
+    });
+    naKlik("gumbPolniDostop", function () {
+      var naprave = (stanje.naprave || []).filter(function (n) { return n.id && n.id !== stanje.idNaprave; });
+      if (!naprave.length) {
+        besedilo("opombaPolniDostop", "Najprej poveži drugo napravo.");
+        return;
+      }
+      naprave.forEach(function (n) {
+        if (most && most.nastaviDovoljenje) most.nastaviDovoljenje(n.id, "polno");
+        stanje.dovoljenja[n.id] = "polno";
+      });
+      besedilo("opombaPolniDostop", "Polni dostop je dovoljen povezanim napravam.");
+      narisiDovoljenja();
     });
     naKlik("gumbZapri", function () {
       if (most) most.zapri();

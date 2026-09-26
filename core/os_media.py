@@ -193,7 +193,7 @@ KNOWN_IMDB = {
         "title": "Igra prestolov (Game of Thrones)",
         "kind": "serija",
         "year": 2011,
-        "image": "https://m.media-amazon.com/images/M/MV5BN2EyZjM3NzUtNWUzMi00MTgxLWI0NTctMzY4M2VlOTdjZWRiXkEyXkFqcGdeQXVyNDUzOTQ5MjY@._V1_SX300.jpg",
+        "image": "https://image.tmdb.org/t/p/w500/1XS1oqL89opfnbLl8WnZY1O1uJx.jpg",
         "description": "Plemiške družine se borijo za nadzor nad Deželami Westerosa.",
         "episodes": [
             (1, 1, "Zima prihaja (Winter Is Coming)"),
@@ -207,7 +207,7 @@ KNOWN_IMDB = {
         "title": "Kriva pota (Breaking Bad)",
         "kind": "serija",
         "year": 2008,
-        "image": "https://m.media-amazon.com/images/M/MV5BYmQ4YWMxYjUtNjZmYi00MDQ1LWFjMjAtNjA5cfFhMmZmN2I3XkEyXkFqcGdeQXVyMTMzNDExODE5._V1_SX300.jpg",
+        "image": "https://image.tmdb.org/t/p/w500/3xnWaLQjelJDDF7LT1WBo6f4oIK.jpg",
         "description": "Učitelj kemije z rakom začne kuhati metamfetamin s svojim nekdanjim dijakom.",
         "episodes": [
             (1, 1, "Pilot"),
@@ -221,7 +221,7 @@ KNOWN_IMDB = {
         "title": "Stranger Things (Nenavadne stvari)",
         "kind": "serija",
         "year": 2016,
-        "image": "https://m.media-amazon.com/images/M/MV5BMDZkYmVhNjMtNWU4MC00MDQxLWE3YTgtZDAzOWZkYzg3NTBhXkEyXkFqcGdeQXVyMTkxNjUyNQ@@._V1_SX300.jpg",
+        "image": "https://image.tmdb.org/t/p/w500/49WJfeN0moxb9IPfGn8AIqMGskD.jpg",
         "description": "Ko deček izgine v majhnem mestu, prijatelji in mati odkrijejo skrivne poskuse in deklico z nadnaravnimi močmi.",
         "episodes": [
             (1, 1, "Izginotje Willa Byersa"),
@@ -233,7 +233,7 @@ KNOWN_IMDB = {
         "title": "The Last of Us",
         "kind": "serija",
         "year": 2023,
-        "image": "https://m.media-amazon.com/images/M/MV5BZGUzYTI3M2EtZmM0Yy00NGUyLWI4ODEtN2Q3ZGJlYzhhZjU3XkEyXkFqcGdeQXVyNTM0NTU5Mg@@._V1_SX300.jpg",
+        "image": "https://image.tmdb.org/t/p/w500/uKvVjHNqB5VmOrdxqAt2F7J78ED.jpg",
         "description": "Joel in Ellie potujeta skozi post-apokaliptične Združene države.",
         "episodes": [
             (1, 1, "Ko si izgubljen v temi"),
@@ -245,7 +245,7 @@ KNOWN_IMDB = {
         "title": "Černobil (Chernobyl)",
         "kind": "serija",
         "year": 2019,
-        "image": "https://m.media-amazon.com/images/M/MV5BNTBlOWUxZTctNTY2ZS00NjJkLTgwZjEtZWM1M2IxM2U0MDMzXkEyXkFqcGdeQXVyMTkxNjUyNQ@@._V1_SX300.jpg",
+        "image": "https://image.tmdb.org/t/p/w500/hlLXt2tOPT6RRnjiUmoxyG1LTFi.jpg",
         "description": "Kronika jedrske nesreče v Černobilu leta 1986 in neprimerljivega poguma reševalcev.",
         "episodes": [
             (1, 1, "1:23:45"),
@@ -765,22 +765,18 @@ def _katalog_iz_predloge(url: str, source_id: str, source_name: str) -> list[dic
             continue
         if not series_template and meta.get("kind") != "film":
             continue
-        episodes = meta.get("episodes", []) if series_template else [(0, 0, "")]
-        for season, episode, episode_name in episodes:
-            play_url = _izpolni_predlogo(url, imdb_id, tmdb_id, season, episode)
-            title = meta.get("title", "Vsebina")
+        # Glavni katalog vsebuje eno kartico na serijo. Sezone in epizode se
+        # naložijo šele v podrobnostih, zato se naslovi in plakati ne podvajajo.
+        season, episode = (1, 1) if series_template else (0, 0)
+        play_url = _izpolni_predlogo(url, imdb_id, tmdb_id, season, episode)
+        item = _item(meta.get("title", "Vsebina"), play_url, base=play_url, source_id=source_id,
+                     source_name=source_name, kind="serija" if series_template else "film",
+                     year=meta.get("year", 0), image=meta.get("image", ""),
+                     description=meta.get("description", ""), imdb_id=imdb_id, tmdb_id=int(tmdb_id))
+        if item:
             if series_template:
-                title += f" S{season:02d}E{episode:02d}"
-                if episode_name:
-                    title += f" - {episode_name}"
-            item = _item(title, play_url, base=play_url, source_id=source_id,
-                         source_name=source_name, kind="serija" if series_template else "film",
-                         year=meta.get("year", 0), image=meta.get("image", ""),
-                         season=season, episode=episode,
-                         description=meta.get("description", ""),
-                         imdb_id=imdb_id, tmdb_id=int(tmdb_id))
-            if item:
-                items.append(item)
+                item["sezona"], item["epizoda"] = 0, 0
+            items.append(item)
     return items
 
 
@@ -848,30 +844,27 @@ def _resolve_embed_or_direct_source(url: str, source_id: str, source_name: str) 
         scheme = parsed.scheme or "https"
         effective_name = source_name if source_name and source_name != embed_host else "VidSrc"
         episodes = info.get("episodes", [])
-        if episodes:
+        # VidSrc starejši katalog še uporablja neposredne epizodne vnose;
+        # pri VidLinku pa je pravilneje pokazati eno serijo in epizode naložiti
+        # šele v podrobnostih.
+        if "vidsrc" in embed_host and episodes:
             items = []
             for s, e, ep_name in episodes:
-                # Za TMDB ponudnike poišči TMDB ID iz aliasov
-                tmdb_id = imdb_id  # privzeto (če je že TMDB)
-                for tmdb_k, imdb_v in [(k, v) for k, v in KNOWN_IMDB.items() if not k.startswith("tt") and v.get("title") == info.get("title")]:
-                    tmdb_id = tmdb_k
-                    break
-                tv_url = _embed_url_for_provider(embed_host, scheme, imdb_id, tmdb_id, "serija", s, e)
-                full_title = f"{title_base} S{s:02d}E{e:02d} - {ep_name}"
-                it = _item(full_title, tv_url, base=tv_url, source_id=source_id,
-                           source_name=effective_name, kind="serija",
-                           year=info.get("year", 0), image=info.get("image", ""),
-                           season=s, episode=e, description=info.get("description", ""))
+                tv_url = _embed_url_for_provider(embed_host, scheme, imdb_id, imdb_id, "serija", s, e)
+                it = _item(f"{title_base} S{s:02d}E{e:02d} - {ep_name}", tv_url, base=tv_url,
+                           source_id=source_id, source_name=effective_name, kind="serija",
+                           year=info.get("year", 0), image=info.get("image", ""), season=s,
+                           episode=e, description=info.get("description", ""), imdb_id=imdb_id,
+                           tmdb_id=_tmdb_id(imdb_id))
                 if it:
                     items.append(it)
             return items
-        else:
-            tv_url = _embed_url_for_provider(embed_host, scheme, imdb_id, imdb_id, "serija", 1, 1)
-            it = _item(f"{title_base} S01E01", tv_url, base=tv_url, source_id=source_id,
-                       source_name=effective_name, kind="serija",
-                       year=info.get("year", 0), image=info.get("image", ""),
-                       season=1, episode=1, description=info.get("description", ""))
-            return [it] if it else []
+        tv_url = _embed_url_for_provider(embed_host, scheme, imdb_id, imdb_id, "serija", 1, 1)
+        it = _item(title_base, tv_url, base=tv_url, source_id=source_id,
+                   source_name=effective_name, kind="serija", year=info.get("year", 0),
+                   image=info.get("image", ""), description=info.get("description", ""),
+                   imdb_id=imdb_id, tmdb_id=_tmdb_id(imdb_id))
+        return [it] if it else []
 
     # 2. Specifična povezava do filma (/movie/ ali /embed/movie/)
     match_movie = re.search(r"/(?:movie|embed/movie)/([^/]+)", url)
@@ -915,14 +908,24 @@ def _resolve_embed_or_direct_source(url: str, source_id: str, source_name: str) 
                 if it:
                     items.append(it)
             elif meta.get("kind") == "serija":
-                for s, e, ep_name in meta.get("episodes", []):
-                    tv_url = _embed_url_for_provider(embed_host, scheme, imdb_id, tmdb_id, "serija", s, e)
-                    full_title = f"{meta['title']} S{s:02d}E{e:02d} - {ep_name}"
-                    it = _item(full_title, tv_url, base=tv_url, source_id=source_id,
-                               source_name=effective_name, kind="serija",
-                               year=meta.get("year", 0), image=meta.get("image", ""),
-                               season=s, episode=e, description=meta.get("description", ""))
+                if "vidsrc" in embed_host:
+                    for s, e, ep_name in meta.get("episodes", []):
+                        tv_url = _embed_url_for_provider(embed_host, scheme, imdb_id, tmdb_id, "serija", s, e)
+                        it = _item(f"{meta['title']} S{s:02d}E{e:02d} - {ep_name}", tv_url,
+                                   base=tv_url, source_id=source_id, source_name=effective_name,
+                                   kind="serija", year=meta.get("year", 0), image=meta.get("image", ""),
+                                   season=s, episode=e, description=meta.get("description", ""),
+                                   imdb_id=imdb_id, tmdb_id=int(tmdb_id))
+                        if it:
+                            items.append(it)
+                else:
+                    tv_url = _embed_url_for_provider(embed_host, scheme, imdb_id, tmdb_id, "serija", 1, 1)
+                    it = _item(meta["title"], tv_url, base=tv_url, source_id=source_id,
+                               source_name=effective_name, kind="serija", year=meta.get("year", 0),
+                               image=meta.get("image", ""), description=meta.get("description", ""),
+                               imdb_id=imdb_id, tmdb_id=int(tmdb_id))
                     if it:
+                        it["sezona"], it["epizoda"] = 0, 0
                         items.append(it)
         return items
 
@@ -1400,7 +1403,9 @@ class MediaCenter:
                      source_name=str(source.get("ime") or "VidLink"), kind=kind, year=year,
                      image=f"{TMDB_IMAGE}/w500{raw['poster_path']}" if raw.get("poster_path") else "",
                      description=raw.get("overview") or "", tmdb_id=tmdb_id, imdb_id=imdb_id,
-                     season=1 if kind == "serija" else 0, episode=1 if kind == "serija" else 0,
+                     # Serija je katalogski naslov; epizodo določi podrobni
+                     # pogled in jo nato sestavi z natančnim ID-jem.
+                     season=0, episode=0,
                      quality="1080p")
         if not item:
             return None
@@ -1448,7 +1453,8 @@ class MediaCenter:
     def catalog(self, query: str = "", kind: str = "vse", genre: str = "", page: int = 1) -> dict:
         with self._lock:
             data = self._load()
-        remote = [item for source in data.get("viri", []) for item in source.get("vnosi", []) if isinstance(item, dict)]
+        remote = [item for source in data.get("viri", []) for item in source.get("vnosi", [])
+                  if isinstance(item, dict)]
         dynamic = self._tmdb_catalog(data, _text(query, 120), kind, _text(genre, 20), page) if self._ima_vidlink(data) else []
         merged = merge_duplicates(self._local_items() + remote + dynamic)
         needle = _text(query, 120).casefold()
@@ -1620,7 +1626,65 @@ class MediaCenter:
         item = self._dynamic_items.get(item_id) or next((item for item in self.catalog()["vnosi"] if item.get("id") == item_id), None)
         if not item:
             return None
-        return self._izberi_najhitrejsi(item)
+        return self._izberi_najhitrejsi(self._dodaj_predvajalne_razlicice(item))
+
+    def _dodaj_predvajalne_razlicice(self, item: dict) -> dict:
+        """Sestavi razlicice samo iz virov, ki jih je dodal uporabnik.
+
+        Katalog ostane brez podvojenih kartic. Pri predvajanju pa isti TMDb/IMDb
+        naslov dobi po eno razlicico za vsak uporabnikov embed vir, zato lahko
+        vmesnik ob nedosegljivem viru varno nadaljuje z naslednjim.
+        """
+        if item.get("vrsta") not in ("film", "serija"):
+            return item
+        tmdb_id = str(int(item.get("tmdb_id") or 0)) if item.get("tmdb_id") else ""
+        imdb_id = str(item.get("imdb_id") or "")
+        if not tmdb_id and not imdb_id:
+            return item
+        season, episode = int(item.get("sezona") or 0), int(item.get("epizoda") or 0)
+        existing = list(item.get("razlicice") or [])
+        if item.get("url"):
+            existing.insert(0, {k: item.get(k) for k in (
+                "url", "vir", "vir_id", "kakovost", "locljivost", "glave", "referer"
+            ) if item.get(k) not in (None, "")})
+
+        with self._lock:
+            sources = list(self._load().get("viri", []))
+        for source in sources:
+            source_url = str(source.get("url") or "")
+            parsed = urllib.parse.urlsplit(source_url)
+            host = (parsed.hostname or "").lower()
+            if not host or not any(domain in host for domain in _EMBED_DOMAINS):
+                continue
+            if item.get("vrsta") == "serija" and (season < 1 or episode < 1):
+                continue
+            if _PREDLOGA_TOKEN.search(source_url):
+                play_url = _izpolni_predlogo(source_url, imdb_id, tmdb_id, season, episode)
+            else:
+                play_url = _embed_url_for_provider(host, parsed.scheme or "https", imdb_id, tmdb_id,
+                                                   str(item.get("vrsta")), season, episode)
+            if play_url:
+                existing.append({
+                    "url": play_url,
+                    "vir": str(source.get("ime") or host),
+                    "vir_id": str(source.get("id") or ""),
+                    "kakovost": "1080p",
+                    "locljivost": 1080,
+                })
+
+        variants, seen = [], set()
+        for variant in existing:
+            url = str(variant.get("url") or "")
+            canonical = canonical_url(url) if url.startswith(("http://", "https://")) else url
+            if not url or canonical in seen:
+                continue
+            seen.add(canonical)
+            variants.append(dict(variant, url=url))
+        out = dict(item)
+        if variants:
+            out["razlicice"] = variants
+            out["stevilo_razlicic"] = len(variants)
+        return out
 
     def _izmeri_ping(self, url: str) -> None:
         """V ozadju izmeri TCP odziv gostitelja; predvajanje na to ne čaka."""
