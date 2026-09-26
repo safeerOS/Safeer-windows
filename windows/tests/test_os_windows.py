@@ -189,6 +189,49 @@ class TestOsWindows(unittest.TestCase):
         self.assertIn("set_hwnd", player)
         self.assertIn("SAFEER OS · MEDIA", player)
 
+    def test_media_viri_so_samo_v_nastavitvah_in_brez_iframe_predvajalnika(self):
+        koren = Path(__file__).resolve().parents[2]
+        html = (koren / "assets" / "os" / "index.html").read_text(encoding="utf-8")
+        javascript = (koren / "assets" / "os" / "os.js").read_text(encoding="utf-8")
+        media_start = html.index('id="r-media"')
+        settings_start = html.index('id="r-nastavitve"')
+        source_form = html.index('id="mediaDodajVir"')
+        self.assertLess(media_start, settings_start)
+        self.assertGreater(source_form, settings_start)
+        self.assertNotIn('id="mediaIframe"', html)
+        self.assertNotIn('$("mediaIframe")', javascript)
+
+    def test_safeer_os_uporablja_notranji_zasciteni_brskalnik(self):
+        koren = Path(__file__).resolve().parents[2]
+        app = (koren / "windows" / "safeer_windows" / "os_app.py").read_text(encoding="utf-8")
+        launcher = (koren / "windows" / "safeer_os_windows.py").read_text(encoding="utf-8")
+        self.assertIn("browser.BrowserWindow", app)
+        self.assertIn("embedded=True", app)
+        self.assertIn("self._odpri_notranji_splet(url, media=True)", app)
+        self.assertNotIn("subprocess.Popen", app)
+        for source in (app, launcher):
+            self.assertNotIn("--disable-web-security", source)
+            self.assertNotIn("--no-sandbox", source)
+
+    def test_media_api_http_glave_se_ohranijo_za_libvlc(self):
+        payload = json.dumps({
+            "items": [{
+                "title": "Film",
+                "url": "https://cdn.test/film.m3u8",
+                "headers": {"Referer": "https://app.test/", "User-Agent": "Safeer Test"},
+            }]
+        }).encode()
+        item = os_media.parse_payload(payload, "application/json", "https://api.test/")[0]
+        self.assertEqual(item["referer"], "https://app.test/")
+        self.assertEqual(item["glave"]["User-Agent"], "Safeer Test")
+        merged = os_media.merge_duplicates([item])[0]
+        self.assertEqual(merged["razlicice"][0]["glave"]["Referer"], "https://app.test/")
+
+        koren = Path(__file__).resolve().parents[2]
+        player = (koren / "windows" / "safeer_windows" / "vlc_player.py").read_text(encoding="utf-8")
+        self.assertIn(":http-referrer=", player)
+        self.assertIn(":http-user-agent=", player)
+
     def test_media_samodejno_osvezi_samo_zastarele_vire(self):
         payload = b'{"items":[{"title":"Film","url":"https://cdn.test/film.mp4"}]}'
         with tempfile.TemporaryDirectory() as td:
@@ -823,7 +866,6 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
             self.assertEqual(stanje["lokalnaKoda"], cb.lokalna_koda)
 
             # Nova lokalna koda
-            stara_koda = cb.lokalna_koda
             nova = cb.nova_lokalna_koda()
             self.assertEqual(len(nova), 6)
             self.assertEqual(cb.lokalna_koda, nova)

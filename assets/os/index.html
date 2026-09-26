@@ -171,7 +171,6 @@
           <div class="media-predvajalnik-glava"><div><small data-t="mediaPredvaja">PREDVAJA SE V SAFEER OS</small><h2 id="mediaPredvajalnikNaslov"></h2><p id="mediaPredvajalnikMeta"></p></div><div class="media-predvajalnik-akcije"><button class="gumb-ikona" id="mediaKino" title="Kino način (celozaslonsko)"><svg data-ikona="celozaslonsko"></svg></button><button class="gumb-ikona" id="mediaZapri" data-naslov="zapri"><svg data-ikona="x"></svg></button></div></div>
           <video id="mediaVideo" controls playsinline preload="metadata" hidden></video>
           <audio id="mediaAudio" controls preload="metadata" hidden></audio>
-          <iframe id="mediaIframe" allowfullscreen webkitallowfullscreen mozallowfullscreen allow="autoplay; encrypted-media; picture-in-picture; fullscreen" style="position:relative; width:100%; aspect-ratio:16/9; max-height:80vh; border:none; background:#000; border-radius:12px;" hidden></iframe>
           <p class="media-napaka" id="mediaNapaka" hidden data-t="mediaNapaka">Tega toka ni mogoče predvajati. Poskusi drugo različico.</p>
           <div class="media-razlicice" id="mediaRazlicice"></div>
         </div>
@@ -184,14 +183,6 @@
         <div class="media-katalog" id="mediaMreza"></div>
         <p class="namig" id="mediaPrazno" hidden data-t="mediaPrazno">Ni zadetkov. Dodaj vir ali spremeni iskanje.</p>
 
-        <div class="media-viri-glava"><div><h2 data-t="mediaViri">Tvoji viri</h2><p data-t="mediaViriOpis">Spletno stran, javni API, RSS ali M3U dodaš samo enkrat.</p></div></div>
-        <form class="media-dodaj-vir" id="mediaDodajVir">
-          <input id="mediaVirIme" type="text" maxlength="80" data-ph="mediaVirIme" placeholder="Ime vira (neobvezno)">
-          <input id="mediaVirUrl" type="url" required data-ph="mediaVirUrl" placeholder="https://primer.si/katalog.json">
-          <button class="gumb glavni" type="submit"><svg data-ikona="plus"></svg><span data-t="mediaDodaj">Dodaj vir</span></button>
-        </form>
-        <p class="namig" id="mediaVirSporocilo"></p>
-        <div class="media-viri" id="mediaViri"></div>
       </section>
 
       <!-- PROGRAMI -->
@@ -309,6 +300,15 @@
           <button class="stikalo" id="stikaloSamozagon" role="switch" aria-checked="false"><svg data-ikona="ponovno"></svg><div><span data-t="samozagon"></span><small data-t="samozagonPod"></small></div><i></i></button>
           <button class="stikalo" id="gumbNazajVMint"><svg data-ikona="odjava"></svg><div><span data-t="nazajVMint"></span><small data-t="nazajVMintPod"></small></div></button>
         </div>
+        <div class="media-viri-glava"><div><h2 data-t="mediaViri">Viri Safeer Media</h2><p data-t="mediaViriOpis">Spletno stran, javni API, RSS ali M3U dodaš samo enkrat.</p></div></div>
+        <form class="media-dodaj-vir" id="mediaDodajVir">
+          <input id="mediaVirIme" type="text" maxlength="80" data-ph="mediaVirIme" placeholder="Ime vira (neobvezno)">
+          <input id="mediaVirUrl" type="url" required data-ph="mediaVirUrl" placeholder="https://primer.si/katalog.json">
+          <button class="gumb glavni" type="submit"><svg data-ikona="plus"></svg><span data-t="mediaDodaj">Dodaj vir</span></button>
+        </form>
+        <p class="namig" id="mediaVirSporocilo"></p>
+        <div class="media-viri" id="mediaViri"></div>
+        <div id="mediaNastavitveMesto"></div>
         <div id="skupineNastavitev"></div>
         <p class="o-sistemu" id="oSistemu"></p>
       </section>

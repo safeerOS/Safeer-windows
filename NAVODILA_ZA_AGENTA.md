@@ -20,9 +20,11 @@ Safeer OS za Windows je hibridni sistem (Go zaganjalnik + Python 3 + PySide6 / Q
 ### 2.1 Enotni program (Safeer OS z vgrajenim Safeer Controlom)
 Safeer OS in Safeer Control **nista dva ločena programa**, temveč enotna aplikacija:
 - **[`windows/safeer_windows/os_app.py`](windows/safeer_windows/os_app.py)**:
-  - Glavno okno `SafeerOsWindow`. Vsebuje `QStackedWidget` z dvema pogledoma:
+  - Glavno okno `SafeerOsWindow`. Vsebuje en `QStackedWidget` z vsemi pogledi:
     1. Domači zaslon Safeer OS (`assets/os/index.html`).
-    2. Vgrajen nadzor naprav Safeer Control (`assets/link/index.html`).
+    2. Vgrajeni LibVLC predvajalnik Safeer Media.
+    3. Zaščiteni Safeer Browser za splet in spletne medijske aplikacije.
+    4. Vgrajen nadzor naprav Safeer Control (`assets/link/index.html`, naložen po potrebi).
   - Prehod med namizjem in nadzorom naprav je hipen in tekoč v istem oknu in istem procesu.
   - V levem meniju Safeer Controla je gumb **"Safeer OS Domov"**, prav tako klik na ✕ vrne uporabnika na namizje.
   - Zastavice ob zagonu:
@@ -65,7 +67,9 @@ Safeer OS in Safeer Control **nista dva ločena programa**, temveč enotna aplik
 - **[`core/os_media.py`](core/os_media.py)** je enotno jedro kataloga za lokalne mape, javne JSON API-je, RSS/Atom, M3U in spletne strani oziroma aplikacije, ki medije objavijo prek HTML, OpenGraph, JSON-LD ali vdelanega JSON-a.
 - Vir se shrani enkrat in se v ozadju osvežuje na šest ur. Kanonični URL prepreči, da bi uporabnik isti vir dodal dvakrat.
 - Vsebina iz vseh virov se normalizira v filme, serije in glasbo. Podvojeni naslovi se združijo, različice pa razvrstijo po kakovosti; uporabniku se privzeto ponudi najboljša.
-- **[`windows/safeer_windows/vlc_player.py`](windows/safeer_windows/vlc_player.py)** vgradi LibVLC neposredno v glavno Qt okno Safeer OS. Zunanji VLC se ne odpre. Če LibVLC ni na voljo, ostane v istem razdelku na voljo HTML5 predvajalnik.
+- **[`windows/safeer_windows/vlc_player.py`](windows/safeer_windows/vlc_player.py)** vgradi LibVLC neposredno v glavno Qt okno Safeer OS. Neposredni tokovi lahko iz uporabnikovega API-ja podedujejo `Referer` in `User-Agent`; zunanji VLC se ne odpre.
+- Spletne aplikacije in embed strani se ne nalagajo v `iframe`, ker jih `X-Frame-Options`/CSP pogosto zavrne in prikaže siv zaslon. Naložijo se kot vrhnja stran v **vgrajenem zaščitenem Safeer Browserju**, še vedno v istem oknu in procesu Safeer OS. Ne vračaj zastavic `--disable-web-security` ali `--no-sandbox`.
+- Dodajanje, odstranjevanje, uvoz in izvoz virov je izključno v skupnem razdelku **Nastavitve**. Safeer Media prikazuje katalog in iskanje, ne konfiguracije ponudnikov. V kodi ni privzeto aktivnega ponudnika; vir vnese uporabnik.
 - Namestitveni program namesti Python vezavo `python-vlc` in, kadar je mogoče, uradni VLC prek `winget`. Zasebni API ključi se ne shranjujejo; uporabniški viri so lokalno v `media.json`.
 
 ---
@@ -98,7 +102,7 @@ git branch  # mora biti: resava-poenotenje-wip
 # 2. Zaženi celotno zbirko testov
 PYTHONPATH=windows pytest windows/tests/
 
-# Pričakovani rezultat: Vseh 84 testov mora biti zelenih (84 passed)
+# Pričakovani rezultat: Vseh 93 testov mora biti zelenih (93 passed)
 ```
 
 Preveri tudi skladnost PowerShell skript (če je na voljo `pwsh`):

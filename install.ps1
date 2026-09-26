@@ -209,12 +209,28 @@ Write-Success "Python najden: $($pyInfo.Exe) (različica $($pyInfo.Version))"
 Write-Step 3 6 "Preverjanje in nameščanje potrebnih knjižnic"
 
 $pyExe = $pyInfo.Exe
-$pipPrefix = if ($pyInfo.IsLauncher) { @($pyExe, "-3", "-m", "pip") } else { @($pyExe, "-m", "pip") }
-$pyRunPrefix = if ($pyInfo.IsLauncher) { @($pyExe, "-3") } else { @($pyExe) }
+
+# PowerShell ne zna varno zagnati polja oblike @("py.exe", "-3", ...)
+# kot en ukaz. Izvedljiva datoteka in argumenti morajo biti podani ločeno.
+function Invoke-SafeerPython([object[]]$PythonArgs) {
+    if ($pyInfo.IsLauncher) {
+        & $pyExe -3 @PythonArgs
+    } else {
+        & $pyExe @PythonArgs
+    }
+}
+
+function Invoke-SafeerPip([object[]]$PipArgs) {
+    if ($pyInfo.IsLauncher) {
+        & $pyExe -3 -m pip @PipArgs
+    } else {
+        & $pyExe -m pip @PipArgs
+    }
+}
 
 function Test-PythonModule($mod) {
     try {
-        & $pyRunPrefix -c "import $mod" 2>$null
+        Invoke-SafeerPython @("-c", "import $mod") 2>$null
         return ($LASTEXITCODE -eq 0)
     } catch {
         return $false
@@ -230,17 +246,17 @@ foreach ($mod in @("PySide6", "PIL", "cryptography", "qrcode", "vlc")) {
 
 if ($manjkajoce.Count -gt 0) {
     Write-Info "Nameščam manjkajoče knjižnice: PySide6 Pillow cryptography qrcode python-vlc..."
-    & $pipPrefix install --disable-pip-version-check --quiet PySide6 Pillow cryptography qrcode python-vlc
+    Invoke-SafeerPip @("install", "--disable-pip-version-check", "--quiet", "PySide6", "Pillow", "cryptography", "qrcode", "python-vlc")
     if ($LASTEXITCODE -ne 0) {
         Write-Warn "Poskušam ponovno namestiti knjižnice z uporabniškimi pravicami..."
-        & $pipPrefix install --user --disable-pip-version-check PySide6 Pillow cryptography qrcode python-vlc
+        Invoke-SafeerPip @("install", "--user", "--disable-pip-version-check", "PySide6", "Pillow", "cryptography", "qrcode", "python-vlc")
     }
 }
 
 # Preveri uspešnost uvoza
 $testOk = $false
 try {
-    $res = & $pyRunPrefix -c "import PySide6.QtCore, PySide6.QtWidgets, PIL.Image, cryptography, qrcode, vlc; print('MODULI_OK')" 2>$null
+    $res = Invoke-SafeerPython @("-c", "import PySide6.QtCore, PySide6.QtWidgets, PIL.Image, cryptography, qrcode, vlc; print('MODULI_OK')") 2>$null
     if ($res -match "MODULI_OK") {
         $testOk = $true
     }
@@ -265,10 +281,10 @@ if (-not $vlcDll) {
         Write-Info "Nameščam uradni LibVLC runtime za vgrajeni Safeer Media predvajalnik..."
         try {
             $vlcInstall = Start-Process -FilePath "winget.exe" -ArgumentList "install --id VideoLAN.VLC -e --silent --accept-package-agreements --accept-source-agreements" -Wait -PassThru
-            if ($vlcInstall.ExitCode -ne 0) { Write-Warn "LibVLC ni bil nameščen; uporabljen bo rezervni HTML5 predvajalnik." }
-        } catch { Write-Warn "LibVLC ni bil nameščen; uporabljen bo rezervni HTML5 predvajalnik." }
+            if ($vlcInstall.ExitCode -ne 0) { Write-Warn "LibVLC ni bil nameščen; spletni viri se bodo odprli v zaščitenem Safeer Browserju." }
+        } catch { Write-Warn "LibVLC ni bil nameščen; spletni viri se bodo odprli v zaščitenem Safeer Browserju." }
     } else {
-        Write-Warn "Windows Package Manager ni na voljo; Safeer Media bo do namestitve VLC uporabljal HTML5 predvajalnik."
+        Write-Warn "Windows Package Manager ni na voljo; spletni viri se bodo odprli v zaščitenem Safeer Browserju."
     }
 }
 
@@ -336,7 +352,7 @@ if (Test-Path $srcIco) {
     $pngSrc = Join-Path $RepoRoot "assets\icon.png"
     if (Test-Path $pngSrc) {
         try {
-            & $pyRunPrefix -c "from PIL import Image; im = Image.open(r'$pngSrc').convert('RGBA'); im.save(r'$icoCilj', sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])" 2>$null
+            Invoke-SafeerPython @("-c", "from PIL import Image; im = Image.open(r'$pngSrc').convert('RGBA'); im.save(r'$icoCilj', sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])") 2>$null
         } catch {}
     }
 }
@@ -509,7 +525,7 @@ except Exception as e:
     sys.exit(1)
 "@
 
-$testResult = & $pyRunPrefix -c $testScript 2>&1
+$testResult = Invoke-SafeerPython @("-c", $testScript) 2>&1
 if ($testResult -match "PREIZKUS_USPESEN") {
     Write-Success "$testResult"
 } else {

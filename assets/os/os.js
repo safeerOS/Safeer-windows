@@ -252,7 +252,12 @@
       if (!S.izbranaNapravaDatoteke && !S.pot) odpriNedavne();
     }
     if (razdelek === "naprave") { osveziPovezavo(); napraveZanka(); }
-    if (razdelek === "nastavitve") { narisiNastavitve(); nalozScit(); scitZanka(); }
+    if (razdelek === "nastavitve") {
+      narisiNastavitve(); nalozScit(); scitZanka(); naloziMedia();
+      var mediaPlosca = $("mediaNastavitvePlosca"), mediaMesto = $("mediaNastavitveMesto");
+      if (mediaPlosca && mediaMesto && mediaPlosca.parentNode !== mediaMesto) mediaMesto.appendChild(mediaPlosca);
+      if (mediaPlosca) mediaPlosca.hidden = false;
+    }
     if (razdelek === "programi") nalozNaprave();
     if (razdelek === "omrezje") nalozOmrezje(false);
     if (razdelek === "zvok") { nalozZvok(); zvokZanka(); if (!jblStanje) nalozJbl(); }
@@ -1906,12 +1911,10 @@
     var variant = variants[index || 0] || variants[0], audio = item.vrsta === "glasba";
     var url = variant.url || "";
     var isDirectMedia = /\.(mp4|mkv|webm|avi|mov|m4v|mp3|flac|ogg|opus|m4a|aac|wav|m3u8)($|\?)/i.test(url) || url.startsWith("file:");
-    var isEmbed = !isDirectMedia || (variant.vrsta === "embed" || variant.kind === "embed" || /vidsrc|vidlink|embed\.su|multiembed|superembed|\/embed\//i.test(url));
-    var video = $("mediaVideo"), playerAudio = $("mediaAudio"), iframe = $("mediaIframe");
+    var video = $("mediaVideo"), playerAudio = $("mediaAudio");
 
     if (video) { video.pause(); video.removeAttribute("src"); video.hidden = true; video.style.display = "none"; }
     if (playerAudio) { playerAudio.pause(); playerAudio.removeAttribute("src"); playerAudio.hidden = true; playerAudio.style.display = "none"; }
-    if (iframe) { iframe.removeAttribute("src"); iframe.hidden = true; iframe.style.display = "none"; }
 
     var pl = $("mediaPredvajalnik");
     if (pl) { pl.hidden = false; pl.classList.remove("kino"); }
@@ -1925,11 +1928,7 @@
     metaSeznam.push(item.leto, variant.vir, variant.kakovost);
     $("mediaPredvajalnikMeta").textContent = metaSeznam.filter(Boolean).join(" · ");
 
-    if (isEmbed && iframe) {
-      iframe.hidden = false;
-      iframe.style.display = "block";
-      iframe.src = url;
-    } else {
+    if (isDirectMedia) {
       var player = audio ? playerAudio : video;
       if (player) {
         player.hidden = false;
@@ -1939,6 +1938,8 @@
         player.play().catch(function () {});
         player.onerror = function () { $("mediaNapaka").hidden = false; };
       }
+    } else {
+      $("mediaNapaka").hidden = false;
     }
     var choices = $("mediaRazlicice"); choices.innerHTML = "";
     variants.forEach(function (entry, i) {
@@ -1951,15 +1952,13 @@
     klic("mediaPredvajaj", [id]).then(function (item) {
       if (!item) { obvesti(t("mediaVirNapaka")); return; }
       media.aktivni = item;
-      if (!item.native) predvajajHtml(item, 0);
+      if (!item.native && !item.internal) predvajajHtml(item, 0);
     }, function () { obvesti(t("mediaVirNapaka")); });
   }
   function zapriMediaHtml() {
     [$("mediaVideo"), $("mediaAudio")].forEach(function (player) {
       if (player) { player.pause(); player.removeAttribute("src"); player.load(); player.hidden = true; player.style.display = "none"; }
     });
-    var iframe = $("mediaIframe");
-    if (iframe) { iframe.removeAttribute("src"); iframe.hidden = true; iframe.style.display = "none"; }
     var pl = $("mediaPredvajalnik");
     if (pl) { pl.hidden = true; pl.classList.remove("kino"); }
     media.aktivni = null;
@@ -1991,10 +1990,6 @@
       var pl = $("mediaPredvajalnik");
       if (!pl) return;
       pl.classList.toggle("kino");
-      var iframe = $("mediaIframe");
-      if (iframe && !iframe.hidden && pl.classList.contains("kino")) {
-        try { if (iframe.requestFullscreen) iframe.requestFullscreen().catch(function () {}); } catch (e) {}
-      }
     });
   }
   $("mediaOsvezi").addEventListener("click", function () { osveziMediaVir(""); });
@@ -2021,10 +2016,9 @@
 
   if ($("mediaNastavitveGumb")) {
     $("mediaNastavitveGumb").addEventListener("click", function () {
+      pojdi("nastavitve");
       var plosca = $("mediaNastavitvePlosca");
-      if (!plosca) return;
-      plosca.hidden = !plosca.hidden;
-      if (!plosca.hidden) plosca.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      if (plosca) setTimeout(function () { plosca.scrollIntoView({ behavior: "smooth", block: "nearest" }); }, 0);
     });
   }
 
