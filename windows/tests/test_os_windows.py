@@ -212,6 +212,15 @@ class TestOsWindows(unittest.TestCase):
         self.assertIn("youtube.com/embed/dQw4w9WgXcQ", youtube[0]["url"])
         self.assertEqual(radio[0]["vrsta"], "radio")
 
+    def test_media_rss_podcast_in_tolerantno_iskanje(self):
+        rss = b'''<?xml version="1.0"?><rss><channel><title>Podcast</title><item>
+          <title>Tehnologija danes</title><author>Safeer</author>
+          <enclosure url="https://cdn.test/epizoda.mp3" type="audio/mpeg"/>
+          <description>Novice iz tehnologije</description></item></channel></rss>'''
+        items = os_media.parse_payload(rss, "application/rss+xml", "https://podcast.test/feed.xml",
+                                      source_id="podcast", source_name="Podcast")
+        self.assertEqual(items[0]["vrsta"], "podcast")
+
     def test_media_razbere_in_podeduje_imdb_in_tmdb_id(self):
         payload = json.dumps({
             "results": [{

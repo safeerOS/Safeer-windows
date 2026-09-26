@@ -10,6 +10,7 @@ razpoložljiva različica.
 from __future__ import annotations
 
 import hashlib
+import difflib
 import json
 import mimetypes
 import os
@@ -76,6 +77,8 @@ def _kind(value: Any, url: str = "", title: str = "", season: int = 0, episode: 
         return "serija"
     hint = f"{value or ''} {url} {title}".lower()
     ext = Path(urllib.parse.urlsplit(url).path).suffix.lower()
+    if any(x in hint for x in ("podcast", "podkasta", "podcasti")):
+        return "podcast"
     if any(x in hint for x in ("radio", "radijska", "radiostream", "icecast", "shoutcast")):
         return "radio"
     if any(x in hint for x in ("live tv", "livetv", "live television", "televizija v živo", "/live/")):
@@ -980,8 +983,16 @@ def _parse_xml(text: str, base: str, source_id: str, source_name: str) -> list[d
                 if link.get("rel") == "enclosure":
                     url = link.get("href", "")
                     break
+        itunes_image = entry.find("{*}image")
+        image = itunes_image.get("href", "") if itunes_image is not None else ""
+        if not image:
+            media_image = entry.find("{*}thumbnail")
+            image = media_image.get("url", "") if media_image is not None else ""
+        hint = f"{source_name} {title} {child('category')}"
         found = _item(title, url, base=base, source_id=source_id, source_name=source_name,
-                      kind=enclosure.get("type", "") if enclosure is not None else "",
+                      kind=("podcast" if "podcast" in hint.casefold() else
+                            enclosure.get("type", "") if enclosure is not None else ""),
+                      image=image, artist=child("author") or child("creator"),
                       description=child("description") or child("summary"))
         if found:
             out.append(found)
@@ -1442,9 +1453,16 @@ class MediaCenter:
         merged = merge_duplicates(self._local_items() + remote + dynamic)
         needle = _text(query, 120).casefold()
         if needle:
-            merged = [item for item in merged if needle in " ".join((item.get("naslov", ""), item.get("izvajalec", ""),
-                                                                      item.get("opis", ""), item.get("imdb_id", ""),
-                                                                      str(item.get("tmdb_id") or ""))).casefold()]
+            def zadetek(item: dict) -> bool:
+                hay = " ".join((item.get("naslov", ""), item.get("izvajalec", ""),
+                                item.get("opis", ""), item.get("imdb_id", ""),
+                                str(item.get("tmdb_id") or ""))).casefold()
+                if needle in hay:
+                    return True
+                # Toleranten zadetek za tipkarske napake v naslovu/izvajalcu.
+                return any(difflib.SequenceMatcher(None, needle, token).ratio() >= 0.72
+                           for token in re.findall(r"[\wÀ-ž]{3,}", hay))
+            merged = [item for item in merged if zadetek(item)]
         if kind not in ("", "vse"):
             merged = [item for item in merged if item.get("vrsta") == kind]
         return {"vnosi": merged, "viri": self.sources(), "skupaj": len(merged), "stran": int(page or 1),
