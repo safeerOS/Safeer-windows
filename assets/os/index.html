@@ -58,16 +58,7 @@
             <h1 id="pozdrav"></h1>
             <p data-t="pozdravPod"></p>
             <p class="hero-vizija">Splet, aplikacije, datoteke in računalniki — končno skupaj. Brez oblaka, računa in naročnine.</p>
-            <div class="hero-akcije">
-              <button class="gumb glavni" data-pojdi="media"><svg data-ikona="glasba"></svg><span>Odpri Safeer Media</span></button>
-              <button class="gumb" data-pojdi="naprave"><svg data-ikona="povezava"></svg><span>Poveži naprave</span></button>
-            </div>
           </div>
-        </div>
-        <div class="velike">
-          <button class="velika" id="kBrskalnik"><svg data-ikona="splet"></svg><div><b data-t="brskalnik"></b><span data-t="brskalnikPod"></span></div><svg class="puscica" data-ikona="desno"></svg></button>
-          <button class="velika" data-pojdi="datoteke"><svg data-ikona="mapa"></svg><div><b data-t="datoteke"></b><span data-t="datotekePod"></span></div><svg class="puscica" data-ikona="desno"></svg></button>
-          <button class="velika" data-pojdi="naprave"><svg data-ikona="naprave"></svg><div><b data-t="naprave"></b><span id="kNapravePod" data-t="napravePodNov"></span></div><svg class="puscica" data-ikona="desno"></svg></button>
         </div>
         <h2><span data-t="nedavnoUporabljeno"></span><button class="dodatno" data-pojdi="programi" data-t="vsiProgrami"></button></h2>
         <div class="vrsta-plosc" id="domaciProgrami"></div>
@@ -83,12 +74,8 @@
             <button class="gumb" id="domControl"><svg data-ikona="qr"></svg><span id="domControlBesedilo" data-t="poveziNaprave"></span></button>
           </div>
           <div class="plosca-dom">
-            <div class="glava-plosce"><b data-t="hitriDostop"></b></div>
-            <div class="hitri" id="hitriDostop"></div>
-          </div>
-          <div class="plosca-dom">
             <button class="glava-plosce" data-pojdi="nastavitve"><b data-t="sistem"></b><svg data-ikona="desno"></svg></button>
-            <div class="sistem-vrstica"><svg data-ikona="namizje"></svg><div><b id="sistemIme">Linux Mint</b><span id="sistemRacunalnik"></span></div></div>
+            <div class="sistem-vrstica"><svg data-ikona="namizje"></svg><div><b id="sistemIme">Windows</b><span id="sistemRacunalnik"></span></div></div>
             <dl class="sistem-podatki" id="sistemPodatki"></dl>
           </div>
         </div>
@@ -182,7 +169,6 @@
           <video id="mediaVideo" controls playsinline preload="metadata" hidden></video>
           <audio id="mediaAudio" controls preload="metadata" hidden></audio>
           <iframe id="mediaIframe" title="Safeer Media predvajalnik"
-                  
                   allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
                   allowfullscreen referrerpolicy="strict-origin-when-cross-origin" hidden></iframe>
           <p class="media-napaka" id="mediaNapaka" hidden data-t="mediaNapaka">Tega toka ni mogoče predvajati. Poskusi drugo različico.</p>
@@ -202,6 +188,7 @@
         </div>
         <div class="media-povzetek" id="mediaPovzetek"></div>
         <div class="media-katalog" id="mediaMreza"></div>
+        <div class="media-stranjevanje" id="mediaStranjevanje"></div>
         <p class="namig" id="mediaPrazno" hidden data-t="mediaPrazno">Ni zadetkov. Dodaj vir ali spremeni iskanje.</p>
 
         <div class="media-podrobnosti" id="mediaPodrobnosti" hidden>

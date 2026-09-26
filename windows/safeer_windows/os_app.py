@@ -747,8 +747,7 @@ class SafeerOsWindow(QMainWindow):
             return []
 
         if metoda == "omrezje":
-            return {"naprave": [], "omrezja": [], "shranjene": [],
-                    "wifi_vklopljen": False, "napredno": True}
+            return os_backend_win.pridobi_stanje_omrezja()
 
         if metoda == "zvok":
             return {"izhodi": [], "vhodi": [], "programi": [],

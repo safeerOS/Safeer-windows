@@ -1847,8 +1847,7 @@
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", zacni); else zacni();
   // ------------------------------------------------------------------ Safeer Media
   // En katalog ne glede na vir. Zaledje zdruzi dvojnike in izbere najboljsi tok;
-  // LibVLC ga predvaja v lastnem Qt pogledu, HTML5 pa je rezervni predvajalnik.
-  var media = { katalog: [], viri: [], filter: "vse", genre: "", query: "", aktivni: null, zahteva: 0, timer: 0 };
+  var media = { katalog: [], viri: [], filter: "vse", genre: "", query: "", page: 1, skupaj_strani: 1, aktivni: null, zahteva: 0, timer: 0 };
   function mediaIkona(vrsta) { return vrsta === "glasba" ? "glasba" : "video"; }
   function mediaOznaka(vrsta) {
     if (vrsta === "glasba") return t("mediaGlasba");
@@ -1857,8 +1856,31 @@
     if (vrsta === "tv-v-zivo") return "TV v živo";
     return t(vrsta === "serija" ? "mediaSerije" : "mediaFilmi");
   }
+
+  function narisiStranjevanje() {
+    var c = $("mediaStranjevanje"); if (!c) return; c.innerHTML = "";
+    if (media.skupaj_strani <= 1) return;
+    var prev = el("button", "gumb", "◀ Prejšnja stran");
+    prev.disabled = media.page <= 1;
+    prev.onclick = function () {
+      if (media.page > 1) { media.page--; naloziMedia(); $("mediaMreza").scrollIntoView({behavior:"smooth", block:"start"}); }
+    };
+    var info = el("span", "stran-info", "Stran " + media.page + " od " + media.skupaj_strani);
+    var next = el("button", "gumb", "Naslednja stran ▶");
+    next.disabled = media.page >= media.skupaj_strani;
+    next.onclick = function () {
+      if (media.page < media.skupaj_strani) { media.page++; naloziMedia(); $("mediaMreza").scrollIntoView({behavior:"smooth", block:"start"}); }
+    };
+    c.appendChild(prev); c.appendChild(info); c.appendChild(next);
+  }
+
   function narisiMedia() {
     var mreza = $("mediaMreza"); if (!mreza) return; mreza.innerHTML = "";
+    var zanriEl = $("mediaZanri");
+    if (zanriEl) {
+      var prikaziZanre = (media.filter === "vse" || media.filter === "film" || media.filter === "serija");
+      zanriEl.style.display = prikaziZanre ? "flex" : "none";
+    }
     var iskano = media.query.trim().toLocaleLowerCase();
     var list = media.katalog.filter(function (x) {
       if (media.filter !== "vse" && x.vrsta !== media.filter) return false;
@@ -1866,8 +1888,8 @@
       return [x.naslov, x.izvajalec, x.opis].join(" ").toLocaleLowerCase().indexOf(iskano) >= 0;
     });
     $("mediaPrazno").hidden = !!list.length;
-    $("mediaPovzetek").textContent = t("mediaZadetkov", { n: list.length });
-    list.slice(0, 300).forEach(function (x) {
+    $("mediaPovzetek").textContent = t("mediaZadetkov", { n: list.length }) + (media.skupaj_strani > 1 ? " · Stran " + media.page + " od " + media.skupaj_strani : "");
+    list.forEach(function (x) {
       var card = el("button", "media-kartica");
       card.setAttribute("aria-label", (x.naslov || "Safeer Media") + " — " + mediaOznaka(x.vrsta));
       if (x.slika) {
@@ -1886,15 +1908,22 @@
       meta.appendChild(el("span", "", ubezi(metaOznaka)));
       if (x.stevilo_razlicic > 1) meta.appendChild(el("span", "", ubezi(t("mediaRazlicic", { n: x.stevilo_razlicic }))));
       data.appendChild(meta); card.appendChild(data);
-      card.appendChild(el("span", "media-kakovost", ubezi(x.kakovost || "")));
+      card.appendChild(el("span", "media-kakovost", ubezi(x.kakovost || "1080p")));
       if (Number(x.ocena || 0) > 0) card.appendChild(el("span", "media-ocena", "★ " + Number(x.ocena).toFixed(1)));
-      card.onclick = function () { x.vrsta === "serija" && x.tmdb_id ? odpriMediaPodrobnosti(x.id) : odpriMedia(x.id); };
+      card.onclick = function () {
+        if (x.tmdb_id || x.vrsta === "serija" || x.vrsta === "film") {
+          odpriMediaPodrobnosti(x.id);
+        } else {
+          odpriMedia(x.id);
+        }
+      };
       mreza.appendChild(card);
     });
+    narisiStranjevanje();
     narisiMediaVire();
   }
   function narisiMediaVire() {
-    var cilj = $("mediaViri"); cilj.innerHTML = "";
+    var cilj = $("mediaViri"); if (!cilj) return; cilj.innerHTML = "";
     if (!media.viri.length) { cilj.appendChild(el("div", "prazno", ubezi(t("mediaBrezVirov")))); return; }
     media.viri.forEach(function (source) {
       var row = el("div", "media-vir"); row.innerHTML = svg("splet");
@@ -1976,9 +2005,6 @@
     } else {
       if (iframe && /^https?:\/\//i.test(url)) {
         iframe.hidden = false;
-        // load pomeni samo, da je embed HTML prispel; VidLink lahko nato še
-        // dolgo vrti svoj spinner ali vrne »content not found«. Časovnika zato
-        // ne prekličemo ob load, sicer uporabnik ostane brez končnega stanja.
         iframe.onload = function () {};
         iframe.onerror = function () {
           if (media.timer) window.clearTimeout(media.timer);
@@ -1986,8 +2012,6 @@
           if (!poskusiNaslednjo()) $("mediaNapaka").hidden = false;
         };
         iframe.src = url;
-        // Oddaljeni embed lahko vrne prazno stran brez omrežne napake. Po
-        // 12 sekundah skrijemo nedelujoči embed in pokažemo jasno napako.
         media.timer = window.setTimeout(function () {
           media.timer = 0;
           iframe.hidden = true;
@@ -2022,10 +2046,11 @@
   function naloziMedia() {
     var zahteva = ++media.zahteva;
     $("mediaPovzetek").textContent = "Nalagam katalog …";
-    klic("mediaKatalog", [media.query, media.filter, media.genre, 1]).then(function (response) {
+    klic("mediaKatalog", [media.query, media.filter, media.genre, media.page || 1]).then(function (response) {
       if (zahteva !== media.zahteva) return;
       media.katalog = (response && response.vnosi) || [];
       media.viri = (response && response.viri) || [];
+      media.skupaj_strani = (response && response.skupaj_strani) || 1;
       narisiMedia();
     }, function () { if (zahteva === media.zahteva) { media.katalog = []; media.viri = []; narisiMedia(); } });
   }
@@ -2059,20 +2084,36 @@
   }
   function odpriMediaPodrobnosti(id) {
     klic("mediaPodrobnosti", [id]).then(function (item) {
-      if (!item || !item.tmdb_id) return;
+      if (!item) return;
       var panel = $("mediaPodrobnosti"); panel.hidden = false;
       var hero = $("mediaPodrobnostiJunak"); hero.innerHTML = "";
       if (item.slika) { var poster = document.createElement("img"); poster.src = item.slika; poster.alt = ""; hero.appendChild(poster); }
       var info = el("div"); info.appendChild(el("h2", "", ubezi(item.naslov || "")));
-      info.appendChild(el("p", "media-detail-meta", ubezi([item.leto, item.ocena ? "★ " + item.ocena : "", "TMDb " + item.tmdb_id].filter(Boolean).join(" · "))));
+      info.appendChild(el("p", "media-detail-meta", ubezi([item.leto, item.ocena ? "★ " + item.ocena : "", item.vrsta === "serija" ? "Serija" : "Film"].filter(Boolean).join(" · "))));
       if (item.opis) info.appendChild(el("p", "", ubezi(item.opis))); hero.appendChild(info);
       var seasons = $("mediaSezone"); seasons.innerHTML = "";
-      (item.sezone || []).forEach(function (season, index) {
-        var b = el("button", index === 0 ? "izbran" : "", ubezi(season.ime || "Sezona " + season.stevilka));
-        b.onclick = function () { naloziMediaSezono(item, season.stevilka, b); }; seasons.appendChild(b);
-        if (index === 0) setTimeout(function () { naloziMediaSezono(item, season.stevilka, b); }, 0);
-      });
-      if (!(item.sezone || []).length) $("mediaEpizode").innerHTML = '<div class="prazno">Sezone niso na voljo.</div>';
+      var episodes = $("mediaEpizode"); episodes.innerHTML = "";
+
+      if (item.vrsta !== "serija") {
+        $("mediaEpizodeNaslov").textContent = "Možnosti predvajanja";
+        var playBtn = el("button", "gumb glavni", "▶ Predvajaj film (1080p HD)");
+        playBtn.style.padding = "14px 28px";
+        playBtn.style.fontSize = "18px";
+        playBtn.style.marginTop = "12px";
+        playBtn.onclick = function () {
+          zapriMediaPodrobnosti();
+          odpriMedia(item.id);
+        };
+        episodes.appendChild(playBtn);
+      } else {
+        $("mediaEpizodeNaslov").textContent = "Epizode";
+        (item.sezone || []).forEach(function (season, index) {
+          var b = el("button", index === 0 ? "izbran" : "", ubezi(season.ime || "Sezona " + season.stevilka));
+          b.onclick = function () { naloziMediaSezono(item, season.stevilka, b); }; seasons.appendChild(b);
+          if (index === 0) setTimeout(function () { naloziMediaSezono(item, season.stevilka, b); }, 0);
+        });
+        if (!(item.sezone || []).length) episodes.innerHTML = '<div class="prazno">Sezone niso na voljo.</div>';
+      }
       panel.scrollIntoView({behavior:"smooth", block:"start"});
     }, function () { obvesti(t("mediaVirNapaka")); });
   }
@@ -2085,6 +2126,7 @@
   document.querySelectorAll("[data-media-filter]").forEach(function (b) {
     b.onclick = function () {
       media.filter = b.getAttribute("data-media-filter");
+      media.page = 1;
       document.querySelectorAll("[data-media-filter]").forEach(function (q) { q.classList.toggle("izbran", q === b); });
       naloziMedia();
     };
@@ -2092,12 +2134,13 @@
   document.querySelectorAll("[data-media-genre]").forEach(function (b) {
     b.onclick = function () {
       media.genre = b.getAttribute("data-media-genre") || "";
+      media.page = 1;
       document.querySelectorAll("[data-media-genre]").forEach(function (q) { q.classList.toggle("izbran", q === b); });
       naloziMedia();
     };
   });
   $("mediaIskanje").addEventListener("input", function () {
-    media.query = this.value; clearTimeout(media.timer); media.timer = setTimeout(naloziMedia, 350);
+    media.query = this.value; media.page = 1; clearTimeout(media.timer); media.timer = setTimeout(naloziMedia, 350);
   });
   $("mediaPodrobnostiNazaj").addEventListener("click", zapriMediaPodrobnosti);
   $("mediaPodrobnostiZapri").addEventListener("click", zapriMediaPodrobnosti);

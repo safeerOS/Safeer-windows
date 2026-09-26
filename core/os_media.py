@@ -1507,10 +1507,15 @@ class MediaCenter:
                 return any(difflib.SequenceMatcher(None, needle, token).ratio() >= 0.72
                            for token in re.findall(r"[\wÀ-ž]{3,}", hay))
             merged = [item for item in merged if zadetek(item)]
-        if kind not in ("", "vse"):
-            merged = [item for item in merged if item.get("vrsta") == kind]
-        return {"vnosi": merged, "viri": self.sources(), "skupaj": len(merged), "stran": int(page or 1),
-                "mape": [str(path) for path in self.roots]}
+        total_pages = 500 if self._ima_embed_vir(data) else max(1, math.ceil(len(merged) / 24))
+        return {
+            "vnosi": merged,
+            "viri": self.sources(),
+            "skupaj": len(merged),
+            "stran": int(page or 1),
+            "skupaj_strani": total_pages,
+            "mape": [str(path) for path in self.roots]
+        }
 
     def details(self, item_id: str) -> dict:
         item = self.resolve(item_id)
