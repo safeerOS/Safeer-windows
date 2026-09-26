@@ -288,7 +288,7 @@ class SafeerOsWindow(QMainWindow):
             QApplication.instance(), policy.SettingsStore(), "embedded"
         )
         self.browser_window = browser.BrowserWindow(
-            self.browser_app, embedded=True, on_safeer_home=self._zapri_browser
+            self.browser_app, private=True, embedded=True, on_safeer_home=self._zapri_browser
         )
         self.browser_window.setWindowFlags(Qt.Widget)
         self.browser_app.windows.append(self.browser_window)
@@ -439,8 +439,11 @@ class SafeerOsWindow(QMainWindow):
 
     def _odpri_notranji_splet(self, url: str, *, media: bool = False) -> None:
         self._browser_media_active = media
-        self.browser_window.set_media_mode(media)
-        self.browser_window.load_in_current(url)
+        if media:
+            self.browser_window.load_media(url)
+        else:
+            self.browser_window.set_media_mode(False)
+            self.browser_window.load_in_current(url)
         self.zaslon.setCurrentWidget(self.browser_window)
         self.setWindowTitle("Safeer OS · Media" if media else "Safeer OS · Splet")
 
@@ -773,7 +776,7 @@ class SafeerOsWindow(QMainWindow):
             is_embed = (
                 item.get("vrsta") == "embed" or
                 "/embed/" in url.lower() or
-                any(x in url.lower() for x in ("vidsrc", "vidlink", "superembed", "embed.su", "multiembed", "youtube", "vimeo", "dailymotion", "streamtape", "vidbox"))
+                any(x in url.lower() for x in ("vidsrc", "vidlink", "videasy", "vidrock", "superembed", "embed.su", "multiembed", "youtube", "vimeo", "dailymotion", "streamtape", "vidbox"))
             )
             parsed_path = urllib.parse.urlsplit(url).path.lower()
             _, ext = os.path.splitext(parsed_path)
@@ -786,10 +789,16 @@ class SafeerOsWindow(QMainWindow):
             native = self.media_player.available and is_direct_stream and not is_embed
             if native:
                 self.dispatcher.dispatch(lambda: self._odpri_media(item))
+            elif is_embed and url.startswith(("http://", "https://")):
+                # Ponudniki, kot je VidLink, namenoma zavrnejo vsak sandboxed
+                # iframe. Odprejo se kot vrhnja stran v zasebnem, vgrajenem
+                # Safeer pogledu: popupi, dovoljenja in zunanja navigacija so
+                # blokirani, uporabnik pa ne zapusti Safeer OS.
+                self.dispatcher.dispatch(lambda: self._odpri_notranji_splet(url, media=True))
             # Spletni embed ostane v namenskem predvajalniku Safeer Media. Ne
             # odpremo ločenega okna brskalnika in uporabnik ne zapusti aplikacije.
             embedded = is_embed and url.startswith(("http://", "https://"))
-            return dict(item, native=native, internal=False, embedded=embedded)
+            return dict(item, native=bool(native or embedded), internal=embedded, embedded=embedded)
 
         if metoda == "mediaStanje":
             return {"na_voljo": True, "native": self.media_player.available,

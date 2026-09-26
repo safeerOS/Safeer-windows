@@ -555,6 +555,15 @@ class SafeerBrowserApp(QObject):
 
     # -- downloads ----------------------------------------------------------
     def on_download_requested(self, download: QWebEngineDownloadRequest) -> None:
+        page = download.page() if hasattr(download, "page") else None
+        # Vdelani BrowserWindow namenoma ni v seznamu samostojnih oken, zato
+        # lastnika dobimo neposredno iz naše strani in ne prek active_window().
+        media_window = page.window_ref if isinstance(page, SafeerPage) and page.window_ref.media_mode else None
+        if media_window is not None:
+            download.cancel()
+            self.note_blocked(download.url().toString(), "block-media-download")
+            media_window.statusBar().showMessage("Prenos iz medijskega vira je blokiran.", 5000)
+            return
         window = self.active_window()
         directory = download.downloadDirectory() or self.download_dir
         name = policy.unique_filename(directory, download.downloadFileName())
@@ -594,6 +603,8 @@ class BrowserWindow(QMainWindow):
         self.app = app
         self.private = private
         self.embedded = embedded
+        self.media_mode = False
+        self.media_allowed_host = ""
         self.on_safeer_home = on_safeer_home
         self.profile = app.get_private_profile() if private else app.profile
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, not embedded)
@@ -659,6 +670,9 @@ class BrowserWindow(QMainWindow):
     def set_media_mode(self, enabled: bool) -> None:
         """Vdelani ponudnik videa ostane del Safeer Media, brez videza drugega brskalnika."""
         enabled = bool(enabled and self.embedded)
+        self.media_mode = enabled
+        if not enabled:
+            self.media_allowed_host = ""
         self.tabs.tabBar().setVisible(not enabled)
         self.new_tab_button.setVisible(not enabled)
         self.statusBar().setVisible(not enabled)
@@ -668,6 +682,16 @@ class BrowserWindow(QMainWindow):
         # Nazaj, osveži in »Safeer OS« ostanejo vidni ter so resnične akcije.
         self.back_button.setVisible(True)
         self.reload_button.setVisible(True)
+
+    def load_media(self, url: str) -> None:
+        """Odpre ponudnika kot izolirano vrhnjo stran znotraj Safeer Media.
+
+        Nekateri ponudniki zavrnejo vsak sandboxed iframe. Zasebni profil in
+        ta navigacijska meja ohranita izolacijo brez spreminjanja njihove kode.
+        """
+        self.set_media_mode(True)
+        self.media_allowed_host = (QUrl(url).host() or "").lower()
+        self.load_in_current(url)
 
     # -- construction helpers ---------------------------------------------
     def _tool(self, icon: str, callback) -> QToolButton:
@@ -902,6 +926,12 @@ class BrowserWindow(QMainWindow):
         if not is_main_frame:
             return True
         text = url.toString()
+        if self.media_mode and is_main_frame and url.scheme().lower() in ("http", "https"):
+            host = (url.host() or "").lower()
+            allowed = self.media_allowed_host
+            if allowed and host != allowed and not host.endswith("." + allowed):
+                self.app.note_blocked(text, "block-media-navigation")
+                return False
         allowed = policy.navigation_scheme_allowed(text)
         if allowed == "external":
             QTimer.singleShot(0, lambda: self.confirm_external(url))
@@ -939,7 +969,10 @@ class BrowserWindow(QMainWindow):
         page.committed_navigation = True
         return True
 
-    def create_page_for_window(self, opener: SafeerPage, window_type) -> QWebEnginePage:
+    def create_page_for_window(self, opener: SafeerPage, window_type) -> Optional[QWebEnginePage]:
+        if self.media_mode:
+            self.app.note_blocked(opener.url().toString(), "block-media-popup")
+            return None
         kind = QWebEnginePage.WebWindowType
         background = window_type == kind.WebBrowserBackgroundTab
         view = self.new_tab("", switch=not background, after_current=True)
@@ -1130,6 +1163,9 @@ class BrowserWindow(QMainWindow):
         return answer == QMessageBox.StandardButton.Yes
 
     def on_permission(self, page: QWebEnginePage, permission) -> None:
+        if self.media_mode:
+            permission.deny()
+            return
         from PySide6.QtWebEngineCore import QWebEnginePermission
         kinds = QWebEnginePermission.PermissionType
         mapping = {
@@ -1149,6 +1185,9 @@ class BrowserWindow(QMainWindow):
             permission.deny()
 
     def on_feature_permission(self, page: QWebEnginePage, origin: QUrl, feature) -> None:
+        if self.media_mode:
+            page.setFeaturePermission(origin, feature, QWebEnginePage.PermissionPolicy.PermissionDeniedByUser)
+            return
         features = QWebEnginePage.Feature
         mapping = {
             features.MediaAudioCapture: "perm_mic", features.MediaVideoCapture: "perm_camera",

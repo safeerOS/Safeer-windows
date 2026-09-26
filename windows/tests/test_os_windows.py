@@ -245,6 +245,17 @@ class TestOsWindows(unittest.TestCase):
             self.assertTrue(any("vidsrc.me/embed/tv?tmdb=1399&season=1&episode=4" in url for url in urls))
             self.assertFalse(any("/1/1" in url or "episode=1" in url for url in urls))
 
+    def test_embed_ponudnik_uporabi_zasebni_varnostni_pogled(self):
+        koren = Path(__file__).resolve().parent.parent.parent
+        app = (koren / "windows" / "safeer_windows" / "os_app.py").read_text(encoding="utf-8")
+        brskalnik = (koren / "windows" / "safeer_windows" / "browser.py").read_text(encoding="utf-8")
+        self.assertIn("private=True, embedded=True", app)
+        self.assertIn("self._odpri_notranji_splet(url, media=True)", app)
+        self.assertIn('"block-media-popup"', brskalnik)
+        self.assertIn('"block-media-navigation"', brskalnik)
+        self.assertIn('"block-media-download"', brskalnik)
+        self.assertIn("if self.media_mode:\n            permission.deny()", brskalnik)
+
     def test_media_razbere_in_podeduje_imdb_in_tmdb_id(self):
         payload = json.dumps({
             "results": [{
@@ -399,8 +410,9 @@ class TestOsWindows(unittest.TestCase):
         launcher = (koren / "windows" / "safeer_os_windows.py").read_text(encoding="utf-8")
         self.assertIn("browser.BrowserWindow", app)
         self.assertIn("embedded=True", app)
+        self.assertIn("private=True", app)
         self.assertIn("embedded = is_embed", app)
-        self.assertNotIn("self._odpri_notranji_splet(url, media=True)", app)
+        self.assertIn("self._odpri_notranji_splet(url, media=True)", app)
         self.assertNotIn("subprocess.Popen", app)
         for source in (app, launcher):
             self.assertNotIn("--disable-web-security", source)
@@ -1323,6 +1335,35 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
         self.assertEqual(item["naslov"], "Inception (Izvor)")
         self.assertEqual(item["vrsta"], "film")
         self.assertEqual(item["leto"], 2010)
+
+    def test_embed_ponudniki_uporabijo_pravilne_javne_poti(self):
+        movie = ("tt1375666", "27205", "film", 0, 0)
+        episode = ("tt0944947", "1399", "serija", 1, 5)
+        cases = {
+            "vidsrc.cc": (
+                "https://vidsrc.cc/v2/embed/movie/tt1375666",
+                "https://vidsrc.cc/v2/embed/tv/tt0944947/1/5"),
+            "vidsrc.to": (
+                "https://vidsrc.to/embed/movie/tt1375666",
+                "https://vidsrc.to/embed/tv/tt0944947/1/5"),
+            "vidlink.pro": (
+                "https://vidlink.pro/movie/27205?primaryColor=00e5ff&autoplay=true&sub=0&subtitles=false",
+                "https://vidlink.pro/tv/1399/1/5?primaryColor=00e5ff&autoplay=true&sub=0&subtitles=false"),
+            "player.videasy.net": (
+                "https://player.videasy.net/movie/27205",
+                "https://player.videasy.net/tv/1399/1/5"),
+            "vidrock.net": (
+                "https://vidrock.net/embed/movie/27205",
+                "https://vidrock.net/embed/tv/1399/1/5"),
+        }
+        for host, expected in cases.items():
+            with self.subTest(host=host, kind="movie"):
+                self.assertEqual(os_media._embed_url_for_provider(host, "https", *movie), expected[0])
+            with self.subTest(host=host, kind="episode"):
+                self.assertEqual(os_media._embed_url_for_provider(host, "https", *episode), expected[1])
+
+        for host in cases:
+            self.assertTrue(any(domain in host for domain in os_media._EMBED_DOMAINS), host)
 
     def test_media_vidlink_uporabnikov_vir_odpre_tmdb_katalog_in_epizode(self):
         with tempfile.TemporaryDirectory() as td:
