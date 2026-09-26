@@ -778,6 +778,11 @@ class SafeerOsWindow(QMainWindow):
             title = str(a[3]) if len(a) > 3 else ""
             return self.media_center.episode_item(tmdb_id, season, episode, title)
 
+        if metoda == "mediaFilm":
+            tmdb_id = int(a[0]) if a else 0
+            title = str(a[1]) if len(a) > 1 else ""
+            return self.media_center.movie_item(tmdb_id, title)
+
         if metoda == "mediaDodajVir":
             url = str(a[0]) if a else ""
             name = str(a[1]) if len(a) > 1 else ""

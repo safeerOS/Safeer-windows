@@ -2101,8 +2101,15 @@
         playBtn.style.fontSize = "18px";
         playBtn.style.marginTop = "12px";
         playBtn.onclick = function () {
-          zapriMediaPodrobnosti();
-          odpriMedia(item.id);
+          if (item.tmdb_id) {
+            klic("mediaFilm", [item.tmdb_id, item.naslov]).then(function (entry) {
+              if (entry && entry.id) { zapriMediaPodrobnosti(); odpriMedia(entry.id); }
+              else { zapriMediaPodrobnosti(); odpriMedia(item.id); }
+            });
+          } else {
+            zapriMediaPodrobnosti();
+            odpriMedia(item.id);
+          }
         };
         episodes.appendChild(playBtn);
       } else {
