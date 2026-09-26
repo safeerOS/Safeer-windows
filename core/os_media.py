@@ -678,63 +678,63 @@ def _embed_url_for_provider(netloc: str, scheme: str, imdb_id: str,
 
     if "videasy" in netloc:
         if is_tv:
-            return f"https://player.videasy.net/tv/{tmdb_or_imdb}/{s}/{e}?sub=0&subtitles=false"
-        return f"https://player.videasy.net/movie/{tmdb_or_imdb}?sub=0&subtitles=false"
+            return f"https://player.videasy.net/tv/{tmdb_or_imdb}/{s}/{e}"
+        return f"https://player.videasy.net/movie/{tmdb_or_imdb}"
 
     if "vidrock" in netloc:
         if is_tv:
-            return f"https://vidrock.net/embed/tv/{tmdb_or_imdb}/{s}/{e}?sub=0&subtitles=false"
-        return f"https://vidrock.net/embed/movie/{tmdb_or_imdb}?sub=0&subtitles=false"
+            return f"https://vidrock.net/embed/tv/{tmdb_or_imdb}/{s}/{e}"
+        return f"https://vidrock.net/embed/movie/{tmdb_or_imdb}"
 
     if "vidsrc.to" in netloc:
         if is_tv:
-            return f"https://vidsrc.to/embed/tv/{imdb_or_tmdb}/{s}/{e}?sub=0&subtitles=false"
-        return f"https://vidsrc.to/embed/movie/{imdb_or_tmdb}?sub=0&subtitles=false"
+            return f"https://vidsrc.to/embed/tv/{imdb_or_tmdb}/{s}/{e}"
+        return f"https://vidsrc.to/embed/movie/{imdb_or_tmdb}"
 
     if "vidsrc.cc" in netloc:
         if is_tv:
-            return f"https://vidsrc.cc/v2/embed/tv/{imdb_or_tmdb}/{s}/{e}?sub=0&subtitles=false"
-        return f"https://vidsrc.cc/v2/embed/movie/{imdb_or_tmdb}?sub=0&subtitles=false"
+            return f"https://vidsrc.cc/v2/embed/tv/{imdb_or_tmdb}/{s}/{e}"
+        return f"https://vidsrc.cc/v2/embed/movie/{imdb_or_tmdb}"
 
     if "vidsrc.me" in netloc:
         if is_tv:
-            return f"https://vidsrc.me/embed/tv?tmdb={tmdb_id}&season={s}&episode={e}&sub=0"
-        return f"https://vidsrc.me/embed/movie?tmdb={tmdb_id}&sub=0"
+            return f"https://vidsrc.me/embed/tv?tmdb={tmdb_id}&season={s}&episode={e}"
+        return f"https://vidsrc.me/embed/movie?tmdb={tmdb_id}"
 
     if "vidsrc.in" in netloc:
         if is_tv:
-            return f"https://vidsrc.in/embed/tv/{tmdb_id}/{s}/{e}?sub=0"
-        return f"https://vidsrc.in/embed/movie/{tmdb_id}?sub=0"
+            return f"https://vidsrc.in/embed/tv/{tmdb_id}/{s}/{e}"
+        return f"https://vidsrc.in/embed/movie/{tmdb_id}"
 
     if "vidsrc.pm" in netloc:
         if is_tv:
-            return f"https://vidsrc.pm/embed/tv/{tmdb_id}/{s}/{e}?sub=0"
-        return f"https://vidsrc.pm/embed/movie/{tmdb_id}?sub=0"
+            return f"https://vidsrc.pm/embed/tv/{tmdb_id}/{s}/{e}"
+        return f"https://vidsrc.pm/embed/movie/{tmdb_id}"
 
     if "autoembed" in netloc:
         if is_tv:
-            return f"https://player.autoembed.cc/embed/tv/{tmdb_id}/{s}/{e}?sub=0&subtitles=false"
-        return f"https://player.autoembed.cc/embed/movie/{tmdb_id}?sub=0&subtitles=false"
+            return f"https://player.autoembed.cc/embed/tv/{tmdb_id}/{s}/{e}"
+        return f"https://player.autoembed.cc/embed/movie/{tmdb_id}"
 
     if "multiembed" in netloc:
         if is_tv:
-            return f"https://multiembed.mov/?video_id={tmdb_id}&tmdb=1&s={s}&e={e}&sub=0"
-        return f"https://multiembed.mov/?video_id={tmdb_id}&tmdb=1&sub=0"
+            return f"https://multiembed.mov/?video_id={tmdb_id}&tmdb=1&s={s}&e={e}"
+        return f"https://multiembed.mov/?video_id={tmdb_id}&tmdb=1"
 
     if "2embed" in netloc:
         if is_tv:
-            return f"https://www.2embed.cc/embedtv/{tmdb_id}&s={s}&e={e}&sub=0"
+            return f"https://www.2embed.cc/embedtv/{tmdb_id}&s={s}&e={e}"
         return f"https://www.2embed.cc/embed/{tmdb_id}"
 
     if "111movies" in netloc:
         if is_tv:
-            return f"https://111movies.com/tv/{tmdb_id}/{s}/{e}?sub=0&subtitles=false"
-        return f"https://111movies.com/movie/{tmdb_id}?sub=0&subtitles=false"
+            return f"https://111movies.com/tv/{tmdb_id}/{s}/{e}"
+        return f"https://111movies.com/movie/{tmdb_id}"
 
     # Privzeto: vidsrc.cc format
     if is_tv:
-        return f"{scheme}://{netloc}/v2/embed/tv/{imdb_or_tmdb}/{s}/{e}?sub=0&subtitles=false"
-    return f"{scheme}://{netloc}/v2/embed/movie/{imdb_or_tmdb}?sub=0&subtitles=false"
+        return f"{scheme}://{netloc}/v2/embed/tv/{imdb_or_tmdb}/{s}/{e}"
+    return f"{scheme}://{netloc}/v2/embed/movie/{imdb_or_tmdb}"
 
 
 # Vse prepoznane embed domene (razširjeno)
@@ -1578,6 +1578,37 @@ class MediaCenter:
                      source_name=str(source.get("ime") or parsed.hostname or "Predvajalni vir"),
                      kind="serija", season=int(season), episode=int(episode),
                      imdb_id=imdb, tmdb_id=int(tmdb_id), quality="1080p")
+        if item:
+            item = merge_duplicates([item])[0]
+            self._dynamic_items[item["id"]] = item
+        return item
+
+    def movie_item(self, tmdb_id: int, title: str = "") -> Optional[dict]:
+        sources = self._load().get("viri", [])
+        source, parsed = {}, None
+        for candidate in sources:
+            if not isinstance(candidate, dict):
+                continue
+            candidate_parsed = urllib.parse.urlsplit(str(candidate.get("url") or ""))
+            host = (candidate_parsed.hostname or "").lower()
+            if any(domain in host for domain in _EMBED_DOMAINS):
+                source, parsed = candidate, candidate_parsed
+                break
+        if not source or parsed is None:
+            parsed = urllib.parse.urlsplit("https://vidlink.pro")
+            source = {"id": "vidlink", "ime": "VidLink", "url": "https://vidlink.pro"}
+        tmdb = str(int(tmdb_id))
+        imdb = TMDB_TO_IMDB.get(tmdb, "")
+        source_url = str(source.get("url") or "")
+        if _PREDLOGA_TOKEN.search(source_url):
+            url = _izpolni_predlogo(source_url, imdb, tmdb, 0, 0)
+        else:
+            url = _embed_url_for_provider((parsed.hostname or "").lower(), parsed.scheme or "https",
+                                          imdb, tmdb, "film", 0, 0)
+        item = _item(title or "Film", url, base=url,
+                     source_id=str(source.get("id") or "embed"),
+                     source_name=str(source.get("ime") or parsed.hostname or "Predvajalni vir"),
+                     kind="film", imdb_id=imdb, tmdb_id=int(tmdb_id), quality="1080p HD")
         if item:
             item = merge_duplicates([item])[0]
             self._dynamic_items[item["id"]] = item
