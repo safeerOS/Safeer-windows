@@ -501,13 +501,33 @@ def pridobi_stanje_omrezja() -> dict:
         s.close()
         if ip and not ip.startswith("127."):
             povezan = True
+            ime_omrezja = f"Povezano ({ip})"
     except Exception:
         try:
             import socket
             hostname = socket.gethostname()
-            ip = socket.gethostbyname(hostname)
-            if ip and not ip.startswith("127."):
-                povezan = True
+            for info in socket.getaddrinfo(hostname, None):
+                ip = info[4][0]
+                if ip and not ip.startswith("127.") and not ip.startswith("169.254."):
+                    povezan = True
+                    ime_omrezja = f"Povezano ({ip})"
+                    break
+        except Exception:
+            pass
+
+    if sys.platform == "win32":
+        try:
+            out = subprocess.check_output(["netsh", "wlan", "show", "interfaces"],
+                                          text=True, errors="replace", timeout=1.5)
+            for line in out.splitlines():
+                if "SSID" in line and "BSSID" not in line:
+                    parts = line.split(":", 1)
+                    if len(parts) > 1 and parts[1].strip():
+                        ssid = parts[1].strip()
+                        ime_omrezja = ssid
+                        vrsta = "wifi"
+                        povezan = True
+                        break
         except Exception:
             pass
 
@@ -580,6 +600,7 @@ def stanje_sistema() -> dict:
         "ram_gb": ram_gb,
         "disk": disk_odstotek,
         "baterija": None,
+        "omrezje": pridobi_stanje_omrezja(),
     }
 
 

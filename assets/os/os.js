@@ -182,6 +182,10 @@
   }
 
   function $(id) { return document.getElementById(id); }
+  function on(id, dogodek, poslusaj) {
+    var e = typeof id === "string" ? $(id) : id;
+    if (e && e.addEventListener) e.addEventListener(dogodek, poslusaj);
+  }
   function el(oznaka, razred, html) {
     var e = document.createElement(oznaka);
     if (razred) e.className = razred;
@@ -287,14 +291,14 @@
   function osveziUro() {
     var zdaj = new Date();
     var lok = LOKALE[jezik] || "en-GB";
-    $("ura").textContent = zdaj.toLocaleTimeString(lok, { hour: "2-digit", minute: "2-digit" });
-    $("datum").textContent = zdaj.toLocaleDateString(lok, { weekday: "short", day: "numeric", month: "short" });
+    if ($("ura")) $("ura").textContent = zdaj.toLocaleTimeString(lok, { hour: "2-digit", minute: "2-digit" });
+    if ($("datum")) $("datum").textContent = zdaj.toLocaleDateString(lok, { weekday: "short", day: "numeric", month: "short" });
     var h = zdaj.getHours();
     var ime = S.zacetek ? String(S.zacetek.ime || "").split(" ")[0] : "";
     var kljuc = h < 11 ? "jutro" : (h < 18 ? "dan" : "vecer");
     var pozdrav = t(kljuc, { ime: ime });
     if (!ime) pozdrav = pozdrav.replace(/,\s*!/, "!");
-    $("pozdrav").textContent = pozdrav;
+    if ($("pozdrav")) $("pozdrav").textContent = pozdrav;
   }
 
   // ------------------------------------------------------------------ programi
@@ -423,19 +427,24 @@
     var stevci = {};
     programi.forEach(function (p) { stevci[p.skupina] = (stevci[p.skupina] || 0) + 1; });
     var izbranaNaprava = S.naprave.find(function (x) { return x.id === S.naprava; });
-    $("programiPod").textContent = S.naprava
-      ? t("programiNaprave", { n: programi.length, naprava: izbranaNaprava ? izbranaNaprava.ime : "" })
-      : (S.naprave.length ? t("programiPodNaprave", { n: S.programi.length, k: S.naprave.length }) : t("programiPod", { n: S.programi.length }));
+    if ($("programiPod")) {
+      $("programiPod").textContent = S.naprava
+        ? t("programiNaprave", { n: programi.length, naprava: izbranaNaprava ? izbranaNaprava.ime : "" })
+        : (S.naprave.length ? t("programiPodNaprave", { n: S.programi.length, k: S.naprave.length }) : t("programiPod", { n: S.programi.length }));
+    }
     var filtri = $("filtri");
-    filtri.innerHTML = "";
-    ["vse"].concat(SKUPINE).forEach(function (s) {
-      if (s !== "vse" && !stevci[s]) return;
-      var b = el("button", s === S.skupina ? "izbran" : "",
-                 ubezi(t("sk_" + s)) + "<span>" + (s === "vse" ? programi.length : stevci[s]) + "</span>");
-      b.addEventListener("click", function () { S.skupina = s; narisiPrograme(); });
-      filtri.appendChild(b);
-    });
+    if (filtri) {
+      filtri.innerHTML = "";
+      ["vse"].concat(SKUPINE).forEach(function (s) {
+        if (s !== "vse" && !stevci[s]) return;
+        var b = el("button", s === S.skupina ? "izbran" : "",
+                   ubezi(t("sk_" + s)) + "<span>" + (s === "vse" ? programi.length : stevci[s]) + "</span>");
+        b.addEventListener("click", function () { S.skupina = s; narisiPrograme(); });
+        filtri.appendChild(b);
+      });
+    }
     var mreza = $("vsiProgrami");
+    if (!mreza) return;
     mreza.innerHTML = "";
     if (S.naprava) {
       var seznamN = S.programiNaprav[S.naprava];
@@ -462,6 +471,13 @@
       var p = S.programi.find(function (x) { return x.id === id; });
       if (p && !p.skrit && izbrani.indexOf(p) < 0) izbrani.push(p);
     });
+    if (izbrani.length < 8 && S.programi.length > 0) {
+      S.programi.forEach(function (p) {
+        if (!p.skrit && izbrani.indexOf(p) < 0 && izbrani.length < 11) {
+          izbrani.push(p);
+        }
+      });
+    }
     return izbrani.slice(0, 11);
   }
   // Ena vrsta ploscic kot na televizorju: programi (pripeti, pogosti), nato spletne aplikacije, na koncu »Dodaj«.
@@ -485,6 +501,7 @@
   }
   function narisiDomov() {
     var vrsta = $("domaciProgrami");
+    if (!vrsta) return;
     var sirina = vrsta.clientWidth || 1000;
     var mest = Math.max(4, Math.floor((sirina + 12) / (116 + 12)));
     var programi = domaciProgrami(), splet = spletne();
@@ -501,6 +518,7 @@
   }
   function narisiHitriDostop() {
     var cilj = $("hitriDostop");
+    if (!cilj) return;
     cilj.innerHTML = "";
     var r = (S.zacetek && S.zacetek.razpolozljivo) || { orodja: [] };
     var elementi = [
@@ -545,25 +563,26 @@
     klic("odprtaOkna").then(narisiOkna, function () {});
   }
   function narisiOkna(okna) {
-    {
-      okna = okna || [];
-      $("blokOkna").hidden = okna.length === 0;
-      var vrsta = $("okna");
-      vrsta.innerHTML = "";
-      okna.slice(0, 12).forEach(function (o) {
-        var b = el("button", "okno");
-        b.appendChild(slikaAliCrka(o.ikona, o.program || o.ime));
-        b.appendChild(el("div", "", "<b>" + ubezi(o.program || o.ime) + "</b><span>" + ubezi(o.ime) + "</span>"));
-        var z = el("span", "zapri", svg("x"));
-        z.addEventListener("click", function (e) {
-          e.stopPropagation();
-          klic("zapriOkno", [o.id]).then(function () { setTimeout(osveziOkna, 500); });
-        });
-        b.appendChild(z);
-        b.addEventListener("click", function () { klic("aktivirajOkno", [o.id]); });
-        vrsta.appendChild(b);
+    var blok = $("blokOkna");
+    if (!blok) return;
+    okna = okna || [];
+    blok.hidden = okna.length === 0;
+    var vrsta = $("okna");
+    if (!vrsta) return;
+    vrsta.innerHTML = "";
+    okna.slice(0, 12).forEach(function (o) {
+      var b = el("button", "okno");
+      b.appendChild(slikaAliCrka(o.ikona, o.program || o.ime));
+      b.appendChild(el("div", "", "<b>" + ubezi(o.program || o.ime) + "</b><span>" + ubezi(o.ime) + "</span>"));
+      var z = el("span", "zapri", svg("x"));
+      z.addEventListener("click", function (e) {
+        e.stopPropagation();
+        klic("zapriOkno", [o.id]).then(function () { setTimeout(osveziOkna, 500); });
       });
-    }
+      b.appendChild(z);
+      b.addEventListener("click", function () { klic("aktivirajOkno", [o.id]); });
+      vrsta.appendChild(b);
+    });
   }
 
   // ------------------------------------------------------------------ datoteke
@@ -899,8 +918,9 @@
   function narisiNedavneDomov() {
     klic("nedavne").then(function (seznam) {
       seznam = (seznam || []).slice(0, 5);
-      $("blokNedavne").hidden = !seznam.length;
-      var v = $("nedavneDomov");
+      if ($("blokNedavne")) $("blokNedavne").hidden = !seznam.length;
+      var v = $("nedavneDomov") || $("domovNadaljuj");
+      if (!v) return;
       v.innerHTML = "";
       seznam.forEach(function (d) { v.appendChild(vrsticaDatoteke(d, true, true)); });
     }, function () {});
@@ -925,33 +945,42 @@
     var p = S.povezava;
     if (S.stanje) setTimeout(function () { narisiStanje(S.stanje); }, 0);
     var povezan = p.stanje === "povezan";
-    $("napravePika").className = "pika" + (povezan ? "" : " siva");
-    $("napraveNaslov").textContent = t(povezan ? "povezanNaslov" : (p.stanje === "brez" ? "brezNaslov" : "novNaslov"));
-    // Nepovezan racunalnik: povemo, ali je v omrezju Safeer Link (in kateri) - uporabnik takoj ve, kaj sledi.
+    if ($("napravePika")) $("napravePika").className = "pika" + (povezan ? "" : " siva");
+    if ($("napraveNaslov")) $("napraveNaslov").textContent = t(povezan ? "povezanNaslov" : (p.stanje === "brez" ? "brezNaslov" : "novNaslov"));
     var hubi = p.hubi || [];
-    $("napraveBesedilo").textContent = !p.control ? t("niControla") : povezan ? t("povezanOpis") :
+    if ($("napraveBesedilo")) $("napraveBesedilo").textContent = !p.control ? t("niControla") : povezan ? t("povezanOpis") :
       (hubi.length ? t("novOpisHub", { ime: hubi[0].ime }) : (p.hubi ? t("novOpisBrezHuba") : t("novOpis")));
     var namig = $("napraveNamig");
-    namig.hidden = povezan || !p.control || hubi.length > 0 || !p.hubi;
-    namig.textContent = t("napraveNamig");
+    if (namig) {
+      namig.hidden = povezan || !p.control || hubi.length > 0 || !p.hubi;
+      namig.textContent = t("napraveNamig");
+    }
     narisiSeznamNaprav(povezan && !!p.control);
-    $("gumbControl").hidden = !p.control;
-    $("gumbControlBesedilo").textContent = t(povezan ? "odpriControl" : "poveziNaprave");
-    $("gumbControl").querySelector("svg").innerHTML = '<path d="' + IK[povezan ? "naprave" : "qr"] + '"/>';
-    $("kNapravePod").textContent = t(povezan ? "napravePodPovezan" : "napravePodNov");
-    $("blokZaupanje").hidden = !povezan;
-    $("gumbOdjava").hidden = !povezan || !p.control;
-    $("gumbOdjava").classList.toggle("opozorilo", odjavaPotrjujem);
-    $("gumbOdjavaBesedilo").textContent = t(odjavaPotrjujem ? "odjavaPotrdi" : "odjaviRacunalnik");
-    $("stikaloZaupaj").setAttribute("aria-checked", p.zaupana ? "true" : "false");
-    $("zaupajPod").textContent = t(p.zaupana ? "zaupajDa" : "zaupajNe");
-    $("domNapravaStanje").innerHTML = '<i class="pika' + (povezan ? "" : " siva") + '"></i><span>' +
+    if ($("gumbControl")) {
+      $("gumbControl").hidden = !p.control;
+      if ($("gumbControlBesedilo")) $("gumbControlBesedilo").textContent = t(povezan ? "odpriControl" : "poveziNaprave");
+      var cSvg = $("gumbControl").querySelector("svg");
+      if (cSvg) cSvg.innerHTML = '<path d="' + IK[povezan ? "naprave" : "qr"] + '"/>';
+    }
+    if ($("kNapravePod")) $("kNapravePod").textContent = t(povezan ? "napravePodPovezan" : "napravePodNov");
+    if ($("blokZaupanje")) $("blokZaupanje").hidden = !povezan;
+    if ($("gumbOdjava")) {
+      $("gumbOdjava").hidden = !povezan || !p.control;
+      $("gumbOdjava").classList.toggle("opozorilo", odjavaPotrjujem);
+    }
+    if ($("gumbOdjavaBesedilo")) $("gumbOdjavaBesedilo").textContent = t(odjavaPotrjujem ? "odjavaPotrdi" : "odjaviRacunalnik");
+    if ($("stikaloZaupaj")) $("stikaloZaupaj").setAttribute("aria-checked", p.zaupana ? "true" : "false");
+    if ($("zaupajPod")) $("zaupajPod").textContent = t(p.zaupana ? "zaupajDa" : "zaupajNe");
+    if ($("domNapravaStanje")) $("domNapravaStanje").innerHTML = '<i class="pika' + (povezan ? "" : " siva") + '"></i><span>' +
       ubezi(t(povezan ? "povezanKratko" : "niPovezano")) + "</span>";
-    $("domControl").hidden = !p.control;
-    $("domControlBesedilo").textContent = t(povezan ? "odpriControl" : "poveziNaprave");
-    $("domControl").querySelector("svg").innerHTML = '<path d="' + IK[povezan ? "naprave" : "qr"] + '"/>';
+    if ($("domControl")) {
+      $("domControl").hidden = !p.control;
+      if ($("domControlBesedilo")) $("domControlBesedilo").textContent = t(povezan ? "odpriControl" : "poveziNaprave");
+      var dSvg = $("domControl").querySelector("svg");
+      if (dSvg) dSvg.innerHTML = '<path d="' + IK[povezan ? "naprave" : "qr"] + '"/>';
+    }
     var sp = $("stanjePovezava");
-    sp.innerHTML = '<i class="pika' + (povezan ? "" : " siva") + '"></i><span>' + ubezi(povezan ? t("povezano") : t("brezNaprav")) + "</span>";
+    if (sp) sp.innerHTML = '<i class="pika' + (povezan ? "" : " siva") + '"></i><span>' + ubezi(povezan ? t("povezano") : t("brezNaprav")) + "</span>";
   }
 
   // Naprave v Linku s preimenovanjem: ime hrani sredisce, zato ga vidijo vse naprave (telefon, TV, tablica).
@@ -1027,20 +1056,28 @@
     S.stanje = s;
     var o = s.omrezje || {};
     var ikona = o.vrsta === "wifi" ? "wifi" : (o.vrsta === "ethernet" ? "ethernet" : "brezOmrezja");
-    var ime = o.vrsta === "ethernet" ? t("zicna") : (o.ime || t("brezOmrezja"));
-    $("stanjeOmrezje").innerHTML = svg(ikona) + "<span>" + ubezi(ime) + "</span>";
-    $("stanjeOmrezje").title = o.ime || "";
+    var ime = o.vrsta === "ethernet" ? (o.ime || t("zicna")) : (o.ime || t("brezOmrezja"));
+    if ($("stanjeOmrezje")) {
+      $("stanjeOmrezje").innerHTML = svg(ikona) + "<span>" + ubezi(ime) + "</span>";
+      $("stanjeOmrezje").title = o.ime || "";
+    }
     var z = s.zvok;
-    $("stanjeZvok").innerHTML = z ? svg(z.utisan ? "utisan" : "zvok") + "<span>" + (z.utisan ? "" : z.glasnost + " %") + "</span>" : "";
+    if ($("stanjeZvok")) {
+      $("stanjeZvok").innerHTML = z ? svg(z.utisan ? "utisan" : "zvok") + "<span>" + (z.utisan ? "" : z.glasnost + " %") + "</span>" : "";
+    }
     var b = s.baterija;
-    $("stanjeBaterija").innerHTML = b ? svg(b.polni ? "polni" : "baterija") + "<span>" + b.odstotek + " %</span>" : "";
-    var podatki = [[t("omrezje"), ime, !!o.vrsta]];
-    if (b) podatki.push([t("baterija"), b.odstotek + " %" + (b.polni && !b.polna ? " · " + t("polni") : ""), true]);
-    podatki.push(["Safeer Link", t(S.povezava.stanje === "povezan" ? "povezanKratko" : "niPovezano"), S.povezava.stanje === "povezan"]);
-    $("sistemPodatki").innerHTML = podatki.map(function (v) {
-      return "<dt>" + ubezi(v[0]) + '</dt><dd><i class="pika' + (v[2] ? "" : " siva") + '"></i>' + ubezi(v[1]) + "</dd>";
-    }).join("");
-    if ($("slojHitro").classList.contains("viden")) narisiHitro();
+    if ($("stanjeBaterija")) {
+      $("stanjeBaterija").innerHTML = b ? svg(b.polni ? "polni" : "baterija") + "<span>" + b.odstotek + " %</span>" : "";
+    }
+    if ($("sistemPodatki")) {
+      var podatki = [[t("omrezje"), ime, !!o.povezan]];
+      if (b) podatki.push([t("baterija"), b.odstotek + " %" + (b.polni && !b.polna ? " · " + t("polni") : ""), true]);
+      podatki.push(["Safeer Link", t(S.povezava.stanje === "povezan" ? "povezanKratko" : "niPovezano"), S.povezava.stanje === "povezan"]);
+      $("sistemPodatki").innerHTML = podatki.map(function (v) {
+        return "<dt>" + ubezi(v[0]) + '</dt><dd><i class="pika' + (v[2] ? "" : " siva") + '"></i>' + ubezi(v[1]) + "</dd>";
+      }).join("");
+    }
+    if ($("slojHitro") && $("slojHitro").classList.contains("viden")) narisiHitro();
   }
   function osveziStanje() { klic("stanje").then(narisiStanje, function () {}); }
 
@@ -1690,17 +1727,17 @@
     document.querySelectorAll("[data-pojdi]").forEach(function (b) {
       b.addEventListener("click", function () { pojdi(b.getAttribute("data-pojdi")); });
     });
-    $("kBrskalnik").addEventListener("click", function () {
+    on("kBrskalnik", "click", function () {
       var b = S.programi.find(function (p) { return p.id === "safeer-browser.desktop"; }) ||
               S.programi.find(function (p) { return /safeer/i.test(p.id) && p.skupina === "splet"; });
       if (b) zazeni(b); else klic("iskanjeSplet", [""]);
     });
-    $("gumbControl").addEventListener("click", function () {
+    on("gumbControl", "click", function () {
       obvesti(t("odpiram", { ime: "Safeer Control" }));
       // Povezan racunalnik: Control z napravami; sicer prijavno okno (QR / koda / brez povezave).
       klic(S.povezava.stanje === "povezan" ? "control" : "prijava");
     });
-    $("gumbOdjava").addEventListener("click", function () {
+    on("gumbOdjava", "click", function () {
       if (!odjavaPotrjujem) {
         odjavaPotrjujem = true;
         clearTimeout(odjavaCas);
@@ -1715,64 +1752,72 @@
         setTimeout(osveziPovezavo, 6000);
       });
     });
-    $("domControl").addEventListener("click", function () { $("gumbControl").click(); });
-    $("gumbStanje").addEventListener("click", function () {
-      if ($("slojHitro").classList.contains("viden")) zapriSloje(); else odpriHitro();
+    on("domControl", "click", function () { var gc = $("gumbControl"); if (gc) gc.click(); });
+    on("gumbStanje", "click", function () {
+      if ($("slojHitro") && $("slojHitro").classList.contains("viden")) zapriSloje(); else odpriHitro();
     });
-    $("gumbNapajanje").addEventListener("click", function () {
-      if ($("slojNapajanje").classList.contains("viden")) zapriSloje(); else odpriNapajanje();
+    on("gumbNapajanje", "click", function () {
+      if ($("slojNapajanje") && $("slojNapajanje").classList.contains("viden")) zapriSloje(); else odpriNapajanje();
     });
-    $("stikaloCelozaslonsko").addEventListener("click", function () {
-      var b = $("stikaloCelozaslonsko"), nov = b.getAttribute("aria-checked") !== "true";
+    on("stikaloCelozaslonsko", "click", function () {
+      var b = $("stikaloCelozaslonsko");
+      if (!b) return;
+      var nov = b.getAttribute("aria-checked") !== "true";
       b.setAttribute("aria-checked", nov ? "true" : "false");
       if (S.zacetek) S.zacetek.celozaslonsko = nov;
       klic("celozaslonsko", [nov]);
     });
-    $("gumbNamizje").addEventListener("click", function () { klic("namizje"); });
-    $("stikaloSamozagon").addEventListener("click", function () {
-      var b = $("stikaloSamozagon"), nov = b.getAttribute("aria-checked") !== "true";
+    on("gumbNamizje", "click", function () { klic("namizje"); });
+    on("stikaloSamozagon", "click", function () {
+      var b = $("stikaloSamozagon");
+      if (!b) return;
+      var nov = b.getAttribute("aria-checked") !== "true";
       b.setAttribute("aria-checked", nov ? "true" : "false");
       klic("samozagon", [nov]).then(function (zdaj) {
         if (S.zacetek) S.zacetek.samozagon = !!zdaj;
         b.setAttribute("aria-checked", zdaj ? "true" : "false");
       });
     });
-    $("stikaloZaupaj").addEventListener("click", function () {
-      var b = $("stikaloZaupaj"), nov = b.getAttribute("aria-checked") !== "true";
+    on("stikaloZaupaj", "click", function () {
+      var b = $("stikaloZaupaj");
+      if (!b) return;
+      var nov = b.getAttribute("aria-checked") !== "true";
       S.povezava.zaupana = nov;
       narisiPovezavo();
       klic("zaupanje", [nov]).then(function () { setTimeout(osveziPovezavo, 600); });
     });
-    $("gumbNazajVMint").addEventListener("click", odpriMint);
-    $("stikaloWifiOmrezje").addEventListener("click", function () {
-      var b = $("stikaloWifiOmrezje"), nov = b.getAttribute("aria-checked") !== "true";
+    on("gumbNazajVMint", "click", odpriMint);
+    on("stikaloWifiOmrezje", "click", function () {
+      var b = $("stikaloWifiOmrezje");
+      if (!b) return;
+      var nov = b.getAttribute("aria-checked") !== "true";
       b.setAttribute("aria-checked", nov ? "true" : "false");
       klic("wifi", [nov]).then(function () { setTimeout(function () { nalozOmrezje(true); }, 1500); });
     });
-    $("gumbOmrezjeOsvezi").addEventListener("click", function () { nalozOmrezje(true); });
-    $("gumbOmrezjeNazaj").addEventListener("click", function () { pojdi("nastavitve"); });
-    $("gumbOmrezjeNapredno").addEventListener("click", function () {
+    on("gumbOmrezjeOsvezi", "click", function () { nalozOmrezje(true); });
+    on("gumbOmrezjeNazaj", "click", function () { pojdi("nastavitve"); });
+    on("gumbOmrezjeNapredno", "click", function () {
       obvesti(t("odpiram", { ime: t("napredno") }));
       klic("nastavitve", ["omrezje"]);
     });
-    $("stanjeOmrezje").addEventListener("click", function (e) { e.stopPropagation(); zapriSloje(); pojdi("omrezje"); });
-    $("stanjeZvok").addEventListener("click", function (e) { e.stopPropagation(); zapriSloje(); pojdi("zvok"); });
-    $("stanjeZvok").addEventListener("contextmenu", function (e) { e.preventDefault(); e.stopPropagation(); zapriSloje(); pojdi("zvok"); });
-    $("gumbZvokNazaj").addEventListener("click", function () { pojdi("nastavitve"); });
-    $("gumbNedavnePocistiDomov").addEventListener("click", pocistiNedavne);
-    $("gumbZvokNapredno").addEventListener("click", function () {
+    on("stanjeOmrezje", "click", function (e) { e.stopPropagation(); zapriSloje(); pojdi("omrezje"); });
+    on("stanjeZvok", "click", function (e) { e.stopPropagation(); zapriSloje(); pojdi("zvok"); });
+    on("stanjeZvok", "contextmenu", function (e) { e.preventDefault(); e.stopPropagation(); zapriSloje(); pojdi("zvok"); });
+    on("gumbZvokNazaj", "click", function () { pojdi("nastavitve"); });
+    on("gumbNedavnePocistiDomov", "click", pocistiNedavne);
+    on("gumbZvokNapredno", "click", function () {
       obvesti(t("odpiram", { ime: t("napredno") }));
       klic("nastavitve", ["sound"]);
     });
-    $("mintPreklici").addEventListener("click", zapriSloje);
-    $("mintSamoTokrat").addEventListener("click", function () { klic("nazajVMint", [false]); });
-    $("mintZaStalno").addEventListener("click", function () { klic("nazajVMint", [true]); });
+    on("mintPreklici", "click", zapriSloje);
+    on("mintSamoTokrat", "click", function () { klic("nazajVMint", [false]); });
+    on("mintZaStalno", "click", function () { klic("nazajVMint", [true]); });
     document.querySelectorAll(".sloj .tancica").forEach(function (t_) { t_.addEventListener("click", function () {
-      $("iskanje").value = "";
+      if ($("iskanje")) $("iskanje").value = "";
       zapriSloje();
     }); });
-    $("dodajPreklici").addEventListener("click", zapriSloje);
-    $("obrazecDodaj").addEventListener("submit", function (e) {
+    on("dodajPreklici", "click", zapriSloje);
+    on("obrazecDodaj", "submit", function (e) {
       e.preventDefault();
       var naslov = normalizirajNaslov($("dodajNaslov").value);
       if (!naslov) { $("dodajNaslov").focus(); return; }
@@ -1781,16 +1826,18 @@
       zapriSloje();
     });
     var iskanje = $("iskanje");
-    iskanje.addEventListener("input", isci);
-    iskanje.addEventListener("keydown", function (e) {
-      if (e.key === "ArrowDown") { e.preventDefault(); premakniIzbiro(1); }
-      else if (e.key === "ArrowUp") { e.preventDefault(); premakniIzbiro(-1); }
-      else if (e.key === "Enter") {
-        var a = document.querySelector("#zadetki .zadetek.aktiven");
-        if (a) { e.preventDefault(); a.click(); iskanje.value = ""; iskanje.blur(); }
-      }
-    });
-    iskanje.addEventListener("focus", function () { if (iskanje.value) isci(); });
+    if (iskanje) {
+      iskanje.addEventListener("input", isci);
+      iskanje.addEventListener("keydown", function (e) {
+        if (e.key === "ArrowDown") { e.preventDefault(); premakniIzbiro(1); }
+        else if (e.key === "ArrowUp") { e.preventDefault(); premakniIzbiro(-1); }
+        else if (e.key === "Enter") {
+          var a = document.querySelector("#zadetki .zadetek.aktiven");
+          if (a) { e.preventDefault(); a.click(); iskanje.value = ""; iskanje.blur(); }
+        }
+      });
+      iskanje.addEventListener("focus", function () { if (iskanje.value) isci(); });
+    }
     // Kot meni Start: kar zacnes tipkati, gre v iskanje.
     document.addEventListener("keydown", function (e) {
       if (e.key === "Escape") {
@@ -1828,11 +1875,11 @@
       if (Array.isArray(z.spletne)) S.spletne = z.spletne;
       if (z.ozadje) $("ozadje").style.backgroundImage = 'url("' + z.ozadje.replace(/"/g, "%22") + '")';
       var ime = String(z.ime || "");
-      $("imeUporabnika").textContent = ime;
-      $("imeRacunalnika").textContent = z.racunalnik || "";
-      if (z.sistem) $("sistemIme").textContent = z.sistem;
-      $("sistemRacunalnik").textContent = z.racunalnik || "";
-      $("zacetnica").textContent = (ime.trim().charAt(0) || "S").toUpperCase();
+      if ($("imeUporabnika")) $("imeUporabnika").textContent = ime;
+      if ($("imeRacunalnika")) $("imeRacunalnika").textContent = z.racunalnik || "";
+      if (z.sistem && $("sistemIme")) $("sistemIme").textContent = z.sistem;
+      if ($("sistemRacunalnik")) $("sistemRacunalnik").textContent = z.racunalnik || "";
+      if ($("zacetnica")) $("zacetnica").textContent = (ime.trim().charAt(0) || "S").toUpperCase();
       S.povezava = z.povezava || S.povezava;
       narisiPovezavo();
       osveziUro();
@@ -2005,18 +2052,16 @@
     } else {
       if (iframe && /^https?:\/\//i.test(url)) {
         iframe.hidden = false;
-        iframe.onload = function () {};
+        $("mediaNapaka").hidden = true;
+        iframe.onload = function () {
+          if (media.timer) { window.clearTimeout(media.timer); media.timer = 0; }
+        };
         iframe.onerror = function () {
           if (media.timer) window.clearTimeout(media.timer);
           media.timer = 0;
           if (!poskusiNaslednjo()) $("mediaNapaka").hidden = false;
         };
         iframe.src = url;
-        media.timer = window.setTimeout(function () {
-          media.timer = 0;
-          iframe.hidden = true;
-          if (!poskusiNaslednjo()) $("mediaNapaka").hidden = false;
-        }, 12000);
       } else $("mediaNapaka").hidden = false;
     }
     var choices = $("mediaRazlicice"); choices.innerHTML = "";
@@ -2042,6 +2087,7 @@
     var pl = $("mediaPredvajalnik");
     if (pl) { pl.hidden = true; pl.classList.remove("kino"); }
     media.aktivni = null;
+    klic("celozaslonsko", [false]);
   }
   function naloziMedia() {
     var zahteva = ++media.zahteva;
@@ -2095,6 +2141,8 @@
       var episodes = $("mediaEpizode"); episodes.innerHTML = "";
 
       if (item.vrsta !== "serija") {
+        if ($("mediaSezoneNaslov")) $("mediaSezoneNaslov").hidden = true;
+        if ($("mediaSezone")) $("mediaSezone").hidden = true;
         $("mediaEpizodeNaslov").textContent = "Možnosti predvajanja";
         var playBtn = el("button", "gumb glavni", "▶ Predvajaj film (1080p HD)");
         playBtn.style.padding = "14px 28px";
@@ -2113,6 +2161,8 @@
         };
         episodes.appendChild(playBtn);
       } else {
+        if ($("mediaSezoneNaslov")) $("mediaSezoneNaslov").hidden = false;
+        if ($("mediaSezone")) $("mediaSezone").hidden = false;
         $("mediaEpizodeNaslov").textContent = "Epizode";
         (item.sezone || []).forEach(function (season, index) {
           var b = el("button", index === 0 ? "izbran" : "", ubezi(season.ime || "Sezona " + season.stevilka));
@@ -2134,7 +2184,10 @@
     b.onclick = function () {
       media.filter = b.getAttribute("data-media-filter");
       media.page = 1;
-      document.querySelectorAll("[data-media-filter]").forEach(function (q) { q.classList.toggle("izbran", q === b); });
+      document.querySelectorAll("[data-media-filter]").forEach(function (q) {
+        q.classList.toggle("izbran", q === b);
+        q.classList.toggle("izbrana", q === b);
+      });
       naloziMedia();
     };
   });
@@ -2146,22 +2199,30 @@
       naloziMedia();
     };
   });
-  $("mediaIskanje").addEventListener("input", function () {
+  on("mediaIskanje", "input", function () {
     media.query = this.value; media.page = 1; clearTimeout(media.timer); media.timer = setTimeout(naloziMedia, 350);
   });
-  $("mediaPodrobnostiNazaj").addEventListener("click", zapriMediaPodrobnosti);
-  $("mediaPodrobnostiZapri").addEventListener("click", zapriMediaPodrobnosti);
-  $("mediaZapri").addEventListener("click", zapriMediaHtml);
-  if ($("mediaKino")) {
-    $("mediaKino").addEventListener("click", function () {
+  on("mediaPodrobnostiNazaj", "click", zapriMediaPodrobnosti);
+  on("mediaPodrobnostiZapri", "click", zapriMediaPodrobnosti);
+  on("mediaZapri", "click", zapriMediaHtml);
+  on("mediaPredvajalnikNazaj", "click", zapriMediaHtml);
+  window.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") {
       var pl = $("mediaPredvajalnik");
-      if (!pl) return;
-      var jeKino = pl.classList.toggle("kino");
-      klic("celozaslonsko", [jeKino]);
-    });
-  }
-  $("mediaOsvezi").addEventListener("click", function () { osveziMediaVir(""); });
-    $("mediaDodajVir").addEventListener("submit", function (event) {
+      if (pl && !pl.hidden) {
+        zapriMediaHtml();
+        e.preventDefault();
+      }
+    }
+  });
+  on("mediaKino", "click", function () {
+    var pl = $("mediaPredvajalnik");
+    if (!pl) return;
+    var jeKino = pl.classList.toggle("kino");
+    klic("celozaslonsko", [jeKino]);
+  });
+  on("mediaOsvezi", "click", function () { osveziMediaVir(""); });
+  on("mediaDodajVir", "submit", function (event) {
     event.preventDefault(); var url = $("mediaVirUrl").value.trim(), name = $("mediaVirIme").value.trim();
     if (!url) return;
     $("mediaVirSporocilo").textContent = t("mediaDodaj") + " …";
