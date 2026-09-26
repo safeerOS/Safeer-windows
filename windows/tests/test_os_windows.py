@@ -317,7 +317,7 @@ class TestOsWindows(unittest.TestCase):
         koren = Path(__file__).resolve().parents[2]
         javascript = (koren / "assets" / "os" / "os.js").read_text(encoding="utf-8")
         self.assertIn("media.timer = window.setTimeout", javascript)
-        self.assertIn("}, 20000);", javascript)
+        self.assertIn("}, 12000);", javascript)
         self.assertIn("iframe.onerror", javascript)
 
     def test_clean_nadgradnja_ohrani_uporabnikove_media_vire(self):
