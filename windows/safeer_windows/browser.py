@@ -656,6 +656,19 @@ class BrowserWindow(QMainWindow):
         self.retranslate()
         self.update_shield()
 
+    def set_media_mode(self, enabled: bool) -> None:
+        """Vdelani ponudnik videa ostane del Safeer Media, brez videza drugega brskalnika."""
+        enabled = bool(enabled and self.embedded)
+        self.tabs.tabBar().setVisible(not enabled)
+        self.new_tab_button.setVisible(not enabled)
+        self.statusBar().setVisible(not enabled)
+        for widget in (self.forward_button, self.home_button, self.address, self.shield_label,
+                       self.star_button, self.downloads_button, self.menu_button):
+            widget.setVisible(not enabled)
+        # Nazaj, osveži in »Safeer OS« ostanejo vidni ter so resnične akcije.
+        self.back_button.setVisible(True)
+        self.reload_button.setVisible(True)
+
     # -- construction helpers ---------------------------------------------
     def _tool(self, icon: str, callback) -> QToolButton:
         button = QToolButton(self)

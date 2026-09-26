@@ -20,7 +20,7 @@ CORE_DIR = os.path.abspath(os.path.join(PACKAGE_DIR, "..", ".."))
 if CORE_DIR not in sys.path:
     sys.path.insert(0, CORE_DIR)
 
-from core import link_deljenje, link_hub, link_tls
+from core import link_deljenje, link_hub, link_hub_streznik, link_tls
 from safeer_windows import os_backend_win
 from safeer_windows.navidezni_zaslon import NavidezniZaslon
 
@@ -79,6 +79,7 @@ class SafeerControlBackend:
         self._cas_hubi = 0.0
         self._deljenje_zaslona: Optional[link_deljenje.DeljenjeZaslona] = None
         self._opozorjena_dovoljenja: set[str] = set()
+        self._lokalni_hub: Optional[link_hub_streznik.HubStreznik] = None
 
     def nova_lokalna_koda(self) -> str:
         self.lokalna_koda = str(100000 + secrets.randbelow(900000))
@@ -391,6 +392,45 @@ class SafeerControlBackend:
         self._oddaj_dogodek("hub", {"najden": False, "naslov": "", "isce_naprej": False})
         return None
 
+    def zagotovi_lokalni_hub(self) -> Optional[dict]:
+        """Če v hiši ni Huba, ga ta računalnik varno prevzame in se nanj vpiše.
+
+        Tako Safeer Control na dveh računalnikih ni odvisen od prižganega TV-ja.
+        Lastni Control se seznani znotraj istega procesa; koda ne zapusti naprave.
+        """
+        if self._lokalni_hub is not None and self._lokalni_hub.tece():
+            return {"naslov": self.hub_url(), "fp": self._lokalni_hub.odtis, "lokalni": True}
+        streznik = link_hub_streznik.HubStreznik()
+        if not streznik.zazeni() or streznik.hub is None:
+            return None
+        self._lokalni_hub = streznik
+        naslov = f"wss://127.0.0.1:{streznik.vrata}/cast/ws"
+        prikazane_kode: List[str] = []
+        streznik.hub.ob_kodi = lambda _ime, koda: prikazane_kode.append(str(koda))
+        try:
+            prijava = link_hub.zacni_seznanitev(naslov, self.device_id, self.device_ime)
+            if not prijava or prijava.get("napaka") or not prikazane_kode:
+                raise RuntimeError("lokalna_seznanitev_ni_stekla")
+            zeton, napaka = link_hub.potrdi_kodo(naslov, prijava, self.device_id, prikazane_kode[-1])
+            if not zeton:
+                raise RuntimeError(napaka or "lokalna_seznanitev_ni_stekla")
+            self.nastavitve.update({
+                "control_token": zeton,
+                "hub_fp": streznik.odtis,
+                "hub_url": naslov,
+                "hub_ime": "Ta računalnik · Safeer Link",
+                "brez_povezave": False,
+            })
+            self.shrani_nastavitve()
+            self._oddaj_dogodek("hub", {"najden": True, "naslov": naslov,
+                                        "ime": "Ta računalnik · Safeer Link", "lokalni": True})
+            return {"naslov": naslov, "fp": streznik.odtis, "lokalni": True}
+        except Exception as exc:
+            print(f"[ControlBackend] Lokalni Safeer Link se ni zagnal: {exc}")
+            streznik.ustavi()
+            self._lokalni_hub = None
+            return None
+
     def nadzor(self, cilj: str, dejanje: str, polozaj: Optional[float] = None, glasnost: Optional[float] = None) -> bool:
         """Ukazi za predvajanje in daljinec (seek, volume, pause, play, play_pause)."""
         if self._povezava:
@@ -554,9 +594,31 @@ class SafeerControlBackend:
     def povezi_naprave(self) -> None:
         self.nastavitve["brez_povezave"] = False
         self.shrani_nastavitve()
-        self.zacni_qr()
+        def pripravi() -> None:
+            if not self.hub_url():
+                najden = self.poisci_hub()
+                if not najden:
+                    self.zagotovi_lokalni_hub()
+            if self.zeton() and self.hub_url():
+                self.povezi_se()
+            self.zacni_qr()
+
+        threading.Thread(target=pripravi, name="safeer-link-priprava", daemon=True).start()
         self._oddaj_dogodek("brezPovezave", False)
         self._oddaj_dogodek("stanje", self.stanje_linka())
+
+    def koncaj(self) -> None:
+        self.prekini_qr()
+        self.koncaj_deljenje_zaslona()
+        if self.povezava is not None:
+            try:
+                self.povezava.zapri()
+            except Exception:
+                pass
+            self.povezava = None
+        if self._lokalni_hub is not None:
+            self._lokalni_hub.ustavi()
+            self._lokalni_hub = None
 
     def pozabi_napravo(self) -> bool:
         hub = self.hub_url()

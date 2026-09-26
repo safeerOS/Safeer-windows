@@ -705,9 +705,77 @@ def _embed_url_for_provider(netloc: str, scheme: str, imdb_id: str,
 _EMBED_DOMAINS = ("vidsrc", "vidlink", "embed.su", "superembed", "multiembed",
                   "2embed", "autoembed", "111movies")
 
+_PREDLOGA_TOKEN = re.compile(r"\{\s*(tmdb_?id|imdb_?id|season|episode|sezona|epizoda)\s*\}", re.I)
+
+
+def _je_predloga_predvajalnika(url: str) -> bool:
+    """Predloga z ID-jem je ponudnik predvajanja, ne medijska vsebina."""
+    parsed = urllib.parse.urlsplit(url)
+    return any(domain in parsed.netloc.lower() for domain in _EMBED_DOMAINS) and bool(_PREDLOGA_TOKEN.search(url))
+
+
+def _je_korenski_predvajalni_vir(url: str) -> bool:
+    parsed = urllib.parse.urlsplit(url)
+    return (any(domain in parsed.netloc.lower() for domain in _EMBED_DOMAINS)
+            and (not parsed.path or parsed.path in ("/", "/index.html", "/v2", "/v2/")))
+
+
+def _je_predvajalni_vir(url: str) -> bool:
+    return _je_predloga_predvajalnika(url) or _je_korenski_predvajalni_vir(url)
+
+
+def _izpolni_predlogo(url: str, imdb_id: str, tmdb_id: str,
+                      season: int = 0, episode: int = 0) -> str:
+    vrednosti = {
+        "tmdbid": tmdb_id, "tmdb_id": tmdb_id,
+        "imdbid": imdb_id, "imdb_id": imdb_id,
+        "season": str(season or 1), "sezona": str(season or 1),
+        "episode": str(episode or 1), "epizoda": str(episode or 1),
+    }
+
+    def zamenjaj(match: re.Match) -> str:
+        return vrednosti.get(match.group(1).replace(" ", "").lower(), "")
+
+    return _PREDLOGA_TOKEN.sub(zamenjaj, url)
+
+
+def _katalog_iz_predloge(url: str, source_id: str, source_name: str) -> list[dict]:
+    """Zgradi začetni katalog z resničnimi ID-ji za prepoznano predlogo."""
+    series_template = bool(re.search(r"/(?:tv|series|embed/tv)/", url, re.I))
+    items: list[dict] = []
+    for imdb_id, meta in KNOWN_IMDB.items():
+        if not imdb_id.startswith("tt"):
+            continue
+        tmdb_id = IMDB_TO_TMDB.get(imdb_id, "")
+        if not tmdb_id:
+            continue
+        if series_template and meta.get("kind") != "serija":
+            continue
+        if not series_template and meta.get("kind") != "film":
+            continue
+        episodes = meta.get("episodes", []) if series_template else [(0, 0, "")]
+        for season, episode, episode_name in episodes:
+            play_url = _izpolni_predlogo(url, imdb_id, tmdb_id, season, episode)
+            title = meta.get("title", "Vsebina")
+            if series_template:
+                title += f" S{season:02d}E{episode:02d}"
+                if episode_name:
+                    title += f" - {episode_name}"
+            item = _item(title, play_url, base=play_url, source_id=source_id,
+                         source_name=source_name, kind="serija" if series_template else "film",
+                         year=meta.get("year", 0), image=meta.get("image", ""),
+                         season=season, episode=episode,
+                         description=meta.get("description", ""),
+                         imdb_id=imdb_id, tmdb_id=int(tmdb_id))
+            if item:
+                items.append(item)
+    return items
+
 
 def _resolve_embed_or_direct_source(url: str, source_id: str, source_name: str) -> list[dict]:
     """Prepozna embed ponudnike, specifične epizode/filme ali splošne vdelane toke."""
+    if _je_predloga_predvajalnika(url):
+        return _katalog_iz_predloge(url, source_id, source_name)
     parsed = urllib.parse.urlsplit(url)
     netloc = parsed.netloc.lower()
     path = parsed.path
@@ -1118,6 +1186,8 @@ class MediaCenter:
                 "stevilo": 0,
                 "vnosi": [],
             }
+            if _je_predvajalni_vir(canonical):
+                source["tip"] = "predvajalni_vir"
             data.setdefault("viri", []).append(source)
             self._save(data)
         return self.refresh_source(source["id"])
@@ -1155,10 +1225,19 @@ class MediaCenter:
             if source is None:
                 return {"ok": False, "napaka": "ni_vira"}
         try:
-            payload, content_type, final_url = self._download(source["url"])
-            items = parse_payload(payload, content_type, final_url, source["id"], source["ime"])
-            if not items:
-                items = _resolve_embed_or_direct_source(final_url, source["id"], source["ime"])
+            if source.get("tip") == "predvajalni_vir" or _je_predvajalni_vir(source["url"]):
+                source["tip"] = "predvajalni_vir"
+                if _je_predloga_predvajalnika(source["url"]):
+                    items = _katalog_iz_predloge(source["url"], source["id"], source["ime"])
+                else:
+                    items = _resolve_embed_or_direct_source(source["url"], source["id"], source["ime"])
+                if not items:
+                    raise ValueError("Predloga potrebuje {tmdbId} ali {imdbId} in pot /movie/ ali /tv/.")
+            else:
+                payload, content_type, final_url = self._download(source["url"])
+                items = parse_payload(payload, content_type, final_url, source["id"], source["ime"])
+                if not items:
+                    items = _resolve_embed_or_direct_source(final_url, source["id"], source["ime"])
             source.update({"vnosi": items, "stevilo": len(items), "posodobljeno": int(time.time()), "napaka": ""})
             ok, error = True, ""
         except Exception as exc:

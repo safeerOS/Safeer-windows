@@ -1866,9 +1866,8 @@
     });
     $("mediaPrazno").hidden = !!list.length;
     $("mediaPovzetek").textContent = t("mediaZadetkov", { n: list.length });
-    list.slice(0, 300).forEach(function (x, indeks) {
+    list.slice(0, 300).forEach(function (x) {
       var card = el("button", "media-kartica");
-      if (!iskano && media.filter === "vse" && indeks === 0 && list.length > 3) card.classList.add("izpostavljena");
       card.setAttribute("aria-label", (x.naslov || "Safeer Media") + " — " + mediaOznaka(x.vrsta));
       if (x.slika) {
         var image = document.createElement("img"); image.alt = ""; image.loading = "lazy"; image.src = x.slika;
@@ -1898,7 +1897,9 @@
     media.viri.forEach(function (source) {
       var row = el("div", "media-vir"); row.innerHTML = svg("splet");
       var info = el("div"); info.appendChild(el("b", "", ubezi(source.ime || source.url)));
-      var status = source.napaka ? source.napaka : t("mediaVirElementov", { n: source.stevilo || 0 });
+      var status = source.napaka ? source.napaka : (source.tip === "predvajalni_vir"
+        ? "Predvajalni vir · " + t("mediaVirElementov", { n: source.stevilo || 0 })
+        : t("mediaVirElementov", { n: source.stevilo || 0 }));
       info.appendChild(el("small", source.napaka ? "media-vir-napaka" : "", ubezi(status + " · " + source.url)));
       row.appendChild(info);
       var refresh = el("button", "gumb-ikona", svg("ponovno")); refresh.title = t("mediaOsvezi");
