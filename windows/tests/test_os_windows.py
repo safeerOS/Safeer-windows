@@ -269,6 +269,17 @@ class TestOsWindows(unittest.TestCase):
             self.assertEqual(center.catalog("tt1234567")["skupaj"], 1)
             self.assertEqual(center.catalog("98765")["skupaj"], 1)
 
+    def test_tmdb_katalog_skrije_napovedane_naslove(self):
+        with tempfile.TemporaryDirectory() as td:
+            center = os_media.MediaCenter(td, roots=[])
+            source = {"id": "vidlink", "ime": "VidLink", "url": "https://vidlink.pro"}
+            prihodnji = {"id": 999001, "media_type": "movie", "title": "Napovedan film",
+                         "release_date": "2099-01-01"}
+            izdan = {"id": 999002, "media_type": "movie", "title": "Objavljen film",
+                     "release_date": "2020-01-01"}
+            self.assertIsNone(center._tmdb_vnos(prihodnji, source))
+            self.assertIsNotNone(center._tmdb_vnos(izdan, source))
+
     def test_media_vmesnik_uporablja_vgrajeni_predvajalnik(self):
         koren = Path(__file__).resolve().parents[2]
         html = (koren / "assets" / "os" / "index.html").read_text(encoding="utf-8")
@@ -279,6 +290,13 @@ class TestOsWindows(unittest.TestCase):
         self.assertIn("VlcPlayerWidget", app)
         self.assertIn("set_hwnd", player)
         self.assertIn("SAFEER OS · MEDIA", player)
+
+    def test_media_predvajalnik_ne_caka_neskoncno(self):
+        koren = Path(__file__).resolve().parents[2]
+        javascript = (koren / "assets" / "os" / "os.js").read_text(encoding="utf-8")
+        self.assertIn("media.timer = window.setTimeout", javascript)
+        self.assertIn("}, 20000);", javascript)
+        self.assertIn("iframe.onerror", javascript)
 
     def test_clean_nadgradnja_ohrani_uporabnikove_media_vire(self):
         koren = Path(__file__).resolve().parents[2]

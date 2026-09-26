@@ -1917,6 +1917,8 @@
     var isDirectMedia = /\.(mp4|mkv|webm|avi|mov|m4v|mp3|flac|ogg|opus|m4a|aac|wav|m3u8)($|\?)/i.test(url) || url.startsWith("file:");
     var video = $("mediaVideo"), playerAudio = $("mediaAudio"), iframe = $("mediaIframe");
 
+    if (media.timer) { window.clearTimeout(media.timer); media.timer = 0; }
+
     if (video) { video.pause(); video.removeAttribute("src"); video.hidden = true; video.style.display = "none"; }
     if (playerAudio) { playerAudio.pause(); playerAudio.removeAttribute("src"); playerAudio.hidden = true; playerAudio.style.display = "none"; }
     if (iframe) { iframe.src = "about:blank"; iframe.hidden = true; }
@@ -1940,13 +1942,25 @@
         player.style.display = "block";
         player.src = url;
         player.load();
+        player.onerror = function () { if (media.timer) window.clearTimeout(media.timer); media.timer = 0; $("mediaNapaka").hidden = false; };
         player.play().catch(function () {});
-        player.onerror = function () { $("mediaNapaka").hidden = false; };
+        media.timer = window.setTimeout(function () {
+          media.timer = 0;
+          if (player.readyState < 2) $("mediaNapaka").hidden = false;
+        }, 20000);
       }
     } else {
       if (iframe && /^https?:\/\//i.test(url)) {
         iframe.hidden = false;
+        iframe.onload = function () { if (media.timer) { window.clearTimeout(media.timer); media.timer = 0; } };
+        iframe.onerror = function () { if (media.timer) window.clearTimeout(media.timer); media.timer = 0; $("mediaNapaka").hidden = false; };
         iframe.src = url;
+        // Oddaljeni embed lahko vrne prazno stran brez omrežne napake. Po
+        // 20 sekundah pokažemo napako in pustimo izbiro druge različice.
+        media.timer = window.setTimeout(function () {
+          media.timer = 0;
+          $("mediaNapaka").hidden = false;
+        }, 20000);
       } else $("mediaNapaka").hidden = false;
     }
     var choices = $("mediaRazlicice"); choices.innerHTML = "";
@@ -1964,6 +1978,7 @@
     }, function () { obvesti(t("mediaVirNapaka")); });
   }
   function zapriMediaHtml() {
+    if (media.timer) { window.clearTimeout(media.timer); media.timer = 0; }
     [$("mediaVideo"), $("mediaAudio")].forEach(function (player) {
       if (player) { player.pause(); player.removeAttribute("src"); player.load(); player.hidden = true; player.style.display = "none"; }
     });
