@@ -322,10 +322,13 @@
 
     <!-- Samo Safeer Control: mape na tem racunalniku, ki jih sme videti televizor (Safeer OS). -->
     <div class="panel" id="panelMape" data-razdelek="mape" hidden>
-      <h2 data-t="mapeNaslov">Datoteke za televizor</h2>
+      <h2 data-t="mapeNaslov">Dostop do tega računalnika</h2>
       <p class="pojasnilo" data-t="mapeOpis">
-        Izbrane mape vidi Safeer OS na televizorju — filmi, glasba in slike se predvajajo naravnost s tega računalnika, samo v domačem omrežju.
+        Za vsako povezano napravo izberi, koliko tega računalnika sme uporabljati. Dovoljenje lahko kadarkoli spremeniš.
       </p>
+      <div class="dovoljenja-naprav" id="dovoljenjaNaprav"></div>
+      <p class="opomba dovoljenja-opomba" id="opombaDovoljenja" data-t="dovoljenjaPrazno">Poveži drugo napravo, nato ji tukaj določi pravice.</p>
+      <h3 class="dovoljenja-mape-naslov" data-t="izbraneMapeNaslov">Mape za omejeni dostop</h3>
       <ul class="seznam" id="seznamMape"></ul>
       <p class="opomba" id="opombaMape" data-t="mapePrazno">Ni izbrane nobene mape. Televizor ne vidi nič.</p>
       <button class="drugotni" id="gumbDodajMapo" data-t="mapeDodaj">Dodaj mapo</button>

@@ -103,7 +103,7 @@ git branch  # mora biti: resava-poenotenje-wip
 # 2. Zaženi celotno zbirko testov
 PYTHONPATH=windows pytest windows/tests/
 
-# Pričakovani rezultat: Vseh 97 testov mora biti zelenih (97 passed)
+# Pričakovani rezultat: Vseh 107 testov mora biti zelenih (107 passed)
 ```
 
 Preveri tudi skladnost PowerShell skript (če je na voljo `pwsh`):
@@ -164,3 +164,14 @@ git commit --no-gpg-sign -m "opis tvojega popravka ali izboljsave"
 ```
 
 Nikoli ne uporabljaj `git push origin main` ali `git checkout main`.
+
+---
+
+## 6. Trenutno stanje Windows integracije (1.0.4-test2)
+
+- Safeer Control se odpre kot vgrajen `QWidget` v istem `QStackedWidget` kot domači zaslon, Safeer Media in Safeer Browser.
+- Povezave iz Safeer Controla mora odpirati `SafeerOsWindow._odpri_notranji_splet()`; uporaba `webbrowser.open()` ni dovoljena.
+- Most v `control_window.py` oglašuje samo funkcije, ki imajo dejansko Python izvedbo. Dostop do celotnega računalnika se nastavlja na posamezno napravo s profili `polno`, `izbrano` in `zaslon`; nikoli ga ne vklopi globalno ali brez uporabnikove izbire.
+- Deljenje zaslona uporablja `_WindowsDeljenjeZaslona` in slike iz `NavidezniZaslon`, zato oddaljena naprava ne prevzame fizične miške, tipkovnice ali namizja uporabnika.
+- Safeer Media združuje rezultate po IMDb/TMDb identiteti in normaliziranih metapodatkih; viri se dodajajo izključno v nastavitvah.
+- Namestitev na testnem Windows računalniku: razširi celoten distribucijski ZIP, dvoklikni `install.bat`, nato po želji zaženi `PREIZKUSI-SAFEER.ps1 -Launch`.

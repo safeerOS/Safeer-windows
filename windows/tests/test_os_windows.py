@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest import mock
 
 from safeer_windows import control_backend, os_backend_win, policy
-from core import link_hub, os_media, os_scit
+from core import link_datoteke, link_hub, os_media, os_scit
 
 
 class TestOsWindows(unittest.TestCase):
@@ -983,6 +983,133 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
             cb.nastavitve["brez_povezave"] = True
             cb.povezi_naprave()
             self.assertFalse(cb.nastavitve["brez_povezave"])
+
+    def test_control_bridge_ne_izpostavlja_nedelujocih_gumbov(self):
+        koren = Path(__file__).resolve().parent.parent.parent
+        okno = (koren / "windows" / "safeer_windows" / "control_window.py").read_text(encoding="utf-8")
+        # Vsaka oglaševana funkcija deljenja ima dejansko Python obravnavo.
+        for metoda in ("poslji", "posljiBesedilo", "izberiDatoteko", "zacniDeljenjeZaslona",
+                       "koncajDeljenjeZaslona", "deliStandardneMape", "shraniVzdevek"):
+            self.assertIn(f'elif metoda == "{metoda}"', okno)
+        # Nedokončani lokalni Hub in deljenje celega diska se ne smeta prikazati kot delujoča.
+        self.assertNotIn("hubStanje: function", okno)
+        self.assertNotIn("nastaviVesDisk: function", okno)
+        self.assertIn("nastaviDovoljenje: function", okno)
+        self.assertIn('elif metoda == "nastaviDovoljenje"', okno)
+        self.assertNotIn("webbrowser.open", okno)
+        self.assertIn("self.na_odpiranje(url)", okno)
+
+    def test_control_poslje_url_po_enotnem_protokolu(self):
+        with tempfile.TemporaryDirectory() as td:
+            cb = control_backend.SafeerControlBackend(config_pot=os.path.join(td, "control.json"))
+            povezava = mock.Mock()
+            povezava.tece = True
+            povezava.poslji_url.return_value = True
+            cb.povezava = povezava
+            self.assertTrue(cb.poslji_url("tv-1", "https://safeer.si/video", "Safeer"))
+            povezava.poslji_url.assert_called_once_with("tv-1", "https://safeer.si/video", "Safeer")
+            self.assertFalse(cb.poslji_url("tv-1", "file:///C:/skrivnost.txt", "Datoteka"))
+
+    def test_control_standardne_mape_in_vzdevki_so_brez_dvojnikov(self):
+        with tempfile.TemporaryDirectory() as td:
+            prva = os.path.join(td, "Dokumenti")
+            druga = os.path.join(td, "Glasba")
+            os.makedirs(prva)
+            os.makedirs(druga)
+            cb = control_backend.SafeerControlBackend(config_pot=os.path.join(td, "control.json"))
+            mape = [{"pot": prva}, {"pot": prva}, {"pot": druga}]
+            with mock.patch.object(os_backend_win, "uporabniske_mape", return_value=mape):
+                self.assertEqual(cb.deli_standardne_mape(), 2)
+                self.assertEqual(cb.deli_standardne_mape(), 0)
+            self.assertEqual(len(cb.deljene_mape()), 2)
+            self.assertTrue(cb.shrani_vzdevek("tv-1", "Dnevna soba"))
+            self.assertEqual(cb.nastavitve["link_vzdevki"]["tv-1"], "Dnevna soba")
+            self.assertTrue(cb.shrani_vzdevek("tv-1", ""))
+            self.assertNotIn("tv-1", cb.nastavitve["link_vzdevki"])
+
+    def test_windows_deljenje_uporabi_izolirani_safeer_zaslon(self):
+        jpeg = b"\xff\xd8safeer-frame\xff\xd9"
+        navidezni = mock.Mock()
+        navidezni.zajemi_posnetek.return_value = {
+            "image": "data:image/jpeg;base64," + base64.b64encode(jpeg).decode("ascii")
+        }
+        deljenje = control_backend._WindowsDeljenjeZaslona(
+            "wss://127.0.0.1:8990/cast/ws", "token", "fp", "pc", "tv", "Televizor",
+            navidezni_zaslon=navidezni,
+        )
+        self.assertEqual(deljenje._okvir(), jpeg)
+        navidezni.zajemi_posnetek.assert_called_once_with()
+
+    def test_nova_naprava_mora_dobiti_izrecno_izbrane_pravice(self):
+        with tempfile.TemporaryDirectory() as td:
+            cb = control_backend.SafeerControlBackend(config_pot=os.path.join(td, "control.json"))
+            dogodki = []
+            cb.dodaj_poslusalca(lambda vrsta, podatki: dogodki.append((vrsta, podatki)))
+            cb._na_sporocilo({"type": "cast.devices", "devices": [
+                {"id": cb.device_id, "name": "Ta računalnik"},
+                {"id": "pc-2", "name": "Drugi računalnik", "capabilities": ["files", "apps", "screen"]},
+            ]})
+            self.assertEqual(cb.dovoljenje_za("pc-2"), "vprasaj")
+            self.assertTrue(any(v == "dovoljenjeZahtevano" and p["id"] == "pc-2" for v, p in dogodki))
+            self.assertFalse(cb._dejanje_dovoljeno("pc-2", "files.list"))
+            self.assertFalse(cb._dejanje_dovoljeno("pc-2", "apps.list"))
+
+            self.assertTrue(cb.nastavi_dovoljenje("pc-2", "polno"))
+            self.assertTrue(cb._dejanje_dovoljeno("pc-2", "files.list"))
+            self.assertTrue(cb._dejanje_dovoljeno("pc-2", "apps.list"))
+            self.assertTrue(cb._dejanje_dovoljeno("pc-2", "key"))
+
+    def test_profili_pravic_locijo_datoteke_programe_in_zaslon(self):
+        with tempfile.TemporaryDirectory() as td:
+            cb = control_backend.SafeerControlBackend(config_pot=os.path.join(td, "control.json"))
+            cb.nastavi_dovoljenje("omejen", "izbrano")
+            self.assertTrue(cb._dejanje_dovoljeno("omejen", "files.list"))
+            self.assertFalse(cb._dejanje_dovoljeno("omejen", "apps.list"))
+            self.assertFalse(cb._dejanje_dovoljeno("omejen", "screen.start"))
+            cb.nastavi_dovoljenje("zaslon", "zaslon")
+            self.assertTrue(cb._dejanje_dovoljeno("zaslon", "screen.start"))
+            self.assertTrue(cb._dejanje_dovoljeno("zaslon", "screenshot"))
+            self.assertFalse(cb._dejanje_dovoljeno("zaslon", "files.list"))
+            self.assertFalse(cb._dejanje_dovoljeno("zaslon", "apps.list"))
+
+    def test_poln_dostop_na_windows_prikaze_vse_priklopljene_diske(self):
+        mape = link_datoteke.DeljeneMape([], ves_disk=True)
+        pravi_exists = link_datoteke.os.path.exists
+
+        def obstaja(pot):
+            if pot in ("C:\\", "D:\\"):
+                return True
+            if len(str(pot)) == 3 and str(pot)[1:] == ":\\":
+                return False
+            return pravi_exists(pot)
+
+        with mock.patch.object(link_datoteke.os, "name", "nt"), \
+             mock.patch.object(link_datoteke.os.path, "exists", side_effect=obstaja):
+            koren = mape.koren()
+        ids = [v["id"] for v in koren]
+        self.assertIn("disk:C:\\", ids)
+        self.assertIn("disk:D:\\", ids)
+
+    def test_vmesnik_ponudi_poln_izbran_ali_samo_zaslonski_dostop(self):
+        koren = Path(__file__).resolve().parent.parent.parent
+        html = (koren / "assets" / "link" / "index.html").read_text(encoding="utf-8")
+        js = (koren / "assets" / "link" / "link.js").read_text(encoding="utf-8")
+        self.assertIn('id="dovoljenjaNaprav"', html)
+        self.assertIn('pravicaPolno: "Poln dostop"', js)
+        self.assertIn("Vsi diski, datoteke, aplikacije in upravljanje zaslona", js)
+        self.assertIn('pravicaIzbrano: "Izbrane datoteke"', js)
+        self.assertIn('pravicaZaslon: "Samo zaslon"', js)
+
+    def test_domaci_in_media_vmesnik_izrazata_vizijo_safeer_os(self):
+        koren = Path(__file__).resolve().parent.parent.parent
+        html = (koren / "assets" / "os" / "index.html").read_text(encoding="utf-8")
+        css = (koren / "assets" / "os" / "os.css").read_text(encoding="utf-8")
+        self.assertIn("Splet, aplikacije, datoteke in računalniki", html)
+        self.assertIn("Brez oblaka, računa in naročnine", html)
+        self.assertIn("Brez dvojnikov", html)
+        self.assertIn("Predvajanje v Safeer OS", html)
+        self.assertIn(".domov-hero", css)
+        self.assertIn(".media-kartica.izpostavljena", css)
 
     def test_media_embed_vir_vidsrc_in_iframe_podpora(self):
         # 1. HTML z vdelanim iframe in povezavami

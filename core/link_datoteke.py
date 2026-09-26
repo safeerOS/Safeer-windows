@@ -120,7 +120,14 @@ class DeljeneMape:
         if self.ves_disk:
             dom = os.path.realpath(os.path.expanduser("~"))
             vnosi.append({"id": "disk:" + dom, "name": os.path.basename(dom) or dom, "type": "folder"})
-            vnosi.append({"id": "disk:/", "name": "/", "type": "folder"})
+            if os.name == "nt":
+                # Windows nima enega korena: pokažemo vse dejansko priklopljene črke diskov.
+                for crka in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+                    disk = crka + ":\\"
+                    if os.path.exists(disk) and os.path.realpath(disk) != dom:
+                        vnosi.append({"id": "disk:" + disk, "name": disk, "type": "folder"})
+            else:
+                vnosi.append({"id": "disk:/", "name": "/", "type": "folder"})
         return vnosi
 
     def razresi(self, oznaka: str) -> Optional[Tuple[int, str]]:

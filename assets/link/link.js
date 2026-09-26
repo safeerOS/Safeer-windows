@@ -1480,6 +1480,41 @@
     for (var _kljuc in BESEDILA_HUB[_jezik]) BESEDILA[_jezik][_kljuc] = BESEDILA_HUB[_jezik][_kljuc];
   }
 
+  var BESEDILA_DOVOLJENJA = {
+    sl: {
+      mapeNaslov: "Dostop do tega računalnika",
+      mapeOpis: "Za vsako povezano napravo izberi, koliko tega računalnika sme uporabljati. Dovoljenje lahko kadarkoli spremeniš.",
+      dovoljenjaPrazno: "Poveži drugo napravo, nato ji tukaj določi pravice.",
+      dovoljenjaIzberi: "Izberi pravice za novo napravo {ime}",
+      izbraneMapeNaslov: "Mape za omejeni dostop",
+      pravicaPolno: "Poln dostop",
+      pravicaPolnoOpis: "Vsi diski, datoteke, aplikacije in upravljanje zaslona",
+      pravicaIzbrano: "Izbrane datoteke",
+      pravicaIzbranoOpis: "Samo spodaj izbrane mape; brez programov in upravljanja",
+      pravicaZaslon: "Samo zaslon",
+      pravicaZaslonOpis: "Naprava sme videti deljeni zaslon, ne pa datotek ali programov",
+      pravicaVprasaj: "Pravice še niso izbrane"
+    },
+    en: {
+      mapeNaslov: "Access to this computer",
+      mapeOpis: "Choose how much of this computer each connected device may use. You can change it at any time.",
+      dovoljenjaPrazno: "Connect another device, then choose its permissions here.",
+      dovoljenjaIzberi: "Choose permissions for the new device {ime}",
+      izbraneMapeNaslov: "Folders for limited access",
+      pravicaPolno: "Full access",
+      pravicaPolnoOpis: "All drives, files, applications and screen control",
+      pravicaIzbrano: "Selected files",
+      pravicaIzbranoOpis: "Only the folders selected below; no apps or remote control",
+      pravicaZaslon: "Screen only",
+      pravicaZaslonOpis: "May view the shared screen, but not files or applications",
+      pravicaVprasaj: "Permissions have not been chosen"
+    }
+  };
+  for (var _jd in BESEDILA_DOVOLJENJA) {
+    if (!BESEDILA[_jd]) BESEDILA[_jd] = {};
+    for (var _kd in BESEDILA_DOVOLJENJA[_jd]) BESEDILA[_jd][_kd] = BESEDILA_DOVOLJENJA[_jd][_kd];
+  }
+
   // ----------------------------------------------------------------
   // Stanje
   // ----------------------------------------------------------------
@@ -1502,7 +1537,8 @@
     hubPovezanih: 0,
     prijave: [],
     hubNaprave: [],
-    lokalnaKoda: ""
+    lokalnaKoda: "",
+    dovoljenja: {}
   };
 
   function besedilo(id, vsebina) {
@@ -2013,6 +2049,7 @@
     if (!seznam) return;
     seznam.innerHTML = "";
     var mape = stanje.deljeneMape || [];
+    narisiDovoljenja();
     pokazi("opombaMape", mape.length === 0);
     pokazi("gumbStandardneMape", !(stanje.standardneDeljene));
     mape.forEach(function (m, i) {
@@ -2022,6 +2059,41 @@
       var pod = li.querySelector(".pod");
       if (pod) pod.style.wordBreak = "break-all";  // dolga pot brez presledkov ne sme prekriti znacke
       seznam.appendChild(li);
+    });
+  }
+
+  /** Nova naprava ne dobi tihega dostopa: uporabnik izbere enega od treh razumljivih profilov. */
+  function narisiDovoljenja() {
+    var cilj = el("dovoljenjaNaprav");
+    if (!cilj) return;
+    cilj.innerHTML = "";
+    var naprave = (stanje.naprave || []).filter(function (n) { return n.id && n.id !== stanje.idNaprave; });
+    pokazi("opombaDovoljenja", naprave.length === 0);
+    naprave.forEach(function (n) {
+      var profil = (stanje.dovoljenja || {})[n.id] || "vprasaj";
+      var kartica = document.createElement("article");
+      kartica.className = "dovoljenje-kartica" + (profil === "vprasaj" ? " zahteva-izbiro" : "");
+      var glava = document.createElement("div");
+      glava.className = "dovoljenje-glava";
+      glava.innerHTML = "<b>" + ubezi(prijaznoIme(n)) + "</b><span>" +
+        ubezi(profil === "vprasaj" ? t("pravicaVprasaj") : "✓") + "</span>";
+      kartica.appendChild(glava);
+      var izbire = document.createElement("div");
+      izbire.className = "dovoljenje-izbire";
+      [["polno", "pravicaPolno", "pravicaPolnoOpis"], ["izbrano", "pravicaIzbrano", "pravicaIzbranoOpis"], ["zaslon", "pravicaZaslon", "pravicaZaslonOpis"]].forEach(function (p) {
+        var gumb = document.createElement("button");
+        gumb.className = profil === p[0] ? "izbran" : "";
+        gumb.innerHTML = "<b>" + ubezi(t(p[1])) + "</b><small>" + ubezi(t(p[2])) + "</small>";
+        gumb.addEventListener("click", function () {
+          if (!most || !most.nastaviDovoljenje) return;
+          most.nastaviDovoljenje(n.id, p[0]);
+          stanje.dovoljenja[n.id] = p[0];
+          narisiDovoljenja();
+        });
+        izbire.appendChild(gumb);
+      });
+      kartica.appendChild(izbire);
+      cilj.appendChild(kartica);
     });
   }
 
@@ -2499,6 +2571,7 @@
         narisiNaprave();
         narisiPrejemnike();
         narisiMeni();
+        narisiMape();
       } else if (vrsta === "predvajanje") {
         stanje.predvajanje = podatki;
         narisiPredvajanje();
@@ -2525,6 +2598,15 @@
         stanje.deljeneMape = (podatki && podatki.mape) || [];
         stanje.standardneDeljene = !!(podatki && podatki.standardne);
         narisiMape();
+      } else if (vrsta === "dovoljenja") {
+        stanje.dovoljenja = podatki || {};
+        narisiMape();
+      } else if (vrsta === "dovoljenjeZahtevano") {
+        oznaciRazdelek("mape");
+        var imeD = (podatki && (podatki.ime || podatki.id)) || t("naprava");
+        narisiMape();
+        besedilo("opombaDovoljenja", t("dovoljenjaIzberi", { ime: imeD }));
+        pokazi("opombaDovoljenja", true);
       } else if (vrsta === "stanje") {
         // Most je zamenjal Hub (npr. vklop/izklop sredisca tu): znova preberemo stanje.
         stanje.naprave = [];
@@ -2908,6 +2990,7 @@
     stanje.zaupajOkno = !!s.zaupajOkno;
     stanje.brezPovezave = !!s.brezPovezave;
     stanje.deljeneMape = s.deljeneMape || [];
+    stanje.dovoljenja = s.dovoljenja || {};
     stanje.standardneDeljene = !!s.standardneDeljene;
     stanje.lokalnaKoda = s.lokalnaKoda || "";
     narisiLokalnoKodo();
