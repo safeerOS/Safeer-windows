@@ -69,14 +69,23 @@ if ($LASTEXITCODE -ne 0 -or $result -notmatch "SAFEER_SMOKE_OK") {
 }
 Write-Host "[OK] Safeer OS, Safeer Control, navidezni zaslon in Safeer Media so pripravljeni." -ForegroundColor Green
 
-$vlc = @(
+$vlcCandidates = @(
     "$env:ProgramFiles\VideoLAN\VLC\libvlc.dll",
     "${env:ProgramFiles(x86)}\VideoLAN\VLC\libvlc.dll"
-) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+) | Where-Object { $_ -and (Test-Path $_) }
+$vlc = $null
+foreach ($candidate in $vlcCandidates) {
+    $candidateEscaped = $candidate.Replace("'", "''")
+    $load = & $exe @prefix -c "import ctypes; ctypes.CDLL(r'$candidateEscaped'); print('LIBVLC_OK')" 2>$null
+    if ($LASTEXITCODE -eq 0 -and $load -match "LIBVLC_OK") {
+        $vlc = $candidate
+        break
+    }
+}
 if ($vlc) {
-    Write-Host "[OK] LibVLC je nameščen: $vlc" -ForegroundColor Green
+    Write-Host "[OK] LibVLC je združljiv s Pythonom: $vlc" -ForegroundColor Green
 } else {
-    Write-Host "[OPOZORILO] LibVLC ni najden; neposredni video tokovi bodo uporabili rezervni predvajalnik." -ForegroundColor Yellow
+    Write-Host "[OPOZORILO] Združljiv LibVLC ni najden; neposredni video tokovi bodo uporabili rezervni predvajalnik." -ForegroundColor Yellow
 }
 
 if ($Launch) {

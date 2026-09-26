@@ -289,6 +289,18 @@ class TestOsWindows(unittest.TestCase):
             self.assertIn('Copy-Item -Path $configBackup -Destination (Join-Path $InstallDir "config")', script)
             self.assertIn("importlib.util.find_spec('vlc')", script)
             self.assertNotIn("cryptography, qrcode, vlc; print('MODULI_OK')", script)
+            self.assertIn('(Test-Path $_) -and (Split-Path $_ -Leaf)', script)
+            self.assertNotIn('{ Test-Path $_ -and', script)
+
+    def test_installer_preveri_dejansko_zdruzljivost_libvlc_in_enotno_namizje(self):
+        koren = Path(__file__).resolve().parents[2]
+        for relative in ("install.ps1", "windows/install.ps1"):
+            script = (koren / relative).read_text(encoding="utf-8")
+            self.assertIn("ctypes.CDLL", script)
+            self.assertIn("--architecture x64 --force", script)
+            self.assertIn('Remove-Item (Join-Path $DesktopPath $_)', script)
+            self.assertNotIn('Join-Path $DesktopPath "Safeer Control.lnk"', script)
+            self.assertNotIn('Join-Path $DesktopPath "Safeer Browser.lnk"', script)
 
     def test_media_viri_so_samo_v_nastavitvah_in_z_vgrajenim_predvajalnikom(self):
         koren = Path(__file__).resolve().parents[2]
