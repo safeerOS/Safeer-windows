@@ -488,9 +488,51 @@ def napajanje(dejanje: str) -> bool:
         return False
 
 
-# ---------------------------------------------------------------------------
-# Sistemski viri
-# ---------------------------------------------------------------------------
+def pridobi_stanje_omrezja() -> dict:
+    povezan = False
+    ime_omrezja = "Žična povezava (LAN)"
+    vrsta = "ethernet"
+    try:
+        import socket
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(0.8)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        if ip and not ip.startswith("127."):
+            povezan = True
+    except Exception:
+        try:
+            import socket
+            hostname = socket.gethostname()
+            ip = socket.gethostbyname(hostname)
+            if ip and not ip.startswith("127."):
+                povezan = True
+        except Exception:
+            pass
+
+    if povezan:
+        return {
+            "povezan": True,
+            "vrsta": vrsta,
+            "ime": ime_omrezja,
+            "omrezja": [{"ssid": ime_omrezja, "povezan": True, "moc": 100}],
+            "naprave": [{"ime": ime_omrezja, "vrsta": vrsta, "povezan": True}],
+            "shranjene": [],
+            "wifi_vklopljen": True,
+            "napredno": True
+        }
+    return {
+        "povezan": False,
+        "vrsta": "brez",
+        "ime": "Brez omrežja",
+        "omrezja": [],
+        "naprave": [],
+        "shranjene": [],
+        "wifi_vklopljen": False,
+        "napredno": True
+    }
+
 
 def stanje_sistema() -> dict:
     ram_odstotek = 50
