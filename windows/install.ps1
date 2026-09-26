@@ -321,7 +321,14 @@ if (-not $vlcDll) {
 # -----------------------------------------------------------------------------
 Write-Step 4 6 "Namestitev datotek Safeer OS & Control"
 
+$configBackup = $null
 if ($Clean -and (Test-Path $InstallDir)) {
+    $existingConfig = Join-Path $InstallDir "config"
+    if (Test-Path $existingConfig) {
+        $configBackup = Join-Path $env:TEMP ("SafeerOS-config-" + [guid]::NewGuid().ToString("N"))
+        Copy-Item -Path $existingConfig -Destination $configBackup -Recurse -Force
+        Write-Info "Ohranjam uporabniške nastavitve in vire Safeer Media."
+    }
     Write-Info "Čistim prejšnjo namestitev v $InstallDir..."
     Remove-Item $InstallDir -Recurse -Force -ErrorAction SilentlyContinue
 }
@@ -329,6 +336,11 @@ if ($Clean -and (Test-Path $InstallDir)) {
 $AppDir = Join-Path $InstallDir "app"
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 New-Item -ItemType Directory -Force -Path $AppDir | Out-Null
+if ($configBackup -and (Test-Path $configBackup)) {
+    Copy-Item -Path $configBackup -Destination (Join-Path $InstallDir "config") -Recurse -Force
+    Remove-Item $configBackup -Recurse -Force -ErrorAction SilentlyContinue
+    Write-Success "Uporabniške nastavitve in viri Safeer Media so ohranjeni."
+}
 
 # Kopiraj binarne datoteke (SafeerOS.exe, SafeerControl.exe)
 $exeSources = @(
