@@ -14,6 +14,7 @@ import json
 import mimetypes
 import os
 import re
+import socket
 import subprocess
 import threading
 import time
@@ -1177,6 +1178,8 @@ class MediaCenter:
         self._lock = threading.RLock()
         self._tmdb_cache: dict[str, tuple[float, dict]] = {}
         self._dynamic_items: dict[str, dict] = {}
+        self._ping_cache: dict[str, tuple[float, float]] = {}
+        self._ping_lock = threading.Lock()
 
     @staticmethod
     def _default_roots() -> list[Path]:
@@ -1596,7 +1599,55 @@ class MediaCenter:
             return {"ok": True, "st_vnosov": len(items), "vir": custom_name, "vrsta": "katalog"}
 
     def resolve(self, item_id: str) -> Optional[dict]:
-        return self._dynamic_items.get(item_id) or next((item for item in self.catalog()["vnosi"] if item.get("id") == item_id), None)
+        item = self._dynamic_items.get(item_id) or next((item for item in self.catalog()["vnosi"] if item.get("id") == item_id), None)
+        if not item:
+            return None
+        return self._izberi_najhitrejsi(item)
+
+    def _izmeri_ping(self, url: str) -> None:
+        """V ozadju izmeri TCP odziv gostitelja; predvajanje na to ne čaka."""
+        try:
+            parsed = urllib.parse.urlsplit(str(url))
+            host = parsed.hostname
+            if not host or parsed.scheme not in ("http", "https"):
+                return
+            port = parsed.port or (443 if parsed.scheme == "https" else 80)
+            zacetek = time.perf_counter()
+            with socket.create_connection((host, port), timeout=0.8):
+                pass
+            meritev = round((time.perf_counter() - zacetek) * 1000, 1)
+            with self._ping_lock:
+                self._ping_cache[f"{host}:{port}"] = (time.time(), meritev)
+        except (OSError, ValueError):
+            return
+
+    def _izberi_najhitrejsi(self, item: dict) -> dict:
+        variants = item.get("razlicice") or []
+        if len(variants) < 2:
+            return item
+        zdaj = time.time()
+        scored = []
+        for variant in variants:
+            url = str(variant.get("url") or "")
+            parsed = urllib.parse.urlsplit(url)
+            key = f"{parsed.hostname}:{parsed.port or (443 if parsed.scheme == 'https' else 80)}" if parsed.hostname else ""
+            with self._ping_lock:
+                cached = self._ping_cache.get(key)
+            ping = cached[1] if cached and zdaj - cached[0] < 300 else 9999.0
+            quality = int(variant.get("locljivost") or 0)
+            # Ne čakamo na meritve: kakovost je začetni kriterij, svež ping pa
+            # ima prednost, ko je že na voljo.
+            scored.append((0 if ping < 9999 else 1, ping, -quality, variant))
+            if ping >= 9999 and url:
+                threading.Thread(target=self._izmeri_ping, args=(url,), daemon=True).start()
+        scored.sort(key=lambda row: row[:3])
+        best = scored[0][3]
+        out = dict(item)
+        out["razlicice"] = [row[3] for row in scored]
+        out["url"] = best.get("url", out.get("url"))
+        out["izbran_ping_ms"] = None if scored[0][1] >= 9999 else scored[0][1]
+        out["izbran_vir"] = best.get("vir", out.get("vir", ""))
+        return out
 
 
 _default_center: Optional[MediaCenter] = None
