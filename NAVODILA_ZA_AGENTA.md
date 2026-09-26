@@ -69,7 +69,9 @@ Safeer OS in Safeer Control **nista dva ločena programa**, temveč enotna aplik
 - Vsebina iz vseh virov se normalizira v filme, serije in glasbo. Podvojeni naslovi se združijo, različice pa razvrstijo po kakovosti; uporabniku se privzeto ponudi najboljša.
 - Identiteta vsebine uporablja ločena `imdb_id` in `tmdb_id` polja. Parser podpira pogoste oblike (`imdb_id`, `imdbId`, `imdbID`, `tmdb_id`, `tmdbId`, `external_ids`, `ids`) in ID iz dokumentiranih `/api/streams/.../:tmdbId` naslovov. Združevanje najprej uporabi zunanji ID, nato naslov + letnico + sezono/epizodo; različnih znanih ID-jev ne sme združiti.
 - **[`windows/safeer_windows/vlc_player.py`](windows/safeer_windows/vlc_player.py)** vgradi LibVLC neposredno v glavno Qt okno Safeer OS. Neposredni tokovi lahko iz uporabnikovega API-ja podedujejo `Referer` in `User-Agent`; zunanji VLC se ne odpre.
-- Spletne aplikacije in embed strani se ne nalagajo v `iframe`, ker jih `X-Frame-Options`/CSP pogosto zavrne in prikaže siv zaslon. Naložijo se kot vrhnja stran v **vgrajenem zaščitenem Safeer Browserju**, še vedno v istem oknu in procesu Safeer OS. Ne vračaj zastavic `--disable-web-security` ali `--no-sandbox`.
+- Korenski naslov `https://vidlink.pro` je uporabniško dodan predvajalni vir, ne katalog. Šele ko ga uporabnik enkrat doda v Nastavitvah, Safeer Media pridobi katalog in metapodatke iz TMDb, filme pa sestavi kot `/movie/{tmdbId}`, serije kot `/tv/{tmdbId}/{season}/{episode}`. V kodi ne dodajaj privzetega uporabniškega vira.
+- Safeer Media ima lasten celozaslonski spletni predvajalni sloj (`mediaIframe`) brez brskalniške naslovne vrstice. Dokumentirani embed naslov ostane znotraj razdelka Media; neposredne datoteke/HLS pa uporablja vgrajeni LibVLC. Ne vračaj zastavic `--disable-web-security` ali `--no-sandbox` in ne uporabljaj neuradnih notranjih `/api/b/...` endpointov.
+- Katalog vključuje posterje, ocene, iskanje in žanre. Serija vedno najprej odpre lasten pogled sezon/epizod; šele izbrana epizoda se pošlje predvajalniku.
 - Dodajanje, odstranjevanje, uvoz in izvoz virov je izključno v skupnem razdelku **Nastavitve**. Safeer Media prikazuje katalog in iskanje, ne konfiguracije ponudnikov. V kodi ni privzeto aktivnega ponudnika; vir vnese uporabnik.
 - Namestitveni program namesti Python vezavo `python-vlc` in, kadar je mogoče, uradni VLC prek `winget`. Zasebni API ključi se ne shranjujejo; uporabniški viri so lokalno v `media.json`.
 
@@ -103,7 +105,7 @@ git branch  # mora biti: resava-poenotenje-wip
 # 2. Zaženi celotno zbirko testov
 PYTHONPATH=windows pytest windows/tests/
 
-# Pričakovani rezultat: Vseh 107 testov mora biti zelenih (107 passed)
+# Pričakovani rezultat: najmanj 112 testov in 10 podtestov mora biti zelenih.
 ```
 
 Preveri tudi skladnost PowerShell skript (če je na voljo `pwsh`):
@@ -178,7 +180,7 @@ Nikoli ne uporabljaj `git push origin main` ali `git checkout main`.
 
 ---
 
-## 6. Trenutno stanje Windows integracije (1.0.4-test2)
+## 6. Trenutno stanje Windows integracije (1.0.4-test4)
 
 - Safeer Control se odpre kot vgrajen `QWidget` v istem `QStackedWidget` kot domači zaslon, Safeer Media in Safeer Browser.
 - Povezave iz Safeer Controla mora odpirati `SafeerOsWindow._odpri_notranji_splet()`; uporaba `webbrowser.open()` ni dovoljena.
