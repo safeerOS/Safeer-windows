@@ -3068,6 +3068,37 @@
       if (most && most.nadaljujBrezPovezave) most.nadaljujBrezPovezave();
     });
     naKlik("gumbVabilo", function () { preklopiVabilo(); });
+    // Gostitelj lahko kodo tudi vnese: oba računalnika imata enak, simetričen tok
+    // (prikaži svojo kodo ali vnesi kodo druge naprave).
+    naKlik("gumbVabiloVnosKode", function () {
+      var vnos = el("vabiloVnosKode");
+      var koda = vnos ? String(vnos.value || "").replace(/\D/g, "").slice(0, 6) : "";
+      if (vnos) vnos.value = koda;
+      if (koda.length !== 6) {
+        besedilo("opombaVabiloVnosKode", "Vnesi vseh 6 številk.");
+        if (vnos) try { vnos.focus(); } catch (e) {}
+        return;
+      }
+      besedilo("opombaVabiloVnosKode", "Preverjam kodo …");
+      if (most && most.potrdiKodo) most.potrdiKodo(koda);
+    });
+    var vabiloVnosKode = el("vabiloVnosKode");
+    if (vabiloVnosKode) {
+      vabiloVnosKode.addEventListener("input", function () {
+        vabiloVnosKode.value = String(vabiloVnosKode.value || "").replace(/\D/g, "").slice(0, 6);
+        if (vabiloVnosKode.value.length === 6) {
+          var g = el("gumbVabiloVnosKode");
+          if (g) g.focus();
+        }
+      });
+      vabiloVnosKode.addEventListener("keydown", function (e) {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          var g = el("gumbVabiloVnosKode");
+          if (g) g.click();
+        }
+      });
+    }
     naKlik("gumbNovaKodaVabilo", function () {
       if (most && most.novaLokalnaKoda) most.novaLokalnaKoda();
     });

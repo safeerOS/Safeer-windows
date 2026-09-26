@@ -13,6 +13,18 @@ from core import link_datoteke, link_hub, os_media, os_scit
 
 
 class TestOsWindows(unittest.TestCase):
+    def test_safeer_control_pairing_has_qr_display_and_symmetric_code_input(self):
+        """Obe Windows napravi lahko kodo pokažeta ali vneseta, kot na Androidu."""
+        root = Path(__file__).resolve().parents[2]
+        html = (root / "assets" / "link" / "index.html").read_text(encoding="utf-8")
+        js = (root / "assets" / "link" / "link.js").read_text(encoding="utf-8")
+        self.assertIn('id="vabiloQr"', html)
+        self.assertIn('id="vabiloLokalnaKoda"', html)
+        self.assertIn('id="vabiloVnosKode"', html)
+        self.assertIn('id="gumbVabiloVnosKode"', html)
+        self.assertIn('most.potrdiKodo(koda)', js)
+        self.assertIn('id="prijavaVnosKode"', html)
+
     def test_google_auth_urls_detected(self):
         auth_urls = [
             "https://accounts.google.com/signin/v2/identifier",

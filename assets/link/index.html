@@ -311,9 +311,17 @@
         <div class="qrOkvir" id="vabiloQr" hidden></div>
         <button class="glavni" id="gumbVabilo" data-t="vabiloGumb">Pokaži QR kodo za novo napravo</button>
         <div class="vabiloStevilcnaKoda">
-          <p class="pojasnilo drobno">Ali na drugi napravi v Safeer Link vpiši to 6-mestno kodo:</p>
+          <p class="pojasnilo drobno">Na drugi napravi v Safeer Link vpiši to 6-mestno kodo:</p>
           <div class="stevilkePrikaz" id="vabiloLokalnaKoda">------</div>
           <button class="drugotni" id="gumbNovaKodaVabilo">Ustvari novo kodo</button>
+          <div class="vabiloVnosKode">
+            <p class="pojasnilo drobno">Ali vpiši 6-mestno kodo druge naprave:</p>
+            <input class="vnosStevilke" id="vabiloVnosKode" type="text" inputmode="numeric"
+                   autocomplete="one-time-code" maxlength="6" placeholder="------"
+                   aria-label="Koda druge naprave" />
+            <button class="glavni" id="gumbVabiloVnosKode">Poveži s kodo</button>
+            <p class="opomba" id="opombaVabiloVnosKode"></p>
+          </div>
         </div>
         <p class="opomba" id="opombaVabilo"></p>
       </div>
