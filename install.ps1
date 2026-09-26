@@ -8,7 +8,7 @@
     3. Namesti potrebne knjižnice (PySide6, Pillow, cryptography, qrcode, python-vlc in LibVLC).
     4. Namesti izvršljive datoteke (SafeerOS.exe, SafeerControl.exe) in aplikacijo v %LOCALAPPDATA%\SafeerOS.
     5. Nastavi pravila Windows Defender požarnega zidu za Safeer Link (vrata 8990 TCP za povezavo s TV/telefonom).
-    6. Ustvari bližnjice z ikonami na Namizju in v meniju Start (Safeer Control, Safeer OS, Safeer Browser).
+    6. Ustvari eno glavno bližnjico Safeer OS na Namizju in hitre vstope v meniju Start.
     7. Izvede samopreizkus delovanja in ponudi takojšen zagon.
 .PARAMETER InstallDir
     Ciljna mapa za namestitev (privzeto: $env:LOCALAPPDATA\SafeerOS).
@@ -305,16 +305,25 @@ Write-Success "Vse potrebne Python knjižnice so pripravljene."
 # Safeer Media uporablja LibVLC neposredno v svojem Qt pogledu. Python paket je le
 # veznik, zato preverimo še uradni VideoLAN runtime. Če ga ni, ostane na voljo
 # rezervni HTML5 predvajalnik, namestitev Safeer OS pa se vseeno dokonča.
-$vlcDll = @(
+$vlcCandidates = @(
     "$env:ProgramFiles\VideoLAN\VLC\libvlc.dll",
     "${env:ProgramFiles(x86)}\VideoLAN\VLC\libvlc.dll"
-) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+) | Where-Object { $_ -and (Test-Path $_) }
+$vlcDll = $null
+foreach ($candidate in $vlcCandidates) {
+    $escapedCandidate = $candidate.Replace("'", "''")
+    $loadResult = Invoke-SafeerPython @("-c", "import ctypes; ctypes.CDLL(r'$escapedCandidate'); print('LIBVLC_OK')") 2>$null
+    if ($LASTEXITCODE -eq 0 -and $loadResult -match "LIBVLC_OK") {
+        $vlcDll = $candidate
+        break
+    }
+}
 if (-not $vlcDll) {
     $wingetVlc = Get-Command winget.exe -ErrorAction SilentlyContinue
     if ($wingetVlc) {
-        Write-Info "Nameščam uradni LibVLC runtime za vgrajeni Safeer Media predvajalnik..."
+        Write-Info "Nameščam 64-bitni uradni LibVLC runtime za vgrajeni Safeer Media predvajalnik..."
         try {
-            $vlcInstall = Start-Process -FilePath "winget.exe" -ArgumentList "install --id VideoLAN.VLC -e --silent --accept-package-agreements --accept-source-agreements" -Wait -PassThru
+            $vlcInstall = Start-Process -FilePath "winget.exe" -ArgumentList "install --id VideoLAN.VLC -e --architecture x64 --force --silent --accept-package-agreements --accept-source-agreements" -Wait -PassThru
             if ($vlcInstall.ExitCode -ne 0) { Write-Warn "LibVLC ni bil nameščen; neposredni tokovi bodo uporabili rezervni predvajalnik Safeer Media." }
         } catch { Write-Warn "LibVLC ni bil nameščen; neposredni tokovi bodo uporabili rezervni predvajalnik Safeer Media." }
     } else {
@@ -359,8 +368,8 @@ $exeSources = @(
 $targetOSExe = Join-Path $InstallDir "SafeerOS.exe"
 $targetControlExe = Join-Path $InstallDir "SafeerControl.exe"
 
-$srcOS = $exeSources | Where-Object { Test-Path $_ -and (Split-Path $_ -Leaf) -ieq "SafeerOS.exe" } | Select-Object -First 1
-$srcControl = $exeSources | Where-Object { Test-Path $_ -and (Split-Path $_ -Leaf) -ieq "SafeerControl.exe" } | Select-Object -First 1
+$srcOS = $exeSources | Where-Object { (Test-Path $_) -and (Split-Path $_ -Leaf) -ieq "SafeerOS.exe" } | Select-Object -First 1
+$srcControl = $exeSources | Where-Object { (Test-Path $_) -and (Split-Path $_ -Leaf) -ieq "SafeerControl.exe" } | Select-Object -First 1
 
 if ($srcOS) {
     Copy-Item -Path $srcOS -Destination $targetOSExe -Force
@@ -499,6 +508,12 @@ function Create-Shortcut($linkPath, $targetPath, $arguments, $workDir, $iconPath
 # Glavne bližnjice (Enotni program Safeer OS)
 $iconArg = if (Test-Path $icoCilj) { $icoCilj } else { "" }
 
+# Stare ločene namizne bližnjice bi uporabniku dajale napačen občutek, da so
+# Browser in Control samostojni programi. Ob nadgradnji jih zato odstranimo.
+@("Safeer Control.lnk", "Safeer Browser.lnk") | ForEach-Object {
+    Remove-Item (Join-Path $DesktopPath $_) -Force -ErrorAction SilentlyContinue
+}
+
 # 1. Safeer OS (glavna bližnjica enotnega programa z vgrajenim Safeer Controlom)
 $osTarget = if (Test-Path $targetOSExe) { $targetOSExe } else { $batOS }
 Create-Shortcut `
@@ -517,15 +532,7 @@ Create-Shortcut `
     -iconPath $iconArg `
     -desc "Safeer OS -- Domače okolje z vgrajenim Safeer Controlom"
 
-# 2. Hitri dostop do Safeer Controla znotraj enotnega programa
-Create-Shortcut `
-    -linkPath (Join-Path $DesktopPath "Safeer Control.lnk") `
-    -targetPath $osTarget `
-    -arguments "--control" `
-    -workDir $InstallDir `
-    -iconPath $iconArg `
-    -desc "Safeer OS (Safeer Control) -- Upravljanje naprav in ločen oddaljen navidezni zaslon"
-
+# 2. Hitri dostop do Safeer Controla znotraj enotnega programa (samo meni Start)
 Create-Shortcut `
     -linkPath (Join-Path $SafeerStartFolder "Safeer Control.lnk") `
     -targetPath $osTarget `
@@ -534,9 +541,9 @@ Create-Shortcut `
     -iconPath $iconArg `
     -desc "Safeer OS (Safeer Control) -- Upravljanje naprav in ločen oddaljen navidezni zaslon"
 
-# 3. Safeer Browser
+# 3. Safeer Browser kot pogled znotraj Safeer OS (samo meni Start)
 Create-Shortcut `
-    -linkPath (Join-Path $DesktopPath "Safeer Browser.lnk") `
+    -linkPath (Join-Path $SafeerStartFolder "Safeer Browser.lnk") `
     -targetPath $osTarget `
     -arguments "--browser" `
     -workDir $InstallDir `
@@ -545,8 +552,7 @@ Create-Shortcut `
 
 Write-Success "Bližnjice ustvarjene na Namizju in v meniju Start:"
 Write-Host "   * Namizje -> Safeer OS.lnk (Enotni program)" -ForegroundColor Cyan
-Write-Host "   * Namizje -> Safeer Control.lnk (Hitri vstop v nadzor naprav)" -ForegroundColor Cyan
-Write-Host "   * Namizje -> Safeer Browser.lnk" -ForegroundColor Cyan
+Write-Host "   * Meni Start -> Safeer OS, Safeer Control in Safeer Browser (vsi odprejo isti program)" -ForegroundColor Cyan
 
 # -----------------------------------------------------------------------------
 # Samopreizkus delovanja

@@ -9,8 +9,10 @@ Ta testna izdaja dokonča uporabniški tok Safeer Media v enotni aplikaciji Safe
 - Film ali epizoda se odpre v celozaslonskem predvajalnem sloju Safeer Media znotraj Safeer OS, brez zunanjega brskalnika.
 - Neposredne datoteke in tokove še naprej predvaja vgrajeni LibVLC.
 - Safeer Control, Safeer Link in 6-mestna povezovalna koda ostanejo del istega okna Safeer OS.
+- Namestitveni program na 64-bitnem Windows preveri dejansko nalaganje `libvlc.dll` in po potrebi namesti 64-bitni VLC.
+- Na Namizju je samo ena bližnjica **Safeer OS**; Media, Link, Control in splet so pogledi istega programa.
 
-Preverjeno: **112 testov in 10 podtestov uspešnih**. TMDb katalog in dokumentirani VidLink naslov sta bila preverjena tudi z resničnim omrežnim odzivom.
+Preverjeno: **114 testov in 10 podtestov uspešnih**. TMDb katalog, dokumentirani VidLink naslov, šestmestna koda in 64-bitni LibVLC so bili preverjeni tudi na testnem Windows računalniku.
 
 ## Namestitev
 
