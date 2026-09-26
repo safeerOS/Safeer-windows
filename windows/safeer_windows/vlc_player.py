@@ -182,7 +182,17 @@ class VlcPlayerWidget(QWidget):
         is_audio = item.get("vrsta") == "glasba"
         self.video.setVisible(not is_audio)
         self.audio_visual.setVisible(is_audio)
-        media = self.instance.media_new(str(variants[variant_index].get("url") or ""))
+        variant = variants[variant_index]
+        media = self.instance.media_new(str(variant.get("url") or ""))
+        headers = variant.get("glave") if isinstance(variant.get("glave"), dict) else {}
+        lowered = {str(key).casefold(): str(value) for key, value in headers.items()}
+        referer = str(variant.get("referer") or lowered.get("referer")
+                      or lowered.get("referrer") or item.get("referer") or "").strip()
+        user_agent = str(lowered.get("user-agent") or lowered.get("user_agent") or "").strip()
+        if referer and "\n" not in referer and "\r" not in referer:
+            media.add_option(f":http-referrer={referer}")
+        if user_agent and "\n" not in user_agent and "\r" not in user_agent:
+            media.add_option(f":http-user-agent={user_agent}")
         self.player.set_media(media)
         if not is_audio:
             self._attach_video()

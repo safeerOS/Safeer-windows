@@ -9,18 +9,12 @@ import os
 import platform
 import socket
 import socketserver
-import subprocess
 import sys
 import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any, List, Optional
-
-# Nastavitve za Chromium v Qt WebEngine za predvajanje vdelanih tokov in preprecevanje zrusitev podokvirjev
-_cr_flags = os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
-_needed_flags = "--no-sandbox --disable-features=SitePerProcess,IsolateOrigins --autoplay-policy=no-user-gesture-required --disable-web-security"
-os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = f"{_cr_flags} {_needed_flags}".strip()
 
 from PySide6.QtCore import QObject, QTimer, QUrl, Qt, Signal, Slot
 from PySide6.QtGui import QIcon, QKeySequence, QShortcut
@@ -31,7 +25,7 @@ from PySide6.QtWidgets import QApplication, QMainWindow, QStackedWidget
 
 from core import os_media, os_scit
 
-from . import control_backend, control_window, os_backend_win, policy, vlc_player
+from . import browser, control_backend, control_window, os_backend_win, policy, vlc_player
 
 class ShrambaWrapper:
     def get(self, key: str, default: Any = None) -> Any:
@@ -124,14 +118,11 @@ class _SafeerAssetHandler(BaseHTTPRequestHandler):
             self.send_error(500)
             return
 
-        # Dovoli iframe embed iz kateregakoli izvora (potrebno za embed ponudnike)
         self.send_response(200)
         self.send_header("Content-Type", mime_type + ("; charset=utf-8" if "text" in mime_type or "javascript" in mime_type else ""))
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-cache")
-        # CORS in Permissions-Policy: dovoli autoplay, encrypted-media, fullscreen za vse iframe vire
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Permissions-Policy", "autoplay=*, encrypted-media=*, fullscreen=*, picture-in-picture=*")
+        self.send_header("Permissions-Policy", "autoplay=(self), fullscreen=(self), picture-in-picture=(self)")
         self.end_headers()
         self.wfile.write(data)
 
@@ -263,9 +254,9 @@ class SafeerOsWindow(QMainWindow):
         settings.setAttribute(attr.ScrollAnimatorEnabled, True)
         settings.setAttribute(attr.FullScreenSupportEnabled, True)
         settings.setAttribute(attr.PlaybackRequiresUserGesture, False)
-        settings.setAttribute(attr.AllowRunningInsecureContent, True)
+        settings.setAttribute(attr.AllowRunningInsecureContent, False)
         settings.setAttribute(attr.JavascriptCanOpenWindows, False)
-        settings.setAttribute(attr.PluginsEnabled, True)
+        settings.setAttribute(attr.PluginsEnabled, False)
 
         # Registriraj skripto mostu
         script = QWebEngineScript()
@@ -288,6 +279,21 @@ class SafeerOsWindow(QMainWindow):
         self.media_player = vlc_player.VlcPlayerWidget(self)
         self.media_player.nazaj.connect(self._zapri_media)
         self.zaslon.addWidget(self.media_player)
+
+        # Safeer Browser ni ločen program: ista zaščitena brskalna seja je tretji
+        # pogled enotnega Safeer OS. Spletne aplikacije se zato nalagajo kot
+        # vrhnja stran (brez nezanesljivega iframe/X-Frame-Options obvoda).
+        self.browser_app = browser.SafeerBrowserApp(
+            QApplication.instance(), policy.SettingsStore(), "embedded"
+        )
+        self.browser_window = browser.BrowserWindow(
+            self.browser_app, embedded=True, on_safeer_home=self._zapri_browser
+        )
+        self.browser_window.setWindowFlags(Qt.Widget)
+        self.browser_app.windows.append(self.browser_window)
+        self.browser_window.new_tab(policy.HOME_URL)
+        self.zaslon.addWidget(self.browser_window)
+        self._browser_media_active = False
         self.setCentralWidget(self.zaslon)
 
         # Tipke za celozaslonski nacin
@@ -316,7 +322,7 @@ class SafeerOsWindow(QMainWindow):
             elif self.zacetni_razdelek == "media-nastavitve":
                 def _odpri_media_nastavitve():
                     js = (
-                        "if (window.safeerOsPojdi) window.safeerOsPojdi('media');"
+                        "if (window.safeerOsPojdi) window.safeerOsPojdi('nastavitve');"
                         "var pl = document.getElementById('mediaNastavitvePlosca');"
                         "if (pl) { pl.hidden = false; pl.scrollIntoView(); }"
                         "var bg = document.getElementById('mediaPrimerKodeGumb');"
@@ -381,9 +387,8 @@ class SafeerOsWindow(QMainWindow):
             print(f"[SafeerOS] Datoteka {os_html} ne obstaja!")
             return
 
-        # Zageni lokalni HTTP server za assets/ — s tem vmesnik pobeži iz
-        # file:// izvora in iframe embed ponudniki dobijo polne HTTP dovoljenja
-        # (autoplay, encrypted-media, fullscreen) brez omejitev Chromium file:// varnostne politike.
+        # Lokalni HTTP izvor zagotovi predvidljivo nalaganje modulov in sredstev;
+        # zunanje strani se odpirajo v ločenem zaščitenem profilu Safeer Browserja.
         port = _start_local_asset_server(assets_root)
         url = f"http://127.0.0.1:{port}/os/index.html"
 
@@ -401,6 +406,9 @@ class SafeerOsWindow(QMainWindow):
         if self.zaslon.currentWidget() is self.media_player:
             self._zapri_media()
             return
+        if self.zaslon.currentWidget() is self.browser_window:
+            self._zapri_browser()
+            return
         if self.isFullScreen():
             self.showNormal()
 
@@ -415,6 +423,22 @@ class SafeerOsWindow(QMainWindow):
         self.media_player.stop()
         self.zaslon.setCurrentWidget(self.view)
         self.setWindowTitle("Safeer OS")
+
+    def _odpri_notranji_splet(self, url: str, *, media: bool = False) -> None:
+        self._browser_media_active = media
+        self.browser_window.load_in_current(url)
+        self.zaslon.setCurrentWidget(self.browser_window)
+        self.setWindowTitle("Safeer OS · Media" if media else "Safeer OS · Splet")
+
+    def _zapri_browser(self) -> None:
+        if self._browser_media_active:
+            view = self.browser_window.current_view()
+            if view is not None:
+                view.setUrl(QUrl("about:blank"))
+        self._browser_media_active = False
+        self.zaslon.setCurrentWidget(self.view)
+        self.setWindowTitle("Safeer OS")
+        self.poslji_dogodek("fokus", None)
 
     def _osvezi_media_v_ozadju(self) -> None:
         def _delo() -> None:
@@ -723,16 +747,21 @@ class SafeerOsWindow(QMainWindow):
             is_direct_stream = (
                 url.startswith("file:") or
                 ext in os_media.MEDIA_EXT or
-                parsed_path.endswith((".m3u8", ".mpd", ".ts"))
+                parsed_path.endswith((".m3u8", ".mpd", ".ts")) or
+                bool(item.get("glave"))
             )
             native = self.media_player.available and is_direct_stream and not is_embed
+            internal = False
             if native:
                 self.dispatcher.dispatch(lambda: self._odpri_media(item))
-            return dict(item, native=native)
+            elif url.startswith(("http://", "https://", "file:")):
+                self.dispatcher.dispatch(lambda: self._odpri_notranji_splet(url, media=True))
+                internal = True
+            return dict(item, native=native, internal=internal)
 
         if metoda == "mediaStanje":
             return {"na_voljo": True, "native": self.media_player.available,
-                    "predvajalnik": "LibVLC" if self.media_player.available else "HTML5"}
+                    "predvajalnik": "LibVLC + zaščiteni Safeer Browser"}
 
         if metoda in ("odprtaOkna", "mediaNaprave"):
             return []
@@ -740,29 +769,24 @@ class SafeerOsWindow(QMainWindow):
         return None
 
     def odpri_splet(self, url: str) -> bool:
+        url = str(url or "").strip()
         if not url:
             return False
-        try:
-            subprocess.Popen([sys.executable, "-m", "safeer_windows", url],
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            return True
-        except Exception:
-            pass
-
-        try:
-            if sys.platform == "win32":
-                os.startfile(url)  # noqa: S606
-                return True
-            subprocess.Popen(["xdg-open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            return True
-        except Exception as e:
-            print(f"[SafeerOS] Napaka pri odpiranju URL {url}: {e}")
+        if not urllib.parse.urlsplit(url).scheme:
+            url = "https://" + url
+        if urllib.parse.urlsplit(url).scheme.lower() not in ("http", "https"):
             return False
+        self.dispatcher.dispatch(lambda: self._odpri_notranji_splet(url))
+        return True
 
     def closeEvent(self, event) -> None:
         try:
             if hasattr(self, "scit") and self.scit is not None:
                 self.scit.koncaj()
+        except Exception:
+            pass
+        try:
+            self.browser_app.shutdown()
         except Exception:
             pass
         event.accept()
@@ -776,10 +800,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--ozadje", action="store_true", help="Zazeni le v ozadju")
     args = parser.parse_args(argv)
 
-    for f in ["--disable-web-security", "--no-sandbox", "--disable-site-isolation-trials", "--disable-features=SitePerProcess,IsolateOrigins", "--autoplay-policy=no-user-gesture-required"]:
-        if f not in sys.argv:
-            sys.argv.append(f)
-
+    browser.register_schemes()
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("SafeerOS")
     app.setOrganizationName("Safeer")

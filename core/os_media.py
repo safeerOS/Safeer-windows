@@ -247,10 +247,24 @@ for _imdb_k, _tmdb_k in [
         KNOWN_IMDB[_tmdb_k] = KNOWN_IMDB[_imdb_k]
 
 
+def _safe_headers(value: Any) -> dict[str, str]:
+    """Ohrani kratke enovrstične HTTP glave, ki jih vrne uporabnikov API."""
+    if not isinstance(value, dict):
+        return {}
+    result: dict[str, str] = {}
+    for name, raw in list(value.items())[:20]:
+        key = _text(name, 80)
+        text = _text(raw, 2048)
+        if key and text and "\n" not in key + text and "\r" not in key + text:
+            result[key] = text
+    return result
+
+
 def _item(title: Any, url: Any, *, base: str, source_id: str, source_name: str,
           kind: Any = "", year: Any = 0, image: Any = "", artist: Any = "",
           quality: Any = "", resolution: Any = 0, bitrate: Any = 0,
-          season: Any = 0, episode: Any = 0, description: Any = "") -> Optional[dict]:
+          season: Any = 0, episode: Any = 0, description: Any = "",
+          headers: Any = None, referer: Any = "") -> Optional[dict]:
     media_url = _absolute(base, url)
     clean_title = _text(title, 200)
     if not media_url or not clean_title:
@@ -324,6 +338,9 @@ def _item(title: Any, url: Any, *, base: str, source_id: str, source_name: str,
         clean_title = f"{source_name or 'Serija'} S{max(1, season_int):02d}E{max(1, episode_int):02d}"
 
     res = _resolution(resolution, quality, media_url, clean_title)
+    safe_headers = _safe_headers(headers)
+    header_referer = next((value for key, value in safe_headers.items()
+                           if key.casefold() in ("referer", "referrer")), "")
     result = {
         "naslov": clean_title,
         "url": media_url,
@@ -339,6 +356,8 @@ def _item(title: Any, url: Any, *, base: str, source_id: str, source_name: str,
         "opis": _text(description, 500),
         "vir_id": source_id,
         "vir": source_name,
+        "glave": safe_headers,
+        "referer": _text(referer, 2048) or header_referer,
     }
     return result
 
@@ -372,6 +391,8 @@ def _items_from_json(data: Any, base: str, source_id: str, source_name: str,
         "season": _first(data, ("season", "season_number")) or inherited.get("season", 0),
         "episode": _first(data, ("episode", "episode_number")) or inherited.get("episode", 0),
         "description": _first(data, ("description", "overview", "summary")) or inherited.get("description", ""),
+        "headers": _first(data, ("headers", "http_headers", "request_headers")) or inherited.get("headers", {}),
+        "referer": _first(data, ("referer", "referrer", "origin")) or inherited.get("referer", ""),
     }
     url = _first(data, ("stream_url", "playback_url", "media_url", "file", "src", "url", "contentUrl"))
     if title and url and not isinstance(url, (dict, list)):
@@ -379,6 +400,7 @@ def _items_from_json(data: Any, base: str, source_id: str, source_name: str,
                       kind=context["kind"], year=context["year"], image=context["image"],
                       artist=context["artist"], season=context["season"], episode=context["episode"],
                       description=context["description"],
+                      headers=context["headers"], referer=context["referer"],
                       quality=_first(data, ("quality", "label", "resolution_name")),
                       resolution=_first(data, ("resolution", "height")),
                       bitrate=_first(data, ("bitrate", "bandwidth")))
@@ -552,10 +574,6 @@ def _embed_url_for_provider(netloc: str, scheme: str, imdb_id: str,
     return f"{scheme}://{netloc}/v2/embed/movie/{imdb_id}"
 
 
-# Domene ki podpirajo TMDB ID-je neposredno (brez IMDb preslikave)
-_TMDB_NATIVE_PROVIDERS = {"vidlink", "vidsrc.me", "vidsrc.in", "vidsrc.pm",
-                          "autoembed", "multiembed", "2embed", "111movies"}
-
 # Vse prepoznane embed domene (razširjeno)
 _EMBED_DOMAINS = ("vidsrc", "vidlink", "embed.su", "superembed", "multiembed",
                   "2embed", "autoembed", "111movies")
@@ -567,9 +585,6 @@ def _resolve_embed_or_direct_source(url: str, source_id: str, source_name: str) 
     netloc = parsed.netloc.lower()
     path = parsed.path
     is_embed_domain = any(dom in netloc for dom in _EMBED_DOMAINS)
-
-    # Ugotovi ali ponudnik podpira TMDB ID-je (namesto IMDb)
-    uses_tmdb = any(dom in netloc for dom in _TMDB_NATIVE_PROVIDERS)
 
     # 1. Specifična povezava do TV serije ali epizode (/tv/ ali /series/ ali SxxExx)
     match_tv = re.search(r"/(?:tv|series|embed/tv)/([^/]+)/(\d+)/(\d+)", url)
@@ -821,7 +836,8 @@ def merge_duplicates(items: Iterable[dict]) -> list[dict]:
         best = dict(variants[0])
         best["id"] = hashlib.sha256(identity.encode()).hexdigest()[:20]
         best["razlicice"] = [{k: value for k, value in item.items()
-                              if k in ("url", "vir", "vir_id", "kakovost", "locljivost", "bitrate")}
+                              if k in ("url", "vir", "vir_id", "kakovost", "locljivost", "bitrate",
+                                       "glave", "referer")}
                              for item in variants]
         best["stevilo_razlicic"] = len(variants)
         best["viri"] = list(dict.fromkeys(item.get("vir", "") for item in variants if item.get("vir")))

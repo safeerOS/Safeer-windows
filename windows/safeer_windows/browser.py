@@ -10,7 +10,7 @@ import re
 import sys
 import time
 import urllib.parse
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from PySide6.QtCore import (QBuffer, QByteArray, QCoreApplication, QEvent, QIODevice, QObject, QSize, QStandardPaths,
                             Qt, QTimer, QUrl)
@@ -158,13 +158,20 @@ def tr(browser: "SafeerBrowserApp", key: str, **values: Any) -> str:
 # WebEngine plumbing
 # ---------------------------------------------------------------------------
 
+_schemes_registered = False
+
+
 def register_schemes() -> None:
+    global _schemes_registered
+    if _schemes_registered:
+        return
     scheme = QWebEngineUrlScheme(QByteArray(b"safeer"))
     scheme.setSyntax(QWebEngineUrlScheme.Syntax.Host)
     # Secure but not local: the start page may show remote favicons; host actions are only
     # accepted while the top-level page itself is safeer://home.
     scheme.setFlags(QWebEngineUrlScheme.Flag.SecureScheme)
     QWebEngineUrlScheme.registerScheme(scheme)
+    _schemes_registered = True
 
 
 def apply_dns_mode(settings: policy.SettingsStore) -> str:
@@ -581,12 +588,15 @@ class SafeerBrowserApp(QObject):
 
 
 class BrowserWindow(QMainWindow):
-    def __init__(self, app: SafeerBrowserApp, private: bool = False):
+    def __init__(self, app: SafeerBrowserApp, private: bool = False, *, embedded: bool = False,
+                 on_safeer_home: Optional[Callable[[], None]] = None):
         super().__init__()
         self.app = app
         self.private = private
+        self.embedded = embedded
+        self.on_safeer_home = on_safeer_home
         self.profile = app.get_private_profile() if private else app.profile
-        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, not embedded)
         self.devtools: Optional[QWebEngineView] = None
         self.find_text = ""
 
@@ -605,6 +615,11 @@ class BrowserWindow(QMainWindow):
         self.toolbar = QToolBar(self)
         self.toolbar.setMovable(False)
         self.addToolBar(self.toolbar)
+        self.safeer_home_button: Optional[QToolButton] = None
+        if embedded:
+            self.safeer_home_button = self._tool("home", on_safeer_home or (lambda: None))
+            self.safeer_home_button.setText("Safeer OS")
+            self.safeer_home_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.back_button = self._tool("back", lambda: self.current_view() and self.current_view().back())
         self.forward_button = self._tool("forward", lambda: self.current_view() and self.current_view().forward())
         self.reload_button = self._tool("reload", self.reload_or_stop)
@@ -680,8 +695,6 @@ class BrowserWindow(QMainWindow):
             ("Ctrl+W", lambda: self.close_tab(self.tabs.currentIndex())),
             ("Ctrl+F4", lambda: self.close_tab(self.tabs.currentIndex())),
             ("Ctrl+Shift+T", self.reopen_closed_tab),
-            ("Ctrl+N", lambda: self.app.new_window()),
-            ("Ctrl+Shift+N", lambda: self.app.new_window(private=True)),
             ("Ctrl+L", self.focus_address), ("F6", self.focus_address), ("Alt+D", self.focus_address),
             ("Ctrl+R", self.reload), ("F5", self.reload),
             ("Ctrl+Shift+R", lambda: self.current_view() and self.current_view().page().triggerAction(QWebEnginePage.WebAction.ReloadAndBypassCache)),
@@ -694,8 +707,14 @@ class BrowserWindow(QMainWindow):
             ("Ctrl+D", self.add_current_to_home), ("Ctrl+J", self.show_downloads),
             ("Ctrl++", lambda: self.zoom(0.1)), ("Ctrl+=", lambda: self.zoom(0.1)),
             ("Ctrl+-", lambda: self.zoom(-0.1)), ("Ctrl+0", lambda: self.zoom(0)),
-            ("F11", self.toggle_fullscreen), ("F12", self.toggle_devtools), ("Ctrl+Shift+I", self.toggle_devtools),
+            ("F12", self.toggle_devtools), ("Ctrl+Shift+I", self.toggle_devtools),
         ]
+        if not self.embedded:
+            bindings.extend([
+                ("Ctrl+N", lambda: self.app.new_window()),
+                ("Ctrl+Shift+N", lambda: self.app.new_window(private=True)),
+                ("F11", self.toggle_fullscreen),
+            ])
         for index in range(1, 9):
             bindings.append((f"Ctrl+{index}", lambda i=index: self.tabs.setCurrentIndex(min(i, self.tabs.count()) - 1)))
         bindings.append(("Ctrl+9", lambda: self.tabs.setCurrentIndex(self.tabs.count() - 1)))
@@ -713,6 +732,8 @@ class BrowserWindow(QMainWindow):
         app = self.app
         self.setWindowTitle(policy.APP_NAME + (f" — {tr(app, 'private')}" if self.private else ""))
         self.address.setPlaceholderText(tr(app, "address"))
+        if self.safeer_home_button is not None:
+            self.safeer_home_button.setToolTip("Safeer OS Domov")
         for button, key in ((self.back_button, "back"), (self.forward_button, "forward"), (self.reload_button, "reload"),
                             (self.home_button, "home"), (self.star_button, "add_home"),
                             (self.downloads_button, "downloads"), (self.menu_button, "menu"), (self.new_tab_button, "new_tab")):
@@ -722,8 +743,10 @@ class BrowserWindow(QMainWindow):
         self.menu.clear()
         entries = [
             ("new_tab", "Ctrl+T", lambda: self.new_tab(policy.HOME_URL)),
-            ("new_window", "Ctrl+N", lambda: self.app.new_window()),
-            ("private_window", "Ctrl+Shift+N", lambda: self.app.new_window(private=True)),
+            *(([] if self.embedded else [
+                ("new_window", "Ctrl+N", lambda: self.app.new_window()),
+                ("private_window", "Ctrl+Shift+N", lambda: self.app.new_window(private=True)),
+            ])),
             ("reopen_tab", "Ctrl+Shift+T", self.reopen_closed_tab),
             None,
             ("downloads", "Ctrl+J", self.show_downloads),
@@ -740,8 +763,7 @@ class BrowserWindow(QMainWindow):
             ("settings", "", self.open_settings),
             ("devtools", "F12", self.toggle_devtools),
             ("about", "", self.show_about),
-            None,
-            ("quit", "", self.app.qt_app.closeAllWindows),
+            *(([] if self.embedded else [None, ("quit", "", self.app.qt_app.closeAllWindows)])),
         ]
         for entry in entries:
             if entry is None:
@@ -1068,22 +1090,24 @@ class BrowserWindow(QMainWindow):
         self.toolbar.setVisible(not on)
         self.tabs.tabBar().setVisible(not on)
         self.statusBar().setVisible(not on)
+        target = self.window() if self.embedded else self
         if on:
-            self.showFullScreen()
+            target.showFullScreen()
         else:
-            self.showNormal()
+            target.showNormal()
 
     def toggle_fullscreen(self) -> None:
-        if self.isFullScreen():
+        target = self.window() if self.embedded else self
+        if target.isFullScreen():
             view = self.current_view()
             if view is not None:
                 view.page().triggerAction(QWebEnginePage.WebAction.ExitFullScreen)
             self.toolbar.setVisible(True)
             self.tabs.tabBar().setVisible(True)
             self.statusBar().setVisible(True)
-            self.showNormal()
+            target.showNormal()
         else:
-            self.showFullScreen()
+            target.showFullScreen()
 
     # -- permissions ----------------------------------------------------------
     def _ask_permission(self, origin: str, what_key: str) -> bool:
@@ -1298,6 +1322,10 @@ class BrowserWindow(QMainWindow):
 
     # -- close ------------------------------------------------------------------
     def closeEvent(self, event) -> None:
+        if self.embedded and self.on_safeer_home is not None:
+            event.ignore()
+            self.on_safeer_home()
+            return
         self.app.window_closed(self)
         self.dispose_tabs()
         super().closeEvent(event)
