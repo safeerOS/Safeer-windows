@@ -128,6 +128,9 @@ class VlcPlayerWidget(QWidget):
         self.volume.valueChanged.connect(self._set_volume)
         self.variants = QComboBox()
         self.variants.currentIndexChanged.connect(self._change_variant)
+        self.subtitles = QComboBox()
+        self.subtitles.addItem("CC  Podnapisi izklopljeni", -1)
+        self.subtitles.currentIndexChanged.connect(self._change_subtitle)
         self.background = QPushButton("♫  Ozadje")
         self.background.setToolTip("Nadaljuj predvajanje v ozadju (Ctrl+Shift+M odpre upravljanje)")
         self.background.clicked.connect(self.ozadje.emit)
@@ -139,6 +142,7 @@ class VlcPlayerWidget(QWidget):
         controls.addWidget(volume_label)
         controls.addWidget(self.volume)
         controls.addWidget(self.variants)
+        controls.addWidget(self.subtitles)
         controls.addWidget(self.background)
         root.addLayout(controls)
 
@@ -201,15 +205,49 @@ class VlcPlayerWidget(QWidget):
         if user_agent and "\n" not in user_agent and "\r" not in user_agent:
             media.add_option(f":http-user-agent={user_agent}")
         self.player.set_media(media)
+        # Podnapisi so vedno privzeto izklopljeni. Ko uporabnik izbere jezik,
+        # LibVLC uporabi izvorne časovne oznake, zato ostanejo usklajeni s filmom.
+        self.player.video_set_spu(-1)
+        self.subtitles.blockSignals(True)
+        self.subtitles.clear()
+        self.subtitles.addItem("CC  Podnapisi izklopljeni", -1)
+        self.subtitles.setCurrentIndex(0)
+        self.subtitles.blockSignals(False)
         if not is_audio:
             self._attach_video()
         result = self.player.play()
+        QTimer.singleShot(1800, self._load_subtitles)
         self.timer.start()
         return result != -1
 
     def _change_variant(self, index: int) -> None:
         if index >= 0 and self.current_item:
             self.play_item(self.current_item, index)
+
+    def _load_subtitles(self) -> None:
+        if not self.player:
+            return
+        try:
+            tracks = self.player.video_get_spu_description() or []
+        except Exception:
+            tracks = []
+        self.subtitles.blockSignals(True)
+        existing = {self.subtitles.itemData(i) for i in range(self.subtitles.count())}
+        for track in tracks:
+            track_id = getattr(track, "id", track[0] if isinstance(track, tuple) else -1)
+            name = getattr(track, "name", track[1] if isinstance(track, tuple) and len(track) > 1 else "Podnapisi")
+            if track_id is None or int(track_id) < 0 or int(track_id) in existing:
+                continue
+            if isinstance(name, bytes):
+                name = name.decode("utf-8", "replace")
+            self.subtitles.addItem(f"CC  {name}", int(track_id))
+            existing.add(int(track_id))
+        self.subtitles.blockSignals(False)
+
+    def _change_subtitle(self, index: int) -> None:
+        if self.player and index >= 0:
+            track_id = self.subtitles.itemData(index)
+            self.player.video_set_spu(int(track_id) if track_id is not None else -1)
 
     def toggle_play(self) -> None:
         if not self.player:

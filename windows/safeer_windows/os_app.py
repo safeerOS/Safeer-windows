@@ -25,7 +25,7 @@ from PySide6.QtWidgets import QApplication, QMainWindow, QStackedWidget
 
 from core import os_media, os_scit
 
-from . import browser, control_backend, control_window, os_backend_win, policy, vlc_player
+from . import browser, control_backend, control_window, os_backend_win, policy, vlc_player, webview2_media
 
 class ShrambaWrapper:
     def get(self, key: str, default: Any = None) -> Any:
@@ -294,6 +294,8 @@ class SafeerOsWindow(QMainWindow):
         self.browser_app.windows.append(self.browser_window)
         self.browser_window.new_tab(policy.HOME_URL)
         self.zaslon.addWidget(self.browser_window)
+        self.webview2_media = webview2_media.WebView2MediaWidget(self._zapri_webview2_media, self)
+        self.zaslon.addWidget(self.webview2_media)
         self._browser_media_active = False
         self.setCentralWidget(self.zaslon)
 
@@ -335,7 +337,8 @@ class SafeerOsWindow(QMainWindow):
             elif self.zacetni_razdelek == "media-serije":
                 def _odpri_media_serije():
                     js = (
-                        "if (window.safeerOsPojdi) window.safeerOsPojdi('media');"
+                        "if (!window.safeerOsPojdi || window.__safeerMediaTestStarted) return;"
+                        "window.__safeerMediaTestStarted = true; window.safeerOsPojdi('media');"
                         "var b = document.querySelector('[data-media-filter=\"serija\"]');"
                         "if (b) { b.click(); }"
                     )
@@ -351,7 +354,13 @@ class SafeerOsWindow(QMainWindow):
                         "  var kartice = document.querySelectorAll('.media-kartica');"
                         "  for (var i = 0; i < kartice.length; i++) {"
                         "    if (kartice[i].innerText.indexOf('Igra prestolov') >= 0 || kartice[i].innerText.indexOf('Inception') >= 0) {"
-                        "      kartice[i].click(); return;"
+                        "      kartice[i].click();"
+                        "      function predvajajPrvoEpizodo(n) {"
+                        "        var p = document.querySelector('#mediaEpizode .media-epizoda button');"
+                        "        if (p) { p.click(); return; }"
+                        "        if ((n || 0) < 40) setTimeout(function () { predvajajPrvoEpizodo((n || 0) + 1); }, 250);"
+                        "      }"
+                        "      setTimeout(function () { predvajajPrvoEpizodo(0); }, 500); return;"
                         "    }"
                         "  }"
                         "  if ((poskusi || 0) < 20) {"
@@ -361,7 +370,9 @@ class SafeerOsWindow(QMainWindow):
                         "setTimeout(function () { klikniKoJePripravljeno(0); }, 300);"
                     )
                     self.view.page().runJavaScript(js)
-                QTimer.singleShot(700, _odpri_media_predvajaj)
+                QTimer.singleShot(1500, _odpri_media_predvajaj)
+                QTimer.singleShot(5000, _odpri_media_predvajaj)
+                QTimer.singleShot(12000, _odpri_media_predvajaj)
             else:
                 QTimer.singleShot(600, lambda: self.view.page().runJavaScript(f"window.safeerOsPojdi && window.safeerOsPojdi('{self.zacetni_razdelek}');"))
         else:
@@ -371,11 +382,11 @@ class SafeerOsWindow(QMainWindow):
             if st == "nov":
                 self.odpri_control(prijava_ob_zagonu=True)
 
-        if self.v_oknu:
+        if False:
             self.resize(1280, 800)
             self.show()
         else:
-            self.showFullScreen()
+            self.showMaximized()
 
     def nalozi_vmesnik(self) -> None:
         try:
@@ -402,18 +413,26 @@ class SafeerOsWindow(QMainWindow):
     def preklopi_celozaslonsko(self) -> None:
         if self.isFullScreen():
             self.showNormal()
+            self.webview2_media.set_fullscreen_ui(False)
         else:
+            if self.zaslon.currentWidget() is self.webview2_media:
+                self.webview2_media.set_fullscreen_ui(True)
             self.showFullScreen()
 
     def na_escape(self) -> None:
+        if self.isFullScreen():
+            self.showNormal()
+            self.webview2_media.set_fullscreen_ui(False)
+            return
         if self.zaslon.currentWidget() is self.media_player:
             self._zapri_media()
             return
         if self.zaslon.currentWidget() is self.browser_window:
             self._zapri_browser()
             return
-        if self.isFullScreen():
-            self.showNormal()
+        if self.zaslon.currentWidget() is self.webview2_media:
+            self._zapri_webview2_media()
+            return
 
     def _odpri_media(self, item: dict) -> None:
         if self.media_player.play_item(item):
@@ -437,8 +456,13 @@ class SafeerOsWindow(QMainWindow):
             self.zaslon.setCurrentWidget(self.media_player)
             self.setWindowTitle(f"Safeer OS · Media · {self.media_player.current_item.get('naslov', '')}")
 
-    def _odpri_notranji_splet(self, url: str, *, media: bool = False) -> None:
+    def _odpri_notranji_splet(self, url: str, *, media: bool = False, item: Optional[dict] = None) -> None:
         self._browser_media_active = media
+        webview_started = self.webview2_media.open_item(item) if media and item else False
+        if media and (webview_started or self.webview2_media.open_url(url)):
+            self.zaslon.setCurrentWidget(self.webview2_media)
+            self.setWindowTitle("Safeer OS · Media")
+            return
         if media:
             self.browser_window.load_media(url)
         else:
@@ -454,6 +478,13 @@ class SafeerOsWindow(QMainWindow):
                 view.setUrl(QUrl("about:blank"))
         self._browser_media_active = False
         self.browser_window.set_media_mode(False)
+        self.zaslon.setCurrentWidget(self.view)
+        self.setWindowTitle("Safeer OS")
+        self.poslji_dogodek("fokus", None)
+
+    def _zapri_webview2_media(self) -> None:
+        self.webview2_media.stop()
+        self._browser_media_active = False
         self.zaslon.setCurrentWidget(self.view)
         self.setWindowTitle("Safeer OS")
         self.poslji_dogodek("fokus", None)
@@ -789,17 +820,8 @@ class SafeerOsWindow(QMainWindow):
             native = self.media_player.available and is_direct_stream and not is_embed
             if native:
                 self.dispatcher.dispatch(lambda: self._odpri_media(item))
-            elif is_embed and url.startswith(("http://", "https://")):
-                # Ponudniki, kot je VidLink, namenoma zavrnejo vsak sandboxed
-                # iframe. Odprejo se kot vrhnja stran v zasebnem, vgrajenem
-                # Safeer pogledu: popupi, dovoljenja in zunanja navigacija so
-                # blokirani, uporabnik pa ne zapusti Safeer OS.
-                self.dispatcher.dispatch(lambda: self._odpri_notranji_splet(url, media=True))
-            # Spletni embed ostane v namenskem predvajalniku Safeer Media. Ne
-            # odpremo ločenega okna brskalnika in uporabnik ne zapusti aplikacije.
-            embedded = is_embed and url.startswith(("http://", "https://"))
-            return dict(item, native=bool(native or embedded), internal=embedded, embedded=embedded)
-
+            # Spletni embed ostane v namenskem predvajalniku Safeer Media (HTML iframe).
+            return dict(item, native=bool(native))
         if metoda == "mediaStanje":
             return {"na_voljo": True, "native": self.media_player.available,
                     "predvajalnik": "LibVLC + vgrajeni Safeer Media predvajalnik"}
@@ -828,6 +850,10 @@ class SafeerOsWindow(QMainWindow):
         try:
             if hasattr(self, "scit") and self.scit is not None:
                 self.scit.koncaj()
+        except Exception:
+            pass
+        try:
+            self.webview2_media.stop()
         except Exception:
             pass
         try:

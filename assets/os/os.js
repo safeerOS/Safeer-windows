@@ -2106,7 +2106,8 @@
     $("mediaKino").addEventListener("click", function () {
       var pl = $("mediaPredvajalnik");
       if (!pl) return;
-      pl.classList.toggle("kino");
+      var jeKino = pl.classList.toggle("kino");
+      klic("celozaslonsko", [jeKino]);
     });
   }
   $("mediaOsvezi").addEventListener("click", function () { osveziMediaVir(""); });

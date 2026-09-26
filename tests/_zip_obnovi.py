@@ -12,10 +12,14 @@ BACKUP = ZIP_POT + ".pred-polno-obnovo.bak"
 VKLJUCI = ["core", "windows", "assets"]
 IZKLJUCI_MAPE = {"__pycache__", "launcher_go", "build", "dist", ".mypy_cache", ".pytest_cache"}
 IZKLJUCI_PRIPONE = {".pyc", ".pyo", ".exe", ".zip", ".bak"}
+VKJUCI_BINARNE = {"windows/SafeerMediaWebView.exe"}
 
 
 def naj_gre_v_zip(pot_rel: str) -> bool:
-    deli = pot_rel.replace(os.sep, "/").split("/")
+    normalna = pot_rel.replace(os.sep, "/")
+    if normalna in VKJUCI_BINARNE:
+        return True
+    deli = normalna.split("/")
     if any(d in IZKLJUCI_MAPE for d in deli):
         return False
     _, ext = os.path.splitext(pot_rel)
