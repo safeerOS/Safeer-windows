@@ -646,3 +646,63 @@ def nastavi_samozagon(vklop: bool) -> bool:
     except OSError as e:
         print(f"[SafeerOS] Samozagona ni bilo mogoče spremeniti: {e}")
         return samozagon_vklopljen()
+
+
+# ---------------------------------------------------------------------------- DRM storitve
+# Vgrajena pogona (Qt WebEngine, WebView2 v Safeer OS) nimata Widevine/PlayReady, zato
+# Netflix & co. v Spletu ne morejo predvajati. Microsoft Edge na Windows ima Widevine
+# (preverjeno z requestMediaKeySystemAccess), zato te storitve odpremo v Edge v nacinu
+# aplikacije: okno brez naslovne vrstice, prijave ostanejo v uporabnikovem Edge profilu.
+DRM_DOMENE = (
+    "netflix.com", "primevideo.com", "amazon.com/gp/video", "disneyplus.com", "max.com",
+    "hbomax.com", "skyshowtime.com", "tv.apple.com", "music.apple.com", "voyo.si",
+    "paramountplus.com", "dazn.com", "tidal.com", "deezer.com", "open.spotify.com",
+    "crunchyroll.com", "mubi.com", "rakuten.tv", "play.hbomax.com", "tv.youtube.com",
+)
+
+
+def je_drm_storitev(url: str) -> bool:
+    from urllib.parse import urlsplit
+    try:
+        deli = urlsplit(str(url or "").strip())
+    except ValueError:
+        return False
+    if deli.scheme.lower() not in ("http", "https"):
+        return False
+    gostitelj = (deli.hostname or "").lower()
+    pot = gostitelj + (deli.path or "")
+    for domena in DRM_DOMENE:
+        if "/" in domena:
+            if pot.startswith(domena) or pot.startswith("www." + domena):
+                return True
+        elif gostitelj == domena or gostitelj.endswith("." + domena):
+            return True
+    return False
+
+
+def najdi_edge() -> Optional[str]:
+    kandidati = []
+    for spremenljivka in ("PROGRAMFILES(X86)", "PROGRAMFILES", "LOCALAPPDATA"):
+        koren = os.environ.get(spremenljivka)
+        if koren:
+            kandidati.append(os.path.join(koren, "Microsoft", "Edge", "Application", "msedge.exe"))
+    for pot in kandidati:
+        if os.path.isfile(pot):
+            return pot
+    return shutil.which("msedge")
+
+
+def odpri_drm_storitev(url: str) -> dict:
+    """Odpre DRM storitev v Edge (nacin aplikacije); brez Edge v privzetem brskalniku."""
+    edge = najdi_edge()
+    if edge:
+        try:
+            subprocess.Popen([edge, "--app=" + url, "--start-maximized"], close_fds=True)
+            return {"zunanje": True, "brskalnik": "Microsoft Edge"}
+        except OSError:
+            pass
+    try:
+        os.startfile(url)  # type: ignore[attr-defined]
+        return {"zunanje": True, "brskalnik": "privzeti brskalnik"}
+    except (OSError, AttributeError):
+        return {"zunanje": False}

@@ -284,8 +284,11 @@
   }
   function otvoriSpletnoStran(url, ime) {
     zabeleziNedavno({ vrsta: "stran", url: url, ime: ime });
-    pojdi("splet");
-    klic("splet", [url]);
+    klic("splet", [url]).then(function (r) {
+      // Storitve z DRM (Netflix ...) odpre Edge, ker vgrajeni pogon nima Widevine.
+      if (r && r.zunanje) { obvesti((ime || imeIzNaslova(url)) + " se odpira v " + r.brskalnik + " (zaščitena vsebina, DRM)."); return; }
+      pojdi("splet");
+    });
   }
 
   // ------------------------------------------------------------------ nedavne aplikacije
