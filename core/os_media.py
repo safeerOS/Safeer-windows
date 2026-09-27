@@ -1480,11 +1480,13 @@ class MediaCenter:
         self._shrani_predpomnilnik()
 
     def kljuc_kataloga(self, query: str = "", kind: str = "vse", genre: str = "", page: int = 1,
-                       razvrsti: str = "", izklopljeni: Iterable[str] = (), samo_lokalno: bool = False) -> str:
+                       razvrsti: str = "", izklopljeni: Iterable[str] = (), samo_lokalno: bool = False,
+                       izklopljeni_jeziki: Iterable[str] = ()) -> str:
         # Prvi element je razlicica oblike pogleda: ob spremembi vrstnega reda stari pogledi ne veljajo.
-        return json.dumps(["v3", _text(query, 120).casefold(), kind or "vse", _text(genre, 20),
+        return json.dumps(["v4", _text(query, 120).casefold(), kind or "vse", _text(genre, 20),
                            max(1, int(page or 1)), self.izbrana_drzava or "auto", razvrsti or "",
-                           sorted({str(x) for x in (izklopljeni or []) if x}), bool(samo_lokalno)], ensure_ascii=False)
+                           sorted({str(x) for x in (izklopljeni or []) if x}), bool(samo_lokalno),
+                           sorted({str(x) for x in (izklopljeni_jeziki or []) if x})], ensure_ascii=False)
 
     def _zapomni_katalog(self, kljuc: str, rezultat: dict) -> None:
         shranjeno = {k: v for k, v in rezultat.items() if k not in ("viri", "mape", "kljuc", "iz_predpomnilnika", "osvezujem")}
@@ -1495,14 +1497,15 @@ class MediaCenter:
 
     def catalog_hitro(self, query: str = "", kind: str = "vse", genre: str = "", page: int = 1,
                       ob_osvezitvi=None, razvrsti: str = "", izklopljeni: Iterable[str] = (),
-                      samo_lokalno: bool = False) -> dict:
+                      samo_lokalno: bool = False, izklopljeni_jeziki: Iterable[str] = ()) -> dict:
         """Katalog najprej iz predpomnilnika (takoj), nato sveze v ozadju.
 
         ob_osvezitvi(kljuc, rezultat) se poklice samo, ce se je vsebina v ozadju res spremenila.
         Ce pogleda se ni v predpomnilniku, ga nalozimo normalno in shranimo za naslednjic.
         """
         izklopljeni = sorted({str(x) for x in (izklopljeni or []) if x})
-        moznosti = {"razvrsti": razvrsti or "", "izklopljeni": izklopljeni, "samo_lokalno": bool(samo_lokalno)}
+        moznosti = {"razvrsti": razvrsti or "", "izklopljeni": izklopljeni, "samo_lokalno": bool(samo_lokalno),
+                    "izklopljeni_jeziki": sorted({str(x) for x in (izklopljeni_jeziki or []) if x})}
         kljuc = self.kljuc_kataloga(query, kind, genre, page, **moznosti)
         if samo_lokalno:
             # Krajevne datoteke so takoj na voljo: brez predpomnilnika (vedno sveze).
@@ -2196,6 +2199,7 @@ class MediaCenter:
             "ocena": rating,
             "zanri": genres,
             "ozadje": backdrop,
+            "jezik": zakoniti_viri.jezik_koda(raw.get("original_language")),
             "media_type": media_type,
         })
         self._dynamic_items[prepared["id"]] = prepared
@@ -2300,8 +2304,17 @@ class MediaCenter:
                             viri=list(dict.fromkeys(r.get("vir", "") for r in ostale if r.get("vir")))))
         return out
 
+    @staticmethod
+    def _filtriraj_jezike(items: list[dict], izklopljeni_jeziki: set[str]) -> list[dict]:
+        """Zacasno izklopljeni jeziki; vnosi brez znanega jezika ostanejo (jih ne skrivamo po nakljucju)."""
+        if not izklopljeni_jeziki:
+            return items
+        return [x for x in items if str(x.get("jezik") or "") not in izklopljeni_jeziki]
+
     def catalog(self, query: str = "", kind: str = "vse", genre: str = "", page: int = 1,
-                razvrsti: str = "", izklopljeni: Iterable[str] = (), samo_lokalno: bool = False) -> dict:
+                razvrsti: str = "", izklopljeni: Iterable[str] = (), samo_lokalno: bool = False,
+                izklopljeni_jeziki: Iterable[str] = ()) -> dict:
+        izklopljeni_jeziki = {str(x) for x in (izklopljeni_jeziki or []) if x}
         razvrsti = razvrsti if razvrsti in self.RAZVRSTITVE else ""
         izklopljeni = {str(x) for x in (izklopljeni or []) if x}
         if samo_lokalno:
@@ -2360,6 +2373,16 @@ class MediaCenter:
             personal = [item for item in personal if any(z in str(item.get("zanri") or "").casefold() for z in iskane)]
         if kind not in ("", "vse"):
             personal = [item for item in personal if item.get("vrsta") == kind]
+        # Vsak vnos mora imeti oznako vira, sicer ga uporabnik ne more zacasno izklopiti
+        # (zakoniti viri - PeerTube, Jamendo, radio, TV - so jo prej imeli le kot besedilo "vir").
+        def z_oznako(vnosi: list) -> list:
+            out = []
+            for vnos in vnosi:
+                if isinstance(vnos, dict) and not vnos.get("vir_id") and vnos.get("vir"):
+                    vnos = dict(vnos, vir_id="vir:" + re.sub(r"\s+", " ", str(vnos["vir"])).strip().casefold()[:80])
+                out.append(vnos)
+            return out
+        dynamic, lawful, personal, remote = z_oznako(dynamic), z_oznako(lawful), z_oznako(personal), z_oznako(remote)
         # Privzeto (Priporoceno): najprej najboljsi viri, v vsakem najbolj priljubljena vsebina.
         # Viri ze vracajo vsebino po priljubljenosti (TMDB popular/trending, javna last po prenosih,
         # PeerTube po ogledih, Jamendo po poslusanjih, radio po klikih) - ta vrstni red ohranimo.
@@ -2391,6 +2414,7 @@ class MediaCenter:
                 return any(difflib.SequenceMatcher(None, needle, token).ratio() >= 0.72
                            for token in re.findall(r"[\wÀ-ž]{3,}", hay))
             merged = [item for item in merged if zadetek(item)]
+        merged = self._filtriraj_jezike(merged, izklopljeni_jeziki)
         merged = self._razvrsti_vnose(merged, razvrsti)
         total_pages = (tmdb_pages if (self._ima_embed_vir(data) and not tmdb_izklopljen and tmdb_pages > 1
                                       and kind in ("", "vse", "film", "serija"))

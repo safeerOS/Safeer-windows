@@ -24,6 +24,35 @@ _PEERTUBE_SUMLJIVO = re.compile(
 # Zbirka feature_films vsebuje tudi uporabniske nalozbe, zato brez licence ne prikazemo nicesar.
 ARCHIVE_PD_QUERY = "collection:feature_films AND mediatype:movies AND licenseurl:*publicdomain*"
 _ARCHIVE_SUMLJIVO = re.compile(r"torrent|\b(?:dvd|br|web|hd|bd)?rip\b|\bhdcam\b|\bx26[45]\b|\bxvid\b|\bcam\b", re.I)
+# Jezik vsebine kot koda ISO 639-1 (za filter jezikov); sprejme kode, angleska in slovenska imena.
+_JEZIKI = {
+    "eng": "en", "english": "en", "anglescina": "en", "angleščina": "en",
+    "deu": "de", "ger": "de", "german": "de", "deutsch": "de", "nemscina": "de", "nemščina": "de",
+    "fra": "fr", "fre": "fr", "french": "fr", "francais": "fr", "français": "fr", "francoscina": "fr", "francoščina": "fr",
+    "spa": "es", "spanish": "es", "espanol": "es", "español": "es", "spanscina": "es", "španščina": "es",
+    "ita": "it", "italian": "it", "italiano": "it", "italijanscina": "it", "italijanščina": "it",
+    "slv": "sl", "slovenian": "sl", "slovene": "sl", "slovenscina": "sl", "slovenščina": "sl",
+    "hrv": "hr", "croatian": "hr", "hrvascina": "hr", "hrvaščina": "hr", "srp": "sr", "serbian": "sr",
+    "por": "pt", "portuguese": "pt", "rus": "ru", "russian": "ru", "jpn": "ja", "japanese": "ja",
+    "kor": "ko", "korean": "ko", "koreanscina": "ko", "korejščina": "ko", "zho": "zh", "chi": "zh", "chinese": "zh",
+    "ara": "ar", "arabic": "ar", "arabscina": "ar", "arabščina": "ar", "tur": "tr", "turkish": "tr", "turscina": "tr", "turščina": "tr",
+    "nld": "nl", "dut": "nl", "dutch": "nl", "pol": "pl", "polish": "pl", "hin": "hi", "hindi": "hi",
+    "swe": "sv", "swedish": "sv", "hun": "hu", "hungarian": "hu", "ces": "cs", "cze": "cs", "czech": "cs",
+}
+
+
+def jezik_koda(vrednost) -> str:
+    if isinstance(vrednost, list):
+        vrednost = vrednost[0] if vrednost else ""
+    besedilo = str(vrednost or "").strip().lower().split(",")[0].split(";")[0].strip()
+    besedilo = besedilo.split("-")[0].split("_")[0]
+    if not besedilo or besedilo in ("und", "zxx", "mul", "xx"):
+        return ""
+    if besedilo in _JEZIKI:
+        return _JEZIKI[besedilo]
+    return besedilo if re.fullmatch(r"[a-z]{2}", besedilo) else ""
+
+
 JAMENDO_CLIENT_ID = "8d37f069"  # Javen client_id aplikacije Safeer TV.
 RADIO_TAGS = ("jazz", "rock", "pop", "news", "classical", "electronic")
 #: Glasbene zvrsti za Glasbo in Radio v Medijskem centru (kot zanri pri filmih):
@@ -92,7 +121,7 @@ def tv_v_zivo(drzava: str = "") -> list[dict]:
         if samo and samo != (drzava or "").upper():
             continue
         vnos = {"id": "tv:" + kljuc, "naslov": ime, "vrsta": "tv-v-zivo", "vir": ime, "drzava": izvor,
-                "opis": "Uradni prenos v živo · " + DRZAVE.get(izvor, izvor) + " · " + jezik, "slika": "", "jezik": jezik}
+                "opis": "Uradni prenos v živo · " + DRZAVE.get(izvor, izvor) + " · " + jezik, "slika": "", "jezik": jezik_koda(jezik) or jezik}
         if url:
             vnos.update(url=url, mime="application/vnd.apple.mpegurl")
         else:
@@ -199,6 +228,7 @@ class ZakonitiViri:
             "izvajalec": channel.get("displayName") or account.get("displayName") or host,
             "trajanje": duration, "v_zivo": live, "skupina": category,
             "vir": "PeerTube · " + host, "streznik": host,
+            "jezik": jezik_koda((row.get("language") or {}).get("id") if isinstance(row.get("language"), dict) else row.get("language")),
             "peertube_uuid": video_id,
         }
 
@@ -387,7 +417,8 @@ class ZakonitiViri:
                 "url": url, "slika": row.get("favicon") or "", "izvajalec": row.get("country") or "",
                 "opis": " · ".join(part for part in (row.get("country"), codec, (str(bitrate) + " kb/s") if bitrate else "") if part),
                 "codec": codec, "bitrate": bitrate, "drzava": row.get("countrycode", ""),
-                "zanri": row.get("tags", ""), "skupina": group, "vir": "Radio Browser"}
+                "zanri": row.get("tags", ""), "skupina": group, "vir": "Radio Browser",
+                "jezik": jezik_koda(row.get("languagecodes") or row.get("language"))}
 
     def _archive_datoteka(self, ident: str) -> tuple[str, int] | None:
         """Neposredna datoteka MP4 (H.264) izdelka; brez nje filma ne pokazemo."""
@@ -423,7 +454,7 @@ class ZakonitiViri:
         iskanje = re.sub(r"[^\w\s-]", " ", query or "", flags=re.UNICODE).strip()
         q = ARCHIVE_PD_QUERY + (" AND title:(%s)" % iskanje if iskanje else "")
         url = "https://archive.org/advancedsearch.php?" + urllib.parse.urlencode(
-            [("q", q), ("fl[]", "identifier"), ("fl[]", "title"), ("fl[]", "year"), ("fl[]", "description"), ("fl[]", "format"),
+            [("q", q), ("fl[]", "identifier"), ("fl[]", "title"), ("fl[]", "year"), ("fl[]", "description"), ("fl[]", "format"), ("fl[]", "language"),
              ("sort[]", "downloads desc"), ("rows", "40"), ("output", "json")])
 
         def fetch():
@@ -452,6 +483,7 @@ class ZakonitiViri:
                     "slika": "https://archive.org/services/img/" + urllib.parse.quote(ident, safe=""),
                     "opis": re.sub(r"<[^>]+>", " ", opis)[:600],
                     "vir": "Internet Archive · javna last", "vir_id": "archive-javna-last", "skupina": "Javna last",
+                    "jezik": jezik_koda(v.get("language")),
                 })
             return out
 

@@ -199,3 +199,34 @@ class PeerTubeFilterTest(unittest.TestCase):
         for naslov in ("Snowden (Film Completo Italiano in streaming)", "Inside Job (documentario completo in streaming ITA)",
                        "cats - the living tombstone 10 hours [LCrCCgjdKx8]", "Neki film 2020 WEBRip"):
             self.assertIsNone(v._peertube_video({"name": naslov, "uuid": "u2"}, "tilvids.com", "x"), naslov)
+
+
+class OznakaViraInJezikTest(unittest.TestCase):
+    def _center(self, td):
+        center = os_media.MediaCenter(td, roots=[])
+        center._ima_embed_vir = lambda data=None: False
+        center._zakoniti_viri.get = lambda *a, **k: [
+            {"naslov": "A", "vrsta": "video", "url": "https://framatube.org/w/1", "vir": "PeerTube · framatube.org", "jezik": "fr"},
+            {"naslov": "B", "vrsta": "video", "url": "https://tilvids.com/w/2", "vir": "PeerTube · tilvids.com", "jezik": "en"},
+            {"naslov": "C", "vrsta": "video", "url": "https://tilvids.com/w/3", "vir": "PeerTube · tilvids.com"}]
+        center._personal_items = lambda q: []
+        return center
+
+    def test_zakoniti_vnosi_dobijo_oznako_in_jih_je_mogoce_izklopiti(self):
+        with tempfile.TemporaryDirectory() as td:
+            center = self._center(td)
+            r = center.catalog("", "video")
+            izklop = next(x["vir_id"] for x in r["vnosi"] if x["naslov"] == "A")
+            r2 = center.catalog("", "video", izklopljeni=[izklop])
+            self.assertEqual(sorted(x["naslov"] for x in r2["vnosi"]), ["B", "C"])
+
+    def test_izklop_jezika_vnosi_brez_jezika_ostanejo(self):
+        with tempfile.TemporaryDirectory() as td:
+            r = self._center(td).catalog("", "video", izklopljeni_jeziki=["fr"])
+            self.assertEqual(sorted(x["naslov"] for x in r["vnosi"]), ["B", "C"])
+
+    def test_jezik_koda(self):
+        from core import zakoniti_viri as z
+        for vhod, izhod in (("English", "en"), ("eng", "en"), ("slovenščina", "sl"), ("de-DE", "de"), ("en,de", "en"),
+                            (["French"], "fr"), ("und", ""), ("", "")):
+            self.assertEqual(z.jezik_koda(vhod), izhod, vhod)
