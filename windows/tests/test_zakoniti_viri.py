@@ -153,6 +153,28 @@ class TestZakonitiViri(unittest.TestCase):
         self.assertIn("t=", urls[0])
         self.assertNotIn("private-password", urls[0])
 
+    def test_soundcloud_uses_official_player_without_reading_the_page(self):
+        with tempfile.TemporaryDirectory() as directory:
+            center = MediaCenter(directory, roots=[])
+            center._izmeri_ping = lambda _url: None
+            center._download = mock.Mock(side_effect=AssertionError("SoundCloud page must not be fetched"))
+            added = center.add_source("https://soundcloud.com/artist/public-track", "Public track")
+            self.assertTrue(added["ok"])
+            item = center.catalog(kind="glasba")["vnosi"][0]
+            self.assertEqual(item["vrsta"], "glasba")
+            self.assertTrue(item["url"].startswith("https://w.soundcloud.com/player/?"))
+            center._download.assert_not_called()
+
+    def test_bandcamp_requires_official_embedded_player_link(self):
+        with tempfile.TemporaryDirectory() as directory:
+            center = MediaCenter(directory, roots=[])
+            center._izmeri_ping = lambda _url: None
+            center._download = mock.Mock(side_effect=AssertionError("Bandcamp page must not be fetched"))
+            added = center.add_source("https://artist.bandcamp.com/track/public-song", "Song")
+            self.assertFalse(added["ok"])
+            self.assertIn("EmbeddedPlayer", added["napaka"])
+            center._download.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
