@@ -1885,7 +1885,8 @@
     // Protocol v1: naprava pove platformo in vrsto sama; ugibanje po imenu ostane za naprave 0.2.
     var pl = (naprava && naprava.platforma) || "";
     var vr = (naprava && naprava.vrsta) || "";
-    if (pl === "tv" || vr === "screen" && pl !== "tablet") return "tv";
+    // "screen" pove le, da naprava zna prikazati zaslon (tudi telefon); TV je samo brez druge platforme.
+    if (pl === "tv" || (vr === "screen" && !pl)) return "tv";
     if (pl === "linux" || pl === "windows" || pl === "win32" || pl === "macos" ||
         vr === "computer" || vr === "racunalnik" || vr === "control") return "racunalnik";
     if (pl === "phone" || pl === "tablet" || vr === "handheld") return "telefon";
