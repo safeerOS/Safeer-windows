@@ -267,6 +267,7 @@
     if (razdelek === "naprave") { osveziPovezavo(); napraveZanka(); }
     if (razdelek === "nastavitve") {
       narisiNastavitve(); nalozScit(); scitZanka(); naloziMedia();
+      naloziMediaWatchSettings();
       var mediaPlosca = $("mediaNastavitvePlosca"), mediaMesto = $("mediaNastavitveMesto");
       if (mediaPlosca && mediaMesto && mediaPlosca.parentNode !== mediaMesto) mediaMesto.appendChild(mediaPlosca);
       if (mediaPlosca) mediaPlosca.hidden = false;
@@ -2171,6 +2172,56 @@
   function zapriMediaPodrobnosti() {
     var panel = $("mediaPodrobnosti"); if (panel) panel.hidden = true;
   }
+  function mediaWatchCountryName(code, fallback) {
+    try { return new Intl.DisplayNames([LOKALE[jezik] || "en-GB"], {type:"region"}).of(code) || fallback || code; }
+    catch (_) { return fallback || code; }
+  }
+  function naloziMediaWatchSettings() {
+    var select = $("mediaWatchCountry"); if (!select) return;
+    klic("mediaWatchSettings", [jezik]).then(function (settings) {
+      if (!settings) return;
+      var automatic = document.createElement("option"); automatic.value = "auto";
+      automatic.textContent = t("mediaWatchAuto", {country:mediaWatchCountryName(settings.zaznana, settings.ime_zaznane)});
+      select.replaceChildren(automatic);
+      (settings.regions || []).slice().sort(function (a,b) {
+        return String(a.native_name || a.english_name).localeCompare(String(b.native_name || b.english_name), LOKALE[jezik] || "en");
+      }).forEach(function (region) {
+        var option = document.createElement("option"); option.value = region.code;
+        option.textContent = mediaWatchCountryName(region.code, region.native_name || region.english_name);
+        select.appendChild(option);
+      });
+      select.value = settings.izbrana || "auto";
+      if (!select.value) select.value = "auto";
+    }).catch(function () {});
+  }
+  on("mediaWatchCountry", "change", function () {
+    klic("mediaWatchCountry", [this.value]).then(function () { obvesti(t("mediaOsvezeno")); })
+      .catch(function () { obvesti(t("mediaVirNapaka")); });
+  });
+  function narisiMediaWatchProviders(item) {
+    var target = $("mediaWatchProviders"); if (!target) return;
+    target.innerHTML = "";
+    var data = item.kje_gledati || {};
+    var countryName = mediaWatchCountryName(data.drzava, data.ime_drzave);
+    target.appendChild(el("h3", "", t("mediaWatchTitle", {country:countryName})));
+    var groups = data.skupine || [];
+    if (!groups.length) target.appendChild(el("p", "", t("mediaWatchNone", {country:countryName})));
+    var groupLabels = {"naročnina":"mediaWatchSubscription", "brezplačno":"mediaWatchFree", "izposoja":"mediaWatchRent", "nakup":"mediaWatchBuy"};
+    groups.forEach(function (group) {
+      var section = el("div", "media-kje-gledati-skupina");
+      section.appendChild(el("h4", "", t(groupLabels[group.id] || group.id)));
+      var providers = el("div", "media-ponudniki");
+      (group.ponudniki || []).forEach(function (provider) {
+        var button = el("button", "media-ponudnik", ""); button.type = "button";
+        if (provider.logo) { var logo = document.createElement("img"); logo.src = provider.logo; logo.alt = ""; logo.loading = "lazy"; button.appendChild(logo); }
+        button.appendChild(el("span", "", ubezi(provider.ime || "")));
+        button.onclick = function () { if (provider.povezava) klic("splet", [provider.povezava]); };
+        providers.appendChild(button);
+      });
+      section.appendChild(providers); target.appendChild(section);
+    });
+    target.appendChild(el("p", "media-kje-gledati-vira", t("mediaWatchSource")));
+  }
   function naloziMediaSezono(item, season, button) {
     document.querySelectorAll("#mediaSezone button").forEach(function (b) { b.classList.toggle("izbran", b === button); });
     $("mediaEpizode").innerHTML = '<div class="prazno">Nalagam epizode …</div>';
@@ -2196,7 +2247,7 @@
     });
   }
   function odpriMediaPodrobnosti(id) {
-    klic("mediaPodrobnosti", [id]).then(function (item) {
+    klic("mediaPodrobnosti", [id, jezik]).then(function (item) {
       if (!item) return;
       var panel = $("mediaPodrobnosti"); panel.hidden = false;
       var hero = $("mediaPodrobnostiJunak"); hero.innerHTML = "";
@@ -2204,6 +2255,7 @@
       var info = el("div"); info.appendChild(el("h2", "", ubezi(item.naslov || "")));
       info.appendChild(el("p", "media-detail-meta", ubezi([item.leto, item.ocena ? "★ " + item.ocena : "", item.vrsta === "serija" ? "Serija" : "Film"].filter(Boolean).join(" · "))));
       if (item.opis) info.appendChild(el("p", "", ubezi(item.opis))); hero.appendChild(info);
+      narisiMediaWatchProviders(item);
       var seasons = $("mediaSezone"); seasons.innerHTML = "";
       var episodes = $("mediaEpizode"); episodes.innerHTML = "";
 
