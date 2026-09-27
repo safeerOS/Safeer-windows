@@ -508,7 +508,21 @@
     b.addEventListener("click", function () { obvesti(t("odpiram", { ime: a.ime })); klic("splet", [a.url]); });
     return b;
   }
+  // Kartica "Spletne aplikacije" na novi domaci strani: vse dodane spletne
+  // aplikacije kot ploscice, klik jo odpre v vgrajenem Safeer brskalniku.
+  function narisiDomaceSpletne() {
+    var cilj = $("domaceSpletneApp");
+    if (!cilj) return;
+    cilj.innerHTML = "";
+    var seznam = spletne();
+    if (!seznam.length) {
+      cilj.appendChild(el("p", "drobno", ubezi("Še ni spletnih aplikacij. Klikni »+ Dodaj« in vpiši naslov strani.")));
+      return;
+    }
+    seznam.forEach(function (a, i) { cilj.appendChild(ploscicaSpletne(a, i)); });
+  }
   function narisiDomov() {
+    narisiDomaceSpletne();
     var vrsta = $("domaciProgrami");
     if (!vrsta) return;
     var sirina = vrsta.clientWidth || 1000;
@@ -1826,6 +1840,8 @@
       zapriSloje();
     }); });
     on("dodajPreklici", "click", zapriSloje);
+    // Gumb "+ Dodaj" na kartici Spletne aplikacije (nova domaca stran).
+    on("gumbOdpriDodajApp", "click", odpriDodaj);
     on("obrazecDodaj", "submit", function (e) {
       e.preventDefault();
       var naslov = normalizirajNaslov($("dodajNaslov").value);
