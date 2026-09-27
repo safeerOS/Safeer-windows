@@ -72,6 +72,8 @@ class SafeerControlBackend:
         self._prijava: Optional[dict] = None
         self._qr: Optional[dict] = None
         self._qr_rod = 0
+        self._vabilo: Optional[dict] = None
+        self._vabilo_rod = 0
         self._cakajoci: Dict[str, list] = {}
         self._poslusavci: List[Callable[[str, Any], None]] = []
         self._povezovanje = False
@@ -591,6 +593,67 @@ class SafeerControlBackend:
         if prijava and hub:
             threading.Thread(target=lambda: link_hub.preklici_qr(hub, prijava, self.device_id), daemon=True).start()
 
+    # ------------------------------------------------------------------ Vabilo za novo napravo
+    def zacni_vabilo(self) -> None:
+        """Pripravi skupno QR in 6-mestno vabilo sredisca v delovni niti."""
+        threading.Thread(target=self._zacni_vabilo, name="safeer-link-vabilo", daemon=True).start()
+
+    def _zacni_vabilo(self) -> None:
+        """Obnavlja isto vabilo, iz katerega stran dobi QR, pin in veljavnost."""
+        self._vabilo_rod += 1
+        rod = self._vabilo_rod
+        naslov, zeton, odtis = self.hub_url(), self.zeton(), self.hub_fp()
+        if not naslov or not zeton:
+            self._oddaj_dogodek("vabilo", {"napaka": "ni_seznanjena"})
+            return
+
+        staro = self._vabilo
+        vabilo = link_hub.povabi(naslov, zeton, odtis, str((staro or {}).get("qr_id") or ""))
+        if rod != self._vabilo_rod:
+            if vabilo.get("qr_id"):
+                link_hub.preklici_vabilo(naslov, zeton, odtis, str(vabilo["qr_id"]))
+            return
+        if vabilo.get("napaka"):
+            self._oddaj_dogodek("vabilo", vabilo)
+            return
+
+        self._vabilo = vabilo
+        self._oddaj_dogodek("vabilo", {
+            "svg": link_hub.qr_svg(str(vabilo["povezava"])),
+            "velja": int(vabilo.get("velja") or 300),
+            "pin": str(vabilo.get("pin") or ""),
+        })
+        konec = time.time() + max(30, int(vabilo.get("velja") or 300) - 20)
+        while rod == self._vabilo_rod:
+            time.sleep(2.0)
+            if rod != self._vabilo_rod:
+                return
+            if time.time() > konec:
+                self.zacni_vabilo()
+                return
+            stanje = link_hub.stanje_vabila(naslov, zeton, odtis, str(vabilo["qr_id"]))
+            if stanje.get("pridruzen"):
+                self._vabilo = None
+                self._oddaj_dogodek("vabilo", {"pridruzen": str(stanje["pridruzen"])})
+                # Okno ostane pripravljeno za naslednjo napravo z novim vabilom.
+                self.zacni_vabilo()
+                return
+            if not stanje.get("caka") and not stanje.get("napaka"):
+                self.zacni_vabilo()
+                return
+
+    def prekini_vabilo(self) -> None:
+        """Zapre odprto vabilo in ga preklice tudi na srediscu."""
+        self._vabilo_rod += 1
+        staro, self._vabilo = self._vabilo, None
+        naslov, zeton, odtis = self.hub_url(), self.zeton(), self.hub_fp()
+        if staro and naslov and zeton:
+            threading.Thread(
+                target=lambda: link_hub.preklici_vabilo(naslov, zeton, odtis, str(staro["qr_id"])),
+                name="safeer-link-vabilo-preklic",
+                daemon=True,
+            ).start()
+
     def povezi_naprave(self) -> None:
         self.nastavitve["brez_povezave"] = False
         self.shrani_nastavitve()
@@ -601,13 +664,15 @@ class SafeerControlBackend:
                     self.zagotovi_lokalni_hub()
             if self.zeton() and self.hub_url():
                 self.povezi_se()
-            self.zacni_qr()
+            self._oddaj_dogodek("stanje", self.stanje_linka())
+            self.zacni_vabilo()
 
         threading.Thread(target=pripravi, name="safeer-link-priprava", daemon=True).start()
         self._oddaj_dogodek("brezPovezave", False)
         self._oddaj_dogodek("stanje", self.stanje_linka())
 
     def koncaj(self) -> None:
+        self.prekini_vabilo()
         self.prekini_qr()
         self.koncaj_deljenje_zaslona()
         if self.povezava is not None:

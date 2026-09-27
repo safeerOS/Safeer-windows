@@ -35,15 +35,19 @@ class TestOsWindows(unittest.TestCase):
         self.assertEqual(media_diagnostics.source_rejection(nepovezan_asset, "https://vidsrc.to/embed/123"), "")
 
     def test_safeer_control_pairing_has_qr_display_and_symmetric_code_input(self):
-        """Obe Windows napravi lahko kodo pokažeta ali vneseta, kot na Androidu."""
+        """Okno uporablja skupno vabilo za QR in kodo ter omogoca tudi vnos kode."""
         root = Path(__file__).resolve().parents[2]
         html = (root / "assets" / "link" / "index.html").read_text(encoding="utf-8")
         js = (root / "assets" / "link" / "link.js").read_text(encoding="utf-8")
         self.assertIn('id="vabiloQr"', html)
-        self.assertIn('id="vabiloLokalnaKoda"', html)
+        self.assertIn('id="vabiloPin"', html)
+        self.assertIn('data-t="vabiloAli"', html)
+        self.assertIn('id="gumbVabiloZapri"', html)
         self.assertIn('id="vabiloVnosKode"', html)
         self.assertIn('id="gumbVabiloVnosKode"', html)
         self.assertIn('most.potrdiKodo(koda)', js)
+        self.assertIn('oblikujPin(p.pin)', js)
+        self.assertIn('pokazi("vabiloPinBlok", !!pin)', js)
         self.assertIn('id="prijavaVnosKode"', html)
 
     def test_google_auth_urls_detected(self):

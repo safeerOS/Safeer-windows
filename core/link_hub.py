@@ -586,7 +586,11 @@ def seja_s_podpisom(ws_naslov: str, device_id: str, odtis: str, ime: str = "") -
 
 def povabi(ws_naslov: str, zeton: str, odtis: str, preklici: str = "") -> dict:
     """»Poveži novo napravo«: sredisce ustvari enkratno kodo za pridruzitev (kot jo pokaze na svojem zaslonu).
-    Vrne {"qr_id", "povezava", "velja"} ali {"napaka": "hub_star" | "ni_huba" | "ni_seznanjena"}.
+    Vrne {"qr_id", "povezava", "velja", "pin"} ali
+    {"napaka": "hub_star" | "ni_huba" | "ni_seznanjena"}.
+
+    Starejse sredisce lahko veljavno vabilo vrne brez polja pin/code. V tem
+    primeru je pin prazen, QR pa ostane uporaben.
 
     Povezava je ista kot na televizorju: https://safeer.si/p#j=<id>&s=<skrivnost>&f=<odtis>&a=<naslov:vrata>
     - skrivnost je za #, zato je streznik strani nikoli ne vidi; telefon se pripne na odtis."""
@@ -603,7 +607,11 @@ def povabi(ws_naslov: str, zeton: str, odtis: str, preklici: str = "") -> dict:
         return {"napaka": "ni_huba"}
     u = urlparse(ws_naslov)
     naslov = "%s:%d" % (u.hostname, u.port or 443)
-    return {"qr_id": qr_id, "velja": int(odgovor.get("expires_in_seconds") or 300),
+    pin = str(odgovor.get("pin") or odgovor.get("code") or "")
+    pin = "".join(znak for znak in pin if znak.isdigit())
+    if len(pin) != 6:
+        pin = ""
+    return {"qr_id": qr_id, "velja": int(odgovor.get("expires_in_seconds") or 300), "pin": pin,
             "povezava": povezava_vabila(u.hostname or "", int(odgovor.get("web_port") or 0), qr_id, skrivnost, fp, naslov)}
 
 
