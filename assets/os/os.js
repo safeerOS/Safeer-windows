@@ -2017,7 +2017,10 @@
 
     var pl = $("mediaPredvajalnik");
     if (pl) { pl.hidden = false; pl.classList.remove("kino"); }
-    $("mediaNapaka").hidden = true;
+    var napakaEl = $("mediaNapaka");
+    napakaEl.hidden = true;
+    napakaEl.classList.remove("media-opozorilo");
+    napakaEl.textContent = t("mediaNapaka");
     $("mediaPredvajalnikNaslov").textContent = item.naslov || "Safeer Media";
 
     var metaSeznam = [item.izvajalec];
@@ -2067,22 +2070,18 @@
     } else {
       if (iframe && /^https?:\/\//i.test(url)) {
         iframe.hidden = false;
-        $("mediaNapaka").hidden = true;
-        // onload pomeni samo, da je HTML prispel - embed player se sele inicializira.
-        // Watchdog ostane aktiven, da zazna stall (prazna stran, blokiran domain).
-        iframe.onload = function () {};
-        iframe.onerror = function () {
-          if (media.timer) window.clearTimeout(media.timer);
-          media.timer = 0;
-          if (!poskusiNaslednjo()) $("mediaNapaka").hidden = false;
-        };
+        napakaEl.hidden = true;
         iframe.src = url;
-        // 18 sekund za inicializacijo; ce ne zacne, preidemo na naslednji vir.
+        // Cross-origin iframe ne razkrije stanja svojega predvajalnika.
+        // Potek časa zato ni dokaz, da je ponudnik tok zavrnil: ne skrij
+        // iframe-a in ne pošiljaj dodatnih zahtev na naslednje ponudnike.
         media.timer = window.setTimeout(function () {
           media.timer = 0;
-          if (!poskusiNaslednjo()) { iframe.hidden = true; $("mediaNapaka").hidden = false; }
-        }, 18000);
-      } else $("mediaNapaka").hidden = false;
+          napakaEl.textContent = mediaZunanjiStatus();
+          napakaEl.classList.add("media-opozorilo");
+          napakaEl.hidden = false;
+        }, 45000);
+      } else napakaEl.hidden = false;
     }
     var choices = $("mediaRazlicice"); choices.innerHTML = "";
     variants.forEach(function (entry, i) {
@@ -2090,6 +2089,18 @@
       button.onclick = function () { predvajajHtml(item, i); }; choices.appendChild(button);
     });
     $("vsebina").scrollTop = 0;
+  }
+  function mediaZunanjiStatus() {
+    var jezik = (document.documentElement.lang || "sl").toLowerCase().split("-")[0];
+    var sporocila = {
+      sl: "Safeer ne more preveriti stanja zunanjega predvajalnika. Če je zaslon še vedno črn, izberi drugo različico.",
+      en: "Safeer cannot inspect this external player. If the screen is still blank, try another version.",
+      de: "Safeer kann diesen externen Player nicht überprüfen. Wenn der Bildschirm noch schwarz ist, probiere eine andere Version.",
+      es: "Safeer no puede comprobar este reproductor externo. Si la pantalla sigue en negro, prueba otra versión.",
+      fr: "Safeer ne peut pas vérifier ce lecteur externe. Si l’écran est toujours noir, essayez une autre version.",
+      it: "Safeer non può verificare questo lettore esterno. Se lo schermo è ancora nero, prova un’altra versione."
+    };
+    return sporocila[jezik] || sporocila.sl;
   }
   function odpriMedia(id) {
     klic("mediaPredvajaj", [id]).then(function (item) {

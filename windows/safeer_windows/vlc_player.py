@@ -93,8 +93,12 @@ class VlcPlayerWidget(QWidget):
         header.addLayout(labels, 1)
         back = QPushButton("←  Nazaj v Safeer OS")
         back.clicked.connect(self.close_player)
+        fullscreen = QPushButton("⛶  Celozaslonsko")
+        fullscreen.clicked.connect(lambda: self.window().preklopi_celozaslonsko())
+        header.addWidget(fullscreen)
         header.addWidget(back)
         root.addLayout(header)
+        self._fullscreen_header_widgets = [brand, self.title, self.meta, fullscreen, back]
 
         self.video = QFrame()
         self.video.setStyleSheet("background:#000;border-radius:14px;")
@@ -145,6 +149,18 @@ class VlcPlayerWidget(QWidget):
         controls.addWidget(self.subtitles)
         controls.addWidget(self.background)
         root.addLayout(controls)
+        self._fullscreen_control_widgets = [
+            self.play_button, stop, self.position, self.time_label, volume_label,
+            self.volume, self.variants, self.subtitles, self.background,
+        ]
+        self._player_layout = root
+
+    def set_fullscreen_ui(self, enabled: bool) -> None:
+        for widget in self._fullscreen_header_widgets + self._fullscreen_control_widgets:
+            widget.setVisible(not enabled)
+        self._player_layout.setContentsMargins(0 if enabled else 24, 0 if enabled else 20,
+                                               0 if enabled else 24, 0 if enabled else 22)
+        self.video.setStyleSheet("background:#000;border-radius:0;" if enabled else "background:#000;border-radius:14px;")
 
     def _init_vlc(self) -> None:
         if VLC is None:

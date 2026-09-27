@@ -15,6 +15,8 @@ from typing import Callable, Optional
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
+from .media_diagnostics import source_rejection
+
 
 class WebView2MediaWidget(QWidget):
     def __init__(self, on_home: Callable[[], None], parent: Optional[QWidget] = None):
@@ -29,6 +31,8 @@ class WebView2MediaWidget(QWidget):
         self.variant_index = 0
         self.opened_at = 0.0
         self.media_detected = False
+        self._last_rejection = ""
+        self._failed_variants: list[str] = []
 
         self.setStyleSheet("background:#070b12;color:#f4f7f5;")
         outer = QVBoxLayout(self)
@@ -106,6 +110,7 @@ class WebView2MediaWidget(QWidget):
         self.stop()
         self.variants = variants
         self.variant_index = 0
+        self._failed_variants = []
         return self._open_variant()
 
     def _stop_process(self) -> None:
@@ -170,6 +175,10 @@ class WebView2MediaWidget(QWidget):
             try:
                 events = Path(self.state_path).read_text(encoding="utf-8")
                 self.media_detected = '"MEDIA_RESPONSE"' in events or '"PLAYBACK_STARTED"' in events
+                if not self.media_detected and time.monotonic() - self.opened_at >= 8:
+                    self._last_rejection = source_rejection(
+                        events, str(self.variants[self.variant_index].get("url") or "")
+                    )
             except OSError:
                 pass
             if self.media_detected:
@@ -177,16 +186,33 @@ class WebView2MediaWidget(QWidget):
                 self.status_label.setText(f"Predvaja se prek {provider}")
         exited = self.process.poll() is not None
         timed_out = not self.media_detected and time.monotonic() - self.opened_at >= 18.0
+        if self._last_rejection and not self.media_detected:
+            self._next_or_report_failure(self._last_rejection)
+            return
         if (exited or timed_out) and self.variant_index + 1 < len(self.variants):
             self.variant_index += 1
             self.status_label.setText("Prvi vir se ni odzval · preklapljam …")
             self._open_variant()
         elif exited:
             self.watchdog.stop()
-            self.status_label.setText("Predvajalnik se je zaprl")
+            self._next_or_report_failure("povezava se je zaprla")
         elif timed_out:
             self.watchdog.stop()
-            self.status_label.setText("Predvajalnik je odprt · če ni slike, osveži ali se vrni")
+            self._next_or_report_failure("v 18 sekundah ni bilo video toka")
+
+    def _next_or_report_failure(self, reason: str) -> None:
+        current = self.variants[self.variant_index] if self.variant_index < len(self.variants) else {}
+        provider = str(current.get("vir") or urllib.parse.urlsplit(str(current.get("url") or "")).hostname or "vir")
+        self._failed_variants.append(f"{provider}: {reason}")
+        if self.variant_index + 1 < len(self.variants):
+            self.variant_index += 1
+            self._last_rejection = ""
+            self.status_label.setText(f"Vir zavrnil predvajanje ({reason}) · preklapljam …")
+            self._open_variant()
+            return
+        self._stop_process()
+        summary = " · ".join(self._failed_variants[-5:])
+        self.status_label.setText(f"Tega toka ni mogoče predvajati · {summary or reason}")
 
     def stop(self) -> None:
         self._stop_process()
