@@ -57,6 +57,13 @@ class SettingsTests(unittest.TestCase):
         store.set("hardware_acceleration", False)
         self.assertEqual(policy.chromium_flags("--foo", store), "--foo --disable-gpu")
 
+    def test_custom_doh_requires_valid_https_endpoint(self):
+        self.assertTrue(policy.valid_doh_url("https://dns.example/dns-query"))
+        self.assertTrue(policy.valid_doh_url("HTTPS://dns.example:443/query"))
+        for invalid in ("", "http://dns.example/query", "https:///query", "https://user:pass@dns.example/query",
+                        "https://dns.example:99999/query", "https://dns.example/a b"):
+            self.assertFalse(policy.valid_doh_url(invalid), invalid)
+
     def test_language(self):
         self.assertEqual(policy.ui_language("auto", "sl_SI"), "sl")
         self.assertEqual(policy.ui_language("auto", "Slovenian_Slovenia"), "sl")

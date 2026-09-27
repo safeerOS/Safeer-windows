@@ -243,7 +243,7 @@
     // Multi-host: datoteke drugih naprav v Safeer Linku
     napraveDatoteke: [], izbranaNapravaDatoteke: "", daljinskaPot: [],
     daljinskiKoreni: {}, daljinskiServer: {},
-    povezava: { stanje: "nov", control: true }, spletne: null, nedavne: []
+    povezava: { stanje: "nov", control: true }, spletne: null, nedavne: [], brskalnikNastavitve: null
   };
   var PRIVZETE_SPLETNE = [
     { ime: "YouTube", url: "https://www.youtube.com" },
@@ -1655,8 +1655,63 @@
     obvesti(t("odpiram", { ime: n.ime }));
     klic("nastavitve", [n.modul]).then(function (ok) { if (!ok) obvesti(t("niUspelo")); });
   }
+  function naloziNastavitveBrskalnika() {
+    return klic("browserSettingsGet").then(function (podatki) {
+      S.brskalnikNastavitve = podatki;
+      narisiNastavitveBrskalnika();
+    }).catch(function () {
+      var cilj = $("browserSettings");
+      if (cilj) cilj.innerHTML = '<p class="browser-settings-message">' + ubezi(t("br_napaka")) + '</p>';
+    });
+  }
+  function narisiNastavitveBrskalnika() {
+    var cilj = $("browserSettings"), data = S.brskalnikNastavitve;
+    if (!cilj || !data) return;
+    function selectCard(key, label, options, note) {
+      var html = '<div class="browser-settings-card"><label for="br-' + key + '">' + ubezi(t(label)) + '</label><select id="br-' + key + '" data-browser-setting="' + key + '">';
+      options.forEach(function (o) { html += '<option value="' + ubezi(o.value) + '"' + (data[key] === o.value ? ' selected' : '') + '>' + ubezi(o.label) + '</option>'; });
+      return html + '</select>' + (note ? '<small>' + ubezi(t(note)) + '</small>' : '') + '</div>';
+    }
+    function toggleCard(key, label, note) {
+      return '<div class="browser-settings-card"><button type="button" class="stikalo" role="switch" aria-checked="' + (data[key] ? 'true' : 'false') + '" data-browser-setting="' + key + '"><span>' + ubezi(t(label)) + '</span><i></i></button>' + (note ? '<small>' + ubezi(t(note)) + '</small>' : '') + '</div>';
+    }
+    var engines = (data.engines || []).map(function (e) { return { value: e.id, label: e.name }; });
+    var html = selectCard("search_engine", "br_isci", engines) +
+      selectCard("startup", "br_zagon", [{ value: "home", label: t("br_domov") }, { value: "restore", label: t("br_obnovi") }]) +
+      '<div class="browser-settings-card"><span class="browser-setting-title">' + ubezi(t("br_zascita")) + '</span>' +
+      [["adblock_enabled", "br_oglasi"], ["adguard_protection_enabled", "br_adguard"], ["tracking_protection_enabled", "br_sledenje"], ["gpc_dnt_enabled", "br_gpc"], ["block_third_party_cookies", "br_piskotki"]].map(function (x) { return '<button type="button" class="stikalo" role="switch" aria-checked="' + (data[x[0]] ? 'true' : 'false') + '" data-browser-setting="' + x[0] + '"><span>' + ubezi(t(x[1])) + '</span><i></i></button>'; }).join("") + '</div>' +
+      selectCard("doh_provider", "br_dns", [{ value: "cloudflare", label: "Cloudflare" }, { value: "quad9", label: "Quad9" }, { value: "google", label: "Google" }, { value: "custom", label: t("br_customDns") }], "br_dnsPo") +
+      (data.doh_provider === "custom" ? '<div class="browser-settings-card"><label for="br-custom-doh-url">' + ubezi(t("br_customDns")) + '</label><input id="br-custom-doh-url" type="url" inputmode="url" autocomplete="url" placeholder="https://dns.example/dns-query" value="' + ubezi(data.custom_doh_url || "") + '" data-browser-setting="custom_doh_url"><small>' + ubezi(t("br_https")) + '</small></div>' : '') +
+      toggleCard("force_dark_mode", "br_temno") +
+      toggleCard("hardware_acceleration", "br_pospesevanje", "br_restart") +
+      toggleCard("ask_download_location", "br_prenos") +
+      '<div class="browser-settings-card"><span class="browser-setting-title">' + ubezi(t("br_stats")) + '</span><div class="browser-settings-stats"><span><b>' + Number(data.total_ads_blocked || 0).toLocaleString() + '</b>' + ubezi(t("br_oglasiBlokirani")) + '</span><span><b>' + Number(data.total_threats_blocked || 0).toLocaleString() + '</b>' + ubezi(t("br_groznjeBlokirane")) + '</span></div><button type="button" class="gumb" id="browserClearData" style="margin-top:14px">' + ubezi(t("br_pocisti")) + '</button></div>' +
+      '<p class="browser-settings-message" id="browserSettingsMessage" aria-live="polite"></p>';
+    cilj.innerHTML = html;
+    cilj.querySelectorAll("[data-browser-setting]").forEach(function (control) {
+      var save = function () {
+        var value = control.type === "checkbox" ? control.checked : control.tagName === "BUTTON" ? control.getAttribute("aria-checked") !== "true" : control.value;
+        if (control.tagName === "BUTTON") control.setAttribute("aria-checked", value ? "true" : "false");
+        if (control.dataset.browserSetting === "custom_doh_url" && value && !/^https:\/\//i.test(value)) {
+          var msg = $("browserSettingsMessage"); if (msg) msg.textContent = t("br_https"); return;
+        }
+        klic("browserSettingsSet", [control.dataset.browserSetting, value]).then(function (result) {
+          S.brskalnikNastavitve = result;
+          narisiNastavitveBrskalnika();
+          var msg = $("browserSettingsMessage"); if (msg) msg.textContent = t("br_shranjeno");
+        }).catch(function () { var msg = $("browserSettingsMessage"); if (msg) msg.textContent = t("br_napaka"); });
+      };
+      control.addEventListener(control.tagName === "BUTTON" ? "click" : "change", save);
+    });
+    var clear = $("browserClearData");
+    if (clear) clear.addEventListener("click", function () {
+      if (!window.confirm(t("br_pocistiPotrdi"))) return;
+      klic("browserClearData").then(function () { var msg = $("browserSettingsMessage"); if (msg) msg.textContent = t("br_pocisceno"); }, function () { var msg = $("browserSettingsMessage"); if (msg) msg.textContent = t("br_napaka"); });
+    });
+  }
   function narisiNastavitve() {
     kontrole($("hitreNastavitve"), false);
+    naloziNastavitveBrskalnika();
     $("stikaloCelozaslonsko").setAttribute("aria-checked", S.zacetek && S.zacetek.celozaslonsko ? "true" : "false");
     $("stikaloSamozagon").setAttribute("aria-checked", S.zacetek && S.zacetek.samozagon ? "true" : "false");
     var cilj = $("skupineNastavitev");

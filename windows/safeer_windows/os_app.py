@@ -218,7 +218,8 @@ class SafeerOsPage(QWebEnginePage):
 
 
 class SafeerOsWindow(QMainWindow):
-    def __init__(self, v_oknu: bool = False, zacetni_razdelek: str = "", media_engine: str = "auto"):
+    def __init__(self, v_oknu: bool = False, zacetni_razdelek: str = "", media_engine: str = "auto",
+                 browser_settings: Optional[policy.SettingsStore] = None):
         super().__init__()
         print("[SafeerOS] DIAG window_init_started", flush=True)
         self.v_oknu = v_oknu
@@ -290,7 +291,7 @@ class SafeerOsWindow(QMainWindow):
         # pogled enotnega Safeer OS. Spletne aplikacije se zato nalagajo kot
         # vrhnja stran (brez nezanesljivega iframe/X-Frame-Options obvoda).
         self.browser_app = browser.SafeerBrowserApp(
-            QApplication.instance(), policy.SettingsStore(), "embedded"
+            QApplication.instance(), browser_settings or policy.SettingsStore(), "embedded"
         )
         self.browser_window = browser.BrowserWindow(
             self.browser_app, private=True, embedded=True, on_safeer_home=self._zapri_browser
@@ -685,6 +686,72 @@ class SafeerOsWindow(QMainWindow):
             poizvedba = str(a[0]) if a else ""
             return self.odpri_spletno_iskanje(poizvedba)
 
+        if metoda == "browserSettingsGet":
+            settings = self.browser_app.settings
+            values = {key: settings.get(key) for key in (
+                "search_engine", "startup", "adblock_enabled", "adguard_protection_enabled",
+                "tracking_protection_enabled", "gpc_dnt_enabled", "block_third_party_cookies",
+                "doh_provider", "custom_doh_url", "force_dark_mode", "hardware_acceleration",
+                "ask_download_location", "total_ads_blocked", "total_threats_blocked",
+            )}
+            values["engines"] = [
+                {"id": key, "name": engine.get("name", key)}
+                for key, engine in policy.search_engines().items()
+            ]
+            return values
+
+        if metoda == "browserSettingsSet":
+            if len(a) < 2:
+                raise ValueError("Manjka nastavitev ali vrednost.")
+            key, value = str(a[0]), a[1]
+            settings = self.browser_app.settings
+            boolean_keys = {
+                "adblock_enabled", "adguard_protection_enabled", "tracking_protection_enabled",
+                "gpc_dnt_enabled", "block_third_party_cookies", "force_dark_mode",
+                "hardware_acceleration", "ask_download_location",
+            }
+            if key == "search_engine":
+                if value not in policy.search_engines():
+                    raise ValueError("Neznan iskalnik.")
+            elif key == "startup":
+                if value not in ("home", "restore"):
+                    raise ValueError("Neznana možnost zagona.")
+            elif key == "doh_provider":
+                if value not in (*policy.DOH_TEMPLATES.keys(), "custom"):
+                    raise ValueError("Neznan ponudnik varnega DNS.")
+            elif key == "custom_doh_url":
+                value = str(value or "").strip()
+                if value and not policy.valid_doh_url(value):
+                    raise ValueError("Naslov ponudnika DNS mora biti veljaven HTTPS URL.")
+            elif key in boolean_keys:
+                if not isinstance(value, bool):
+                    raise ValueError("Nastavitev mora biti vklopljena ali izklopljena.")
+            else:
+                raise ValueError("Te nastavitve ni mogoče spreminjati.")
+            settings.set(key, value, save=False)
+            if not settings.save():
+                raise OSError("Nastavitev ni bilo mogoče zapisati.")
+            # Interceptor prebere isti SettingsStore sproti; skripte in videz
+            # aktivnega zasebnega profila osvežimo na Qt GUI niti brez restarta.
+            self.dispatcher.dispatch(self.browser_app.refresh_preferences)
+            return self._izvedi_metodo("browserSettingsGet", [])
+
+        if metoda == "browserClearData":
+            def clear_embedded_profile():
+                profile = self.browser_app.private_profile
+                if profile is None:
+                    return
+                profile.clearHttpCache()
+                profile.cookieStore().deleteAllCookies()
+                profile.clearAllVisitedLinks()
+                self.browser_app.closed_tabs.clear()
+                for index in range(self.browser_window.tabs.count()):
+                    view = self.browser_window.tabs.widget(index)
+                    if isinstance(view, QWebEngineView):
+                        view.page().history().clear()
+            self.dispatcher.dispatch(clear_embedded_profile)
+            return True
+
         if metoda == "celozaslonsko":
             novo = bool(a[0]) if a else not self.isFullScreen()
             self.dispatcher.dispatch(lambda: self.showFullScreen() if novo else self.showNormal())
@@ -967,10 +1034,19 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--ozadje", action="store_true", help="Zazeni le v ozadju")
     args = parser.parse_args(argv)
 
+    # Browser settings are the single shared store for Safeer OS and the
+    # embedded Safeer Browser. Apply restart-only Chromium/DNS options before
+    # creating the WebEngine profile, then pass this exact store to the host.
+    browser_settings = policy.SettingsStore()
+    os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = policy.chromium_flags(
+        os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", ""), browser_settings
+    )
+
     browser.register_schemes()
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("SafeerOS")
     app.setOrganizationName("Safeer")
+    browser.apply_dns_mode(browser_settings)
     print(f"[SafeerOS] DIAG main_start section={args.razdelek or 'home'} media_engine={args.media_engine}", flush=True)
 
     zacetni = ""
@@ -982,7 +1058,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     # Ce je izbran control razdelek ali --okno, odpri v oknu
     v_oknu = True if (args.control or args.razdelek or args.okno) else False
 
-    window = SafeerOsWindow(v_oknu=v_oknu, zacetni_razdelek=zacetni, media_engine=args.media_engine)
+    window = SafeerOsWindow(v_oknu=v_oknu, zacetni_razdelek=zacetni, media_engine=args.media_engine,
+                            browser_settings=browser_settings)
     print("[SafeerOS] DIAG event_loop_start", flush=True)
 
     if args.ozadje:

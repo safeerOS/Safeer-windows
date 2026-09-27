@@ -273,6 +273,19 @@ h2 .dodatno + .dodatno { margin-left: 14px; }
 .stikalo svg { color: var(--zelena); }
 .stikalo div { flex: 1; }
 .stikalo small { display: block; color: var(--medlo); font-size: 14px; margin-top: 3px; }
+.browser-settings-section { max-width: 1100px; margin: 32px 0; }
+.browser-settings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.browser-settings-card { min-width: 0; padding: 18px 20px; border: 1px solid var(--rob); border-radius: 16px; background: var(--kartica); }
+.browser-settings-card > label, .browser-settings-card > .browser-setting-title { display: block; font-weight: 600; margin-bottom: 8px; }
+.browser-settings-card small { display: block; color: var(--medlo); line-height: 1.45; margin-top: 6px; }
+.browser-settings-card select, .browser-settings-card input[type=url] { width: 100%; min-height: 42px; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--rob); background: #111924; color: var(--besedilo); }
+.browser-settings-card select:focus, .browser-settings-card input[type=url]:focus { outline: 1px solid var(--zelena); }
+.browser-settings-card .stikalo { padding: 10px 0 0; background: transparent; border: 0; }
+.browser-settings-card .stikalo:first-child { padding-top: 0; }
+.browser-settings-stats { display: flex; gap: 20px; flex-wrap: wrap; color: var(--medlo); }
+.browser-settings-stats b { color: var(--zelena); font-size: 20px; display: block; }
+.browser-settings-message { grid-column: 1 / -1; color: var(--zelena); min-height: 1.3em; }
+@media (max-width: 900px) { .browser-settings { grid-template-columns: 1fr; } }
 .stikalo i {
   width: 50px; height: 28px; border-radius: 14px; background: #3a4650; position: relative; flex: none; transition: background .15s;
 }
