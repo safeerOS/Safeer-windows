@@ -28,6 +28,10 @@ from urllib.parse import urlparse
 
 from core import link_krog, link_tls, spake2
 
+# Kaj ta racunalnik pove srediscu: Windows in Linux imata isto kodo, platforma pa mora biti prava
+# (Windows se je predstavljal kot "linux").
+PLATFORMA = "windows" if sys.platform.startswith("win") else "linux"
+
 PRIVZETA_VRATA = 8990
 # Uporabnik naj vidi kratko domace ime, ne naslova IP. Staro ime ostane takoj za njim,
 # ker ga imajo ze seznanjene naprave shranjeno in jim ne sme nic odpasti.
@@ -439,7 +443,7 @@ QR_POVEZAVA = "https://safeer.si/p#i={qr_id}&s={skrivnost}&f={odtis}"
 QR_ODTIS_ZNAKOV = 16
 
 
-def zacni_qr(ws_naslov: str, device_id: str, ime: str, platforma: str = "linux") -> Optional[dict]:
+def zacni_qr(ws_naslov: str, device_id: str, ime: str, platforma: str = PLATFORMA) -> Optional[dict]:
     """Odpre prijavo s QR kodo. Vrne {"qr_id", "odtis", "skrivnost", "prevzem", "povezava", "velja"},
     {"napaka": ...} ali None, ce se hub ne oglasi.
 
@@ -557,7 +561,7 @@ def vzemi_vstopnico_s_podpisom(ws_naslov: str, device_id: str, odtis: str, ime: 
     # Ime in platforma: ce hub nov id (iz kljuca) sele vpisuje kot alias starega, naj ima pravo ime.
     koda, odgovor = _zahteva(osnova + "/cast/auth/ticket",
                              {"device_id": device_id, "nonce": nonce, "signature": podpis,
-                              "name": ime or "", "platform": "linux"}, odtis=odtis)
+                              "name": ime or "", "platform": PLATFORMA}, odtis=odtis)
     if koda != 200:
         return None, koda
     krog = odgovor.get("ring")
@@ -579,7 +583,7 @@ def seja_s_podpisom(ws_naslov: str, device_id: str, odtis: str, ime: str = "") -
     except Exception:
         return None
     koda, odgovor = _zahteva(osnova + "/cast/auth/ticket", {"device_id": device_id, "nonce": nonce, "signature": podpis,
-                                                            "name": ime or "", "platform": "linux"}, odtis=odtis)
+                                                            "name": ime or "", "platform": PLATFORMA}, odtis=odtis)
     seja = odgovor.get("session_token") if koda == 200 else None
     return seja if isinstance(seja, str) and seja else None
 
@@ -658,7 +662,7 @@ def vpisi_v_krog(ws_naslov: str, zeton: str, odtis: str, ime: str) -> bool:
     except Exception:
         return False
     koda, odgovor = _zahteva(_osnova(ws_naslov) + "/cast/trust/enroll",
-                             {"pubkey": kljuc, "name": ime, "platform": "linux"}, zeton=zeton, odtis=odtis)
+                             {"pubkey": kljuc, "name": ime, "platform": PLATFORMA}, zeton=zeton, odtis=odtis)
     if koda != 200:
         return False
     krog = odgovor.get("ring")
@@ -904,7 +908,7 @@ def model_naprave_v1(device_id: str) -> dict:
     kind: "control" za Safeer Control (id se konca na -control), sicer "computer" (brskalnik).
     Prioritete ne posljemo - racunalnik huba (se) ne gosti. Hub 0.2 ta polja prezre.
     """
-    polja = {"protocol": PROTOKOL_V1, "platform": "linux",
+    polja = {"protocol": PROTOKOL_V1, "platform": PLATFORMA,
              "kind": "control" if device_id.endswith("-control") else "computer"}
     razlicica = _razlicica_aplikacije()
     if razlicica:
