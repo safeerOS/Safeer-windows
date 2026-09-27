@@ -404,7 +404,7 @@ class SafeerOsWindow(QMainWindow):
             # Safeer OS se vedno odpre neposredno v domačem vmesniku
             pass
 
-        if False:
+        if self.v_oknu:
             self.resize(1280, 800)
             self.show()
         else:
