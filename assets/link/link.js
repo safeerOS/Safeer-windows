@@ -1258,6 +1258,18 @@
   }
   var BESEDILA_VABILO = {
     "sl": {
+      "vabiloNaslov": "Poveži naprave",
+      "vabiloPodnaslov": "Telefon, tablica in računalnik se pridružijo tej napravi.",
+      "vabiloQrNaslov": "Skeniraj s kamero",
+      "vabiloQrOpis": "Usmeri kamero druge naprave v kodo. S Safeerjem se odpre v aplikaciji, brez njega v brskalniku – nič ni treba namestiti.",
+      "vabiloPripravljam": "Pripravljam kodo …",
+      "vabiloAli": "ALI",
+      "vabiloKodaNaslov": "6-mestna koda",
+      "vabiloKodaOpis": "Na napravi, ki se pridružuje, odpri Safeer → Povezane naprave → Pridruži se. Koda se pokaže tukaj – prepiši jo tja.",
+      "vabiloKodaVelja": "Velja 5 minut · vnesite na novi napravi",
+      "vabiloVpisiGumb": "Vpiši kodo z druge naprave",
+      "vabiloPoveziGumb": "Poveži",
+      "vabiloNovaKoda": "Nova koda",
       "vabiloGumb": "Pokaži QR kodo za novo napravo",
       "vabiloOpis": "S kamero telefona ali tablice skeniraj kodo – Safeer se odpre in naprava se poveže s Safeer Linkom.",
       "vabiloPridruzen": "✓ {ime} je povezan.",
@@ -1266,6 +1278,18 @@
       "vabiloZapri": "Skrij kodo"
     },
     "en": {
+      "vabiloNaslov": "Connect devices",
+      "vabiloPodnaslov": "Your phone, tablet and computer join this device.",
+      "vabiloQrNaslov": "Scan with a camera",
+      "vabiloQrOpis": "Point the other device's camera at the code. With Safeer it opens in the app; without it, in the browser – nothing to install.",
+      "vabiloPripravljam": "Preparing the code …",
+      "vabiloAli": "OR",
+      "vabiloKodaNaslov": "6-digit code",
+      "vabiloKodaOpis": "On the joining device open Safeer → Connected devices → Join. The code appears here – type it there.",
+      "vabiloKodaVelja": "Valid for 5 minutes · enter on joining device",
+      "vabiloVpisiGumb": "Enter code from another device",
+      "vabiloPoveziGumb": "Connect",
+      "vabiloNovaKoda": "New code",
       "vabiloGumb": "Show QR code for a new device",
       "vabiloOpis": "Scan the code with your phone or tablet camera – Safeer opens and the device joins Safeer Link.",
       "vabiloPridruzen": "✓ {ime} is connected.",
@@ -1274,6 +1298,18 @@
       "vabiloZapri": "Hide code"
     },
     "de": {
+      "vabiloNaslov": "Geräte verbinden",
+      "vabiloPodnaslov": "Handy, Tablet und Computer verbinden sich mit diesem Gerät.",
+      "vabiloQrNaslov": "Mit der Kamera scannen",
+      "vabiloQrOpis": "Richte die Kamera des anderen Geräts auf den Code. Mit Safeer öffnet er sich in der App, sonst im Browser – nichts zu installieren.",
+      "vabiloPripravljam": "Code wird vorbereitet …",
+      "vabiloAli": "ODER",
+      "vabiloKodaNaslov": "6-stelliger Code",
+      "vabiloKodaOpis": "Öffne auf dem beitretenden Gerät Safeer → Verbundene Geräte → Beitreten. Der Code erscheint hier – gib ihn dort ein.",
+      "vabiloKodaVelja": "Gültig für 5 Minuten · auf beitretendem Gerät eingeben",
+      "vabiloVpisiGumb": "Code von anderem Gerät eingeben",
+      "vabiloPoveziGumb": "Verbinden",
+      "vabiloNovaKoda": "Neuer Code",
       "vabiloGumb": "QR-Code für ein neues Gerät zeigen",
       "vabiloOpis": "Scanne den Code mit der Kamera von Handy oder Tablet – Safeer öffnet sich und das Gerät tritt Safeer Link bei.",
       "vabiloPridruzen": "✓ {ime} ist verbunden.",
@@ -1282,6 +1318,18 @@
       "vabiloZapri": "Code ausblenden"
     },
     "es": {
+      "vabiloNaslov": "Conectar dispositivos",
+      "vabiloPodnaslov": "Tu móvil, tableta y ordenador se unen a este dispositivo.",
+      "vabiloQrNaslov": "Escanea con la cámara",
+      "vabiloQrOpis": "Apunta la cámara del otro dispositivo al código. Con Safeer se abre en la app; sin él, en el navegador: no hay que instalar nada.",
+      "vabiloPripravljam": "Preparando el código …",
+      "vabiloAli": "O",
+      "vabiloKodaNaslov": "Código de 6 cifras",
+      "vabiloKodaOpis": "En el dispositivo que se une abre Safeer → Dispositivos conectados → Unirse. El código aparece aquí: escríbelo allí.",
+      "vabiloKodaVelja": "Válido durante 5 minutos · introducir en el nuevo dispositivo",
+      "vabiloVpisiGumb": "Introducir código de otro dispositivo",
+      "vabiloPoveziGumb": "Conectar",
+      "vabiloNovaKoda": "Nuevo código",
       "vabiloGumb": "Mostrar código QR para un dispositivo nuevo",
       "vabiloOpis": "Escanea el código con la cámara del móvil o la tableta: Safeer se abre y el dispositivo se une a Safeer Link.",
       "vabiloPridruzen": "✓ {ime} está conectado.",
@@ -1290,6 +1338,18 @@
       "vabiloZapri": "Ocultar código"
     },
     "fr": {
+      "vabiloNaslov": "Connecter des appareils",
+      "vabiloPodnaslov": "Ton téléphone, ta tablette et ton ordinateur rejoignent cet appareil.",
+      "vabiloQrNaslov": "Scanne avec l'appareil photo",
+      "vabiloQrOpis": "Dirige l'appareil photo de l'autre appareil vers le code. Avec Safeer, il s'ouvre dans l'application ; sinon dans le navigateur – rien à installer.",
+      "vabiloPripravljam": "Préparation du code …",
+      "vabiloAli": "OU",
+      "vabiloKodaNaslov": "Code à 6 chiffres",
+      "vabiloKodaOpis": "Sur l'appareil qui rejoint, ouvre Safeer → Appareils connectés → Rejoindre. Le code apparaît ici – saisis-le là-bas.",
+      "vabiloKodaVelja": "Valable 5 minutes · saisir sur le nouvel appareil",
+      "vabiloVpisiGumb": "Saisir le code d'un autre appareil",
+      "vabiloPoveziGumb": "Connecter",
+      "vabiloNovaKoda": "Nouveau code",
       "vabiloGumb": "Afficher le code QR pour un nouvel appareil",
       "vabiloOpis": "Scanne le code avec l'appareil photo du téléphone ou de la tablette – Safeer s'ouvre et l'appareil rejoint Safeer Link.",
       "vabiloPridruzen": "✓ {ime} est connecté.",
@@ -1298,6 +1358,18 @@
       "vabiloZapri": "Masquer le code"
     },
     "it": {
+      "vabiloNaslov": "Collega dispositivi",
+      "vabiloPodnaslov": "Telefono, tablet e computer si uniscono a questo dispositivo.",
+      "vabiloQrNaslov": "Scansiona con la fotocamera",
+      "vabiloQrOpis": "Inquadra il codice con la fotocamera dell'altro dispositivo. Con Safeer si apre nell'app, altrimenti nel browser: non serve installare nulla.",
+      "vabiloPripravljam": "Preparo il codice …",
+      "vabiloAli": "OPPURE",
+      "vabiloKodaNaslov": "Codice di 6 cifre",
+      "vabiloKodaOpis": "Sul dispositivo che si unisce apri Safeer → Dispositivi connessi → Unisciti. Il codice appare qui: digitalo lì.",
+      "vabiloKodaVelja": "Valido per 5 minuti · inserire sul nuovo dispositivo",
+      "vabiloVpisiGumb": "Inserisci codice da un altro dispositivo",
+      "vabiloPoveziGumb": "Collega",
+      "vabiloNovaKoda": "Nuovo codice",
       "vabiloGumb": "Mostra il codice QR per un nuovo dispositivo",
       "vabiloOpis": "Scansiona il codice con la fotocamera del telefono o del tablet: Safeer si apre e il dispositivo entra in Safeer Link.",
       "vabiloPridruzen": "✓ {ime} è collegato.",
@@ -1957,8 +2029,8 @@
     pokazi("panelSync", false);
     pokazi("predvajalnik", false);
     pokazi("panelMape", stanje.znan && stanje.seznanjen);
-    pokazi("panelDodaj", (stanje.znan && (stanje.seznanjen || stanje.vKrogu)) || !!(most && most.zacniVabilo));
-    pokazi("vabiloBlok", !!(most && most.zacniVabilo));
+    pokazi("panelDodaj", vabiloOdprto);
+    pokazi("vabiloBlok", vabiloOdprto);
     var sredisce = imeSredisca() || t("televizor");
     besedilo("dodajKorak3", t("dodajKorak3", { sredisce: sredisce }));
     narisiMape();
@@ -2301,6 +2373,10 @@
 
   // »Poveži novo napravo« (Safeer Control): QR koda sredisca za nov telefon ali tablico.
   var vabiloOdprto = false;
+  function oblikujPin(pin) {
+    var cist = String(pin || "").replace(/\D/g, "").slice(0, 6);
+    return cist.length === 6 ? cist.slice(0, 3) + " " + cist.slice(3) : "";
+  }
   function narisiVabilo(p) {
     var qr = el("vabiloQr");
     if (!qr) return;
@@ -2309,31 +2385,32 @@
       pokazi("vabiloBlok", true);
       qr.innerHTML = String(p.svg).replace(/^<\?xml[^>]*>\s*/, "");
       qr.hidden = false;
-      besedilo("opombaVabilo", t("prijavaQrOsvezi"));
+      var pin = oblikujPin(p.pin);
+      pokazi("vabiloPinBlok", !!pin);
+      besedilo("vabiloPin", pin);
     } else if (p.pridruzen) {
-      qr.hidden = true;
-      vabiloOdprto = false;
-      besedilo("gumbVabilo", t("vabiloGumb"));
       besedilo("opombaVabilo", t("vabiloPridruzen", { ime: p.pridruzen }));
     } else if (p.napaka) {
-      qr.hidden = true;
-      vabiloOdprto = false;
-      besedilo("gumbVabilo", t("vabiloGumb"));
+      qr.innerHTML = '<span class="qrCakam">' + t("vabiloNapaka") + '</span>';
+      pokazi("vabiloPinBlok", false);
       besedilo("opombaVabilo", t(p.napaka === "hub_star" ? "vabiloHubStar" : "vabiloNapaka"));
     }
   }
   function preklopiVabilo(odpri) {
     if (!most || !most.zacniVabilo) return;
     vabiloOdprto = odpri === undefined ? !vabiloOdprto : !!odpri;
-    besedilo("gumbVabilo", t(vabiloOdprto ? "vabiloZapri" : "vabiloGumb"));
     if (vabiloOdprto) {
       pokazi("panelDodaj", true);
       pokazi("vabiloBlok", true);
-      besedilo("opombaVabilo", t("prijavaQrPripravljam"));
-      if (most.novaLokalnaKoda) most.novaLokalnaKoda();
+      pokazi("vabiloPinBlok", false);
+      pokazi("vabiloVnosKodeBlok", false);
+      var qr = el("vabiloQr");
+      if (qr) qr.innerHTML = '<span class="qrCakam">' + t("vabiloPripravljam") + '</span>';
+      besedilo("opombaVabilo", "");
       most.zacniVabilo();
     } else {
-      if (el("vabiloQr")) el("vabiloQr").hidden = true;
+      pokazi("panelDodaj", false);
+      pokazi("vabiloBlok", false);
       besedilo("opombaVabilo", "");
       most.prekiniVabilo();
     }
@@ -3034,6 +3111,10 @@
   // ----------------------------------------------------------------
 
   document.addEventListener("DOMContentLoaded", function () {
+    // Modal ni vezan na stanje zaslona pod njim (prvi zagon, brez povezave ali
+    // seznam naprav), zato ga prestavimo neposredno pod body.
+    var vabiloOkno = el("panelDodaj");
+    if (vabiloOkno && vabiloOkno.parentNode !== document.body) document.body.appendChild(vabiloOkno);
     prevediStran();
 
     try {
@@ -3090,6 +3171,12 @@
     });
     naKlik("gumbPrijavaKoda", posljiKodo);
     naKlik("gumbPoveziNaprave", function () {
+      vabiloOdprto = true;
+      pokazi("panelDodaj", true);
+      pokazi("vabiloBlok", true);
+      pokazi("vabiloPinBlok", false);
+      var qr = el("vabiloQr");
+      if (qr) qr.innerHTML = '<span class="qrCakam">' + t("vabiloPripravljam") + '</span>';
       if (most && most.poveziNaprave) most.poveziNaprave();
     });
     naKlik("gumbOdpriOsLokalno", function () {
@@ -3100,7 +3187,13 @@
       besedilo("opombaBrezPovezave", "");
       if (most && most.nadaljujBrezPovezave) most.nadaljujBrezPovezave();
     });
-    naKlik("gumbVabilo", function () { preklopiVabilo(); });
+    naKlik("gumbVabiloZapri", function () { preklopiVabilo(false); });
+    naKlik("gumbVabiloVnosOdpri", function () {
+      var blok = el("vabiloVnosKodeBlok");
+      var odpri = !!(blok && blok.hidden);
+      pokazi("vabiloVnosKodeBlok", odpri);
+      if (odpri && el("vabiloVnosKode")) try { el("vabiloVnosKode").focus(); } catch (e) {}
+    });
     // Gostitelj lahko kodo tudi vnese: oba računalnika imata enak, simetričen tok
     // (prikaži svojo kodo ali vnesi kodo druge naprave).
     naKlik("gumbVabiloVnosKode", function () {
@@ -3108,11 +3201,11 @@
       var koda = vnos ? String(vnos.value || "").replace(/\D/g, "").slice(0, 6) : "";
       if (vnos) vnos.value = koda;
       if (koda.length !== 6) {
-        besedilo("opombaVabiloVnosKode", "Vnesi vseh 6 številk.");
+        besedilo("opombaVabiloVnosKode", t("prijavaKodaSestMest"));
         if (vnos) try { vnos.focus(); } catch (e) {}
         return;
       }
-      besedilo("opombaVabiloVnosKode", "Preverjam kodo …");
+      besedilo("opombaVabiloVnosKode", t("prijavaPreverjam"));
       if (most && most.potrdiKodo) most.potrdiKodo(koda);
     });
     var vabiloVnosKode = el("vabiloVnosKode");
@@ -3133,7 +3226,11 @@
       });
     }
     naKlik("gumbNovaKodaVabilo", function () {
-      if (most && most.novaLokalnaKoda) most.novaLokalnaKoda();
+      pokazi("vabiloPinBlok", false);
+      var qr = el("vabiloQr");
+      if (qr) qr.innerHTML = '<span class="qrCakam">' + t("vabiloPripravljam") + '</span>';
+      besedilo("opombaVabilo", "");
+      if (most && most.zacniVabilo) most.zacniVabilo();
     });
     var zaupaj = el("prijavaZaupaj");
     if (zaupaj) {

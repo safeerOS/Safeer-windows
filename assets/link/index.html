@@ -302,35 +302,46 @@
       <p class="opomba" id="opombaPozabi"></p>
     </div>
 
-    <!-- Samo Safeer Control: kako se prikljuci nova naprava. Kodo vedno pokaze sredisce (varnost:
-         kdor sredisca ne vidi, se ne more prikljuciti), zato povemo, kje jo bo uporabnik videl. -->
-    <div class="panel" id="panelDodaj" data-razdelek="naprave" hidden>
-      <h2 data-t="dodajNaslov">Dodaj telefon ali tablico</h2>
+    <!-- Okno je vsebinsko in vizualno enako povezovanju na televizorju. -->
+    <div class="panel vabiloOkno" id="panelDodaj" data-razdelek="naprave" hidden>
       <div id="vabiloBlok" class="vabilo" hidden>
-        <p class="pojasnilo" data-t="vabiloOpis">S kamero telefona ali tablice skeniraj kodo – Safeer se odpre in naprava se poveže s Safeer Linkom.</p>
-        <div class="qrOkvir" id="vabiloQr" hidden></div>
-        <button class="glavni" id="gumbVabilo" data-t="vabiloGumb">Pokaži QR kodo za novo napravo</button>
-        <div class="vabiloStevilcnaKoda">
-          <p class="pojasnilo drobno">Na drugi napravi v Safeer Link vpiši to 6-mestno kodo:</p>
-          <div class="stevilkePrikaz" id="vabiloLokalnaKoda">------</div>
-          <button class="drugotni" id="gumbNovaKodaVabilo">Ustvari novo kodo</button>
-          <div class="vabiloVnosKode">
-            <p class="pojasnilo drobno">Ali vpiši 6-mestno kodo druge naprave:</p>
-            <input class="vnosStevilke" id="vabiloVnosKode" type="text" inputmode="numeric"
-                   autocomplete="one-time-code" maxlength="6" placeholder="------"
-                   aria-label="Koda druge naprave" />
-            <button class="glavni" id="gumbVabiloVnosKode">Poveži s kodo</button>
-            <p class="opomba" id="opombaVabiloVnosKode"></p>
-          </div>
+        <div class="vabiloZnak"><span class="znakOs" aria-hidden="true">S</span><span>Safeer OS</span></div>
+        <h2 data-t="vabiloNaslov">Poveži naprave</h2>
+        <p class="vabiloPodnaslov" data-t="vabiloPodnaslov">Telefon, tablica in računalnik se pridružijo tej napravi.</p>
+
+        <div class="vabiloNacini">
+          <section class="vabiloKartica">
+            <div class="qrOkvir" id="vabiloQr" aria-live="polite"><span class="qrCakam" data-t="vabiloPripravljam">Pripravljam kodo …</span></div>
+            <h3 data-t="vabiloQrNaslov">Skeniraj s kamero</h3>
+            <p data-t="vabiloQrOpis">Usmeri kamero druge naprave v kodo. S Safeerjem se odpre v aplikaciji, brez njega v brskalniku – nič ni treba namestiti.</p>
+          </section>
+
+          <div class="vabiloAli" data-t="vabiloAli">ALI</div>
+
+          <section class="vabiloKartica vabiloKodaKartica">
+            <h3 data-t="vabiloKodaNaslov">6-mestna koda</h3>
+            <p data-t="vabiloKodaOpis">Na napravi, ki se pridružuje, odpri Safeer → Povezane naprave → Pridruži se. Koda se pokaže tukaj – prepiši jo tja.</p>
+            <div id="vabiloPinBlok" hidden>
+              <div class="stevilkePrikaz" id="vabiloPin">907 870</div>
+              <p class="vabiloVelja" data-t="vabiloKodaVelja">Velja 5 minut · vnesite na novi napravi</p>
+            </div>
+            <button class="drugotni vabiloVpisi" id="gumbVabiloVnosOdpri" data-t="vabiloVpisiGumb">Vpiši kodo z druge naprave</button>
+            <div class="vabiloVnosKode" id="vabiloVnosKodeBlok" hidden>
+              <input class="vnosStevilke" id="vabiloVnosKode" type="text" inputmode="numeric"
+                     autocomplete="one-time-code" maxlength="6" placeholder="123 456"
+                     data-t-naslov="vabiloVpisiGumb" aria-label="Vpiši kodo z druge naprave" />
+              <button class="glavni" id="gumbVabiloVnosKode" data-t="vabiloPoveziGumb">Poveži</button>
+              <p class="opomba" id="opombaVabiloVnosKode"></p>
+            </div>
+          </section>
         </div>
-        <p class="opomba" id="opombaVabilo"></p>
+
+        <p class="vabiloStanje" id="opombaVabilo" aria-live="polite"></p>
+        <div class="vabiloDejanja">
+          <button class="drugotni" id="gumbNovaKodaVabilo" data-t="vabiloNovaKoda">Nova koda</button>
+          <button class="drugotni" id="gumbVabiloZapri" data-t="zapri">Zapri</button>
+        </div>
       </div>
-      <ol class="koraki">
-        <li data-t="dodajKorak1">Na telefonu odpri Safeer in v meniju izberi Safeer Link.</li>
-        <li data-t="dodajKorak2">Pritisni »Poveži s Safeer Link«.</li>
-        <li id="dodajKorak3">Na središču se izpiše 6-mestna koda – prepiši jo v telefon.</li>
-      </ol>
-      <p class="opomba" data-t="dodajOpomba">Koda se pokaže samo na središču: kdor ga ne vidi, se ne more povezati – tudi ne v javnem omrežju.</p>
     </div>
 
     <!-- Samo Safeer Control: mape na tem racunalniku, ki jih sme videti televizor (Safeer OS). -->

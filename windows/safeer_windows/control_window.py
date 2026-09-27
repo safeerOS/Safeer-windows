@@ -273,9 +273,9 @@ class SafeerControlWindow(QWidget):
         elif metoda == "novaLokalnaKoda":
             self.backend.nova_lokalna_koda()
         elif metoda == "zacniVabilo":
-            self.backend.zacni_qr()
+            self.backend.zacni_vabilo()
         elif metoda == "prekiniVabilo":
-            self.backend.prekini_qr()
+            self.backend.prekini_vabilo()
         elif metoda == "odpri":
             url = str(a[0]) if a else ""
             if url and self.na_odpiranje is not None:
