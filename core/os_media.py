@@ -82,7 +82,8 @@ def _kind(value: Any, url: str = "", title: str = "", season: int = 0, episode: 
         return "podcast"
     if any(x in hint for x in ("radio", "radijska", "radiostream", "icecast", "shoutcast")):
         return "radio"
-    if any(x in hint for x in ("live tv", "livetv", "live television", "televizija v živo", "/live/")):
+    if (any(x in hint for x in ("live tv", "livetv", "live television", "televizija v živo", "/live/", "iptv"))
+            or re.search(r"\btv\b", str(value or "").casefold())):
         return "tv-v-zivo"
     if ext in AUDIO or any(x in hint for x in ("audio", "music", "song", "track", "album", "glasba", "/music/")):
         return "glasba"
@@ -739,16 +740,11 @@ def _embed_url_for_provider(netloc: str, scheme: str, imdb_id: str,
 
 
 # Vse prepoznane embed domene (razširjeno)
-_EMBED_DOMAINS = ("vidsrc", "vidlink", "videasy", "vidrock", "embed.su",
-                  "superembed", "multiembed", "2embed", "autoembed", "111movies")
-
-_TOP_PROVIDERS = [
-    ("vidlink", "VidLink (1080p)", "https://vidlink.pro"),
-    ("vidsrc_me", "VidSrc (Strežnik 2)", "https://vidsrc.me"),
-    ("videasy", "Videasy (Strežnik 3)", "https://player.videasy.net"),
-    ("autoembed", "AutoEmbed (Strežnik 4)", "https://player.autoembed.cc"),
-    ("vidsrc_cc", "VidSrc CC (Rezerva)", "https://vidsrc.cc"),
-]
+_EMBED_DOMAINS = (
+    "vidlink.pro", "vidsrc.to", "vidsrc.cc", "vidsrc.me", "vidsrc.in", "vidsrc.pm",
+    "videasy.net", "vidrock.net", "embed.su", "superembed.stream", "multiembed.mov",
+    "2embed.cc", "autoembed.cc", "111movies.com",
+)
 
 _PREDLOGA_TOKEN = re.compile(r"\{\s*(tmdb_?id|imdb_?id|season|episode|sezona|epizoda)\s*\}", re.I)
 
@@ -767,6 +763,12 @@ def _je_korenski_predvajalni_vir(url: str) -> bool:
 
 def _je_predvajalni_vir(url: str) -> bool:
     return _je_predloga_predvajalnika(url) or _je_korenski_predvajalni_vir(url)
+
+
+def _je_neposredni_medijski_tok(url: str) -> bool:
+    """Prepozna neposreden medijski URL, ki ga ne smemo prenesti kot katalog."""
+    path = urllib.parse.urlsplit(url).path.lower()
+    return Path(path).suffix in MEDIA_EXT or path.endswith((".m3u8", ".mpd", ".ts"))
 
 
 def _izpolni_predlogo(url: str, imdb_id: str, tmdb_id: str,
@@ -820,6 +822,13 @@ def _resolve_embed_or_direct_source(url: str, source_id: str, source_name: str) 
     parsed = urllib.parse.urlsplit(url)
     netloc = parsed.netloc.lower()
     path = parsed.path
+
+    if _je_neposredni_medijski_tok(url):
+        kind = _kind("", url, source_name)
+        item = _item(source_name or "Medijski tok", url, base=url,
+                     source_id=source_id, source_name=source_name or netloc,
+                     kind=kind, quality="adaptive" if path.lower().endswith((".m3u8", ".mpd")) else "")
+        return [item] if item else []
 
     # YouTube Music je spletna aplikacija, ne javni katalog JSON. V Safeer Media
     # jo odpremo kot notranji glasbeni vir; posamezne povezave do videa pa
@@ -1255,17 +1264,8 @@ class MediaCenter:
             pass
         if not isinstance(data, dict):
             data = {"viri": []}
-        if not data.get("viri"):
-            data["viri"] = [
-                {"id": "vidlink", "ime": "VidLink Pro (1080p)", "url": "https://vidlink.pro",
-                 "tip": "predvajalni_vir", "posodobljeno": int(time.time()), "napaka": "", "stevilo": 1000},
-                {"id": "vidsrc", "ime": "VidSrc (HD)", "url": "https://vidsrc.me",
-                 "tip": "predvajalni_vir", "posodobljeno": int(time.time()), "napaka": "", "stevilo": 1000},
-            ]
-            try:
-                self._save(data)
-            except Exception:
-                pass
+        if not isinstance(data.get("viri"), list):
+            data["viri"] = []
         return data
 
     def _save(self, data: dict) -> None:
@@ -1300,6 +1300,9 @@ class MediaCenter:
                 source["tip"] = "predvajalni_vir"
             data.setdefault("viri", []).append(source)
             self._save(data)
+        # Odziv vira začnemo meriti takoj ob dodajanju, da je meritev navadno
+        # že na voljo, ko uporabnik prvič izbere film ali epizodo.
+        threading.Thread(target=self._izmeri_ping, args=(canonical,), daemon=True).start()
         return self.refresh_source(source["id"])
 
     def remove_source(self, source_id: str) -> bool:
@@ -1343,6 +1346,13 @@ class MediaCenter:
                     items = _resolve_embed_or_direct_source(source["url"], source["id"], source["ime"])
                 if not items:
                     raise ValueError("Predloga potrebuje {tmdbId} ali {imdbId} in pot /movie/ ali /tv/.")
+            elif _je_neposredni_medijski_tok(source["url"]):
+                # Neposrednega MP3/MP4/HLS toka ne prenašaj v pomnilnik kot
+                # spletni katalog; shrani ga kot en predvajalni vnos.
+                items = _resolve_embed_or_direct_source(source["url"], source["id"], source["ime"])
+                if not items:
+                    raise ValueError("Neposrednega medijskega toka ni mogoče dodati.")
+                source["tip"] = "neposredni_medijski_tok"
             else:
                 payload, content_type, final_url = self._download(source["url"])
                 items = parse_payload(payload, content_type, final_url, source["id"], source["ime"])
@@ -1412,7 +1422,22 @@ class MediaCenter:
         return items
 
     def _ima_embed_vir(self, data: Optional[dict] = None) -> bool:
-        return True
+        configured = data if isinstance(data, dict) else self._load()
+        return bool(self._embed_viri(configured))
+
+    @staticmethod
+    def _embed_viri(data: dict) -> list[tuple[dict, urllib.parse.SplitResult, str]]:
+        """Vrne samo varne HTTPS ponudnike, ki jih je uporabnik sam dodal."""
+        result = []
+        for source in data.get("viri", []):
+            if not isinstance(source, dict):
+                continue
+            parsed = urllib.parse.urlsplit(str(source.get("url") or ""))
+            host = (parsed.hostname or "").casefold()
+            if parsed.scheme == "https" and any(host == domain or host.endswith("." + domain)
+                                                 for domain in _EMBED_DOMAINS):
+                result.append((source, parsed, host))
+        return result
 
     def _tmdb(self, endpoint: str, params: Optional[dict] = None) -> dict:
         query = dict(params or {})
@@ -1467,29 +1492,24 @@ class MediaCenter:
         backdrop = f"{TMDB_IMAGE}/original{raw['backdrop_path']}" if raw.get("backdrop_path") else ""
         genres = raw.get("genre_ids") or []
 
-        if kind == "film":
-            items = []
-            for prov_id, prov_name, prov_url in _TOP_PROVIDERS:
-                parsed = urllib.parse.urlsplit(prov_url)
-                u = _embed_url_for_provider((parsed.hostname or "").lower(), parsed.scheme or "https",
-                                              imdb_id, str(tmdb_id), "film", 0, 0)
-                it = _item(title, u, base=u, source_id=prov_id, source_name=prov_name,
-                           kind="film", year=year, image=poster, description=overview,
-                           tmdb_id=tmdb_id, imdb_id=imdb_id, quality="1080p HD")
-                if it:
-                    items.append(it)
-            if not items:
-                return None
-            prepared = merge_duplicates(items)[0]
-        else:
-            url = _embed_url_for_provider("vidlink.pro", "https", imdb_id, str(tmdb_id), kind, 1, 1)
-            item = _item(title, url, base=url, source_id=str(source.get("id") or "vidlink"),
-                         source_name=str(source.get("ime") or "VidLink"), kind=kind, year=year,
+        providers = self._embed_viri(self._load())
+        items = []
+        for provider, parsed, host in providers:
+            url = _embed_url_for_provider(
+                host, parsed.scheme, imdb_id, str(tmdb_id), kind,
+                1 if kind == "serija" else 0,
+                1 if kind == "serija" else 0,
+            )
+            item = _item(title, url, base=url,
+                         source_id=str(provider.get("id") or host),
+                         source_name=str(provider.get("ime") or host), kind=kind, year=year,
                          image=poster, description=overview, tmdb_id=tmdb_id, imdb_id=imdb_id,
-                         season=0, episode=0, quality="1080p")
-            if not item:
-                return None
-            prepared = merge_duplicates([item])[0]
+                         season=0, episode=0, quality="Samodejno")
+            if item:
+                items.append(item)
+        if not items:
+            return None
+        prepared = merge_duplicates(items)[0]
 
         prepared.update({
             "datum": date,
@@ -1502,7 +1522,7 @@ class MediaCenter:
         return prepared
 
     def _tmdb_catalog(self, data: dict, query: str, kind: str, genre: str, page: int) -> tuple[list[dict], int]:
-        source = next((s for s in data.get("viri", []) if "vidlink.pro" in str(s.get("url") or "").lower()), {})
+        source = {}
         media_type = "tv" if kind == "serija" else "movie" if kind == "film" else "all"
         current_page = max(1, min(int(page or 1), 500))
         params: dict[str, Any] = {"page": current_page}
@@ -1605,12 +1625,11 @@ class MediaCenter:
         s, ep = max(1, int(season or 1)), max(1, int(episode or 1))
         ep_title = title or f"S{s:02d}E{ep:02d}"
         items = []
-        for prov_id, prov_name, prov_url in _TOP_PROVIDERS:
-            parsed = urllib.parse.urlsplit(prov_url)
-            url = _embed_url_for_provider((parsed.hostname or "").lower(), parsed.scheme or "https",
-                                          imdb, tmdb, "serija", s, ep)
+        for provider, parsed, host in self._embed_viri(self._load()):
+            url = _embed_url_for_provider(host, parsed.scheme, imdb, tmdb, "serija", s, ep)
             it = _item(ep_title, url, base=url,
-                       source_id=prov_id, source_name=prov_name,
+                       source_id=str(provider.get("id") or host),
+                       source_name=str(provider.get("ime") or host),
                        kind="serija", season=s, episode=ep,
                        imdb_id=imdb, tmdb_id=int(tmdb_id), quality="1080p HD")
             if it:
@@ -1628,12 +1647,11 @@ class MediaCenter:
         tmdb = str(int(tmdb_id))
         imdb = TMDB_TO_IMDB.get(tmdb, "")
         items = []
-        for prov_id, prov_name, prov_url in _TOP_PROVIDERS:
-            parsed = urllib.parse.urlsplit(prov_url)
-            url = _embed_url_for_provider((parsed.hostname or "").lower(), parsed.scheme or "https",
-                                          imdb, tmdb, "film", 0, 0)
+        for provider, parsed, host in self._embed_viri(self._load()):
+            url = _embed_url_for_provider(host, parsed.scheme, imdb, tmdb, "film", 0, 0)
             it = _item(title or "Film", url, base=url,
-                       source_id=prov_id, source_name=prov_name,
+                       source_id=str(provider.get("id") or host),
+                       source_name=str(provider.get("ime") or host),
                        kind="film", imdb_id=imdb, tmdb_id=int(tmdb_id), quality="1080p HD")
             if it:
                 items.append(it)
@@ -1752,7 +1770,7 @@ class MediaCenter:
         item = self._dynamic_items.get(item_id) or next((item for item in self.catalog()["vnosi"] if item.get("id") == item_id), None)
         if not item:
             return None
-        return self._dodaj_predvajalne_razlicice(item)
+        return self._izberi_najhitrejsi(self._dodaj_predvajalne_razlicice(item))
 
     def _dodaj_predvajalne_razlicice(self, item: dict) -> dict:
         """Sestavi razlicice samo iz virov, ki jih je dodal uporabnik.
@@ -1773,20 +1791,27 @@ class MediaCenter:
         season, episode = int(item.get("sezona") or 0), int(item.get("epizoda") or 0)
         with self._lock:
             sources = list(self._load().get("viri", []))
-        embed_sources = []
-        for source in sources:
-            source_url = str(source.get("url") or "")
-            parsed = urllib.parse.urlsplit(source_url)
-            host = (parsed.hostname or "").lower()
-            if host and any(domain in host for domain in _EMBED_DOMAINS):
-                embed_sources.append((source, source_url, parsed, host))
+        embed_sources = [
+            (source, str(source.get("url") or ""), parsed, host)
+            for source, parsed, host in self._embed_viri({"viri": sources})
+        ]
+        allowed_hosts = {host for _, _, _, host in embed_sources}
+        current_variants = []
+        for variant in existing:
+            host = (urllib.parse.urlsplit(str(variant.get("url") or "")).hostname or "").casefold()
+            is_embed = any(host == domain or host.endswith("." + domain) for domain in _EMBED_DOMAINS)
+            if not is_embed or any(host == allowed or host.endswith("." + allowed) for allowed in allowed_hosts):
+                current_variants.append(variant)
+        existing = current_variants
 
-        # Pri filmih/serijah imajo prednost izključno ponudniki, ki jih je
-        # uporabnik dejansko dodal, in sicer v njegovem vrstnem redu. URL iz
-        # TMDb kataloga je le katalogska predloga in ne sme potisniti prvega
-        # uporabnikovega vira na drugo mesto.
-        existing = list(item.get("razlicice") or [])
-        if not existing and item.get("url"):
+        # Uporabnikov vrstni red je stabilen, razen kadar so že znani pingi.
+        # Katalogski URL ne sme dodati neizbranega ponudnika.
+        item_host = (urllib.parse.urlsplit(str(item.get("url") or "")).hostname or "").casefold()
+        item_is_embed = any(item_host == domain or item_host.endswith("." + domain)
+                            for domain in _EMBED_DOMAINS)
+        if (not existing and item.get("url")
+                and (not item_is_embed or any(item_host == host or item_host.endswith("." + host)
+                                              for host in allowed_hosts))):
             existing.insert(0, {k: item.get(k) for k in (
                 "url", "vir", "vir_id", "kakovost", "locljivost", "glave", "referer"
             ) if item.get(k) not in (None, "")})
