@@ -1000,6 +1000,15 @@ class SafeerOsWindow(QMainWindow):
             self.odpri_control("daljinec", id_nap)
             return True
 
+        if metoda == "oddaljeniZaslon":
+            id_nap = str(a[0]) if a else ""
+            ime = str(a[1]) if len(a) > 1 else ""
+            if not id_nap:
+                return False
+            from . import oddaljeni_zaslon
+            self.dispatcher.dispatch(lambda: oddaljeni_zaslon.odpri(self.control_backend, id_nap, ime))
+            return True
+
         if metoda == "novaNaprava":
             self.odpri_control("novaNaprava")
             return True

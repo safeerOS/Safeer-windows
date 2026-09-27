@@ -1271,6 +1271,9 @@
           });
           setTimeout(function () { vnos.focus(); vnos.select(); }, 0);
         } else {
+          var jeRacunalnik = !n.ta && (n.platforma === "linux" || n.platforma === "windows" ||
+            n.platforma === "win32" || n.platforma === "macos" || n.vrsta === "computer" ||
+            n.vrsta === "racunalnik" || n.vrsta === "control");
           var jeDaljinec = !n.ta && (
             (n.zmoznosti && n.zmoznosti.indexOf("remote") >= 0) ||
             n.platforma === "tv" || n.vrsta === "screen" || n.vloga === "receiver"
@@ -1280,6 +1283,10 @@
           if (jeDaljinec) {
             htmlGumbi += '<button class="gumb majhen glavni gumb-daljinec" style="display:inline-flex;gap:4px;align-items:center;">' +
               svg("daljinec") + '<span>' + ubezi(t("daljinec") || "Daljinec") + '</span></button>';
+          }
+          if (jeRacunalnik) {
+            htmlGumbi += '<button class="gumb majhen glavni gumb-oddaljeni-zaslon" style="display:inline-flex;gap:4px;align-items:center;">' +
+              svg("zaslon") + '<span>' + ubezi(t("upravljajRacunalnik")) + '</span></button>';
           }
           htmlGumbi += '</div>';
 
@@ -1297,6 +1304,13 @@
             gDaljinec.addEventListener("click", function () {
               obvesti(t("odpiram", { ime: n.ime || "Daljinec" }));
               klic("daljinec", [n.id]);
+            });
+          }
+          var gZaslon = li.querySelector(".gumb-oddaljeni-zaslon");
+          if (gZaslon) {
+            gZaslon.addEventListener("click", function () {
+              obvesti(t("odpiram", { ime: n.ime || n.id }));
+              klic("oddaljeniZaslon", [n.id, n.ime || n.id]);
             });
           }
         }

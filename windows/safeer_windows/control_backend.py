@@ -1108,6 +1108,7 @@ class SafeerControlBackend:
                 "ime": ime,
                 "platforma": n.get("platforma") or n.get("platform", ""),
                 "vrsta": n.get("vrsta") or n.get("kind", ""),
+                "naslov": n.get("naslov") or n.get("address") or n.get("host", ""),
                 "ta": bool(n.get("ta") or n.get("id") == self.device_id),
                 "zmoznosti": n.get("zmoznosti") or n.get("capabilities") or [],
             })

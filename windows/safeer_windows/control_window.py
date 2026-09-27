@@ -88,6 +88,7 @@ MOST_JS = """
     nadaljujBrezPovezave: function () { poslji("nadaljujBrezPovezave"); },
     ukaz: function (cilj, u, podatki, ref) { poslji("ukaz", [cilj, u, podatki, ref]); },
     nadzor: function (cilj, u, v) { poslji("nadzor", [cilj, u, v]); },
+    oddaljeniZaslon: function (cilj, ime) { poslji("oddaljeniZaslon", [cilj, ime]); },
     odpri: function (url) { poslji("odpri", [url]); },
     deliStandardneMape: function () { poslji("deliStandardneMape"); },
     nastaviDovoljenje: function (id, profil) { poslji("nastaviDovoljenje", [id, profil]); },
@@ -285,6 +286,12 @@ class SafeerControlWindow(QWidget):
             u = str(a[1]) if len(a) > 1 else ""
             v = a[2] if len(a) > 2 else 0
             self.backend.nadzor(cilj, u, v)
+        elif metoda == "oddaljeniZaslon":
+            cilj = str(a[0]) if a else ""
+            ime = str(a[1]) if len(a) > 1 else ""
+            if cilj:
+                from . import oddaljeni_zaslon
+                self.dispatcher.dispatch(lambda: oddaljeni_zaslon.odpri(self.backend, cilj, ime))
         elif metoda == "ukaz":
             cilj = str(a[0]) if len(a) > 0 else ""
             u = str(a[1]) if len(a) > 1 else ""
