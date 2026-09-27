@@ -5,3 +5,4 @@ Pillow>=10.4,<12
 cryptography>=43,<47
 python-vlc>=3.0.21203,<4
 mutagen>=1.47,<2
+truststore>=0.9

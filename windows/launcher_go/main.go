@@ -171,9 +171,9 @@ func checkAndInstallPySide6(py *PythonInfo) error {
 	showMessage("Safeer OS", "Safeer OS pripravlja potrebne knjižnice (PySide6, python-vlc, mutagen, PyAV). Namestitev poteka v ozadju...", MB_ICONINFORMATION)
 	var installCmd *exec.Cmd
 	if py.IsLauncher {
-		installCmd = exec.Command(py.ExePath, "-3", "-m", "pip", "install", "PySide6", "qrcode", "python-vlc", "mutagen", "av")
+		installCmd = exec.Command(py.ExePath, "-3", "-m", "pip", "install", "PySide6", "qrcode", "python-vlc", "mutagen", "av", "truststore")
 	} else {
-		installCmd = exec.Command(py.ExePath, "-m", "pip", "install", "PySide6", "qrcode", "python-vlc", "mutagen", "av")
+		installCmd = exec.Command(py.ExePath, "-m", "pip", "install", "PySide6", "qrcode", "python-vlc", "mutagen", "av", "truststore")
 	}
 	installCmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000}
 	if err := installCmd.Run(); err != nil {
