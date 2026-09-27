@@ -2,6 +2,7 @@ import base64
 import json
 import tempfile
 import unittest
+import wave
 from pathlib import Path
 from unittest import mock
 
@@ -57,9 +58,18 @@ class TestZakonitiViri(unittest.TestCase):
             raise OSError("unavailable")
         api = ZakonitiViri(opener=open_request, clock=lambda: now[0])
         first = api._peer_rows("tilvids.com", "/api/v1/videos?sort=-views", "Popular")
-        now[0] += 60
+        now[0] += 1801
         again = api._peer_rows("tilvids.com", "/api/v1/videos?sort=-views", "Popular")
         self.assertEqual(first, again)
+
+    def test_jamendo_empty_popular_response_is_retried(self):
+        responses = [Response({"results": []}), Response({"results": [{
+            "id": "t1", "name": "A public track", "artist_name": "Artist",
+            "audio": "https://audio.test/track.mp3", "image": "https://img.test/cover.jpg"}]})]
+        api = ZakonitiViri(opener=lambda request, timeout: responses.pop(0))
+        rows = api.music()
+        self.assertEqual(rows[0]["naslov"], "A public track")
+        self.assertEqual(len(responses), 0)
 
     def test_media_center_merges_public_catalog_and_resolves_direct_stream(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -86,12 +96,28 @@ class TestZakonitiViri(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "Cover.jpg").write_bytes(b"not-a-real-image")
-            (root / "Song.mp3").write_bytes(b"not-a-real-audio-file")
+            song = root / "Song.wav"
+            with wave.open(str(song), "wb") as audio_file:
+                audio_file.setparams((1, 2, 8000, 800, "NONE", "not compressed"))
+                audio_file.writeframes(b"\0\0" * 800)
+            from mutagen.wave import WAVE
+            from mutagen.id3 import APIC, TALB, TIT2, TPE1, TDRC
+            tagged = WAVE(str(song)); tagged.add_tags()
+            tagged.tags.add(TIT2(encoding=3, text="Tagged song"))
+            tagged.tags.add(TPE1(encoding=3, text="Test artist"))
+            tagged.tags.add(TALB(encoding=3, text="Test album"))
+            tagged.tags.add(TDRC(encoding=3, text="2020"))
+            tagged.tags.add(APIC(encoding=3, mime="image/png", type=3, desc="Cover", data=b"png-data"))
+            tagged.save()
             center = MediaCenter(directory + "/config", roots=[])
             result = center.add_local_root(directory)
             self.assertTrue(result["ok"])
             items = center.catalog()["vnosi"]
             self.assertEqual({item["vrsta"] for item in items}, {"slika", "glasba"})
+            song_item = next(item for item in items if item["vrsta"] == "glasba")
+            self.assertEqual((song_item["naslov"], song_item["izvajalec"], song_item["album"], song_item["leto"]),
+                             ("Tagged song", "Test artist", "Test album", 2020))
+            self.assertTrue(song_item["slika"].startswith("data:image/png;base64,"))
             self.assertFalse(center.add_local_root(directory)["ok"])
             self.assertIn("NFS", center.add_local_root("nfs://server/share")["napaka"])
 
