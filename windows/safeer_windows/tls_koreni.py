@@ -17,13 +17,23 @@ _ze = False
 
 
 def namesti() -> str:
+    """Zamenja le privzeti kontekst za odhodni HTTPS (urllib/http.client).
+
+    Globalno vbrizganje (truststore.inject_into_ssl) ne pride v postev: zamenja tudi strezniske kontekste
+    in tiste s pripetim lastnim certifikatom (Safeer Link, oddaljeni zaslon) - zaslon se potem ne odzove.
+    """
     global _ze
     if _ze or sys.platform != "win32":
         return ""
     _ze = True
     try:
         import truststore  # type: ignore
-        truststore.inject_into_ssl()
+
+        def s_sistemom():
+            return truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+
+        s_sistemom()  # preveri, da deluje, preden ga nastavimo
+        ssl._create_default_https_context = s_sistemom
         return "truststore"
     except Exception:
         pass
@@ -37,16 +47,14 @@ def namesti() -> str:
             continue
     if not pot:
         return ""
-    izvirni = ssl.create_default_context
 
-    def s_koreni(*a, **k):
-        kontekst = izvirni(*a, **k)
+    def s_koreni():
+        kontekst = ssl.create_default_context()
         try:
             kontekst.load_verify_locations(cafile=pot)
         except Exception:
             pass
         return kontekst
 
-    ssl.create_default_context = s_koreni
-    ssl._create_default_https_context = s_koreni  # urllib brez izrecnega konteksta
+    ssl._create_default_https_context = s_koreni
     return "certifi"
