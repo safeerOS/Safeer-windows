@@ -3093,6 +3093,9 @@
     }
     stanje.znan = !!s.znan;
     stanje.seznanjen = !!s.seznanjen;
+    // Ce je bila povezava vzpostavljena, preden se je stran odprla, dogodka "povezava" ne bo vec:
+    // stanje preberemo iz mostu, sicer glava ostane na "Povezujem se ...".
+    if (typeof s.povezan === "boolean") stanje.povezan = s.povezan;
     stanje.hub = s.hub || "";
     stanje.imeNaprave = s.naprava || "";
     stanje.idNaprave = s.id || "";
