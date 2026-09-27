@@ -1963,6 +1963,27 @@
     if ($("iskanje").value && document.activeElement !== $("iskanje")) $("iskanje").value = "";
   }
 
+  // Nova naprava se pridruzuje Safeer Linku: kodo, ki jo vpise nanjo, pokazemo tudi tu (velika,
+  // da jo uporabnik prebere z razdalje). Okno se zapre samo po 5 minutah ali ob kliku.
+  function pokaziKodoPrijave(p) {
+    var koda = String(p.koda || "");
+    if (!/^[0-9]{6}$/.test(koda)) return;
+    var staro = document.getElementById("slojKodaPrijave");
+    if (staro) staro.remove();
+    var sloj = el("div", "sloj-koda-prijave");
+    sloj.id = "slojKodaPrijave";
+    var okno = el("div", "koda-prijave-okno");
+    var h = el("h2"); h.textContent = "Nova naprava";
+    var o = el("p"); o.textContent = (p.ime || "Naprava") + " se želi pridružiti tvojemu Safeer Linku. Na njej vpiši to kodo:";
+    var k = el("div", "koda-prijave"); k.textContent = koda.slice(0, 3) + " " + koda.slice(3);
+    var g = el("button", "koda-prijave-gumb"); g.textContent = "V redu";
+    g.addEventListener("click", function () { sloj.remove(); });
+    okno.appendChild(h); okno.appendChild(o); okno.appendChild(k); okno.appendChild(g);
+    sloj.appendChild(okno);
+    document.body.appendChild(sloj);
+    setTimeout(function () { if (sloj.parentNode) sloj.remove(); }, 300000);
+  }
+
   // ------------------------------------------------------------------ dogodki iz safeer_os.py
   window.safeerOsDogodek = function (vrsta, podatki) {
     if (vrsta === "stanje") narisiStanje(podatki);
@@ -1970,6 +1991,7 @@
     if (vrsta === "pojdi") window.safeerOsPojdi(podatki);
     if (vrsta === "mediaFallback" && podatki) predvajajHtml(podatki, 0);
     if (vrsta === "mediaOsvezen" && S.razdelek === "media") naloziMedia();
+    if (vrsta === "kodaPrijave" && podatki) pokaziKodoPrijave(podatki);
     if (vrsta === "naprave") {
       if (S.razdelek === "programi") nalozNaprave();
       if (S.razdelek === "datoteke") nalozNapraveSDatoteki();

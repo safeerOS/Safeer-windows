@@ -718,3 +718,15 @@ div.vrstica { cursor: default; }
 .nedavna-vrstica:hover .odstrani, .nedavna-vrstica:focus-within .odstrani { display: grid; }
 .nedavna-vrstica .odstrani:hover { background: rgba(255,255,255,.12); }
 .nedavna-vrstica .odstrani svg { width: 14px; height: 14px; }
+
+/* Koda za novo napravo v Safeer Linku */
+.sloj-koda-prijave { position: fixed; inset: 0; z-index: 900; background: rgba(0, 0, 0, .55);
+  display: flex; align-items: center; justify-content: center; }
+.koda-prijave-okno { width: min(560px, calc(100vw - 32px)); padding: 28px 32px; border-radius: var(--polmer);
+  background: var(--kartica-poudarek); border: 1px solid var(--rob); box-shadow: var(--senca); text-align: center; }
+.koda-prijave-okno h2 { margin: 0 0 8px; }
+.koda-prijave-okno p { color: var(--medlo); margin: 0 0 18px; line-height: 1.45; }
+.koda-prijave { font-size: 56px; font-weight: 700; letter-spacing: .12em; color: var(--zelena);
+  font-variant-numeric: tabular-nums; margin-bottom: 22px; }
+.koda-prijave-gumb { padding: 10px 26px; border-radius: 12px; border: 0; background: var(--zelena);
+  color: var(--zelena-temna); font-weight: 700; font-size: 16px; cursor: pointer; }

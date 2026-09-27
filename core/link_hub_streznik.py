@@ -970,10 +970,27 @@ def _je_krajevni_naslov(naslov: str) -> bool:
         or nizko.startswith("feb") or nizko.startswith("fc") or nizko.startswith("fd")
 
 
+# Aplikacija (npr. Safeer OS na Windows) se tu prijavi, da kodo pokaze v svojem oknu: fn(ime, koda).
+POSLUSALCI_KODE: List[Callable[[str, str], None]] = []
+
+
 def _obvestilo_kode(ime: str, koda: str) -> None:
-    """Koda za novo napravo tudi na racunalniku (Link je lahko brez televizorja). Brez notify-send nic."""
+    """Koda za novo napravo tudi na racunalniku (Link je lahko brez televizorja).
+
+    Najprej v odprtih Safeer oknih (poslusalci), nato sistemsko obvestilo: Linux notify-send,
+    Windows obvestilo v kotu zaslona (PowerShell, brez dodatnih modulov).
+    """
     import shutil
     import subprocess
+    import sys
+    for poslusalec in list(POSLUSALCI_KODE):
+        try:
+            poslusalec(ime, koda)
+        except Exception:
+            pass
+    if sys.platform == "win32":
+        _obvestilo_kode_windows(ime, koda)
+        return
     if not shutil.which("notify-send"):
         return
     try:
@@ -981,6 +998,31 @@ def _obvestilo_kode(ime: str, koda: str) -> None:
                           "Safeer Link: nova naprava",
                           "%s se želi povezati. Vpiši kodo %s %s" % (ime, koda[:3], koda[3:])],
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
+
+
+def _obvestilo_kode_windows(ime: str, koda: str) -> None:
+    import subprocess
+    from xml.sax.saxutils import escape
+    naslov = escape("Safeer Link: nova naprava")
+    besedilo = escape("%s se želi povezati. Vpiši kodo %s %s" % (ime, koda[:3], koda[3:]))
+    xml = ("<toast duration='long'><visual><binding template='ToastGeneric'><text>%s</text><text>%s</text>"
+           "</binding></visual></toast>") % (naslov, besedilo)
+    skripta = (
+        "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType=WindowsRuntime] | Out-Null;"
+        "[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType=WindowsRuntime] | Out-Null;"
+        "$x = New-Object Windows.Data.Xml.Dom.XmlDocument; $x.LoadXml($env:SAFEER_TOAST);"
+        "$app = '{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe';"
+        "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($app).Show("
+        "[Windows.UI.Notifications.ToastNotification]::new($x))"
+    )
+    import os
+    okolje = dict(os.environ, SAFEER_TOAST=xml)
+    try:
+        subprocess.Popen(["powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", skripta],
+                         env=okolje, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     except Exception:
         pass
 
