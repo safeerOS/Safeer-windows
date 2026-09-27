@@ -2508,6 +2508,9 @@
     return sporocila[jezik] || sporocila.sl;
   }
   function odpriMedia(id) {
+    // Prenos, ki ga izdajatelj ponuja samo na svoji strani (npr. RTV SLO): odpremo ga v Spletu.
+    var znan = (media.katalog || []).find(function (x) { return x.id === id; });
+    if (znan && znan.stran) { otvoriSpletnoStran(znan.stran, znan.naslov); return; }
     klic("mediaPredvajaj", [id]).then(function (item) {
       if (!item) { obvesti(t("mediaVirNapaka")); return; }
       media.aktivni = item;
@@ -2526,7 +2529,55 @@
     media.aktivni = null;
     klic("celozaslonsko", [false]);
   }
+  // Zanri pod iskanjem: pri filmih in serijah filmski (TMDB), pri glasbi in radiu glasbene zvrsti,
+  // drugje jih ni. Ob menjavi skupine izbrani zanr ponastavimo (filmska oznaka ni glasbena).
+  var FILMSKI_ZANRI = null;
+  function skupinaZanrov(filter) {
+    if (filter === "film" || filter === "serija" || filter === "vse") return "film";
+    if (filter === "glasba" || filter === "radio") return filter;
+    return "";
+  }
+  function izberiZanr(b) {
+    media.genre = b.getAttribute("data-media-genre") || "";
+    media.page = 1;
+    document.querySelectorAll("[data-media-genre]").forEach(function (q) { q.classList.toggle("izbran", q === b); });
+    naloziMedia();
+  }
+  function narisiZanre() {
+    var vrstica = $("mediaZanri");
+    if (!vrstica) return;
+    if (FILMSKI_ZANRI === null) FILMSKI_ZANRI = vrstica.innerHTML;
+    var skupina = skupinaZanrov(media.filter);
+    if (media._skupinaZanrov === skupina) return;
+    media._skupinaZanrov = skupina;
+    media.genre = "";
+    vrstica.hidden = !skupina;
+    if (skupina === "film") {
+      vrstica.innerHTML = FILMSKI_ZANRI;
+      vrstica.querySelectorAll("[data-media-genre]").forEach(function (b) {
+        b.classList.toggle("izbran", !b.getAttribute("data-media-genre"));
+        b.onclick = function () { izberiZanr(b); };
+      });
+      return;
+    }
+    if (!skupina) return;
+    vrstica.innerHTML = "";
+    var vse = el("button", "izbran"); vse.setAttribute("data-media-genre", "");
+    vse.textContent = skupina === "radio" ? "Vse postaje" : "Vsa glasba";
+    vse.onclick = function () { izberiZanr(vse); };
+    vrstica.appendChild(vse);
+    klic("mediaZvrsti", [skupina]).then(function (zvrsti) {
+      if (media._skupinaZanrov !== skupina) return;
+      (zvrsti || []).forEach(function (z) {
+        var b = el("button"); b.setAttribute("data-media-genre", z.id); b.textContent = z.ime;
+        b.onclick = function () { izberiZanr(b); };
+        vrstica.appendChild(b);
+      });
+    });
+  }
+
   function naloziMedia() {
+    narisiZanre();
     var zahteva = ++media.zahteva;
     $("mediaPovzetek").textContent = "Nalagam katalog …";
     klic("mediaKatalog", [media.query, media.filter, media.genre, media.page || 1]).then(function (response) {
@@ -2680,12 +2731,7 @@
     };
   });
   document.querySelectorAll("[data-media-genre]").forEach(function (b) {
-    b.onclick = function () {
-      media.genre = b.getAttribute("data-media-genre") || "";
-      media.page = 1;
-      document.querySelectorAll("[data-media-genre]").forEach(function (q) { q.classList.toggle("izbran", q === b); });
-      naloziMedia();
-    };
+    b.onclick = function () { izberiZanr(b); };
   });
   on("mediaIskanje", "input", function () {
     media.query = this.value; media.page = 1; clearTimeout(media.timer); media.timer = setTimeout(naloziMedia, 350);

@@ -14,6 +14,65 @@ from typing import Any
 PEERTUBE_INSTANCES = ("peertube.tv", "tilvids.com", "framatube.org", "peertube.uno", "video.blender.org")
 JAMENDO_CLIENT_ID = "8d37f069"  # Javen client_id aplikacije Safeer TV.
 RADIO_TAGS = ("jazz", "rock", "pop", "news", "classical", "electronic")
+#: Glasbene zvrsti za Glasbo in Radio v Medijskem centru (kot zanri pri filmih):
+#: kljuc -> (ime za uporabnika, oznaka Jamendo ali "", oznaka Radio Browser ali "").
+GLASBENE_ZVRSTI = {
+    "pop": ("Pop", "pop", "pop"),
+    "rock": ("Rock", "rock", "rock"),
+    "elektronska": ("Elektronska", "electronic", "electronic"),
+    "hiphop": ("Hip-hop", "hiphop", "hip hop"),
+    "jazz": ("Jazz", "jazz", "jazz"),
+    "klasicna": ("Klasična", "classical", "classical"),
+    "metal": ("Metal", "metal", "metal"),
+    "plesna": ("Plesna", "dance", "dance"),
+    "ljudska": ("Ljudska", "folk", "folk"),
+    "reggae": ("Reggae", "reggae", "reggae"),
+    "sprostitvena": ("Sprostitvena", "ambient", "chillout"),
+    "filmska": ("Filmska", "soundtrack", "soundtrack"),
+    "country": ("Country", "country", "country"),
+    "novice": ("Novice in pogovor", "", "news"),
+}
+
+
+#: TV v zivo: samo uradni, javno objavljeni prenosi izdajateljev (preverjeno, da tecejo), brez posrednikov.
+#: (id, ime, jezik, url HLS ali "", uradna stran za prenos, drzava - "" = za vse)
+TV_V_ZIVO = (
+    ("rtvslo", "RTV SLO v živo", "slovenščina", "", "https://365.rtvslo.si/v-zivo", "SI"),
+    ("dw-en", "DW News", "angleščina", "https://dwamdstream102.akamaized.net/hls/live/2015525/dwstream102/index.m3u8", "", ""),
+    ("dw-de", "DW Deutsch", "nemščina", "https://dwamdstream106.akamaized.net/hls/live/2017965/dwstream106/index.m3u8", "", ""),
+    ("dw-es", "DW Español", "španščina", "https://dwamdstream104.akamaized.net/hls/live/2015530/dwstream104/index.m3u8", "", ""),
+    ("f24-en", "France 24 English", "angleščina", "https://static.france24.com/live/F24_EN_HI_HLS/live_web.m3u8", "", ""),
+    ("f24-fr", "France 24 Français", "francoščina", "https://static.france24.com/live/F24_FR_HI_HLS/live_web.m3u8", "", ""),
+    ("f24-es", "France 24 Español", "španščina", "https://static.france24.com/live/F24_ES_HI_HLS/live_web.m3u8", "", ""),
+    ("aje", "Al Jazeera English", "angleščina", "https://live-hls-apps-aje-fa.getaj.net/AJE/index.m3u8", "", ""),
+    ("trt-world", "TRT World", "angleščina", "https://tv-trtworld.medya.trt.com.tr/master.m3u8", "", ""),
+    ("cbs-news", "CBS News 24/7", "angleščina", "https://cbsn-us.cbsnstream.cbsnews.com/out/v1/55a8648e8f134e82a470f83d562deeca/master.m3u8", "", ""),
+    ("arirang", "Arirang TV", "angleščina", "https://amdlive-ch01-ctnd-com.akamaized.net/arirang_1ch/smil:arirang_1ch.smil/playlist.m3u8", "", ""),
+    ("nasa", "NASA TV", "angleščina", "https://ntv1.akamaized.net/hls/live/2014075/NASA-NTV1-HLS/master.m3u8", "", ""),
+    ("redbull", "Red Bull TV", "angleščina", "https://rbmn-live.akamaized.net/hls/live/590964/BoRB-AT/master.m3u8", "", ""),
+)
+
+
+def tv_v_zivo(drzava: str = "") -> list[dict]:
+    """Uradni prenosi v zivo; domaci (npr. RTV SLO) samo za uporabnike iz te drzave."""
+    izid = []
+    for kljuc, ime, jezik, url, stran, samo in TV_V_ZIVO:
+        if samo and samo != (drzava or "").upper():
+            continue
+        vnos = {"id": "tv:" + kljuc, "naslov": ime, "vrsta": "tv-v-zivo", "vir": ime,
+                "opis": "Uradni prenos v živo · " + jezik, "slika": "", "jezik": jezik}
+        if url:
+            vnos.update(url=url, mime="application/vnd.apple.mpegurl")
+        else:
+            vnos.update(url=stran, stran=stran, opis="Uradna stran v živo · " + jezik)
+        izid.append(vnos)
+    return izid
+
+
+def zvrsti_za(vrsta: str) -> list[dict]:
+    """Zvrsti, ki jih ima smisel pokazati za 'glasba' ali 'radio' (novice so samo na radiu)."""
+    indeks = 1 if vrsta == "glasba" else 2
+    return [{"id": kljuc, "ime": v[0]} for kljuc, v in GLASBENE_ZVRSTI.items() if v[indeks]]
 _TTL = 30 * 60
 _TIMEOUT = 10
 
@@ -228,7 +287,15 @@ class ZakonitiViri:
                 "zunanja_povezava": row.get("shorturl") or row.get("shareurl", ""),
                 "vir": "Jamendo", "opis": "Jamendo · " + str(row.get("artist_name", ""))}
 
-    def music(self, query: str = "") -> list[dict]:
+    def music(self, query: str = "", zvrst: str = "") -> list[dict]:
+        oznaka = GLASBENE_ZVRSTI.get(zvrst, ("", "", ""))[1]
+        if zvrst and not oznaka:
+            return []
+        if oznaka and not query:
+            # Jamendo pri nekaterih oznakah obcasno vrne prazno z `tags`; takrat poskusimo `fuzzytags`.
+            zadetki = self._jamendo("tracks/", {"order": "popularity_total", "limit": 48, "audioformat": "mp32", "tags": oznaka})
+            return zadetki or self._jamendo("tracks/", {"order": "popularity_total", "limit": 48, "audioformat": "mp32",
+                                                         "fuzzytags": oznaka})
         if not query:
             return self._jamendo("tracks/", {"order": "popularity_total", "limit": 36, "audioformat": "mp32"})
         def fetch():
@@ -242,14 +309,21 @@ class ZakonitiViri:
                     "audioformat": "mp32"}), selected) for track in rows]
         return self._cached("jam-search:" + query.casefold(), fetch)
 
-    def radio(self, query: str = "") -> list[dict]:
-        tags = [(query, "Iskanje")] if query else [("SI", "Slovenija")] + [(tag, tag.title()) for tag in RADIO_TAGS] + [("", "Najbolj poslušane")]
+    def radio(self, query: str = "", zvrst: str = "") -> list[dict]:
+        ime, _, oznaka = GLASBENE_ZVRSTI.get(zvrst, ("", "", ""))
+        if zvrst and not oznaka:
+            return []
+        if oznaka:
+            tags = [(oznaka, ime)]
+        else:
+            tags = [(query, "Iskanje")] if query else [("SI", "Slovenija")] + [(tag, tag.title()) for tag in RADIO_TAGS] + [("", "Najbolj poslušane")]
         def load_tag(entry):
             value, label = entry
-            params = {"order": "clickcount", "reverse": "true", "hidebroken": "true", "limit": "30", "is_https": "true"}
+            params = {"order": "clickcount", "reverse": "true", "hidebroken": "true",
+                      "limit": "60" if oznaka else "30", "is_https": "true"}
             if value == "SI": params["countrycode"] = "SI"
             elif value: params["tag"] = value
-            key = "radio:" + label
+            key = "radio:" + label + ":" + value
             def fetch(params=params, label=label):
                 url = "https://de1.api.radio-browser.info/json/stations/search?" + urllib.parse.urlencode(params)
                 rows = self._json(url)
@@ -279,8 +353,12 @@ class ZakonitiViri:
                 "codec": codec, "bitrate": bitrate, "drzava": row.get("countrycode", ""),
                 "zanri": row.get("tags", ""), "skupina": group, "vir": "Radio Browser"}
 
-    def get(self, query: str = "", configured_hosts: list[str] | None = None) -> list[dict]:
-        tasks = ((self.videos, (query, configured_hosts)), (self.music, (query,)), (self.radio, (query,)))
+    def get(self, query: str = "", configured_hosts: list[str] | None = None, zvrst: str = "") -> list[dict]:
+        if zvrst:
+            # Glasbena zvrst velja samo za glasbo in radio (video nima teh zvrsti).
+            tasks = ((self.music, (query, zvrst)), (self.radio, (query, zvrst)))
+        else:
+            tasks = ((self.videos, (query, configured_hosts)), (self.music, (query,)), (self.radio, (query,)))
         with ThreadPoolExecutor(max_workers=3) as pool:
             futures = [pool.submit(fn, *args) for fn, args in tasks]
             results = []

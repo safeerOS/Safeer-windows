@@ -941,6 +941,10 @@ class SafeerOsWindow(QMainWindow):
         if metoda == "jbl":
             return {"vklop": False, "najdena": False}
 
+        if metoda == "mediaZvrsti":
+            from core import zakoniti_viri
+            return zakoniti_viri.zvrsti_za(str(a[0]) if a else "glasba")
+
         if metoda == "mediaKatalog":
             query = str(a[0]) if a else ""
             kind = str(a[1]) if len(a) > 1 else "vse"
