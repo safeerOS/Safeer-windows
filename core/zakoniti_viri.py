@@ -220,7 +220,11 @@ class ZakonitiViri:
             image = "https://%s%s" % (host, image)
         live = bool(row.get("isLive"))
         duration = int(row.get("duration") or 0)
-        kind = "tv-v-zivo" if live else ("film" if duration > 40 * 60 else "video")
+        # Film je le, kar avtor na PeerTube uvrsti med filme (kategorija 2 "Films") in je dolgo; dolga
+        # predavanja, sestanki in podkasti so video - prej so zasuli polico Filmi.
+        kategorija = row.get("category") if isinstance(row.get("category"), dict) else {}
+        je_film = str(kategorija.get("id") or "") == "2" and duration > 40 * 60
+        kind = "tv-v-zivo" if live else ("film" if je_film else "video")
         return {
             "id": "peertube:" + video_id, "naslov": title, "vrsta": kind,
             "url": "https://%s/videos/watch/%s" % (host, video_id),

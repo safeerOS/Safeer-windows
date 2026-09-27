@@ -40,6 +40,19 @@ class TestZakonitiViri(unittest.TestCase):
         self.assertTrue(resolved["v_zivo"])
         self.assertTrue(all("timeout" not in url for url in calls))
 
+    def test_peertube_film_je_le_kategorija_films(self):
+        """Dolgo predavanje ni film; film je le PeerTube kategorija 2 (Films)."""
+        api = ZakonitiViri(opener=lambda *_a, **_k: Response({}))
+        predavanje = api._peertube_video({"uuid": "a", "name": "OPG Town Hall", "duration": 3600,
+                                          "category": {"id": 13, "label": "Education"}}, "tilvids.com", "x")
+        film = api._peertube_video({"uuid": "b", "name": "Sintel", "duration": 3000,
+                                    "category": {"id": 2, "label": "Films"}}, "video.blender.org", "x")
+        kratek = api._peertube_video({"uuid": "c", "name": "Kratki", "duration": 600,
+                                      "category": {"id": 2, "label": "Films"}}, "video.blender.org", "x")
+        self.assertEqual(predavanje["vrsta"], "video")
+        self.assertEqual(film["vrsta"], "film")
+        self.assertEqual(kratek["vrsta"], "video")
+
     def test_radio_metadata_requires_https_and_keeps_codec(self):
         row = {"stationuuid": "s1", "name": "Jazz FM", "url_resolved": "https://radio.test/live.m3u8",
                "codec": "AAC", "bitrate": 128, "country": "Slovenia", "countrycode": "SI",
