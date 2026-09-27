@@ -409,6 +409,13 @@
     }, function () {});
   }
   function zazeni(p) {
+    // Program druge naprave se privzeto odpre TUKAJ (oddaljeno namizje: naprava ga zazene na
+    // navideznem zaslonu in pretaka sliko). Zagon na sami napravi je izbira z ikono na ploscici.
+    if (p.naprava) { odpriTukaj(p); return; }
+    obvesti(t("odpiram", { ime: p.ime }));
+    zazeniLokalno(p);
+  }
+  function zazeniNaSamiNapravi(p) {
     if (p.naprava) {
       var n = S.naprave.find(function (x) { return x.id === p.naprava; }) || { ime: "" };
       obvesti(t("zaganjamNa", { ime: p.ime, naprava: n.ime }));
@@ -424,7 +431,8 @@
                                                         function () { obvesti(t("niUspelo")); });
       return;
     }
-    obvesti(t("odpiram", { ime: p.ime }));
+  }
+  function zazeniLokalno(p) {
     klic("zazeni", [p.id]).then(function (ok) {
       if (!ok) { obvesti(t("niUspelo")); return; }
       zabeleziNedavno({ vrsta: "program", id: p.id, ime: p.ime, ikona: p.ikona });
@@ -438,8 +446,9 @@
     var n = S.naprave.find(function (x) { return x.id === p.naprava; }) || { ime: "" };
     obvesti(t("potrdiNaNapravi", { ime: p.ime, naprava: n.ime }));
     klic("odpriTukaj", [p.naprava, p.id]).then(function (r) {
-      if (!r || !r.ok) obvesti(t("niUspelo"));
-      else if (!r.tu) obvesti(t("napravaNePretaka", { ime: p.ime, naprava: n.ime }));
+      if (!r || !r.ok) { obvesti(r && r.message ? r.message : t("niUspelo")); return; }
+      if (!r.tu) obvesti(t("napravaNePretaka", { ime: p.ime, naprava: n.ime }));
+      zabeleziNedavno({ vrsta: "program", id: p.id, ime: p.ime, ikona: p.ikona, naprava: p.naprava, ime_naprave: n.ime });
     }, function () { obvesti(t("niUspelo")); });
   }
   function ploscicaPrograma(p, zPripenjanjem, naDomacem) {
@@ -449,10 +458,10 @@
     b.appendChild(el("span", "ime", ubezi(p.ime)));
     b.addEventListener("click", function () { zazeni(p); });
     if (p.naprava) {
-      var tu = el("span", "pripni", svg("namizje"));
-      tu.title = t("odpriTukaj");
-      tu.addEventListener("click", function (e) { e.stopPropagation(); odpriTukaj(p); });
-      b.appendChild(tu);
+      var tam = el("span", "pripni", svg("zaslon"));
+      tam.title = "Zaženi na napravi";
+      tam.addEventListener("click", function (e) { e.stopPropagation(); zazeniNaSamiNapravi(p); });
+      b.appendChild(tam);
     }
     if (zPripenjanjem) {
       var pr = el("span", "pripni" + (p.pripet ? " pripet" : "") + (naDomacem ? " levo" : ""), svg("zvezda"));
