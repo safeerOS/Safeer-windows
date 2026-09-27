@@ -207,6 +207,8 @@ class SafeerOsPage(QWebEnginePage):
         if message.startswith(BRIDGE_PREFIX):
             try:
                 payload = json.loads(message[len(BRIDGE_PREFIX):])
+                if str(payload.get("m") or "").startswith("media"):
+                    print(f"[SafeerOS] Media zahteva #{payload.get('id')}: {payload.get('m')}", flush=True)
                 self.window_ref.obdelaj_klic(payload)
             except Exception as e:
                 print(f"[SafeerOS] Napaka pri razclenjevanju mostu: {e}", flush=True)
@@ -216,10 +218,13 @@ class SafeerOsPage(QWebEnginePage):
 
 
 class SafeerOsWindow(QMainWindow):
-    def __init__(self, v_oknu: bool = False, zacetni_razdelek: str = ""):
+    def __init__(self, v_oknu: bool = False, zacetni_razdelek: str = "", media_engine: str = "auto"):
         super().__init__()
+        print("[SafeerOS] DIAG window_init_started", flush=True)
         self.v_oknu = v_oknu
         self.zacetni_razdelek = zacetni_razdelek
+        self.media_engine = media_engine if media_engine in ("auto", "qt") else "auto"
+        self._fullscreen_restore_maximized = not v_oknu
         self.setWindowTitle("Safeer OS")
         self.setMinimumSize(960, 600)
 
@@ -296,6 +301,7 @@ class SafeerOsWindow(QMainWindow):
         self.zaslon.addWidget(self.browser_window)
         self.webview2_media = webview2_media.WebView2MediaWidget(self._zapri_webview2_media, self)
         self.zaslon.addWidget(self.webview2_media)
+        print("[SafeerOS] DIAG media_views_ready", flush=True)
         self._browser_media_active = False
         self.setCentralWidget(self.zaslon)
 
@@ -317,6 +323,7 @@ class SafeerOsWindow(QMainWindow):
 
         # Nalozi domaco stran
         self.nalozi_vmesnik()
+        print("[SafeerOS] DIAG home_page_requested", flush=True)
         QTimer.singleShot(0, self._osvezi_media_v_ozadju)
 
         # Ce je dolocen zacetni razdelek (npr. 'control', 'daljinec', 'novaNaprava', 'media', 'nastavitve'),
@@ -337,7 +344,7 @@ class SafeerOsWindow(QMainWindow):
             elif self.zacetni_razdelek == "media-serije":
                 def _odpri_media_serije():
                     js = (
-                        "if (!window.safeerOsPojdi || window.__safeerMediaTestStarted) return;"
+                        "if (window.safeerOsPojdi && !window.__safeerMediaTestStarted) {"
                         "window.__safeerMediaTestStarted = true; window.safeerOsPojdi('media');"
                         "var b = document.querySelector('[data-media-filter=\"serija\"]');"
                         "if (b) { b.click(); }"
@@ -372,7 +379,8 @@ class SafeerOsWindow(QMainWindow):
             elif self.zacetni_razdelek == "media-predvajaj":
                 def _odpri_media_predvajaj():
                     js = (
-                        "if (window.safeerOsPojdi) window.safeerOsPojdi('media');"
+                        "if (window.safeerOsPojdi && !window.__safeerMediaTestStarted) {"
+                        "window.__safeerMediaTestStarted = true; window.safeerOsPojdi('media');"
                         "var b = document.querySelector('[data-media-filter=\"serija\"]');"
                         "if (b) { b.click(); }"
                         "function klikniKoJePripravljeno(poskusi) {"
@@ -393,6 +401,7 @@ class SafeerOsWindow(QMainWindow):
                         "  }"
                         "}"
                         "setTimeout(function () { klikniKoJePripravljeno(0); }, 300);"
+                        "}"
                     )
                     self.view.page().runJavaScript(js)
                 QTimer.singleShot(1500, _odpri_media_predvajaj)
@@ -409,6 +418,7 @@ class SafeerOsWindow(QMainWindow):
             self.show()
         else:
             self.showMaximized()
+        print(f"[SafeerOS] DIAG window_show_called section={self.zacetni_razdelek or 'home'}", flush=True)
 
     def nalozi_vmesnik(self) -> None:
         try:
@@ -434,17 +444,27 @@ class SafeerOsWindow(QMainWindow):
 
     def preklopi_celozaslonsko(self) -> None:
         if self.isFullScreen():
-            self.showNormal()
-            self.webview2_media.set_fullscreen_ui(False)
+            self._zapusti_celozaslonsko()
         else:
-            if self.zaslon.currentWidget() is self.webview2_media:
-                self.webview2_media.set_fullscreen_ui(True)
+            self._fullscreen_restore_maximized = self.isMaximized()
+            self._nastavi_predvajalnik_celozaslonsko(True)
             self.showFullScreen()
+
+    def _nastavi_predvajalnik_celozaslonsko(self, enabled: bool) -> None:
+        if self.zaslon.currentWidget() is self.webview2_media:
+            self.webview2_media.set_fullscreen_ui(enabled)
+        elif self.zaslon.currentWidget() is self.media_player:
+            self.media_player.set_fullscreen_ui(enabled)
+
+    def _zapusti_celozaslonsko(self) -> None:
+        self._nastavi_predvajalnik_celozaslonsko(False)
+        self.showNormal()
+        if self._fullscreen_restore_maximized:
+            self.showMaximized()
 
     def na_escape(self) -> None:
         if self.isFullScreen():
-            self.showNormal()
-            self.webview2_media.set_fullscreen_ui(False)
+            self._zapusti_celozaslonsko()
             return
         if self.zaslon.currentWidget() is self.media_player:
             self._zapri_media()
@@ -480,12 +500,26 @@ class SafeerOsWindow(QMainWindow):
 
     def _odpri_notranji_splet(self, url: str, *, media: bool = False, item: Optional[dict] = None) -> None:
         self._browser_media_active = media
-        webview_started = self.webview2_media.open_item(item) if media and item else False
-        if media and (webview_started or self.webview2_media.open_url(url)):
+        webview_item = None
+        if media and item:
+            selected_url = str(item.get("url") or url)
+            selected = next((dict(row) for row in item.get("razlicice", [])
+                             if isinstance(row, dict) and str(row.get("url") or "") == selected_url),
+                            {"url": selected_url, "vir": item.get("vir", "")})
+            webview_item = dict(item, url=selected_url, razlicice=[selected])
+        webview_started = False
+        if self.media_engine != "qt":
+            webview_started = self.webview2_media.open_item(webview_item) if webview_item else False
+            if media and not webview_started:
+                webview_started = self.webview2_media.open_url(url)
+        if media and webview_started:
             self.zaslon.setCurrentWidget(self.webview2_media)
             self.setWindowTitle("Safeer OS · Media")
             return
         if media:
+            # Uporabi preverjeno pot iz c1155b1: embed je vrhnja stran v
+            # zasebnem, vgrajenem Safeer Browserju. HTML iframe v os.js ga
+            # je zamenjal v 9f79709 in ponudniki lahko zavrnejo tak embed.
             self.browser_window.load_media(url)
         else:
             self.browser_window.set_media_mode(False)
@@ -569,9 +603,12 @@ class SafeerOsWindow(QMainWindow):
         def delo():
             try:
                 res = self._izvedi_metodo(metoda, a)
+                if metoda.startswith("media"):
+                    count = len(res.get("vnosi", [])) if isinstance(res, dict) else ""
+                    print(f"[SafeerOS] Media odgovor #{klic_id}: {metoda}; vnosi={count}", flush=True)
                 self.vrni_odgovor(klic_id, True, res)
             except Exception as e:
-                print(f"[SafeerOS] Napaka pri klicu {metoda}: {e}")
+                print(f"[SafeerOS] Napaka pri klicu {metoda}: {e}", flush=True)
                 self.vrni_odgovor(klic_id, False, str(e))
 
         threading.Thread(target=delo, daemon=True).start()
@@ -828,6 +865,7 @@ class SafeerOsWindow(QMainWindow):
         if metoda == "mediaPredvajaj":
             item = self.media_center.resolve(str(a[0]) if a else "")
             if not item:
+                print("[SafeerMedia] MEDIA_ROUTE missing_item", flush=True)
                 return None
             url = str(item.get("url") or "")
             is_embed = (
@@ -844,9 +882,17 @@ class SafeerOsWindow(QMainWindow):
                 bool(item.get("glave"))
             )
             native = self.media_player.available and is_direct_stream and not is_embed
+            host = urllib.parse.urlsplit(url).hostname or ""
+            print(f"[SafeerMedia] MEDIA_ROUTE engine={self.media_engine} host={host} "
+                  f"embed={is_embed} direct={is_direct_stream} native={native}", flush=True)
             if native:
                 self.dispatcher.dispatch(lambda: self._odpri_media(item))
-            # Spletni embed ostane v namenskem predvajalniku Safeer Media (HTML iframe).
+            elif is_embed and url.startswith(("http://", "https://")) and (
+                    self.media_engine == "qt" or self.webview2_media.available):
+                # WebView2 prejme le trenutno izbrani ponudnikov URL. Ne
+                # poskušaj zaporedoma vseh ponudnikov ob enem uporabniškem kliku.
+                self.dispatcher.dispatch(lambda: self._odpri_notranji_splet(url, media=True, item=item))
+                native = True
             return dict(item, native=bool(native))
         if metoda == "mediaStanje":
             return {"na_voljo": True, "native": self.media_player.available,
@@ -894,6 +940,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--okno", action="store_true", help="Odpri v oknu namesto celozaslonsko")
     parser.add_argument("--control", "-c", action="store_true", help="Odpri neposredno v razdelku Naprave")
     parser.add_argument("--razdelek", type=str, default="", help="Zacetni razdelek (npr. control, daljinec, naprave, novaNaprava)")
+    parser.add_argument("--media-engine", choices=("auto", "qt"), default="auto",
+                        help=argparse.SUPPRESS)
     parser.add_argument("--ozadje", action="store_true", help="Zazeni le v ozadju")
     args = parser.parse_args(argv)
 
@@ -901,6 +949,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("SafeerOS")
     app.setOrganizationName("Safeer")
+    print(f"[SafeerOS] DIAG main_start section={args.razdelek or 'home'} media_engine={args.media_engine}", flush=True)
 
     zacetni = ""
     if args.control:
@@ -911,7 +960,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     # Ce je izbran control razdelek ali --okno, odpri v oknu
     v_oknu = True if (args.control or args.razdelek or args.okno) else False
 
-    window = SafeerOsWindow(v_oknu=v_oknu, zacetni_razdelek=zacetni)
+    window = SafeerOsWindow(v_oknu=v_oknu, zacetni_razdelek=zacetni, media_engine=args.media_engine)
+    print("[SafeerOS] DIAG event_loop_start", flush=True)
 
     if args.ozadje:
         window.control_backend.povezi_se()

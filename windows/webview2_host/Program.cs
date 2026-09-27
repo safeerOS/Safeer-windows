@@ -33,6 +33,24 @@ internal static class Program
 
 internal sealed class MediaForm : Form
 {
+    private const string DesktopChromeUserAgent =
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+    private static readonly string[] BlockedHostSuffixes = {
+        "monetag.com", "20bet.com", "1xbet.com", "onclick.com", "popunder.net",
+        "popcash.net", "popads.net", "propellerads.com", "exoclick.com", "adsterra.com",
+        "juicyads.com", "trafficjunky.com", "adnxs.com", "criteo.com", "histats.com",
+        "doubleclick.net", "googlesyndication.com", "clarity.ms", "hotjar.com", "bet365.com",
+        "parimatch.com", "vulkan.com", "mostbet.com", "pinup.com", "admaven.com",
+        "hilltopads.com", "a-ads.com"
+    };
+    private static readonly string[] BlockedHostMarkers = {
+        "monetag", "20bet", "1xbet", "onclick", "popunder", "popcash", "popads",
+        "propellerads", "exoclick", "adsterra", "juicyads", "trafficjunky", "adnxs",
+        "criteo", "histats", "doubleclick", "googlesyndication", "disable-devtool",
+        "clarity.ms", "hotjar", "bet365", "parimatch", "vulkan", "mostbet", "pinup",
+        "admaven", "hilltopads", "a-ads", "23vlcfp", "2lizguk"
+    };
+
     private readonly IntPtr parentHandle;
     private readonly Uri initialUri;
     private readonly string profilePath;
@@ -49,6 +67,7 @@ internal sealed class MediaForm : Form
     private bool playbackStarted;
     private bool playbackCheckRunning;
     private int playClickAttempts;
+    private int httpErrorsLogged;
     private CoreWebView2DevToolsProtocolEventReceiver? networkResponseReceiver;
 
     private const string PlaybackCheckScript =
@@ -118,8 +137,12 @@ internal sealed class MediaForm : Form
         try
         {
             Directory.CreateDirectory(profilePath);
+            // Oglasi v embedih pogosto uporabljajo ta TLD-je. Omejitve veljajo
+            // samo za izolirani Media WebView2, ne za glavni Safeer Browser.
+            // CORS, mixed-content in WebView2 varnostne meje ostanejo vključene.
+            var resolverRules = "--host-resolver-rules=\"MAP *.cfd 127.0.0.1, MAP *.buzz 127.0.0.1, MAP *.monster 127.0.0.1, MAP *.top 127.0.0.1, MAP *.click 127.0.0.1\"";
             var options = new CoreWebView2EnvironmentOptions(
-                "--autoplay-policy=no-user-gesture-required --disable-background-mode --disable-sync");
+                "--autoplay-policy=no-user-gesture-required --disable-background-mode --disable-sync " + resolverRules);
             var environment = await CoreWebView2Environment.CreateAsync(null, profilePath, options);
             await view.EnsureCoreWebView2Async(environment);
             var core = view.CoreWebView2;
@@ -129,6 +152,8 @@ internal sealed class MediaForm : Form
             networkResponseReceiver = core.GetDevToolsProtocolEventReceiver("Network.responseReceived");
             networkResponseReceiver.DevToolsProtocolEventReceived += (_, e) => DetectMediaResponse(e.ParameterObjectAsJson);
             var settings = core.Settings;
+            // Združljivostni UA velja le za ta namenski predvajalnik.
+            settings.UserAgent = DesktopChromeUserAgent;
             settings.AreDevToolsEnabled = false;
             settings.AreDefaultContextMenusEnabled = false;
             settings.AreBrowserAcceleratorKeysEnabled = false;
@@ -147,6 +172,7 @@ internal sealed class MediaForm : Form
                 Log("PERMISSION_BLOCKED", e.PermissionKind.ToString());
             };
             core.NavigationStarting += (_, e) => {
+                Log("NAVIGATION_START", $"{SafeHost(e.Uri)} redirected={e.IsRedirected}");
                 if (!Uri.TryCreate(e.Uri, UriKind.Absolute, out var target)
                     || target.Scheme != Uri.UriSchemeHttps
                     || BaseDomain(target.Host) != BaseDomain(initialUri.Host))
@@ -166,7 +192,15 @@ internal sealed class MediaForm : Form
                 frame.Destroyed += (_, _) => frames.Remove(frame);
                 frame.NavigationCompleted += async (_, navigation) => {
                     if (!navigation.IsSuccess) return;
-                    try { await frame.ExecuteScriptAsync(AutoplayScript); Log("FRAME_READY"); } catch { }
+                    try {
+                        await frame.ExecuteScriptAsync(AutoplayScript);
+                        Log("FRAME_READY");
+                        // Vdelani predvajalnik je lahko pripravljen, medtem ko glavna
+                        // stran še čaka na druge vire. Ne čakamo na njen load dogodek:
+                        // klik znotraj območja iframe-a je potreben za predvajalnike,
+                        // ki zavrnejo samodejni zagon.
+                        if (playClickAttempts == 0) inputTimer.Start();
+                    } catch { }
                 };
             };
             core.NavigationCompleted += async (_, e) => {
@@ -174,18 +208,24 @@ internal sealed class MediaForm : Form
                 if (e.IsSuccess)
                 {
                     await TriggerAutoplayAsync();
-                    playClickAttempts = 0;
-                    inputTimer.Start();
+                    if (playClickAttempts == 0) inputTimer.Start();
                 }
             };
             core.AddWebResourceRequestedFilter("*", CoreWebView2WebResourceContext.All);
             core.WebResourceRequested += (_, e) => {
+                if (TryGetBlockedHost(e.Request.Uri, out var blockedHost))
+                {
+                    var body = new MemoryStream(Array.Empty<byte>());
+                    e.Response = environment.CreateWebResourceResponse(
+                        body, 200, "OK", "Content-Type: text/plain\r\n");
+                    Log("AD_OR_THREAT_RESOURCE_BLOCKED", blockedHost);
+                    return;
+                }
                 if (e.ResourceContext == CoreWebView2WebResourceContext.Media)
                     mediaRequestUrls.Add(e.Request.Uri);
             };
             core.WebResourceResponseReceived += (_, e) => {
-                if (mediaResponseLogged || e.Response is null || e.Response.StatusCode < 200 || e.Response.StatusCode >= 300)
-                    return;
+                if (e.Response is null) return;
                 var path = "";
                 try { path = new Uri(e.Request.Uri).AbsolutePath.ToLowerInvariant(); } catch { }
                 var contentType = "";
@@ -195,6 +235,14 @@ internal sealed class MediaForm : Form
                     || path.EndsWith(".ts") || path.EndsWith(".mp4") || path.EndsWith(".webm");
                 var mediaType = contentType.StartsWith("video/") || contentType.StartsWith("audio/")
                     || contentType.Contains("mpegurl") || contentType.Contains("dash+xml");
+                if (e.Response.StatusCode >= 400 && httpErrorsLogged < 30)
+                {
+                    httpErrorsLogged++;
+                    // V dnevnik ne zapisujemo polnih URL-jev, poti ali podpisanih poizvedb.
+                    Log("HTTP_ERROR", $"{SafeHost(e.Request.Uri)} status={e.Response.StatusCode} type={contentType}");
+                }
+                if (mediaResponseLogged || e.Response.StatusCode < 200 || e.Response.StatusCode >= 300)
+                    return;
                 if (mediaContext || mediaPath || mediaType)
                 {
                     mediaResponseLogged = true;
@@ -338,6 +386,33 @@ internal sealed class MediaForm : Form
     {
         var parts = host.Trim('.').ToLowerInvariant().Split('.');
         return parts.Length >= 2 ? string.Join('.', parts[^2..]) : host.ToLowerInvariant();
+    }
+
+    private static bool TryGetBlockedHost(string requestUrl, out string host)
+    {
+        host = "";
+        if (!Uri.TryCreate(requestUrl, UriKind.Absolute, out var uri)
+            || (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp))
+            return false;
+        var normalizedHost = uri.Host.TrimEnd('.').ToLowerInvariant();
+        if (normalizedHost == "127.0.0.1" || normalizedHost == "localhost"
+            || normalizedHost == "tmdb.org" || normalizedHost.EndsWith(".tmdb.org", StringComparison.Ordinal)
+            || normalizedHost == "themoviedb.org" || normalizedHost.EndsWith(".themoviedb.org", StringComparison.Ordinal))
+        {
+            return false;
+        }
+        if (BlockedHostSuffixes.Any(domain => normalizedHost == domain || normalizedHost.EndsWith("." + domain, StringComparison.Ordinal)))
+        {
+            host = normalizedHost;
+            return true;
+        }
+        var labels = normalizedHost.Split('.');
+        if (BlockedHostMarkers.Any(marker => labels.Any(label => label.Contains(marker, StringComparison.Ordinal))))
+        {
+            host = normalizedHost;
+            return true;
+        }
+        return false;
     }
 
     private static string SafeHost(string raw) => Uri.TryCreate(raw, UriKind.Absolute, out var uri) ? uri.Host : "invalid";
