@@ -793,7 +793,7 @@
       naprava: "Naprava",
       deliDotik: "Dotakni se za deljenje",
       deliKlik: "Klikni za deljenje in daljinec",
-      dodajNaslov: "Dodaj telefon ali tablico",
+      dodajNaslov: "Poveži novo napravo",
       dodajKorak1: "Na telefonu odpri Safeer in v meniju izberi Safeer Link.",
       dodajKorak2: "Pritisni »Poveži s Safeer Link«.",
       dodajKorak3: "Na napravi {sredisce} se izpiše 6-mestna koda – prepiši jo v telefon.",
@@ -844,7 +844,7 @@
       naprava: "Device",
       deliDotik: "Tap to share",
       deliKlik: "Click to share or use the remote",
-      dodajNaslov: "Add a phone or tablet",
+      dodajNaslov: "Connect a new device",
       dodajKorak1: "On the phone, open Safeer and choose Safeer Link in the menu.",
       dodajKorak2: "Tap “Connect to Safeer Link”.",
       dodajKorak3: "A 6-digit code appears on {sredisce} – type it into the phone.",
@@ -1259,7 +1259,7 @@
   var BESEDILA_VABILO = {
     "sl": {
       "vabiloNaslov": "Poveži naprave",
-      "vabiloPodnaslov": "Telefon, tablica in računalnik se pridružijo tej napravi.",
+      "vabiloPodnaslov": "Katerakoli naprava – telefon, tablica, televizor ali računalnik. Safeer Link sam prepozna, kaj je.",
       "vabiloQrNaslov": "Skeniraj s kamero",
       "vabiloQrOpis": "Usmeri kamero druge naprave v kodo. S Safeerjem se odpre v aplikaciji, brez njega v brskalniku – nič ni treba namestiti.",
       "vabiloPripravljam": "Pripravljam kodo …",
@@ -1279,7 +1279,7 @@
     },
     "en": {
       "vabiloNaslov": "Connect devices",
-      "vabiloPodnaslov": "Your phone, tablet and computer join this device.",
+      "vabiloPodnaslov": "Any device – phone, tablet, TV or computer. Safeer Link recognises the type by itself.",
       "vabiloQrNaslov": "Scan with a camera",
       "vabiloQrOpis": "Point the other device's camera at the code. With Safeer it opens in the app; without it, in the browser – nothing to install.",
       "vabiloPripravljam": "Preparing the code …",
@@ -1299,7 +1299,7 @@
     },
     "de": {
       "vabiloNaslov": "Geräte verbinden",
-      "vabiloPodnaslov": "Handy, Tablet und Computer verbinden sich mit diesem Gerät.",
+      "vabiloPodnaslov": "Jedes Gerät – Handy, Tablet, Fernseher oder Computer. Safeer Link erkennt den Typ selbst.",
       "vabiloQrNaslov": "Mit der Kamera scannen",
       "vabiloQrOpis": "Richte die Kamera des anderen Geräts auf den Code. Mit Safeer öffnet er sich in der App, sonst im Browser – nichts zu installieren.",
       "vabiloPripravljam": "Code wird vorbereitet …",
@@ -1319,7 +1319,7 @@
     },
     "es": {
       "vabiloNaslov": "Conectar dispositivos",
-      "vabiloPodnaslov": "Tu móvil, tableta y ordenador se unen a este dispositivo.",
+      "vabiloPodnaslov": "Cualquier dispositivo: móvil, tableta, televisor u ordenador. Safeer Link reconoce el tipo solo.",
       "vabiloQrNaslov": "Escanea con la cámara",
       "vabiloQrOpis": "Apunta la cámara del otro dispositivo al código. Con Safeer se abre en la app; sin él, en el navegador: no hay que instalar nada.",
       "vabiloPripravljam": "Preparando el código …",
@@ -1339,7 +1339,7 @@
     },
     "fr": {
       "vabiloNaslov": "Connecter des appareils",
-      "vabiloPodnaslov": "Ton téléphone, ta tablette et ton ordinateur rejoignent cet appareil.",
+      "vabiloPodnaslov": "N’importe quel appareil : téléphone, tablette, téléviseur ou ordinateur. Safeer Link reconnaît le type tout seul.",
       "vabiloQrNaslov": "Scanne avec l'appareil photo",
       "vabiloQrOpis": "Dirige l'appareil photo de l'autre appareil vers le code. Avec Safeer, il s'ouvre dans l'application ; sinon dans le navigateur – rien à installer.",
       "vabiloPripravljam": "Préparation du code …",
@@ -1359,7 +1359,7 @@
     },
     "it": {
       "vabiloNaslov": "Collega dispositivi",
-      "vabiloPodnaslov": "Telefono, tablet e computer si uniscono a questo dispositivo.",
+      "vabiloPodnaslov": "Qualsiasi dispositivo: telefono, tablet, TV o computer. Safeer Link riconosce il tipo da solo.",
       "vabiloQrNaslov": "Scansiona con la fotocamera",
       "vabiloQrOpis": "Inquadra il codice con la fotocamera dell'altro dispositivo. Con Safeer si apre nell'app, altrimenti nel browser: non serve installare nulla.",
       "vabiloPripravljam": "Preparo il codice …",
@@ -3285,6 +3285,13 @@
     }
 
     naKlik("gumbOsvezi", poveziSe);
+    // Okno Poveži naprave (QR ALI 6-mestna koda, kot na TV) odpre ta gumb v samem Controlu.
+    if (most && most.zacniVabilo) pokazi("gumbNovaNapravaCtl", true);
+    naKlik("gumbNovaNapravaCtl", function () {
+      preklopiVabilo(true);
+      var p = el("panelDodaj");
+      if (p && p.scrollIntoView) setTimeout(function () { p.scrollIntoView({ block: "start", behavior: "smooth" }); }, 0);
+    });
 
     naKlik("gumbHubVklopi", function () {
       besedilo("opombaHubVklop", t("prizigam"));
