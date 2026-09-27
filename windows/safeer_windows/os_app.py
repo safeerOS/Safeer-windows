@@ -847,6 +847,9 @@ class SafeerOsWindow(QMainWindow):
             name = str(a[1]) if len(a) > 1 else ""
             return self.media_center.add_source(url, name)
 
+        if metoda == "mediaDodajMapo":
+            return self.media_center.add_local_root(str(a[0]) if a else "")
+
         if metoda == "mediaUvoziJson":
             raw_json = a[0] if a else ""
             default_name = str(a[1]) if len(a) > 1 else ""

@@ -217,7 +217,8 @@
               <button class="gumb-ikona" id="mediaZapri" data-naslov="zapri" title="Zapri"><svg data-ikona="x"></svg></button>
             </div>
           </div>
-          <video id="mediaVideo" controls playsinline preload="metadata" hidden></video>
+        <video id="mediaVideo" controls playsinline preload="metadata" hidden></video>
+          <img id="mediaSlika" alt="" hidden>
           <audio id="mediaAudio" controls preload="metadata" hidden></audio>
           <iframe id="mediaIframe" title="Safeer Media predvajalnik"
                   allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
@@ -375,6 +376,10 @@
         </form>
         <p class="namig" id="mediaVirSporocilo"></p>
         <div class="media-viri" id="mediaViri"></div>
+        <form class="media-dodaj-vir" id="mediaDodajMapo">
+          <input id="mediaMapaPot" type="text" required placeholder="Pot mape, tudi \\strežnik\mapa (UNC)">
+          <button class="gumb" type="submit">Dodaj lokalno ali omrežno mapo</button>
+        </form>
         <div id="mediaNastavitveMesto"></div>
         <div id="skupineNastavitev"></div>
         <p class="o-sistemu" id="oSistemu"></p>

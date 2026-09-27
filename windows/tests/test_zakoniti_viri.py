@@ -1,7 +1,7 @@
-import io
 import json
 import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from core.zakoniti_viri import ZakonitiViri
@@ -79,6 +79,19 @@ class TestZakonitiViri(unittest.TestCase):
         m3u = parse_payload(b"#EXTM3U\n#EXTINF:-1 group-title=Jazz,Jazz FM\nhttps://radio.test/aac\n",
                             "audio/x-mpegurl", "https://example.test/list.m3u", "Radio")
         self.assertEqual(m3u[0]["naslov"], "Jazz FM")
+
+    def test_local_roots_scan_music_video_pictures_and_accept_unc_form(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "Cover.jpg").write_bytes(b"not-a-real-image")
+            (root / "Song.mp3").write_bytes(b"not-a-real-audio-file")
+            center = MediaCenter(directory + "/config", roots=[])
+            result = center.add_local_root(directory)
+            self.assertTrue(result["ok"])
+            items = center.catalog()["vnosi"]
+            self.assertEqual({item["vrsta"] for item in items}, {"slika", "glasba"})
+            self.assertFalse(center.add_local_root(directory)["ok"])
+            self.assertIn("NFS", center.add_local_root("nfs://server/share")["napaka"])
 
 
 if __name__ == "__main__":

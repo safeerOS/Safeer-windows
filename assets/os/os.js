@@ -1968,11 +1968,14 @@
     });
     $("mediaPrazno").hidden = !!list.length;
     $("mediaPovzetek").textContent = t("mediaZadetkov", { n: list.length }) + (media.skupaj_strani > 1 ? " · Stran " + media.page + " od " + media.skupaj_strani : "");
-    if (media.filter === "radio" || media.filter === "video") list.sort(function (a, b) { return (a.skupina || "").localeCompare(b.skupina || ""); });
+    if (media.filter === "radio" || media.filter === "video" || media.filter === "glasba") list.sort(function (a, b) {
+      return (a.skupina || a.izvajalec || "").localeCompare(b.skupina || b.izvajalec || "");
+    });
     var mediaZadnjaSkupina = "";
     list.forEach(function (x) {
-      if ((media.filter === "radio" || media.filter === "video") && x.skupina && x.skupina !== mediaZadnjaSkupina) {
-        mediaZadnjaSkupina = x.skupina;
+      var skupina = x.skupina || (media.filter === "glasba" ? x.izvajalec : "");
+      if ((media.filter === "radio" || media.filter === "video" || media.filter === "glasba") && skupina && skupina !== mediaZadnjaSkupina) {
+        mediaZadnjaSkupina = skupina;
         mreza.appendChild(el("h3", "media-skupina", ubezi(mediaZadnjaSkupina)));
       }
       var card = el("button", "media-kartica");
@@ -2032,13 +2035,14 @@
     var variant = variants[index || 0] || variants[0], audio = item.vrsta === "glasba" || item.vrsta === "radio" || item.vrsta === "podcast";
     var url = variant.url || "";
     var isDirectMedia = /\.(mp4|mkv|webm|avi|mov|m4v|mp3|flac|ogg|opus|m4a|aac|wav|m3u8)($|\?)/i.test(url) || url.startsWith("file:") || /mpegurl/i.test(variant.mime || item.mime || "");
-    var video = $("mediaVideo"), playerAudio = $("mediaAudio"), iframe = $("mediaIframe");
+    var video = $("mediaVideo"), playerAudio = $("mediaAudio"), iframe = $("mediaIframe"), playerImage = $("mediaSlika");
 
     if (media.timer) { window.clearTimeout(media.timer); media.timer = 0; }
 
     if (video) { video.pause(); video.removeAttribute("src"); video.hidden = true; video.style.display = "none"; }
     if (playerAudio) { playerAudio.pause(); playerAudio.removeAttribute("src"); playerAudio.hidden = true; playerAudio.style.display = "none"; }
     if (iframe) { iframe.src = "about:blank"; iframe.hidden = true; }
+    if (playerImage) { playerImage.removeAttribute("src"); playerImage.hidden = true; }
 
     var pl = $("mediaPredvajalnik");
     if (pl) { pl.hidden = false; pl.classList.remove("kino"); }
@@ -2064,7 +2068,10 @@
       return false;
     }
 
-    if (isDirectMedia) {
+    if (item.vrsta === "slika" && playerImage) {
+      playerImage.hidden = false;
+      playerImage.src = url;
+    } else if (isDirectMedia) {
       var player = audio ? playerAudio : video;
       if (player) {
         player.hidden = false;
@@ -2140,6 +2147,7 @@
       if (player) { player.pause(); player.removeAttribute("src"); player.load(); player.hidden = true; player.style.display = "none"; }
     });
     var iframe = $("mediaIframe"); if (iframe) { iframe.src = "about:blank"; iframe.hidden = true; }
+    var playerImage = $("mediaSlika"); if (playerImage) { playerImage.removeAttribute("src"); playerImage.hidden = true; }
     var pl = $("mediaPredvajalnik");
     if (pl) { pl.hidden = true; pl.classList.remove("kino"); }
     media.aktivni = null;
@@ -2285,6 +2293,16 @@
     klic("mediaDodajVir", [url, name]).then(function (result) {
       if (result && result.ok) { $("mediaVirUrl").value = ""; $("mediaVirIme").value = ""; $("mediaVirSporocilo").textContent = t("mediaVirDodan"); }
       else $("mediaVirSporocilo").textContent = (result && result.napaka === "podvojen") ? t("mediaVirPodvojen") : ((result && result.napaka) ? result.napaka : t("mediaVirNapaka"));
+      naloziMedia();
+    }, function () { $("mediaVirSporocilo").textContent = t("mediaVirNapaka"); });
+  });
+  on("mediaDodajMapo", "submit", function (event) {
+    event.preventDefault();
+    var pot = $("mediaMapaPot").value.trim();
+    if (!pot) return;
+    klic("mediaDodajMapo", [pot]).then(function (result) {
+      $("mediaVirSporocilo").textContent = result && result.ok ? "Mapa je dodana." : ((result && result.napaka) || t("mediaVirNapaka"));
+      if (result && result.ok) $("mediaMapaPot").value = "";
       naloziMedia();
     }, function () { $("mediaVirSporocilo").textContent = t("mediaVirNapaka"); });
   });
