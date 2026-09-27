@@ -834,7 +834,8 @@ class SafeerControlBackend:
                     "code": "dovoljenje_potrebno",
                     "data": {"permission": self.dovoljenje_za(posiljatelj)},
                 }
-                self._oddaj_dogodek("dovoljenjeZahtevano", {"id": posiljatelj, "ime": posiljatelj})
+                ime_n = next((str(n.get("ime") or "") for n in self.naprave if n.get("id") == posiljatelj), "")
+                self._oddaj_dogodek("dovoljenjeZahtevano", {"id": posiljatelj, "ime": ime_n or posiljatelj})
 
             elif akcija == "status":
                 izid = {

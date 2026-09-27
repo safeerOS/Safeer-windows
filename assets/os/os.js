@@ -2027,6 +2027,44 @@
     setTimeout(function () { if (sloj.parentNode) sloj.remove(); }, 300000);
   }
 
+  // Nova naprava v Safeer Linku: kaj sme na tem racunalniku. Brez izbire nima dostopa (varno privzeto),
+  // zato vprasamo takoj, ko se pojavi - ne sele v Safeer Control, kamor uporabnik morda nikoli ne gre.
+  var cakajocaDovoljenja = [];
+  function vprasajZaDovoljenje(n) {
+    if (cakajocaDovoljenja.some(function (x) { return x.id === n.id; })) return;
+    cakajocaDovoljenja.push(n);
+    if (cakajocaDovoljenja.length === 1) pokaziDovoljenje();
+  }
+  function pokaziDovoljenje() {
+    var n = cakajocaDovoljenja[0];
+    if (!n) return;
+    var sloj = el("div", "sloj-koda-prijave");
+    var okno = el("div", "koda-prijave-okno");
+    var h = el("h2"); h.textContent = "Nova naprava v Safeer Linku";
+    var o = el("p"); o.textContent = "Kaj sme " + (n.ime || n.id) + " na tem računalniku?";
+    okno.appendChild(h); okno.appendChild(o);
+    function naprej() {
+      sloj.remove();
+      cakajocaDovoljenja.shift();
+      pokaziDovoljenje();
+    }
+    [["polno", "Vse: programi, datoteke in zaslon"], ["izbrano", "Samo datoteke"], ["zaslon", "Samo ogled zaslona"]].forEach(function (m) {
+      var g = el("button", "vrstica"); g.textContent = m[1];
+      g.addEventListener("click", function () {
+        klic("nastaviDovoljenje", [n.id, m[0]]).then(function (ok) {
+          obvesti(ok ? ((n.ime || "Naprava") + ": dovoljenje shranjeno.") : t("niUspelo"));
+        });
+        naprej();
+      });
+      okno.appendChild(g);
+    });
+    var z = el("button", "koda-prijave-gumb"); z.textContent = "Ne zdaj";
+    z.addEventListener("click", naprej);
+    okno.appendChild(z);
+    sloj.appendChild(okno);
+    document.body.appendChild(sloj);
+  }
+
   // ------------------------------------------------------------------ dogodki iz safeer_os.py
   window.safeerOsDogodek = function (vrsta, podatki) {
     if (vrsta === "stanje") narisiStanje(podatki);
@@ -2035,7 +2073,11 @@
     if (vrsta === "mediaFallback" && podatki) predvajajHtml(podatki, 0);
     if (vrsta === "mediaOsvezen" && S.razdelek === "media") naloziMedia();
     if (vrsta === "kodaPrijave" && podatki) pokaziKodoPrijave(podatki);
-    if (vrsta === "zaslonZNaprave" && podatki) obvesti("Zaslon naprave " + (podatki.od || "") + " se odpira tukaj.");
+    if (vrsta === "zaslonZNaprave" && podatki) {
+      obvesti(podatki.dejanje === "stop" ? ("Naprava " + (podatki.od || "") + " je končala deljenje zaslona.")
+                                         : ("Zaslon naprave " + (podatki.od || "") + " se odpira tukaj."));
+    }
+    if (vrsta === "dovoljenjeZahtevano" && podatki && podatki.id) vprasajZaDovoljenje(podatki);
     if (vrsta === "prejetaDatoteka" && podatki) {
       obvesti(podatki.uspeh ? ("Prejeto z naprave " + podatki.od + ": " + podatki.ime + " (mapa Prenosi)")
                             : ("Datoteke " + podatki.ime + " ni bilo mogoče prevzeti: " + (podatki.napaka || "")));
