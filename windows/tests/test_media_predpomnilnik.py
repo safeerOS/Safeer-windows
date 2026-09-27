@@ -187,3 +187,15 @@ class PriporocenoTest(unittest.TestCase):
             center._personal_items = lambda q: []
             r = center.catalog("", "film")
             self.assertEqual([x["naslov"] for x in r["vnosi"]], ["Zzz uspesnica", "Mmm druga", "Bbb javna last", "Aaa domaci"])
+
+
+class PeerTubeFilterTest(unittest.TestCase):
+    def test_piratske_nalozbe_in_blokirani_strezniki_izloceni(self):
+        from core import zakoniti_viri as z
+        v = z.ZakonitiViri()
+        ok = {"name": "What is PeerTube?", "uuid": "u1"}
+        self.assertIsNotNone(v._peertube_video(ok, "framatube.org", "x"))
+        self.assertIsNone(v._peertube_video(ok, "peertube.uno", "x"))
+        for naslov in ("Snowden (Film Completo Italiano in streaming)", "Inside Job (documentario completo in streaming ITA)",
+                       "cats - the living tombstone 10 hours [LCrCCgjdKx8]", "Neki film 2020 WEBRip"):
+            self.assertIsNone(v._peertube_video({"name": naslov, "uuid": "u2"}, "tilvids.com", "x"), naslov)

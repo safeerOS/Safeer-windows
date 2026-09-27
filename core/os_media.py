@@ -1482,7 +1482,7 @@ class MediaCenter:
     def kljuc_kataloga(self, query: str = "", kind: str = "vse", genre: str = "", page: int = 1,
                        razvrsti: str = "", izklopljeni: Iterable[str] = (), samo_lokalno: bool = False) -> str:
         # Prvi element je razlicica oblike pogleda: ob spremembi vrstnega reda stari pogledi ne veljajo.
-        return json.dumps(["v2", _text(query, 120).casefold(), kind or "vse", _text(genre, 20),
+        return json.dumps(["v3", _text(query, 120).casefold(), kind or "vse", _text(genre, 20),
                            max(1, int(page or 1)), self.izbrana_drzava or "auto", razvrsti or "",
                            sorted({str(x) for x in (izklopljeni or []) if x}), bool(samo_lokalno)], ensure_ascii=False)
 
