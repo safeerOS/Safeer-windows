@@ -885,8 +885,19 @@ class SafeerControlBackend:
                 stream = bool(params.get("stream"))
                 if app_id:
                     self.navidezni_zaslon.zazeni_program(app_id)
+                    # Program zares zazenemo na tem racunalniku; televizor ga vidi prek pravega zaslona
+                    # (screen.start). Prej je bil to samo zapis v navideznem kontekstu - nic se ni odprlo.
+                    program = next((p for p in self.navidezni_zaslon._vsi_programi()
+                                    if p.get("id") == app_id or str(p.get("ime") or "").lower() == app_id.lower()), None)
+                    pot = str((program or {}).get("pot") or "")
+                    zagnan = bool(pot) and os_backend_win.zazeni_program(pot)
                     odgovor_data = {"stream": "pending"} if stream else None
-                    izid = {"ok": True, "message": "Program se odpira na ločenem navideznem zaslonu", "data": odgovor_data}
+                    if zagnan:
+                        izid = {"ok": True, "message": f"{program.get('ime') or app_id} se odpira na računalniku",
+                                "data": odgovor_data}
+                    else:
+                        izid = {"ok": False, "message": "Programa ni bilo mogoče zagnati na tem računalniku.",
+                                "code": "ni_zagnan"}
                 else:
                     izid = {"ok": False, "message": "Manjka oznaka programa"}
 
