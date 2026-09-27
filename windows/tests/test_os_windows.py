@@ -91,7 +91,7 @@ class TestOsWindows(unittest.TestCase):
         self.assertEqual(os_backend_win.vrsta_datoteke("neznano.xyz"), "drugo")
 
     def test_preglej_mapo(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             os.makedirs(os.path.join(td, "podmapa"))
             with open(os.path.join(td, "dokument.txt"), "w") as f:
                 f.write("test")
@@ -183,7 +183,7 @@ class TestOsWindows(unittest.TestCase):
     def test_media_isti_vir_lahko_dodamo_samo_enkrat(self):
         payload = json.dumps({"items": [{"title": "Film", "url": "https://cdn.test/film-720p.mp4",
                                           "type": "movie", "year": 2025}]}).encode()
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             center = os_media.MediaCenter(td, roots=[])
             with mock.patch.object(center, "_download", return_value=(payload, "application/json", "https://api.test/catalog")):
                 first = center.add_source("HTTPS://API.TEST/catalog/?utm_source=safeer", "Prvi vir")
@@ -194,13 +194,13 @@ class TestOsWindows(unittest.TestCase):
             self.assertEqual(len(center.sources()), 1)
 
     def test_media_ne_doda_skritih_privzetih_ponudnikov(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             center = os_media.MediaCenter(td, roots=[])
             self.assertEqual(center.sources(), [])
             self.assertFalse(center._ima_embed_vir())
 
     def test_media_izbere_najhitrejsi_uporabnikov_embed_vir(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             center = os_media.MediaCenter(td, roots=[])
             center._save({"viri": [
                 {"id": "počasnejši", "url": "https://vidsrc.to", "ime": "VidSrc", "vnosi": []},
@@ -219,7 +219,7 @@ class TestOsWindows(unittest.TestCase):
             self.assertTrue(resolved["url"].startswith("https://vidlink.pro/"))
 
     def test_media_zdruzi_enako_vsebino_in_izbere_najboljso(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             center = os_media.MediaCenter(td, roots=[])
             responses = {
                 "https://a.test/catalog": json.dumps({"items": [{"title": "Moj film", "url": "https://a.test/film-720p.mp4", "type": "movie", "year": 2025}]}).encode(),
@@ -263,7 +263,7 @@ class TestOsWindows(unittest.TestCase):
         self.assertEqual(radio[0]["vrsta"], "radio")
 
     def test_neposredni_medijski_viri_se_ne_prenesejo_kot_katalog(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             center = os_media.MediaCenter(td, roots=[])
             with mock.patch.object(center, "_download", side_effect=AssertionError("stream must not download")) as download:
                 music = center.add_source("https://media.example/song.mp3", "Test glasba")
@@ -303,14 +303,14 @@ class TestOsWindows(unittest.TestCase):
         self.assertEqual(got[0]["sezona"], 0)
         self.assertEqual(got[0]["epizoda"], 0)
         self.assertIn("1XS1oqL89opfnbLl8WnZY1O1uJx", got[0]["slika"])
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             center = os_media.MediaCenter(td, roots=[])
             center._save({"viri": [{"id": "v1", "url": "https://vidlink.pro", "ime": "VidLink", "vnosi": []}]})
             episode = center.episode_item(1399, 1, 4, "Winter Is Coming")
             self.assertIn("/tv/1399/1/4", episode["url"])
 
     def test_stari_epizodni_cache_se_zdruzi_v_serijo_s_pravim_plakatom(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             center = os_media.MediaCenter(td, roots=[])
             cached = []
             for episode in range(1, 6):
@@ -331,7 +331,7 @@ class TestOsWindows(unittest.TestCase):
             self.assertIn("1XS1oqL89opfnbLl8WnZY1O1uJx", got[0]["slika"])
 
     def test_epizoda_uporabi_dejansko_dodan_vidsrc_vir(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             center = os_media.MediaCenter(td, roots=[])
             center._save({"viri": [{"id": "v1", "url": "https://vidsrc.cc", "ime": "VidSrc", "vnosi": []}]})
             episode = center.episode_item(1399, 1, 4, "Igra prestolov S01E04")
@@ -340,7 +340,7 @@ class TestOsWindows(unittest.TestCase):
             self.assertNotIn("vidlink.pro", episode["url"])
 
     def test_predvajanje_spostuje_vrstni_red_uporabnikovih_virov(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             center = os_media.MediaCenter(td, roots=[])
             center._save({"viri": [
                 {"id": "prvi", "url": "https://vidsrc.to", "ime": "VidSrc", "vnosi": []},
@@ -352,7 +352,7 @@ class TestOsWindows(unittest.TestCase):
             self.assertEqual(resolved["razlicice"][0]["vir_id"], "prvi")
 
     def test_predvajanje_uporabi_le_uporabnikove_vire_in_pravilno_epizodo(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             center = os_media.MediaCenter(td, roots=[])
             center._save({"viri": [
                 {"id": "v1", "url": "https://vidlink.pro", "ime": "VidLink", "vnosi": []},
@@ -479,7 +479,7 @@ class TestOsWindows(unittest.TestCase):
         self.assertEqual(len(merged), 4)
 
     def test_media_isce_tudi_po_imdb_in_tmdb_id(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             center = os_media.MediaCenter(td, roots=[])
             payload = json.dumps([{
                 "title": "Film", "url": "https://cdn.test/film.mp4",
@@ -490,7 +490,7 @@ class TestOsWindows(unittest.TestCase):
             self.assertEqual(center.catalog("98765")["skupaj"], 1)
 
     def test_tmdb_katalog_skrije_napovedane_naslove(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             center = os_media.MediaCenter(td, roots=[])
             source = {"id": "vidlink", "ime": "VidLink", "url": "https://vidlink.pro"}
             center._save({"viri": [source]})
@@ -602,7 +602,7 @@ class TestOsWindows(unittest.TestCase):
 
     def test_media_samodejno_osvezi_samo_zastarele_vire(self):
         payload = b'{"items":[{"title":"Film","url":"https://cdn.test/film.mp4"}]}'
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             center = os_media.MediaCenter(td, roots=[])
             with mock.patch.object(center, "_download",
                                    return_value=(payload, "application/json", "https://api.test/catalog")) as download:
@@ -618,14 +618,14 @@ class TestOsWindows(unittest.TestCase):
 
     # ------------------------------------------------------------------ Safeer Control testi
     def test_control_backend_identity(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             cfg = os.path.join(td, "link.json")
             backend = control_backend.SafeerControlBackend(config_pot=cfg)
             self.assertTrue(backend.device_id.endswith("-control"))
             self.assertTrue(backend.device_ime.startswith("Safeer Control"))
 
     def test_control_backend_stanje(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             cfg = os.path.join(td, "link.json")
             backend = control_backend.SafeerControlBackend(config_pot=cfg)
             st_os = backend.stanje_povezave()
@@ -646,7 +646,7 @@ class TestOsWindows(unittest.TestCase):
             self.assertTrue(st_link_brez["brezPovezaveIzbrano"])
 
     def test_control_backend_settings(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             cfg = os.path.join(td, "link.json")
             backend = control_backend.SafeerControlBackend(config_pot=cfg)
             backend.nastavi_zaupanje(True)
@@ -660,7 +660,7 @@ class TestOsWindows(unittest.TestCase):
             self.assertTrue(backend2.nastavitve.get("brez_povezave"))
 
     def test_control_backend_shared_folders(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             cfg = os.path.join(td, "link.json")
             backend = control_backend.SafeerControlBackend(config_pot=cfg)
             backend.dodaj_deljeno_mapo(td)
@@ -669,7 +669,7 @@ class TestOsWindows(unittest.TestCase):
             self.assertEqual(len(backend.deljene_mape()), 0)
 
     def test_control_backend_devices_filtering(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             cfg = os.path.join(td, "link.json")
             backend = control_backend.SafeerControlBackend(config_pot=cfg)
             backend.naprave = [
@@ -696,7 +696,7 @@ class TestOsWindows(unittest.TestCase):
     def test_control_backend_normalizes_mobile_capabilities_and_catalog(self):
         """Telefon je viden tudi s podrobnimi action oznakami; ob uspavanem
         Android procesu se uporabi Protocol v1 katalog iz cast.register."""
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             backend = control_backend.SafeerControlBackend(config_pot=os.path.join(td, "link.json"))
             backend.naprave = [{
                 "id": "phone-1", "ime": "Telefon", "platforma": "android",
@@ -716,7 +716,7 @@ class TestOsWindows(unittest.TestCase):
 
     def test_control_backend_waits_for_result_after_accepted_ack(self):
         """Hub acceptance is an interim ACK; remote apps/data arrive in control.result."""
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             backend = control_backend.SafeerControlBackend(config_pot=os.path.join(td, "link.json"))
             event = threading.Event()
             holder = [None]
@@ -737,7 +737,7 @@ class TestOsWindows(unittest.TestCase):
             self.assertIn("icon", holder[0]["data"]["items"][0])
 
     def test_control_backend_rejected_ack_finishes_wait(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             backend = control_backend.SafeerControlBackend(config_pot=os.path.join(td, "link.json"))
             event = threading.Event()
             holder = [None]
@@ -751,7 +751,7 @@ class TestOsWindows(unittest.TestCase):
             self.assertEqual(holder[0]["koda"], "brez_daljinca")
 
     def test_control_backend_accepts_legacy_mobile_response_shapes(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             backend = control_backend.SafeerControlBackend(config_pot=os.path.join(td, "link.json"))
 
             def odgovor(_id, dejanje, _parametri=None, cas=0):
@@ -773,7 +773,7 @@ class TestOsWindows(unittest.TestCase):
             self.assertEqual(dat["items"][0]["name"], "Film.mp4")
 
     def test_control_backend_datoteke_rpc(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             cfg = os.path.join(td, "link.json")
             backend = control_backend.SafeerControlBackend(config_pot=cfg)
 
@@ -813,7 +813,7 @@ class TestOsWindows(unittest.TestCase):
         self.assertIn("</svg>", svg)
 
     def test_control_backend_stanje_linka_identity(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             cfg = os.path.join(td, "link.json")
             backend = control_backend.SafeerControlBackend(config_pot=cfg)
             st = backend.stanje_linka()
@@ -824,7 +824,7 @@ class TestOsWindows(unittest.TestCase):
             self.assertTrue(st["control"])
 
     def test_control_backend_cast_devices_metadata(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             cfg = os.path.join(td, "link.json")
             backend = control_backend.SafeerControlBackend(config_pot=cfg)
 
@@ -861,7 +861,7 @@ class TestOsWindows(unittest.TestCase):
             self.assertIn("remote", vse[0]["zmoznosti"])
 
     def test_control_backend_ukaz_and_result(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             cfg = os.path.join(td, "link.json")
             backend = control_backend.SafeerControlBackend(config_pot=cfg)
 
@@ -1005,7 +1005,7 @@ class TestNavidezniZaslon(unittest.TestCase):
 
 class TestControlBackendDohodniNadzor(unittest.TestCase):
     def test_dohodni_ukaz_status_in_odziv(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             cfg = os.path.join(td, "link.json")
             backend = control_backend.SafeerControlBackend(config_pot=cfg)
 
@@ -1042,7 +1042,7 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
             self.assertIn("screenshot", podatki["actions"])
 
     def test_dohodni_ukaz_key_in_screenshot(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             cfg = os.path.join(td, "link.json")
             backend = control_backend.SafeerControlBackend(config_pot=cfg)
 
@@ -1080,7 +1080,7 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
             self.assertTrue(res_ss["payload"]["data"]["image"].startswith("data:image/jpeg;base64,"))
 
     def test_dohodni_ukaz_apps_in_open_url(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             cfg = os.path.join(td, "link.json")
             backend = control_backend.SafeerControlBackend(config_pot=cfg)
 
@@ -1120,7 +1120,7 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
             self.assertEqual(backend.navidezni_zaslon.aktivni_url, "https://safeer.si")
 
     def test_dohodni_ukaz_volume(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             cfg = os.path.join(td, "link.json")
             backend = control_backend.SafeerControlBackend(config_pot=cfg)
 
@@ -1146,7 +1146,7 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
             self.assertEqual(backend.navidezni_zaslon.glasnost, 60)
 
     def test_stanje_visoka_kakovost_in_varnost(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             cfg = os.path.join(td, "link.json")
             backend = control_backend.SafeerControlBackend(config_pot=cfg)
 
@@ -1161,7 +1161,7 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
             self.assertTrue(stanje_l.get("navidezni_zaslon"))
 
     def test_dohodni_ukaz_screen_start_privzeto_najvisja(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             cfg = os.path.join(td, "link.json")
             backend = control_backend.SafeerControlBackend(config_pot=cfg)
 
@@ -1202,7 +1202,7 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
         self.assertIn("--okno", vsebina)
 
     def test_media_center_import_and_export_json(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             mc = os_media.MediaCenter(td, roots=[])
             izvoz = mc.export_json()
             self.assertEqual(izvoz.get("razlicica"), 1)
@@ -1241,7 +1241,7 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
             self.assertIn("Big Buck Bunny", naslovi)
 
     def test_media_center_import_full_export_structure(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             mc = os_media.MediaCenter(td, roots=[])
             izvozen_paket = {
                 "razlicica": 1,
@@ -1298,7 +1298,7 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
 
     def test_control_backend_pairing_and_lokalna_koda(self):
         oddani = []
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             cfg = os.path.join(td, "control.json")
             cb = control_backend.SafeerControlBackend(config_pot=cfg)
             cb.dodaj_poslusalca(lambda vrsta, podatki=None: oddani.append((vrsta, podatki)))
@@ -1362,7 +1362,7 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
         self.assertIn("self.backend.lokalna_koda", okno)
 
     def test_control_poslje_url_po_enotnem_protokolu(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             cb = control_backend.SafeerControlBackend(config_pot=os.path.join(td, "control.json"))
             povezava = mock.Mock()
             povezava.tece = True
@@ -1373,7 +1373,7 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
             self.assertFalse(cb.poslji_url("tv-1", "file:///C:/skrivnost.txt", "Datoteka"))
 
     def test_control_standardne_mape_in_vzdevki_so_brez_dvojnikov(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             prva = os.path.join(td, "Dokumenti")
             druga = os.path.join(td, "Glasba")
             os.makedirs(prva)
@@ -1403,7 +1403,7 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
         navidezni.zajemi_posnetek.assert_called_once_with()
 
     def test_nova_naprava_mora_dobiti_izrecno_izbrane_pravice(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             cb = control_backend.SafeerControlBackend(config_pot=os.path.join(td, "control.json"))
             dogodki = []
             cb.dodaj_poslusalca(lambda vrsta, podatki: dogodki.append((vrsta, podatki)))
@@ -1422,7 +1422,7 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
             self.assertTrue(cb._dejanje_dovoljeno("pc-2", "key"))
 
     def test_profili_pravic_locijo_datoteke_programe_in_zaslon(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             cb = control_backend.SafeerControlBackend(config_pot=os.path.join(td, "control.json"))
             cb.nastavi_dovoljenje("omejen", "izbrano")
             self.assertTrue(cb._dejanje_dovoljeno("omejen", "files.list"))
@@ -1473,7 +1473,7 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
         self.assertIn("repeat(auto-fill,minmax(145px,1fr))", css)
 
     def test_media_vidlink_predloga_vstavi_pravi_tmdb_id_in_ni_lazna_kartica(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             center = os_media.MediaCenter(td, roots=[])
             result = center.add_source("https://vidlink.pro/movie/{tmdbId}", "VidLink")
             self.assertTrue(result["ok"])
@@ -1486,7 +1486,7 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
             self.assertNotIn("tmdbid", inception["naslov"].lower())
 
     def test_media_korenski_vidlink_je_en_vir_za_filme_in_serije(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             center = os_media.MediaCenter(td, roots=[])
             with mock.patch.object(center, "_download", side_effect=AssertionError("Ponudnika ne beremo kot katalog")):
                 result = center.add_source("https://vidlink.pro", "VidLink")
@@ -1499,7 +1499,7 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
             self.assertTrue(all(item["url"].startswith("https://vidlink.pro/") for item in catalog))
 
     def test_media_staro_vidlink_predlogo_samodejno_migrira(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             center = os_media.MediaCenter(td, roots=[])
             center.config_dir.mkdir(parents=True, exist_ok=True)
             center.store_path.write_text(json.dumps({"viri": [{
@@ -1530,7 +1530,7 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
         self.assertEqual(items[2]["vrsta"], "film")
 
         # 2. Dodajanje korenskega vira vidsrc.cc v MediaCenter (VidSrc Embed Engine)
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             center = os_media.MediaCenter(td, roots=[])
             with mock.patch.object(center, "_download", side_effect=Exception("HTTP Error 403: Forbidden")):
                 rez = center.add_source("https://vidsrc.cc", "VidSrc")
@@ -1550,7 +1550,7 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
                 self.assertEqual(len([x for x in cat_serije["vnosi"] if x.get("tmdb_id") == 1399]), 1)
 
         # 3. Dodajanje specifične povezave do serije
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             center = os_media.MediaCenter(td, roots=[])
             with mock.patch.object(center, "_download", side_effect=Exception("HTTP Error 403: Forbidden")):
                 rez_tv = center.add_source("https://vidsrc.cc/v2/embed/tv/tt0944947/1/5", "GoT Epizoda")
@@ -1652,7 +1652,7 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
             self.assertTrue(any(domain in host for domain in os_media._EMBED_DOMAINS), host)
 
     def test_media_vidlink_uporabnikov_vir_odpre_tmdb_katalog_in_epizode(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             center = os_media.MediaCenter(td, roots=[])
             with mock.patch.object(center, "refresh_source", return_value={"ok": True, "vir": {}}):
                 result = center.add_source("https://vidlink.pro", "Moj VidLink")

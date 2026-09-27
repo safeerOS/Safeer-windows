@@ -26,6 +26,7 @@ from PySide6.QtWidgets import QApplication, QMainWindow, QStackedWidget
 
 from core import os_media, os_scit
 
+from . import en_primerek
 from . import browser, control_backend, control_window, os_backend_win, policy, vlc_player, webview2_media, zapiski
 
 class ShrambaWrapper:
@@ -434,6 +435,20 @@ class SafeerOsWindow(QMainWindow):
         else:
             self.showMaximized()
         print(f"[SafeerOS] DIAG window_show_called section={self.zacetni_razdelek or 'home'}", flush=True)
+
+    def prebudi(self, razdelek: str = "") -> None:
+        """Druga kopija je bila zagnana (ikona, bliznjica): pokazi to okno in odpri zeleni razdelek."""
+        if self.isMinimized() or not self.isVisible():
+            if self.v_oknu:
+                self.showNormal()
+            else:
+                self.showMaximized()
+        self.raise_()
+        self.activateWindow()
+        if razdelek in ("control", "daljinec", "naprave", "novaNaprava", "prijava"):
+            self.odpri_control(razdelek=razdelek)
+        elif razdelek and re.fullmatch(r"[A-Za-z0-9_-]{1,40}", razdelek):
+            self.view.page().runJavaScript(f"window.safeerOsPojdi && window.safeerOsPojdi('{razdelek}');")
 
     def nalozi_vmesnik(self) -> None:
         try:
@@ -1291,18 +1306,26 @@ def main(argv: Optional[List[str]] = None) -> int:
         os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", ""), browser_settings
     )
 
-    browser.register_schemes()
-    app = QApplication.instance() or QApplication(sys.argv)
-    app.setApplicationName("SafeerOS")
-    app.setOrganizationName("Safeer")
-    browser.apply_dns_mode(browser_settings)
-    print(f"[SafeerOS] DIAG main_start section={args.razdelek or 'home'} media_engine={args.media_engine}", flush=True)
-
     zacetni = ""
     if args.control:
         zacetni = args.razdelek or "naprave"
     elif args.razdelek:
         zacetni = args.razdelek
+
+    browser.register_schemes()
+    app = QApplication.instance() or QApplication(sys.argv)
+    zaklep = en_primerek.zakleni()
+    if zaklep is None:
+        if en_primerek.predaj_prvemu(zacetni, bool(args.ozadje)):
+            print("[SafeerOS] Ze tece; razdelek predan prvi kopiji.", flush=True)
+            return 0
+        # Prva kopija se ne odziva (visi ali se zapira): ne zaganjamo druge, da ne podvojimo Linka.
+        print("[SafeerOS] Ze tece druga kopija, ki se ne odziva.", flush=True)
+        return 1
+    app.setApplicationName("SafeerOS")
+    app.setOrganizationName("Safeer")
+    browser.apply_dns_mode(browser_settings)
+    print(f"[SafeerOS] DIAG main_start section={args.razdelek or 'home'} media_engine={args.media_engine}", flush=True)
 
     # Ce je izbran control razdelek ali --okno, odpri v oknu
     v_oknu = True if (args.control or args.razdelek or args.okno) else False
@@ -1310,6 +1333,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     window = SafeerOsWindow(v_oknu=v_oknu, zacetni_razdelek=zacetni, media_engine=args.media_engine,
                             browser_settings=browser_settings)
     print("[SafeerOS] DIAG event_loop_start", flush=True)
+    window._streznik_primerka = en_primerek.streznik(window)
+    window._zaklep_primerka = zaklep
 
     if args.ozadje:
         window.control_backend.povezi_se()
