@@ -1960,15 +1960,23 @@ class MediaCenter:
         needle = _text(query, 120).casefold()
         if needle:
             def zadetek(item: dict) -> bool:
-                hay = " ".join((item.get("naslov", ""), item.get("izvajalec", ""), item.get("album", ""),
-                                item.get("opis", ""), item.get("imdb_id", ""),
-                                str(item.get("tmdb_id") or ""))).casefold()
+                hay = " ".join(str(item.get(key) or "") for key in
+                               ("naslov", "izvajalec", "album", "opis", "imdb_id", "tmdb_id")).casefold()
                 if needle in hay:
                     return True
                 return any(difflib.SequenceMatcher(None, needle, token).ratio() >= 0.72
                            for token in re.findall(r"[\wÀ-ž]{3,}", hay))
             merged = [item for item in merged if zadetek(item)]
         total_pages = tmdb_pages if (self._ima_embed_vir(data) and tmdb_pages > 1) else max(1, math.ceil(len(merged) / 24))
+        # Zapomni si vse prikazane vnose (tudi zadetke iskanja in zdruzene kartice),
+        # da jih resolve() najde, ko uporabnik klikne - sicer se klik na zadetek
+        # iskanja tiho ne zgodi, ker katalog brez iskanja tega vnosa nima.
+        for shown in merged:
+            if isinstance(shown, dict) and shown.get("id") and shown["id"] not in self._dynamic_items:
+                self._dynamic_items[shown["id"]] = shown
+        if len(self._dynamic_items) > 5000:
+            for old_key in list(self._dynamic_items)[:len(self._dynamic_items) - 4000]:
+                self._dynamic_items.pop(old_key, None)
         return {
             "vnosi": merged,
             "viri": self.sources(),
@@ -2171,10 +2179,25 @@ class MediaCenter:
             return None
         if item.get("peertube_uuid"):
             configured = [str(source.get("url") or "") for source in self.sources()]
-            resolved = self._zakoniti_viri.resolve_video(item, configured)
-            if resolved:
-                self._dynamic_items[item_id] = resolved
-                return resolved
+            # Najprej glavna razlicica, nato ostale (zdruzena kartica ima vec
+            # streznikov z istim videom) - prvi, ki odgovori, zmaga.
+            kandidati = [item]
+            for variant in item.get("razlicice") or []:
+                match = re.search(r"https://([^/]+)/(?:videos/watch|w)/([0-9a-fA-F-]{8,})", str((variant or {}).get("url") or ""))
+                if match and match.group(2) != item.get("peertube_uuid"):
+                    kandidati.append(dict(item, streznik=match.group(1), peertube_uuid=match.group(2),
+                                          url=variant.get("url"), vir=variant.get("vir") or item.get("vir")))
+            for kandidat in kandidati:
+                resolved = self._zakoniti_viri.resolve_video(kandidat, configured)
+                if resolved:
+                    # Predvajalnik bere razlicice, zato jih nadomesti s predvajalnim
+                    # tokom - prvotne razlicice kazejo na spletne strani videov
+                    # (/videos/watch/...), ki jih VLC ne more predvajati.
+                    predvajalna = {"url": resolved["url"], "vir": resolved.get("vir") or kandidat.get("vir", ""),
+                                   "kakovost": resolved.get("kakovost") or ("HLS" if str(resolved.get("mime", "")).endswith("mpegurl") else "")}
+                    resolved = dict(resolved, id=item_id, razlicice=[predvajalna], stevilo_razlicic=1)
+                    self._dynamic_items[item_id] = resolved
+                    return resolved
             return None
         return self._izberi_najhitrejsi(self._dodaj_predvajalne_razlicice(item))
 
