@@ -26,7 +26,7 @@ from PySide6.QtWidgets import QApplication, QMainWindow, QStackedWidget
 
 from core import os_media, os_scit
 
-from . import browser, control_backend, control_window, os_backend_win, policy, vlc_player, webview2_media
+from . import browser, control_backend, control_window, os_backend_win, policy, vlc_player, webview2_media, zapiski
 
 class ShrambaWrapper:
     def get(self, key: str, default: Any = None) -> Any:
@@ -301,6 +301,8 @@ class SafeerOsWindow(QMainWindow):
             self.browser_app, private=True, embedded=True, on_safeer_home=self._zapri_browser
         )
         self.browser_window.setWindowFlags(Qt.Widget)
+        self.zapiski = zapiski.Zapiski(os.path.join(os_backend_win.CONFIG_DIR, "zapiski.json"))
+        self.browser_window.na_zapisek = self._izrezek_iz_spleta
         self.browser_app.windows.append(self.browser_window)
         self.browser_window.new_tab(policy.HOME_URL)
         self.zaslon.addWidget(self.browser_window)
@@ -564,6 +566,28 @@ class SafeerOsWindow(QMainWindow):
 
         threading.Thread(target=_delo, name="SafeerMediaRefresh", daemon=True).start()
 
+    def _izrezek_iz_spleta(self) -> None:
+        """Gumb 'V zapisek' v Spletu: izbrano besedilo (ali samo stran) gre z virom v zadnji zapisek."""
+        view = self.browser_window.current_view()
+        if view is None:
+            return
+        url = view.url().toString()
+        naslov = view.page().title()
+        gumb = self.browser_window.zapisek_button
+
+        def _potrdi(izbor) -> None:
+            try:
+                z = self.zapiski.dodaj_izrezek(url, naslov, str(izbor or ""))
+                sporocilo = "✓ V zapisku »%s«" % z["naslov"]
+            except Exception as e:
+                sporocilo = "Ni dodano: %s" % e
+            if gumb is not None:
+                gumb.setText(sporocilo)
+                QTimer.singleShot(2500, lambda: gumb.setText("V zapisek"))
+            self.poslji_dogodek("zapiskiSpremenjeni", None)
+
+        view.page().runJavaScript("window.getSelection ? String(window.getSelection()) : ''", 0, _potrdi)
+
     def poslji_dogodek(self, vrsta: str, podatki: Any) -> None:
         payload_js = json.dumps(podatki, ensure_ascii=False)
         cmd = f"window.safeerOsDogodek && window.safeerOsDogodek({json.dumps(vrsta)}, {payload_js});"
@@ -688,6 +712,19 @@ class SafeerOsWindow(QMainWindow):
         if metoda == "odpriDatoteko":
             pot = str(a[0]) if a else ""
             return os_backend_win.odpri_datoteko(pot)
+
+        if metoda == "zapiskiSeznam":
+            return self.zapiski.seznam(str(a[0]) if a else "")
+
+        if metoda == "zapisekDobi":
+            return self.zapiski.dobi(str(a[0]) if a else "")
+
+        if metoda == "zapisekShrani":
+            return self.zapiski.shrani(str(a[0]) if a else "", str(a[1]) if len(a) > 1 else "",
+                                       str(a[2]) if len(a) > 2 else "", (bool(a[3]) if len(a) > 3 and a[3] is not None else None))
+
+        if metoda == "zapisekIzbrisi":
+            return self.zapiski.izbrisi(str(a[0]) if a else "")
 
         if metoda == "nastaviDovoljenje":
             return self.control_backend.nastavi_dovoljenje(str(a[0]) if a else "", str(a[1]) if len(a) > 1 else "")
