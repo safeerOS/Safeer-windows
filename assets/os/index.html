@@ -221,6 +221,27 @@
 
         <div class="media-orodja">
           <label class="media-iskanje"><svg data-ikona="isci"></svg><input id="mediaIskanje" type="search" autocomplete="off" placeholder="Išči filme, serije, glasbo, radio ..."></label>
+          <label class="media-razvrsti" title="Razvrsti vsebine">
+            <span>Razvrsti</span>
+            <select id="mediaRazvrsti">
+              <option value="">Priporočeno</option>
+              <option value="novo">Leto izida: najnovejše</option>
+              <option value="staro">Leto izida: najstarejše</option>
+              <option value="az">Po abecedi A–Ž</option>
+              <option value="za">Po abecedi Ž–A</option>
+            </select>
+          </label>
+          <div class="media-filter-viri">
+            <button class="gumb" id="mediaViriFilterGumb" type="button" aria-expanded="false" aria-controls="mediaViriFilter">Viri: vsi</button>
+            <div class="media-viri-filter" id="mediaViriFilter" hidden>
+              <label class="media-viri-filter-lokalno"><input type="checkbox" id="mediaSamoLokalno"> <span><b>Samo ta naprava</b><small>Samo datoteke na tem računalniku, brez spleta.</small></span></label>
+              <div class="media-viri-filter-seznam" id="mediaViriFilterSeznam"></div>
+              <div class="media-viri-filter-noga">
+                <small>Izklop je začasen: ob ponovnem zagonu so spet vklopljeni vsi viri.</small>
+                <button class="gumb" id="mediaViriFilterPonastavi" type="button">Vklopi vse</button>
+              </div>
+            </div>
+          </div>
         </div>
         <div class="media-zanri" id="mediaZanri" aria-label="Žanri">
           <button class="izbran" data-media-genre="">Vse vsebine</button>
