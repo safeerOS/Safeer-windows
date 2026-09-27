@@ -406,8 +406,13 @@
     if (p.naprava) {
       var n = S.naprave.find(function (x) { return x.id === p.naprava; }) || { ime: "" };
       obvesti(t("zaganjamNa", { ime: p.ime, naprava: n.ime }));
-      klic("zazeniNaNapravi", [p.naprava, p.id]).then(function (ok) {
-        if (!ok) { obvesti(t("niUspelo")); return; }
+      klic("zazeniNaNapravi", [p.naprava, p.id]).then(function (r) {
+        var ok = r === true || !!(r && r.ok);
+        if (!ok) {
+          // Sporocilo naprave (npr. "dovoli Prikaz cez druge aplikacije") je koristnejse od splosnega.
+          obvesti(r && r.message ? r.message : t("niUspelo"));
+          return;
+        }
         zabeleziNedavno({ vrsta: "program", id: p.id, ime: p.ime, ikona: p.ikona, naprava: p.naprava, ime_naprave: n.ime });
       },
                                                         function () { obvesti(t("niUspelo")); });
