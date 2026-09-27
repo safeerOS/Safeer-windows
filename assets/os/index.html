@@ -95,24 +95,10 @@
           </button>
         </div>
 
-        <!-- Middle Widgets Row (Naprave, Programi, AI Asistent) -->
+        <!-- Srednja vrsta: spletne aplikacije (siroko) + nedavne -->
         <div class="domov-sredina-mreza">
-          <!-- Naprave -->
-          <div class="domov-kartica">
-            <div class="kartica-glava">
-              <b data-pojdi="naprave">Naprave</b>
-              <svg data-ikona="desno" data-pojdi="naprave"></svg>
-            </div>
-            <div class="naprave-pilule">
-              <div class="naprava-pilula povezana"><svg data-ikona="tv"></svg><b>Android TV</b><span><i class="pika zelena"></i> Povezan</span></div>
-              <div class="naprava-pilula povezana"><svg data-ikona="namizje"></svg><b>Linux PC</b><span><i class="pika zelena"></i> Povezan</span></div>
-              <div class="naprava-pilula povezana"><svg data-ikona="telefon"></svg><b>Telefon</b><span><i class="pika zelena"></i> Povezan</span></div>
-              <div class="naprava-pilula"><svg data-ikona="tablica"></svg><b>Tablica</b><span><i class="pika siva"></i> Offline</span></div>
-            </div>
-          </div>
-
           <!-- Spletne aplikacije -->
-          <div class="domov-kartica" id="karticaSpletneApp">
+          <div class="domov-kartica kartica-siroka" id="karticaSpletneApp">
             <div class="kartica-glava">
               <b>Spletne aplikacije</b>
               <button class="gumb-mini-dodaj" id="gumbOdpriDodajApp" title="Dodaj spletno stran kot namizno aplikacijo">+ Dodaj</button>
@@ -404,6 +390,17 @@
 <div class="sloj" id="slojHitro"><div class="tancica"></div><div class="plosca" id="hitro"></div></div>
 <!-- Napajanje -->
 <div class="sloj" id="slojNapajanje"><div class="tancica"></div><div class="plosca" id="napajanje"></div></div>
+<!-- Vse spletne aplikacije (Vec aplikacij) -->
+<div class="sloj" id="slojVecApp"><div class="tancica"></div>
+  <div class="plosca" id="ploscaVecApp">
+    <div class="kartica-glava"><b>Spletne aplikacije</b>
+      <span class="gumbi-glave"><button class="gumb-mini-dodaj" id="vecAppDodaj" type="button">+ Dodaj</button>
+      <button class="gumb-ikona" id="vecAppZapri" type="button" title="Zapri"><svg data-ikona="x"></svg></button></span>
+    </div>
+    <p class="drobno">Povleci ploščico ali uporabi puščici, da spremeniš vrstni red. Prve aplikacije so vidne na domači strani.</p>
+    <div class="spletne-mreza-vse" id="vseSpletneApp"></div>
+  </div>
+</div>
 <!-- Dodaj spletno aplikacijo -->
 <div class="sloj" id="slojDodaj"><div class="tancica"></div>
   <form class="plosca" id="obrazecDodaj">

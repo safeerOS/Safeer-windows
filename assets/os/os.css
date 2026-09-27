@@ -620,8 +620,8 @@ div.vrstica { cursor: default; }
 }
 
 /* Kartica Spletne aplikacije na domaci strani */
-.spletne-mreza-mini { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
-  gap: 10px; margin-top: 12px; max-height: 260px; overflow-y: auto; }
+.spletne-mreza-mini { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  gap: 12px; margin-top: 4px; }
 .spletne-mreza-mini .ploscica { width: auto; min-height: 92px; }
 .spletne-mreza-mini .drobno { grid-column: 1 / -1; margin: 6px 0; opacity: .75; }
 
@@ -655,3 +655,24 @@ div.vrstica { cursor: default; }
 .splet-zasebnost b{font-size:14px}
 .splet-zasebnost small{margin-top:3px;color:var(--medlo);font-size:13px}
 @media(max-width:700px){.splet-zacetek{padding:28px 20px;margin:8px auto;min-height:calc(100vh - 140px)}.splet-iskalnik{flex-wrap:wrap;padding:10px 12px}.splet-iskalnik input{font-size:16px}.splet-iskalnik .gumb{width:100%;justify-content:center}.splet-hitro{grid-template-columns:1fr}}
+
+/* Domaca stran: spletne aplikacije cez dva stolpca, brez drsnika */
+.domov-kartica.kartica-siroka { grid-column: span 2; }
+.spletne-mreza-mini .ploscica, .spletne-mreza-vse .ploscica { height: 116px; min-height: 0; gap: 8px; }
+.spletne-mreza-mini .ploscica img, .spletne-mreza-mini .ploscica .crka,
+.spletne-mreza-vse .ploscica img, .spletne-mreza-vse .ploscica .crka { width: 48px; height: 48px; font-size: 22px; }
+.ploscica.vec-aplikacij { border-style: dashed; color: var(--zelena); cursor: pointer; }
+.ploscica.vec-aplikacij svg { width: 30px; height: 30px; }
+.ploscica.vec-aplikacij .vec-stevilo { font-size: 13px; opacity: .8; }
+.ploscica.vlecem { opacity: .45; }
+.ploscica.cilj-spusta { outline: 2px solid var(--zelena); outline-offset: 2px; }
+.ploscica .premik { position: absolute; left: 6px; bottom: 6px; display: none; gap: 4px; }
+.ploscica:hover .premik, .ploscica:focus-within .premik { display: flex; }
+.ploscica .premik-gumb { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center;
+  background: rgba(255,255,255,.08); cursor: pointer; }
+.ploscica .premik-gumb:hover, .ploscica .premik-gumb:focus { background: rgba(84,214,165,.3); outline: none; }
+.ploscica .premik-gumb svg { width: 14px; height: 14px; }
+#slojVecApp .plosca { left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(920px, calc(100vw - 80px));
+  max-height: calc(100vh - 120px); overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+#slojVecApp .gumbi-glave { display: flex; gap: 8px; align-items: center; }
+.spletne-mreza-vse { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 12px; }
