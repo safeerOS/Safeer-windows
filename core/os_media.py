@@ -2661,6 +2661,17 @@ class MediaCenter:
             if any(t.get("torrent") for t in tokovi):
                 return dict(item, napaka="Ta dodatek ponuja samo torrent povezave; Safeer predvaja neposredne tokove.")
             return dict(item, napaka="Dodatek za to vsebino ni vrnil predvajalne povezave.")
+        if item.get("tunein_id"):
+            try:
+                resolved = self._zakoniti_viri.resolve_tunein(item)
+            except Exception:
+                resolved = None
+            if not resolved:
+                return dict(item, napaka="TuneIn za to postajo trenutno ne ponuja toka.")
+            resolved = dict(resolved, id=item_id, razlicice=[{"url": resolved["url"], "vir": "TuneIn",
+                                                             "kakovost": ""}], stevilo_razlicic=1)
+            self._dynamic_items[item_id] = resolved
+            return resolved
         if item.get("archive_id"):
             try:
                 resolved = self._zakoniti_viri.resolve_archive(item)

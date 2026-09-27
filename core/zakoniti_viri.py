@@ -397,12 +397,78 @@ class ZakonitiViri:
             return self._cached(key, fetch)
         with ThreadPoolExecutor(max_workers=len(tags)) as pool:
             result = [station for rows in pool.map(load_tag, tags) for station in rows]
+        if not zvrst:
+            # TuneIn (neuradni OPML vmesnik; uporabo je izrecno dovolil lastnik izdelka): pri iskanju zadetki,
+            # sicer postaje v blizini. Ce vmesnik ne odgovori, se tiho izpusti.
+            try:
+                result += self.tunein(query)
+            except Exception:
+                pass
         seen = set()
+        imena = set()
         out = []
         for station in result:
-            if station and station["id"] not in seen:
-                seen.add(station["id"]); out.append(station)
+            if not station or station["id"] in seen:
+                continue
+            ime = _norm(station.get("naslov", ""))
+            if station.get("tunein_id") and ime in imena:
+                continue  # ista postaja je ze iz Radio Browserja
+            seen.add(station["id"]); imena.add(ime); out.append(station)
         return out
+
+    TUNEIN = "https://opml.radiotime.com"
+
+    def _tunein_vnos(self, row: dict, skupina: str) -> dict | None:
+        if not isinstance(row, dict) or row.get("type") != "audio" or row.get("item") != "station":
+            return None
+        gid = str(row.get("guide_id") or "")
+        ime = str(row.get("text") or "").strip()
+        if not re.fullmatch(r"s\d{1,12}", gid) or not ime:
+            return None
+        slika = str(row.get("image") or "")
+        if slika.startswith("http://"):
+            slika = "https://" + slika[len("http://"):]
+        return {"id": "tunein:" + gid, "naslov": ime[:200], "vrsta": "radio",
+                "url": "https://tunein.com/radio/" + gid + "/", "tunein_id": gid,
+                "slika": slika, "izvajalec": str(row.get("subtext") or "")[:160],
+                "opis": "TuneIn · " + str(row.get("subtext") or "")[:300], "skupina": skupina,
+                "vir": "TuneIn", "vir_id": "tunein"}
+
+    def tunein(self, query: str = "") -> list[dict]:
+        """Postaje TuneIn: pri iskanju zadetki, sicer postaje v blizini (po IP naslovu)."""
+        if query:
+            url = self.TUNEIN + "/Search.ashx?" + urllib.parse.urlencode(
+                {"query": query, "render": "json", "formats": "mp3,aac,ogg,hls"})
+            kljuc, skupina = "tunein:isci:" + _norm(query), "TuneIn"
+        else:
+            url = self.TUNEIN + "/Browse.ashx?" + urllib.parse.urlencode({"c": "local", "render": "json"})
+            kljuc, skupina = "tunein:blizu", "TuneIn · v bližini"
+
+        def fetch():
+            vrste = []
+            def zberi(elementi):
+                for el in elementi or []:
+                    if isinstance(el, dict):
+                        if el.get("children"):
+                            zberi(el["children"])
+                        else:
+                            vrste.append(el)
+            zberi((self._json(url) or {}).get("body"))
+            return [v for v in (self._tunein_vnos(r, skupina) for r in vrste) if v][:40]
+        return self._cached(kljuc, fetch)
+
+    def resolve_tunein(self, item: dict) -> dict | None:
+        gid = str(item.get("tunein_id") or "")
+        if not re.fullmatch(r"s\d{1,12}", gid):
+            return None
+        data = self._json(self.TUNEIN + "/Tune.ashx?" + urllib.parse.urlencode(
+            {"id": gid, "render": "json", "formats": "mp3,aac,ogg,hls"}))
+        for row in (data or {}).get("body") or []:
+            url = str((row or {}).get("url") or "")
+            if (row or {}).get("element") == "audio" and url.startswith(("https://", "http://")):
+                mime = "application/vnd.apple.mpegurl" if ".m3u8" in url.lower() else ""
+                return dict(item, url=url, mime=mime, bitrate=int(row.get("bitrate") or 0))
+        return None
 
     @staticmethod
     def _station(row: dict, group: str) -> dict | None:
