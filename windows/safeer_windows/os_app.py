@@ -1097,10 +1097,12 @@ class SafeerOsWindow(QMainWindow):
             razvrsti = str(a[4]) if len(a) > 4 and a[4] else ""
             izklopljeni = [str(x) for x in a[5]][:200] if len(a) > 5 and isinstance(a[5], list) else []
             samo_lokalno = bool(a[6]) if len(a) > 6 else False
+            izklopljeni_jeziki = [str(x) for x in a[7]][:100] if len(a) > 7 and isinstance(a[7], list) else []
             return self.media_center.catalog_hitro(
                 query, kind, genre, page,
                 ob_osvezitvi=lambda kljuc, rezultat: self.poslji_dogodek("mediaKatalogOsvezen", rezultat),
-                razvrsti=razvrsti, izklopljeni=izklopljeni, samo_lokalno=samo_lokalno)
+                razvrsti=razvrsti, izklopljeni=izklopljeni, samo_lokalno=samo_lokalno,
+                izklopljeni_jeziki=izklopljeni_jeziki)
 
         if metoda == "mediaPodrobnosti":
             shramba = os_backend_win.nalozi_shrambo()

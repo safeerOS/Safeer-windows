@@ -2508,7 +2508,8 @@
   // En katalog ne glede na vir. Zaledje zdruzi dvojnike in izbere najboljsi tok;
   var media = { katalog: [], viri: [], filter: "film", genre: "", query: "", page: 1, skupaj_strani: 1, aktivni: null, zahteva: 0, timer: 0,
                 // Razvrstitev in zacasno izklopljeni viri veljajo do ponovnega zagona (namenoma ne shranjujemo).
-                razvrsti: "", izklopljeni: {}, samoLokalno: false, znaniViri: {} };
+                razvrsti: "", izklopljeni: {}, samoLokalno: false, znaniViri: {},
+                izklopljeniJeziki: {}, znaniJeziki: {} };
   function mediaIkona(vrsta) {
     if (vrsta === "glasba") return "glasba";
     if (vrsta === "radio") return "radio";
@@ -2810,11 +2811,17 @@
       razl.forEach(function (r) { if (r.vir_id && r.vir_id !== "lokalno") media.znaniViri[r.vir_id] = r.vir || r.vir_id; });
     });
     ((response && response.viri) || []).forEach(function (v) { if (v.id) media.znaniViri[v.id] = v.ime || v.id; });
+    ((response && response.vnosi) || []).forEach(function (x) { if (x.jezik) media.znaniJeziki[x.jezik] = 1; });
+  }
+  function imeJezika(koda) {
+    try { var ime = new Intl.DisplayNames([LOKALE[jezik] || "sl-SI"], { type: "language" }).of(koda);
+          return ime ? ime.charAt(0).toLocaleUpperCase() + ime.slice(1) : koda; }
+    catch (_) { return koda; }
   }
   function osveziGumbViri() {
     var gumb = $("mediaViriFilterGumb"); if (!gumb) return;
-    var n = Object.keys(media.izklopljeni).length;
-    gumb.textContent = media.samoLokalno ? "Viri: samo ta naprava" : (n ? "Viri: " + n + " izklopljen" + (n === 1 ? "" : (n === 2 ? "a" : (n < 5 ? "i" : "ih"))) : "Viri: vsi");
+    var n = Object.keys(media.izklopljeni).length + Object.keys(media.izklopljeniJeziki).length;
+    gumb.textContent = media.samoLokalno ? "Viri in jeziki: samo ta naprava" : (n ? "Viri in jeziki: " + n + " izklopljen" + (n === 1 ? "" : (n === 2 ? "a" : (n < 5 ? "i" : "ih"))) : "Viri in jeziki: vsi");
     gumb.classList.toggle("aktiven", media.samoLokalno || n > 0);
   }
   function narisiViriFilter() {
@@ -2834,6 +2841,23 @@
     });
     seznam.classList.toggle("onemogoceno", media.samoLokalno);
     $("mediaSamoLokalno").checked = media.samoLokalno;
+    var jeziki = $("mediaJezikiFilterSeznam");
+    if (jeziki) {
+      jeziki.innerHTML = "";
+      var kode = Object.keys(media.znaniJeziki).sort(function (a, b) { return imeJezika(a).localeCompare(imeJezika(b)); });
+      if (!kode.length) jeziki.appendChild(el("small", "", "Jeziki se pokažejo, ko se katalog naloži."));
+      kode.forEach(function (koda) {
+        var vrstica = el("label"), cb = el("input");
+        cb.type = "checkbox"; cb.checked = !media.izklopljeniJeziki[koda];
+        cb.onchange = function () {
+          if (cb.checked) delete media.izklopljeniJeziki[koda]; else media.izklopljeniJeziki[koda] = 1;
+          osveziGumbViri(); media.page = 1; naloziMedia();
+        };
+        var besedilo = el("span"); besedilo.appendChild(el("b", "", ubezi(imeJezika(koda))));
+        vrstica.appendChild(cb); vrstica.appendChild(besedilo); jeziki.appendChild(vrstica);
+      });
+      jeziki.classList.toggle("onemogoceno", media.samoLokalno);
+    }
   }
 
   function prevzemiMediaKatalog(response, tiho) {
@@ -2854,7 +2878,8 @@
     var zahteva = ++media.zahteva;
     $("mediaPovzetek").textContent = "Nalagam katalog …";
     klic("mediaKatalog", [media.query, media.filter, media.genre, media.page || 1,
-                          media.razvrsti, Object.keys(media.izklopljeni), media.samoLokalno]).then(function (response) {
+                          media.razvrsti, Object.keys(media.izklopljeni), media.samoLokalno,
+                          Object.keys(media.izklopljeniJeziki)]).then(function (response) {
       if (zahteva !== media.zahteva) return;
       prevzemiMediaKatalog(response);
     }, function () { if (zahteva === media.zahteva) { media.katalog = []; media.viri = []; narisiMedia(); } });
@@ -3018,7 +3043,7 @@
     narisiViriFilter(); osveziGumbViri(); media.page = 1; naloziMedia();
   });
   on("mediaViriFilterPonastavi", "click", function () {
-    media.izklopljeni = {}; media.samoLokalno = false;
+    media.izklopljeni = {}; media.izklopljeniJeziki = {}; media.samoLokalno = false;
     narisiViriFilter(); osveziGumbViri(); media.page = 1; naloziMedia();
   });
   document.addEventListener("click", function (event) {
