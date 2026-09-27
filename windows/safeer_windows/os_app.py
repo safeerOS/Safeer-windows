@@ -951,6 +951,9 @@ class SafeerOsWindow(QMainWindow):
             from core import media_servers
             return media_servers.odkrij_dlna()
 
+        if metoda in ("mediaZvrsti", "mediaKatalog"):
+            self.media_center.izbrana_drzava = str(os_backend_win.nalozi_shrambo().get("media_watch_country") or "auto")
+
         if metoda == "mediaZvrsti":
             from core import zakoniti_viri
             vrsta = str(a[0]) if a else "glasba"

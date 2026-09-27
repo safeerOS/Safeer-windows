@@ -1475,9 +1475,12 @@ class MediaCenter:
         except Exception:
             return izbran, ""
 
+    #: Drzava, ki jo je uporabnik izbral pri "Kje gledati" (ali "auto" = zaznana).
+    izbrana_drzava = "auto"
+
     def _drzava_uporabnika(self) -> str:
         try:
-            return str(self.watch_country_settings("auto", "sl").get("drzava", "") or "")
+            return str(self.watch_country_settings(self.izbrana_drzava or "auto", "sl").get("drzava", "") or "")
         except Exception:
             return ""
 
@@ -2041,7 +2044,8 @@ class MediaCenter:
                 return any(difflib.SequenceMatcher(None, needle, token).ratio() >= 0.72
                            for token in re.findall(r"[\wÀ-ž]{3,}", hay))
             merged = [item for item in merged if zadetek(item)]
-        total_pages = tmdb_pages if (self._ima_embed_vir(data) and tmdb_pages > 1) else max(1, math.ceil(len(merged) / 24))
+        total_pages = (tmdb_pages if (self._ima_embed_vir(data) and tmdb_pages > 1 and kind in ("", "vse", "film", "serija"))
+                       else max(1, math.ceil(len(merged) / 24)))
         # Zapomni si vse prikazane vnose (tudi zadetke iskanja in zdruzene kartice),
         # da jih resolve() najde, ko uporabnik klikne - sicer se klik na zadetek
         # iskanja tiho ne zgodi, ker katalog brez iskanja tega vnosa nima.

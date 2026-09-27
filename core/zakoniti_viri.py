@@ -39,16 +39,16 @@ GLASBENE_ZVRSTI = {
 TV_V_ZIVO = (
     ("rtvslo", "RTV SLO v živo", "slovenščina", "", "https://365.rtvslo.si/v-zivo", "SI", "SI"),
     ("dw-en", "DW News", "angleščina", "https://dwamdstream102.akamaized.net/hls/live/2015525/dwstream102/index.m3u8", "", "", "DE"),
-    ("dw-de", "DW Deutsch", "nemščina", "https://dwamdstream106.akamaized.net/hls/live/2017965/dwstream106/index.m3u8", "", "", "DE"),
+    ("dw-de", "DW Deutsch", "nemščina", "https://dwamdstream103.akamaized.net/hls/live/2015526/dwstream103/index.m3u8", "", "", "DE"),
     ("dw-es", "DW Español", "španščina", "https://dwamdstream104.akamaized.net/hls/live/2015530/dwstream104/index.m3u8", "", "", "DE"),
-    ("f24-en", "France 24 English", "angleščina", "https://static.france24.com/live/F24_EN_HI_HLS/live_web.m3u8", "", "", "FR"),
-    ("f24-fr", "France 24 Français", "francoščina", "https://static.france24.com/live/F24_FR_HI_HLS/live_web.m3u8", "", "", "FR"),
-    ("f24-es", "France 24 Español", "španščina", "https://static.france24.com/live/F24_ES_HI_HLS/live_web.m3u8", "", "", "FR"),
+    ("f24-en", "France 24 English", "angleščina", "https://live.france24.com/hls/live/2037218/F24_EN_HI_HLS/master_5000.m3u8", "", "", "FR"),
+    ("f24-fr", "France 24 Français", "francoščina", "https://live.france24.com/hls/live/2037179/F24_FR_HI_HLS/master_5000.m3u8", "", "", "FR"),
+    ("f24-es", "France 24 Español", "španščina", "https://live.france24.com/hls/live/2037220/F24_ES_HI_HLS/master_5000.m3u8", "", "", "FR"),
     ("aje", "Al Jazeera English", "angleščina", "https://live-hls-apps-aje-fa.getaj.net/AJE/index.m3u8", "", "", "QA"),
     ("trt-world", "TRT World", "angleščina", "https://tv-trtworld.medya.trt.com.tr/master.m3u8", "", "", "TR"),
     ("cbs-news", "CBS News 24/7", "angleščina", "https://cbsn-us.cbsnstream.cbsnews.com/out/v1/55a8648e8f134e82a470f83d562deeca/master.m3u8", "", "", "US"),
     ("arirang", "Arirang TV", "angleščina", "https://amdlive-ch01-ctnd-com.akamaized.net/arirang_1ch/smil:arirang_1ch.smil/playlist.m3u8", "", "", "KR"),
-    ("nasa", "NASA TV", "angleščina", "https://ntv1.akamaized.net/hls/live/2014075/NASA-NTV1-HLS/master.m3u8", "", "", "US"),
+    ("tagesschau24", "tagesschau24 (ARD)", "nemščina", "https://tagesschau.akamaized.net/hls/live/2020115/tagesschau/tagesschau_1/master.m3u8", "", "", "DE"),
     ("redbull", "Red Bull TV", "angleščina", "https://rbmn-live.akamaized.net/hls/live/590964/BoRB-AT/master.m3u8", "", "", "AT"),
 )
 
