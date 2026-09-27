@@ -719,6 +719,13 @@ class BrowserWindow(QMainWindow):
             self.zapisek_button.setToolTip("Dodaj izbrano besedilo ali to stran v zapisek (z virom)")
             self.zapisek_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
             self.zapisek_button.hide()
+        # Zapisek ob strani: samo kadar ga uporabnik sam odpre; sicer je Splet cel zaslon kot vedno.
+        self.na_zapisek_ob_strani = None
+        self.ob_strani_button: Optional[QToolButton] = None
+        if embedded:
+            self.ob_strani_button = self._tool("menu", lambda: self.na_zapisek_ob_strani and self.na_zapisek_ob_strani())
+            self.ob_strani_button.setToolTip("Odpri ali zapri zapisek ob strani")
+            self.ob_strani_button.hide()
         self.star_button = self._tool("star", self.add_current_to_home)
         self.downloads_button = self._tool("download", self.show_downloads)
         self.menu_button = QToolButton(self)
@@ -780,6 +787,8 @@ class BrowserWindow(QMainWindow):
                 self.safeer_home_button.show()
             if self.zapisek_button is not None:
                 self._set_toolbar_widget_visible(self.zapisek_button, True)
+            if self.ob_strani_button is not None:
+                self._set_toolbar_widget_visible(self.ob_strani_button, True)
             self.address.setPlaceholderText("Išči ali vnesi spletni naslov")
         else:
             self.tabs.tabBar().show()
@@ -792,6 +801,8 @@ class BrowserWindow(QMainWindow):
                 self.safeer_home_button.show()
             if self.zapisek_button is not None:
                 self._set_toolbar_widget_visible(self.zapisek_button, False)
+            if self.ob_strani_button is not None:
+                self._set_toolbar_widget_visible(self.ob_strani_button, False)
             self.address.setPlaceholderText(tr(self.app, "address"))
 
     def _set_toolbar_widget_visible(self, widget: QWidget, visible: bool) -> None:

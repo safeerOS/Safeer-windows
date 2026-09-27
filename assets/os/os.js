@@ -2283,6 +2283,9 @@
     if (vrsta === "pojdi") window.safeerOsPojdi(podatki);
     if (vrsta === "mediaFallback" && podatki) predvajajHtml(podatki, 0);
     if (vrsta === "mediaOsvezen" && S.razdelek === "media") naloziMedia();
+    if (vrsta === "mediaKatalogOsvezen" && podatki && S.razdelek === "media" && podatki.kljuc && podatki.kljuc === media.kljuc) {
+      prevzemiMediaKatalog(podatki, true);
+    }
     if (vrsta === "kodaPrijave" && podatki) pokaziKodoPrijave(podatki);
     if (vrsta === "zapiskiSpremenjeni" && S.razdelek === "zapiski") {
       naloziZapiske(); if (Z.aktivni) odpriZapisek(Z.aktivni.id);
@@ -2794,16 +2797,26 @@
     });
   }
 
+  // Katalog pride najprej iz predpomnilnika (takoj); ko v ozadju prispejo sveži podatki,
+  // jih Python pošlje kot dogodek "mediaKatalogOsvezen" in pogled tiho posodobimo.
+  function prevzemiMediaKatalog(response, tiho) {
+    media.kljuc = (response && response.kljuc) || "";
+    media.katalog = (response && response.vnosi) || [];
+    if (response && response.viri) media.viri = response.viri;
+    media.skupaj_strani = (response && response.skupaj_strani) || 1;
+    var drsnik = $("vsebina") || document.documentElement;
+    var odmik = drsnik.scrollTop;
+    narisiMedia();
+    if (tiho) drsnik.scrollTop = odmik;
+  }
+
   function naloziMedia() {
     narisiZanre();
     var zahteva = ++media.zahteva;
     $("mediaPovzetek").textContent = "Nalagam katalog …";
     klic("mediaKatalog", [media.query, media.filter, media.genre, media.page || 1]).then(function (response) {
       if (zahteva !== media.zahteva) return;
-      media.katalog = (response && response.vnosi) || [];
-      media.viri = (response && response.viri) || [];
-      media.skupaj_strani = (response && response.skupaj_strani) || 1;
-      narisiMedia();
+      prevzemiMediaKatalog(response);
     }, function () { if (zahteva === media.zahteva) { media.katalog = []; media.viri = []; narisiMedia(); } });
   }
 
@@ -2988,7 +3001,9 @@
     $("mediaVirSporocilo").textContent = t("mediaDodaj") + " …";
     klic("mediaDodajVir", [url, name]).then(function (result) {
       if (result && result.ok) { $("mediaVirUrl").value = ""; $("mediaVirIme").value = ""; $("mediaVirSporocilo").textContent = t("mediaVirDodan"); }
-      else $("mediaVirSporocilo").textContent = (result && result.napaka === "podvojen") ? t("mediaVirPodvojen") : ((result && result.napaka) ? result.napaka : t("mediaVirNapaka"));
+      else $("mediaVirSporocilo").textContent = (result && result.napaka === "podvojen") ? t("mediaVirPodvojen")
+        : (result && result.sporocilo) ? result.sporocilo : ((result && result.napaka) ? result.napaka : t("mediaVirNapaka"));
+      if (result && !result.ok && result.sporocilo) obvesti(result.sporocilo);
       naloziMedia();
     }, function () { $("mediaVirSporocilo").textContent = t("mediaVirNapaka"); });
   });
@@ -3021,7 +3036,10 @@
       if (result && result.ok) {
         $("mediaStreznikUrl").value = ""; $("mediaStreznikIme").value = "";
         $("mediaVirSporocilo").textContent = "Strežnik je varno povezan.";
-      } else $("mediaVirSporocilo").textContent = (result && result.napaka) || t("mediaVirNapaka");
+      } else {
+        $("mediaVirSporocilo").textContent = (result && result.napaka) || t("mediaVirNapaka");
+        if (result && result.sporocilo) obvesti(result.sporocilo);
+      }
       naloziMedia();
     }, function () {
       $("mediaStreznikSkrivnost").value = "";

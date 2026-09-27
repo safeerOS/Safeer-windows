@@ -561,6 +561,47 @@ def stremio_tokovi(koren: str, tip: str, ident: str) -> list[dict]:
     return tokovi
 
 
+def stremio_preveri(base: str) -> str:
+    """Pred dodajanjem preveri, ali dodatek ponuja kaj, kar Safeer zna predvajati.
+
+    Vrne prazen niz, ce je dodatek uporaben, sicer razlog za uporabnika. Katalog brez
+    predvajalnih povezav ali dodatek s samimi torrenti v medijskem centru ne bi deloval.
+    """
+    koren = _stremio_koren(base)
+    manifest = stremio_manifest(koren)
+    viri = [r if isinstance(r, str) else str((r or {}).get("name") or "") for r in (manifest.get("resources") or [])]
+    if "stream" not in viri:
+        return ("Ta dodatek ponuja samo seznam naslovov brez predvajalnih povezav, "
+                "zato ga Safeer ne more predvajati.")
+    vzorci = []
+    for katalog in (manifest.get("catalogs") or [])[:4]:
+        tip, ident = str(katalog.get("type") or ""), str(katalog.get("id") or "")
+        if tip not in _STREMIO_VRSTE or not ident or any(
+                isinstance(e, dict) and e.get("isRequired") for e in (katalog.get("extra") or [])):
+            continue
+        try:
+            metas = json.loads(_request(koren + "/catalog/%s/%s.json" % (tip, urllib.parse.quote(ident, safe="")))).get("metas") or []
+        except Exception:
+            continue
+        vzorci += [(tip, str(m.get("id") or "")) for m in metas[:2] if m.get("id")]
+        if len(vzorci) >= 3:
+            break
+    if not vzorci:
+        return ""  # dodatek brez lastnega kataloga (npr. samo tokovi za druge kataloge) - ne zavrnemo
+    torrent = predvajljivo = 0
+    for tip, mid in vzorci[:3]:
+        try:
+            tokovi = stremio_tokovi(koren, tip, mid)
+        except Exception:
+            continue
+        predvajljivo += sum(1 for t in tokovi if t.get("url"))
+        torrent += sum(1 for t in tokovi if t.get("torrent"))
+    if not predvajljivo and torrent:
+        return ("Ta dodatek ponuja samo torrent povezave. Safeer predvaja samo neposredne tokove, "
+                "zato dodatka nismo dodali.")
+    return ""
+
+
 def kodi_odpri_dodatek(base: str, uporabnik: str, geslo: str, dodatek: str, glasba: bool = False) -> None:
     """Odpre dodatek na zaslonu naprave s Kodijem (dodatki tecejo samo v Kodiju)."""
     _kodi(base, uporabnik, geslo, "GUI.ActivateWindow",

@@ -241,6 +241,12 @@ class SafeerOsWindow(QMainWindow):
         link_hub_streznik.POSLUSALCI_KODE.append(
             lambda ime, koda: self.poslji_dogodek("kodaPrijave", {"ime": ime, "koda": koda}))
         self.media_center = os_media.MediaCenter(os_backend_win.CONFIG_DIR)
+        try:
+            self.media_center.izbrana_drzava = str(os_backend_win.nalozi_shrambo().get("media_watch_country") or "auto")
+        except Exception:
+            pass
+        # Glavne poglede medijskega centra pripravimo v ozadju, da je prvi klik takojsen.
+        QTimer.singleShot(8000, self.media_center.prednalozi)
 
         # Safeer Ščit za zaščito celotne naprave (DNS filtriranje na napravi)
         self.scit = os_scit.Scit(ShrambaWrapper())
@@ -303,6 +309,8 @@ class SafeerOsWindow(QMainWindow):
         self.browser_window.setWindowFlags(Qt.Widget)
         self.zapiski = zapiski.Zapiski(os.path.join(os_backend_win.CONFIG_DIR, "zapiski.json"))
         self.browser_window.na_zapisek = self._izrezek_iz_spleta
+        self.browser_window.na_zapisek_ob_strani = self._preklopi_zapisek_ob_strani
+        self._zapisek_dock = None
         self.browser_app.windows.append(self.browser_window)
         self.browser_window.new_tab(policy.HOME_URL)
         self.zaslon.addWidget(self.browser_window)
@@ -566,6 +574,84 @@ class SafeerOsWindow(QMainWindow):
 
         threading.Thread(target=_delo, name="SafeerMediaRefresh", daemon=True).start()
 
+    # ------------------------------------------------------------------ zapisek ob strani (Splet)
+    def _preklopi_zapisek_ob_strani(self) -> None:
+        """Zapisek ob strani se odpre samo na uporabnikovo zahtevo; brez njega je Splet cel zaslon."""
+        if self._zapisek_dock is None:
+            self._zapisek_dock = self._ustvari_zapisek_ob_strani()
+        vidno = not self._zapisek_dock.isVisible()
+        if vidno:
+            self._napolni_zapisek_ob_strani()
+        self._zapisek_dock.setVisible(vidno)
+
+    def _ustvari_zapisek_ob_strani(self):
+        from PySide6.QtWidgets import (QComboBox, QDockWidget, QLabel, QLineEdit, QPlainTextEdit,
+                                       QVBoxLayout, QWidget)
+        dock = QDockWidget("Zapisek", self.browser_window)
+        dock.setObjectName("zapisekObStrani")
+        dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetClosable)
+        vsebina = QWidget(dock)
+        plast = QVBoxLayout(vsebina)
+        self._zs_izbira = QComboBox(vsebina)
+        self._zs_naslov = QLineEdit(vsebina)
+        self._zs_naslov.setPlaceholderText("Naslov")
+        self._zs_besedilo = QPlainTextEdit(vsebina)
+        self._zs_besedilo.setPlaceholderText("Piši … »V zapisek« doda izbrano besedilo s strani z virom.")
+        self._zs_stanje = QLabel("", vsebina)
+        for w in (self._zs_izbira, self._zs_naslov, self._zs_besedilo, self._zs_stanje):
+            plast.addWidget(w)
+        vsebina.setMinimumWidth(320)
+        vsebina.setStyleSheet("QWidget{background:#111924;color:#f0f4f3;font-size:14px}"
+                              "QLineEdit,QPlainTextEdit,QComboBox{background:#1b2a33;border:1px solid #2c3a46;"
+                              "border-radius:8px;padding:6px}QLabel{color:#b0bdc4;font-size:12px}")
+        dock.setWidget(vsebina)
+        self.browser_window.addDockWidget(Qt.RightDockWidgetArea, dock)
+        dock.hide()
+        self._zs_id = ""
+        self._zs_polnim = False
+        self._zs_casovnik = QTimer(self)
+        self._zs_casovnik.setSingleShot(True)
+        self._zs_casovnik.setInterval(600)
+        self._zs_casovnik.timeout.connect(self._shrani_zapisek_ob_strani)
+        self._zs_naslov.textEdited.connect(lambda _t: self._zs_casovnik.start())
+        self._zs_besedilo.textChanged.connect(lambda: None if self._zs_polnim else self._zs_casovnik.start())
+        self._zs_izbira.activated.connect(self._izbran_zapisek_ob_strani)
+        return dock
+
+    def _napolni_zapisek_ob_strani(self, ident: str = "") -> None:
+        seznam = self.zapiski.seznam()
+        if not ident:
+            ident = self.zapiski.zadnji() or (seznam[0]["id"] if seznam else "")
+        self._zs_polnim = True
+        self._zs_izbira.clear()
+        self._zs_izbira.addItem("+ Nov zapisek", "")
+        for z in seznam:
+            self._zs_izbira.addItem(z["naslov"], z["id"])
+        z = self.zapiski.dobi(ident) if ident else None
+        self._zs_id = z["id"] if z else ""
+        self._zs_izbira.setCurrentIndex(max(0, self._zs_izbira.findData(self._zs_id)))
+        self._zs_naslov.setText(z.get("naslov", "") if z else "")
+        self._zs_besedilo.setPlainText(z.get("besedilo", "") if z else "")
+        self._zs_polnim = False
+
+    def _izbran_zapisek_ob_strani(self, indeks: int) -> None:
+        self._shrani_zapisek_ob_strani()
+        ident = self._zs_izbira.itemData(indeks) or ""
+        if not ident:
+            ident = self.zapiski.shrani("", "Nov zapisek", "")["id"]
+        self._napolni_zapisek_ob_strani(ident)
+
+    def _shrani_zapisek_ob_strani(self) -> None:
+        if self._zapisek_dock is None or self._zs_polnim:
+            return
+        naslov, besedilo = self._zs_naslov.text(), self._zs_besedilo.toPlainText()
+        if not self._zs_id and not (naslov.strip() or besedilo.strip()):
+            return
+        z = self.zapiski.shrani(self._zs_id, naslov or "Zapisek", besedilo)
+        self._zs_id = z["id"]
+        self._zs_stanje.setText("Shranjeno")
+        self.poslji_dogodek("zapiskiSpremenjeni", None)
+
     def _izrezek_iz_spleta(self) -> None:
         """Gumb 'V zapisek' v Spletu: izbrano besedilo (ali samo stran) gre z virom v zadnji zapisek."""
         view = self.browser_window.current_view()
@@ -577,8 +663,12 @@ class SafeerOsWindow(QMainWindow):
 
         def _potrdi(izbor) -> None:
             try:
+                if self._zapisek_dock is not None and self._zapisek_dock.isVisible():
+                    self._shrani_zapisek_ob_strani()  # najprej to, kar uporabnik pravkar pise
                 z = self.zapiski.dodaj_izrezek(url, naslov, str(izbor or ""))
                 sporocilo = "✓ V zapisku »%s«" % z["naslov"]
+                if self._zapisek_dock is not None and self._zapisek_dock.isVisible():
+                    self._napolni_zapisek_ob_strani(z["id"])
             except Exception as e:
                 sporocilo = "Ni dodano: %s" % e
             if gumb is not None:
@@ -1003,7 +1093,10 @@ class SafeerOsWindow(QMainWindow):
             kind = str(a[1]) if len(a) > 1 else "vse"
             genre = str(a[2]) if len(a) > 2 else ""
             page = int(a[3]) if len(a) > 3 else 1
-            return self.media_center.catalog(query, kind, genre, page)
+            # Najprej shranjeni pogled (takoj), sveze podatke posljemo kot dogodek, ko prispejo.
+            return self.media_center.catalog_hitro(
+                query, kind, genre, page,
+                ob_osvezitvi=lambda kljuc, rezultat: self.poslji_dogodek("mediaKatalogOsvezen", rezultat))
 
         if metoda == "mediaPodrobnosti":
             shramba = os_backend_win.nalozi_shrambo()
