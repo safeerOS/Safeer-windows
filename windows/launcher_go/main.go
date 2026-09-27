@@ -253,7 +253,6 @@ func main() {
 	}
 	args = append(args, scriptFullPath)
 
-	hasMode := false
 	isControl := strings.Contains(baseName, "control")
 	for _, a := range os.Args[1:] {
 		if a == "--browser" || a == "-b" {
@@ -263,17 +262,12 @@ func main() {
 			isControl = true
 			continue
 		}
-		if a == "--okno" || a == "--celozaslonsko" {
-			hasMode = true
-		}
 		args = append(args, a)
 	}
 
 	if targetScript == "windows/safeer_os_windows.py" {
 		if isControl {
 			args = append(args, "--control", "--okno")
-		} else if !hasMode {
-			args = append(args, "--okno")
 		}
 	}
 
@@ -282,7 +276,7 @@ func main() {
 	cmd.Env = append(os.Environ(),
 		"PYTHONPATH="+filepath.Join(targetDir, "windows")+";"+targetDir,
 		"PYTHONUNBUFFERED=1",
-		"QTWEBENGINE_CHROMIUM_FLAGS=--disable-web-security --no-sandbox --disable-site-isolation-trials --disable-features=SitePerProcess,IsolateOrigins --autoplay-policy=no-user-gesture-required",
+		"QTWEBENGINE_CHROMIUM_FLAGS=--autoplay-policy=no-user-gesture-required",
 	)
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000}
 
