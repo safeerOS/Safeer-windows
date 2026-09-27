@@ -132,6 +132,29 @@ def _absolute(base: str, value: Any) -> str:
     return url if urllib.parse.urlsplit(url).scheme in ("http", "https", "file") else ""
 
 
+def _official_music_embed(url: str, source_id: str, source_name: str) -> tuple[list[dict] | None, str]:
+    """Prepozna samo SoundCloud in Bandcamp uradne vdelave; nikoli ne bere njihovih strani."""
+    parsed = urllib.parse.urlsplit(url)
+    host, path = (parsed.hostname or "").casefold(), parsed.path
+    if host in ("soundcloud.com", "www.soundcloud.com"):
+        encoded = urllib.parse.urlencode({"url": url, "auto_play": "false"})
+        embed_url = "https://w.soundcloud.com/player/?" + encoded
+    elif host == "w.soundcloud.com" and path.rstrip("/") == "/player":
+        embed_url = url
+    elif host == "bandcamp.com" and path.casefold().startswith("/embeddedplayer/"):
+        embed_url = url
+    elif host == "bandcamp.com" or host.endswith(".bandcamp.com"):
+        return None, "Vnesi javni uradni Bandcamp EmbeddedPlayer naslov; strani ne beremo."
+    else:
+        return None, ""
+    path_name = path.rstrip("/").split("/")[-1]
+    title = source_name or urllib.parse.unquote(path_name).replace("-", " ") or host
+    item = _item(title, embed_url, base=embed_url, source_id=source_id,
+                 source_name="SoundCloud" if "soundcloud.com" in host else "Bandcamp",
+                 kind="glasba", description="Uradni vdelani predvajalnik javne vsebine.")
+    return ([item] if item else []), ""
+
+
 def _kind(value: Any, url: str = "", title: str = "", season: int = 0, episode: int = 0) -> str:
     if season > 0 or episode > 0:
         return "serija"
@@ -1512,10 +1535,16 @@ class MediaCenter:
         with self._lock:
             source = next((item.copy() for item in self._load().get("viri", [])
                            if item.get("id") == source_id), None)
-            if source is None:
-                return {"ok": False, "napaka": "ni_vira"}
+        if source is None:
+            return {"ok": False, "napaka": "ni_vira"}
         try:
-            if source.get("tip") == "predvajalni_vir" or _je_predvajalni_vir(source["url"]):
+            music_embed, embed_error = _official_music_embed(source["url"], source["id"], source["ime"])
+            if embed_error:
+                raise ValueError(embed_error)
+            if music_embed is not None:
+                items = music_embed
+                source["tip"] = "uradni_vdelani_predvajalnik"
+            elif source.get("tip") == "predvajalni_vir" or _je_predvajalni_vir(source["url"]):
                 source["tip"] = "predvajalni_vir"
                 if _je_predloga_predvajalnika(source["url"]):
                     items = _katalog_iz_predloge(source["url"], source["id"], source["ime"])
@@ -1538,7 +1567,9 @@ class MediaCenter:
             source.update({"vnosi": items, "stevilo": len(items), "posodobljeno": int(time.time()), "napaka": ""})
             ok, error = True, ""
         except Exception as exc:
-            items = _resolve_embed_or_direct_source(source["url"], source["id"], source["ime"])
+            host = (urllib.parse.urlsplit(source["url"]).hostname or "").casefold()
+            restricted = host == "bandcamp.com" or host.endswith(".bandcamp.com")
+            items = [] if restricted else _resolve_embed_or_direct_source(source["url"], source["id"], source["ime"])
             if items:
                 source.update({"vnosi": items, "stevilo": len(items), "posodobljeno": int(time.time()), "napaka": ""})
                 ok, error = True, ""
