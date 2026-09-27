@@ -60,6 +60,12 @@ WATCH_PROVIDER_SEARCH = {
     "prime video": "https://www.primevideo.com/search?phrase=",
     "amazon video": "https://www.primevideo.com/search?phrase=",
     "voyo": "https://voyo.si/iskanje?q=",
+    # Brezplacne storitve z oglasi: odpremo njihovo stran/aplikacijo (toka ne prevzemamo).
+    "plex": "https://watch.plex.tv/search?q=",
+    "plex channel": "https://watch.plex.tv/search?q=",
+    "filmtap": "https://www.filmtap.com/search?q=",
+    "arte": "https://www.arte.tv/de/search/?q=",
+    "rakuten tv free": "https://www.rakuten.tv/search?q=",
 }
 
 
@@ -1475,7 +1481,8 @@ class MediaCenter:
 
     def kljuc_kataloga(self, query: str = "", kind: str = "vse", genre: str = "", page: int = 1,
                        razvrsti: str = "", izklopljeni: Iterable[str] = (), samo_lokalno: bool = False) -> str:
-        return json.dumps([_text(query, 120).casefold(), kind or "vse", _text(genre, 20),
+        # Prvi element je razlicica oblike pogleda: ob spremembi vrstnega reda stari pogledi ne veljajo.
+        return json.dumps(["v2", _text(query, 120).casefold(), kind or "vse", _text(genre, 20),
                            max(1, int(page or 1)), self.izbrana_drzava or "auto", razvrsti or "",
                            sorted({str(x) for x in (izklopljeni or []) if x}), bool(samo_lokalno)], ensure_ascii=False)
 
@@ -2353,7 +2360,22 @@ class MediaCenter:
             personal = [item for item in personal if any(z in str(item.get("zanri") or "").casefold() for z in iskane)]
         if kind not in ("", "vse"):
             personal = [item for item in personal if item.get("vrsta") == kind]
+        # Privzeto (Priporoceno): najprej najboljsi viri, v vsakem najbolj priljubljena vsebina.
+        # Viri ze vracajo vsebino po priljubljenosti (TMDB popular/trending, javna last po prenosih,
+        # PeerTube po ogledih, Jamendo po poslusanjih, radio po klikih) - ta vrstni red ohranimo.
+        lawful = sorted(lawful, key=lambda x: 0 if x.get("vir_id") == "archive-javna-last" else 1)
+        prednostni = dynamic + lawful + remote + personal + local
+        mesto: dict[str, int] = {}
+        for indeks, vnos in enumerate(prednostni):
+            if isinstance(vnos, dict) and vnos.get("url"):
+                mesto.setdefault(str(vnos["url"]), indeks)
         merged = self._filtriraj_vire(merge_duplicates(local + remote + dynamic + lawful + personal), izklopljeni)
+        if not razvrsti:
+            def prednost(vnos: dict) -> int:
+                urlji = [str(vnos.get("url") or "")] + [str(r.get("url") or "") for r in (vnos.get("razlicice") or [])
+                                                        if isinstance(r, dict)]
+                return min((mesto[u] for u in urlji if u in mesto), default=len(prednostni))
+            merged = sorted(merged, key=prednost)
         # Prenos, ki ga izdajatelj ponuja samo na svoji strani (RTV SLO): zdruzevanje polja ne ohrani.
         strani = {str(item.get("url")): item["stran"] for item in lawful if isinstance(item, dict) and item.get("stran")}
         if strani:
@@ -2615,6 +2637,17 @@ class MediaCenter:
             if any(t.get("torrent") for t in tokovi):
                 return dict(item, napaka="Ta dodatek ponuja samo torrent povezave; Safeer predvaja neposredne tokove.")
             return dict(item, napaka="Dodatek za to vsebino ni vrnil predvajalne povezave.")
+        if item.get("archive_id"):
+            try:
+                resolved = self._zakoniti_viri.resolve_archive(item)
+            except Exception:
+                resolved = None
+            if not resolved:
+                return dict(item, napaka="Internet Archive za ta film trenutno ne ponuja datoteke MP4.")
+            resolved = dict(resolved, id=item_id, razlicice=[{"url": resolved["url"], "vir": resolved.get("vir", ""),
+                                                             "kakovost": resolved.get("kakovost", "")}], stevilo_razlicic=1)
+            self._dynamic_items[item_id] = resolved
+            return resolved
         if item.get("peertube_uuid"):
             configured = [str(source.get("url") or "") for source in self.sources()]
             # Najprej glavna razlicica, nato ostale (zdruzena kartica ima vec
