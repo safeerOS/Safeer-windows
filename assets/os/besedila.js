@@ -379,3 +379,47 @@ var BESEDILA_OS = {
     odstrani: "Rimuovi", wifiIzklopljen: "Il Wi-Fi è spento"
   }
 };
+
+// Safeer Media: country aware legal watch-provider information.
+Object.assign(BESEDILA_OS.sl, {
+  mediaWatchSettingsTitle: "Medijski center", mediaWatchCountryLabel: "Država za »Kje gledati«",
+  mediaWatchAuto: "Samodejno ({country})", mediaWatchTitle: "Kje gledati – {country}",
+  mediaWatchNone: "Za ta naslov ni podatkov o zakonitih ponudnikih v tvoji državi ({country}).",
+  mediaWatchSource: "Podatki o ponudnikih: JustWatch prek TMDB", mediaWatchSubscription: "Naročnina",
+  mediaWatchFree: "Brezplačno", mediaWatchRent: "Izposoja", mediaWatchBuy: "Nakup"
+});
+Object.assign(BESEDILA_OS.en, {
+  mediaWatchSettingsTitle: "Media Center", mediaWatchCountryLabel: "Country for ‘Where to watch’",
+  mediaWatchAuto: "Automatic ({country})", mediaWatchTitle: "Where to watch – {country}",
+  mediaWatchNone: "No lawful provider data is available for this title in your country ({country}).",
+  mediaWatchSource: "Provider data: JustWatch via TMDB", mediaWatchSubscription: "Subscription",
+  mediaWatchFree: "Free", mediaWatchRent: "Rent", mediaWatchBuy: "Buy"
+});
+Object.assign(BESEDILA_OS.de, {
+  mediaWatchSettingsTitle: "Mediencenter", mediaWatchCountryLabel: "Land für „Wo ansehen“",
+  mediaWatchAuto: "Automatisch ({country})", mediaWatchTitle: "Wo ansehen – {country}",
+  mediaWatchNone: "Für diesen Titel gibt es in deinem Land ({country}) keine Daten zu legalen Anbietern.",
+  mediaWatchSource: "Anbieterdaten: JustWatch über TMDB", mediaWatchSubscription: "Abonnement",
+  mediaWatchFree: "Kostenlos", mediaWatchRent: "Leihen", mediaWatchBuy: "Kaufen"
+});
+Object.assign(BESEDILA_OS.es, {
+  mediaWatchSettingsTitle: "Centro multimedia", mediaWatchCountryLabel: "País para «Dónde ver»",
+  mediaWatchAuto: "Automático ({country})", mediaWatchTitle: "Dónde ver – {country}",
+  mediaWatchNone: "No hay datos de proveedores legales para este título en tu país ({country}).",
+  mediaWatchSource: "Datos de proveedores: JustWatch a través de TMDB", mediaWatchSubscription: "Suscripción",
+  mediaWatchFree: "Gratis", mediaWatchRent: "Alquiler", mediaWatchBuy: "Compra"
+});
+Object.assign(BESEDILA_OS.fr, {
+  mediaWatchSettingsTitle: "Centre multimédia", mediaWatchCountryLabel: "Pays pour « Où regarder »",
+  mediaWatchAuto: "Automatique ({country})", mediaWatchTitle: "Où regarder – {country}",
+  mediaWatchNone: "Aucune donnée de fournisseur légal n’est disponible pour ce titre dans votre pays ({country}).",
+  mediaWatchSource: "Données des fournisseurs : JustWatch via TMDB", mediaWatchSubscription: "Abonnement",
+  mediaWatchFree: "Gratuit", mediaWatchRent: "Location", mediaWatchBuy: "Achat"
+});
+Object.assign(BESEDILA_OS.it, {
+  mediaWatchSettingsTitle: "Centro multimediale", mediaWatchCountryLabel: "Paese per «Dove guardare»",
+  mediaWatchAuto: "Automatico ({country})", mediaWatchTitle: "Dove guardare – {country}",
+  mediaWatchNone: "Non ci sono dati sui fornitori legali per questo titolo nel tuo paese ({country}).",
+  mediaWatchSource: "Dati dei fornitori: JustWatch tramite TMDB", mediaWatchSubscription: "Abbonamento",
+  mediaWatchFree: "Gratis", mediaWatchRent: "Noleggio", mediaWatchBuy: "Acquisto"
+});

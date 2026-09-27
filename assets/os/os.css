@@ -549,6 +549,18 @@ div.vrstica { cursor: default; }
 .media-nastavitev-naslov svg{width:22px;height:22px;color:var(--zelena);flex-shrink:0;margin-top:2px}
 .media-nastavitev-naslov b{display:block;font-size:15px;margin-bottom:2px}
 .media-nastavitev-naslov small{display:block;color:var(--medlo);font-size:13px;line-height:1.4}
+.media-drzava-nastavitev{display:flex;align-items:center;gap:14px;max-width:620px;margin:10px 0 22px;padding:14px 16px;background:rgba(255,255,255,.03);border:1px solid var(--rob);border-radius:12px}
+.media-drzava-nastavitev label{flex:1;color:var(--medlo)}
+.media-drzava-nastavitev select{min-width:220px;padding:9px 12px;color:var(--besedilo);background:#17212c;border:1px solid var(--rob);border-radius:8px}
+.media-kje-gledati{margin:20px 0 24px;padding:16px 18px;background:rgba(15,23,34,.72);border:1px solid var(--rob);border-radius:14px}
+.media-kje-gledati h3{margin:0 0 12px}
+.media-kje-gledati-skupina{margin:14px 0}
+.media-kje-gledati-skupina h4{margin:0 0 8px;color:var(--medlo);font-size:14px}
+.media-ponudniki{display:flex;flex-wrap:wrap;gap:10px}
+.media-ponudnik{display:flex;align-items:center;gap:9px;min-height:42px;padding:6px 12px;color:var(--besedilo);background:rgba(255,255,255,.05);border:1px solid var(--rob);border-radius:10px;cursor:pointer}
+.media-ponudnik:hover{border-color:var(--zelena)}
+.media-ponudnik img{width:28px;height:28px;object-fit:contain;border-radius:6px}
+.media-kje-gledati-vira{margin:12px 0 0;color:var(--medlo);font-size:12px}
 .media-datoteka-vrstica{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .media-datoteka-ime{color:var(--medlo);font-size:13px;font-style:italic;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .media-json-obrazec{display:flex;flex-direction:column;gap:10px}
@@ -617,6 +629,7 @@ div.vrstica { cursor: default; }
 .nedavno-vrsta { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin: 10px 0; }
 .nedavno-kartica { display: flex; align-items: center; gap: 14px; padding: 14px; border-radius: 16px; background: rgba(13, 21, 31, 0.82); border: 1px solid rgba(255,255,255,0.08); cursor: pointer; }
 .glasba-slika, .radio-slika, .video-slika { width: 54px; height: 54px; border-radius: 12px; background: linear-gradient(135deg, #1e3648, #0e1a26); display: grid; place-items: center; flex-shrink: 0; position: relative; }
+.media-skupina { grid-column: 1 / -1; margin: 18px 0 2px; color: var(--medlo); font-size: 15px; }
 .predvajaj-ikona { width: 32px; height: 32px; border-radius: 50%; background: var(--zelena); display: grid; place-items: center; border: 0; color: #000; }
 .predvajaj-ikona svg { width: 16px; height: 16px; fill: currentColor; }
 
