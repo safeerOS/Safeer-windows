@@ -297,7 +297,7 @@ class DeljeneMape:
 # ------------------------------------------------------------------ TLS
 
 def zagotovi_potrdilo(mapa: str = TLS_MAPA) -> Tuple[str, str, str]:
-    """Samopodpisano potrdilo Controla (kljuc, potrdilo, odtis SHA-256 DER). Ustvari ga z openssl ob prvi rabi."""
+    """Samopodpisano potrdilo Controla (kljuc, potrdilo, odtis SHA-256 DER). Ustvari ga ob prvi rabi (core.link_kripto)."""
     os.makedirs(mapa, exist_ok=True)
     try:
         os.chmod(mapa, 0o700)
@@ -306,10 +306,12 @@ def zagotovi_potrdilo(mapa: str = TLS_MAPA) -> Tuple[str, str, str]:
     kljuc, potrdilo = os.path.join(mapa, "kljuc.pem"), os.path.join(mapa, "potrdilo.pem")
     if not (os.path.isfile(kljuc) and os.path.isfile(potrdilo)):
         ime = socket.gethostname().split(".")[0] or "safeer-control"
-        subprocess.run(["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1",
-                        "-nodes", "-days", "3650", "-subj", f"/CN=Safeer Control {ime}",
-                        "-keyout", kljuc, "-out", potrdilo], check=True, capture_output=True)
-        os.chmod(kljuc, 0o600)
+        from core import link_kripto
+        link_kripto.ustvari_kljuc_in_potrdilo(kljuc, potrdilo, ime)
+        try:
+            os.chmod(kljuc, 0o600)
+        except OSError:
+            pass
     with open(potrdilo, "rb") as d:
         der = ssl.PEM_cert_to_DER_cert(d.read().decode("ascii"))
     return kljuc, potrdilo, hashlib.sha256(der).hexdigest()
