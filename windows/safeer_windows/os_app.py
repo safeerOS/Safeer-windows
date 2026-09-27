@@ -580,6 +580,18 @@ class SafeerOsWindow(QMainWindow):
                     browser.ZAUPANA_POTRDILA.add(odtis)
                 self.poslji_dogodek("zaslonZNaprave", {"od": podatki.get("od"), "dejanje": "start"})
                 self.dispatcher.dispatch(lambda: self._odpri_notranji_splet(url))
+            elif podatki.get("dejanje") == "stop":
+                # Naprava je deljenje koncala: zadnje slike ne pustimo na zaslonu, vrnemo se v Safeer OS.
+                def _zapri_gledalca() -> None:
+                    view = self.browser_window.current_view()
+                    naslov = view.url().toString() if view is not None else ""
+                    if "/cast/screen/" in naslov:
+                        view.setUrl(QUrl("about:blank"))
+                        self._zapri_browser()
+                self.dispatcher.dispatch(_zapri_gledalca)
+                self.poslji_dogodek("zaslonZNaprave", {"od": podatki.get("od"), "dejanje": "stop"})
+        if vrsta == "dovoljenjeZahtevano" and isinstance(podatki, dict):
+            self.poslji_dogodek("dovoljenjeZahtevano", {"id": podatki.get("id"), "ime": podatki.get("ime")})
         if vrsta == "prejetaDatoteka" and isinstance(podatki, dict):
             self.poslji_dogodek("prejetaDatoteka", podatki)
         if vrsta == "deljenje" and isinstance(podatki, dict) and not podatki.get("tece"):
@@ -676,6 +688,9 @@ class SafeerOsWindow(QMainWindow):
         if metoda == "odpriDatoteko":
             pot = str(a[0]) if a else ""
             return os_backend_win.odpri_datoteko(pot)
+
+        if metoda == "nastaviDovoljenje":
+            return self.control_backend.nastavi_dovoljenje(str(a[0]) if a else "", str(a[1]) if len(a) > 1 else "")
 
         if metoda == "posljiDatoteko":
             if len(a) < 2:
