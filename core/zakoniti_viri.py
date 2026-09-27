@@ -35,32 +35,52 @@ GLASBENE_ZVRSTI = {
 
 
 #: TV v zivo: samo uradni, javno objavljeni prenosi izdajateljev (preverjeno, da tecejo), brez posrednikov.
-#: (id, ime, jezik, url HLS ali "", uradna stran za prenos, drzava - "" = za vse)
+#: (id, ime, jezik, url HLS ali "", uradna stran, samo za drzavo ("" = za vse), drzava izdajatelja)
 TV_V_ZIVO = (
-    ("rtvslo", "RTV SLO v živo", "slovenščina", "", "https://365.rtvslo.si/v-zivo", "SI"),
-    ("dw-en", "DW News", "angleščina", "https://dwamdstream102.akamaized.net/hls/live/2015525/dwstream102/index.m3u8", "", ""),
-    ("dw-de", "DW Deutsch", "nemščina", "https://dwamdstream106.akamaized.net/hls/live/2017965/dwstream106/index.m3u8", "", ""),
-    ("dw-es", "DW Español", "španščina", "https://dwamdstream104.akamaized.net/hls/live/2015530/dwstream104/index.m3u8", "", ""),
-    ("f24-en", "France 24 English", "angleščina", "https://static.france24.com/live/F24_EN_HI_HLS/live_web.m3u8", "", ""),
-    ("f24-fr", "France 24 Français", "francoščina", "https://static.france24.com/live/F24_FR_HI_HLS/live_web.m3u8", "", ""),
-    ("f24-es", "France 24 Español", "španščina", "https://static.france24.com/live/F24_ES_HI_HLS/live_web.m3u8", "", ""),
-    ("aje", "Al Jazeera English", "angleščina", "https://live-hls-apps-aje-fa.getaj.net/AJE/index.m3u8", "", ""),
-    ("trt-world", "TRT World", "angleščina", "https://tv-trtworld.medya.trt.com.tr/master.m3u8", "", ""),
-    ("cbs-news", "CBS News 24/7", "angleščina", "https://cbsn-us.cbsnstream.cbsnews.com/out/v1/55a8648e8f134e82a470f83d562deeca/master.m3u8", "", ""),
-    ("arirang", "Arirang TV", "angleščina", "https://amdlive-ch01-ctnd-com.akamaized.net/arirang_1ch/smil:arirang_1ch.smil/playlist.m3u8", "", ""),
-    ("nasa", "NASA TV", "angleščina", "https://ntv1.akamaized.net/hls/live/2014075/NASA-NTV1-HLS/master.m3u8", "", ""),
-    ("redbull", "Red Bull TV", "angleščina", "https://rbmn-live.akamaized.net/hls/live/590964/BoRB-AT/master.m3u8", "", ""),
+    ("rtvslo", "RTV SLO v živo", "slovenščina", "", "https://365.rtvslo.si/v-zivo", "SI", "SI"),
+    ("dw-en", "DW News", "angleščina", "https://dwamdstream102.akamaized.net/hls/live/2015525/dwstream102/index.m3u8", "", "", "DE"),
+    ("dw-de", "DW Deutsch", "nemščina", "https://dwamdstream106.akamaized.net/hls/live/2017965/dwstream106/index.m3u8", "", "", "DE"),
+    ("dw-es", "DW Español", "španščina", "https://dwamdstream104.akamaized.net/hls/live/2015530/dwstream104/index.m3u8", "", "", "DE"),
+    ("f24-en", "France 24 English", "angleščina", "https://static.france24.com/live/F24_EN_HI_HLS/live_web.m3u8", "", "", "FR"),
+    ("f24-fr", "France 24 Français", "francoščina", "https://static.france24.com/live/F24_FR_HI_HLS/live_web.m3u8", "", "", "FR"),
+    ("f24-es", "France 24 Español", "španščina", "https://static.france24.com/live/F24_ES_HI_HLS/live_web.m3u8", "", "", "FR"),
+    ("aje", "Al Jazeera English", "angleščina", "https://live-hls-apps-aje-fa.getaj.net/AJE/index.m3u8", "", "", "QA"),
+    ("trt-world", "TRT World", "angleščina", "https://tv-trtworld.medya.trt.com.tr/master.m3u8", "", "", "TR"),
+    ("cbs-news", "CBS News 24/7", "angleščina", "https://cbsn-us.cbsnstream.cbsnews.com/out/v1/55a8648e8f134e82a470f83d562deeca/master.m3u8", "", "", "US"),
+    ("arirang", "Arirang TV", "angleščina", "https://amdlive-ch01-ctnd-com.akamaized.net/arirang_1ch/smil:arirang_1ch.smil/playlist.m3u8", "", "", "KR"),
+    ("nasa", "NASA TV", "angleščina", "https://ntv1.akamaized.net/hls/live/2014075/NASA-NTV1-HLS/master.m3u8", "", "", "US"),
+    ("redbull", "Red Bull TV", "angleščina", "https://rbmn-live.akamaized.net/hls/live/590964/BoRB-AT/master.m3u8", "", "", "AT"),
 )
+
+
+DRZAVE = {"SI": "Slovenija", "DE": "Nemčija", "FR": "Francija", "QA": "Katar", "TR": "Turčija", "US": "ZDA",
+          "KR": "Južna Koreja", "AT": "Avstrija", "HR": "Hrvaška", "IT": "Italija", "GB": "Združeno kraljestvo"}
+
+
+def tv_drzave(drzava_uporabnika: str = "", moji: bool = False) -> list[dict]:
+    """Drzave za TV v zivo (kot zanri): najprej uporabnikova, nato druge; na koncu njegov sprejemnik."""
+    drzava_uporabnika = (drzava_uporabnika or "").upper()
+    prisotne = []
+    for _k, _i, _j, _u, _s, samo, izvor in TV_V_ZIVO:
+        if samo and samo != drzava_uporabnika:
+            continue
+        if izvor not in prisotne:
+            prisotne.append(izvor)
+    prisotne.sort(key=lambda d: (d != drzava_uporabnika, DRZAVE.get(d, d)))
+    izid = [{"id": d, "ime": DRZAVE.get(d, d)} for d in prisotne]
+    if moji:
+        izid.append({"id": "moji", "ime": "Moji kanali"})
+    return izid
 
 
 def tv_v_zivo(drzava: str = "") -> list[dict]:
     """Uradni prenosi v zivo; domaci (npr. RTV SLO) samo za uporabnike iz te drzave."""
     izid = []
-    for kljuc, ime, jezik, url, stran, samo in TV_V_ZIVO:
+    for kljuc, ime, jezik, url, stran, samo, izvor in TV_V_ZIVO:
         if samo and samo != (drzava or "").upper():
             continue
-        vnos = {"id": "tv:" + kljuc, "naslov": ime, "vrsta": "tv-v-zivo", "vir": ime,
-                "opis": "Uradni prenos v živo · " + jezik, "slika": "", "jezik": jezik}
+        vnos = {"id": "tv:" + kljuc, "naslov": ime, "vrsta": "tv-v-zivo", "vir": ime, "drzava": izvor,
+                "opis": "Uradni prenos v živo · " + DRZAVE.get(izvor, izvor) + " · " + jezik, "slika": "", "jezik": jezik}
         if url:
             vnos.update(url=url, mime="application/vnd.apple.mpegurl")
         else:

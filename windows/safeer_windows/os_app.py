@@ -941,9 +941,22 @@ class SafeerOsWindow(QMainWindow):
         if metoda == "jbl":
             return {"vklop": False, "najdena": False}
 
+        if metoda == "mediaImaKodi":
+            return self.media_center.ima_kodi()
+
+        if metoda == "mediaNaKodi":
+            return self.media_center.predvajaj_na_kodi(str(a[0]) if a else "")
+
+        if metoda == "mediaOdkrijDlna":
+            from core import media_servers
+            return media_servers.odkrij_dlna()
+
         if metoda == "mediaZvrsti":
             from core import zakoniti_viri
-            return zakoniti_viri.zvrsti_za(str(a[0]) if a else "glasba")
+            vrsta = str(a[0]) if a else "glasba"
+            if vrsta == "tv-v-zivo":
+                return self.media_center.tv_drzave()
+            return zakoniti_viri.zvrsti_za(vrsta)
 
         if metoda == "mediaKatalog":
             query = str(a[0]) if a else ""

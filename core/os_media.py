@@ -1425,18 +1425,24 @@ class MediaCenter:
 
     def add_server(self, provider: str, name: str, url: str, username: str, secret: str) -> dict:
         provider = _text(provider, 20).lower()
-        parsed = urllib.parse.urlsplit(_text(url, 1024))
+        url = _text(url, 1024)
+        if url.startswith("stremio://"):
+            url = "https://" + url[len("stremio://"):]
+        parsed = urllib.parse.urlsplit(url)
         username = _text(username, 160)
         secret = str(secret or "")
-        if provider not in ("jellyfin", "emby", "navidrome", "plex"):
+        if provider not in media_servers.PONUDNIKI:
             return {"ok": False, "napaka": "Nepodprta vrsta strežnika."}
         if len(secret) > 4096:
             return {"ok": False, "napaka": "Geslo ali žeton je predolg."}
         if provider in ("jellyfin", "emby", "navidrome") and (not username or not secret):
             return {"ok": False, "napaka": "Ta strežnik zahteva uporabniško ime in geslo."}
-        if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
-            return {"ok": False, "napaka": "Vnesi osnovni HTTPS naslov strežnika brez prijavnih podatkov ali parametrov."}
-        base = urllib.parse.urlunsplit(("https", parsed.netloc, parsed.path.rstrip("/"), "", ""))
+        varen = parsed.scheme == "https" or (parsed.scheme == "http" and media_servers.je_domace_omrezje(parsed.hostname or ""))
+        if not varen or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
+            return {"ok": False, "napaka": "Vnesi naslov strežnika brez prijavnih podatkov ali parametrov "
+                                          "(HTTP je dovoljen samo v domačem omrežju, drugače HTTPS)."}
+        base = urllib.parse.urlunsplit((parsed.scheme, parsed.netloc,
+                                        parsed.path if provider in ("dlna", "stremio") else parsed.path.rstrip("/"), "", ""))
         raw_secret = secret
         try:
             auth = media_servers.authenticate(provider, base, username, raw_secret)
@@ -1457,6 +1463,47 @@ class MediaCenter:
             self._save(data)
         return {"ok": True, "vir": {k: v for k, v in source.items() if k not in ("secret_enc", "uporabnik")}}
 
+    def _kodi_streznik(self, server_id: str = "") -> Optional[tuple]:
+        """(streznik, geslo) povezanega Kodija - dolocenega ali prvega."""
+        with self._lock:
+            servers = [x for x in self._load().get("osebni_strezniki", []) if x.get("ponudnik") == "kodi"]
+        izbran = next((x for x in servers if x.get("id") == server_id), servers[0] if servers else None)
+        if not izbran:
+            return None
+        try:
+            return izbran, self._secret_decryptor(str(izbran.get("secret_enc") or ""))
+        except Exception:
+            return izbran, ""
+
+    def _drzava_uporabnika(self) -> str:
+        try:
+            return str(self.watch_country_settings("auto", "sl").get("drzava", "") or "")
+        except Exception:
+            return ""
+
+    def tv_drzave(self) -> list[dict]:
+        with self._lock:
+            moji = any(x.get("ponudnik") in ("tvheadend", "dlna", "kodi")
+                       for x in self._load().get("osebni_strezniki", []))
+        return zakoniti_viri.tv_drzave(self._drzava_uporabnika(), moji)
+
+    def ima_kodi(self) -> bool:
+        return self._kodi_streznik() is not None
+
+    def predvajaj_na_kodi(self, item_id: str) -> dict:
+        kodi = self._kodi_streznik()
+        if not kodi:
+            return {"ok": False, "napaka": "V Medijskem centru ni povezanega Kodija."}
+        item = self.resolve(item_id)
+        url = str((item or {}).get("url") or "")
+        if not url or (item or {}).get("stran") or (item or {}).get("napaka"):
+            return {"ok": False, "napaka": "Te vsebine ni mogoče poslati na Kodi."}
+        try:
+            media_servers.kodi_predvajaj(kodi[0]["url"], kodi[0].get("uporabnik", ""), kodi[1], url)
+        except Exception:
+            return {"ok": False, "napaka": "Kodi se ni odzval."}
+        return {"ok": True, "kodi": kodi[0].get("ime", "Kodi")}
+
     def _personal_items(self, query: str) -> list[dict]:
         with self._lock:
             servers = list(self._load().get("osebni_strezniki", []))
@@ -1465,12 +1512,12 @@ class MediaCenter:
         for server in servers:
             provider = str(server.get("ponudnik") or "")
             server_id = str(server.get("id") or "")
-            server_query = query if provider == "navidrome" else ""
+            server_query = query if provider in ("navidrome", "funkwhale") else ""
             key = server_id + ":" + server_query.casefold()
             cached = self._server_cache.get(key)
             if cached and now - cached[0] < 300:
                 rows = cached[1]
-                if query and provider != "navidrome":
+                if query and provider not in ("navidrome", "funkwhale"):
                     needle = query.casefold()
                     rows = [item for item in rows if needle in " ".join((item.get("naslov", ""), item.get("izvajalec", ""),
                                                                             item.get("album", ""), item.get("opis", ""))).casefold()]
@@ -1481,7 +1528,7 @@ class MediaCenter:
                 self._server_cache[key] = (now, rows)
             except Exception:
                 rows = cached[1] if cached else []
-            if query and provider != "navidrome":
+            if query and provider not in ("navidrome", "funkwhale"):
                 needle = query.casefold()
                 rows = [item for item in rows if needle in " ".join((item.get("naslov", ""), item.get("izvajalec", ""),
                                                                         item.get("album", ""), item.get("opis", ""))).casefold()]
@@ -1958,14 +2005,24 @@ class MediaCenter:
             # Pri zvrsti pokazemo samo zadetke te zvrsti, ne tudi krajevnih datotek in osebnih virov.
             local, remote = [], []
         if kind == "tv-v-zivo":
-            try:
-                drzava = self.watch_country_settings("auto", "sl").get("drzava", "")
-            except Exception:
-                drzava = ""
-            lawful = lawful + zakoniti_viri.tv_v_zivo(drzava)
+            lawful = lawful + zakoniti_viri.tv_v_zivo(self._drzava_uporabnika())
+            izbrana = _text(genre, 20)
+            if izbrana == "moji":
+                lawful, dynamic, remote = [], [], []
+            elif izbrana:
+                # TV v zivo po drzavah (kot zanri pri filmih); osebni kanali so pod "Moji kanali".
+                lawful = [item for item in lawful if str(item.get("drzava") or "").upper() == izbrana.upper()]
+                dynamic, remote, local = [], [], []
         if kind not in ("", "vse"):
             lawful = [item for item in lawful if item.get("vrsta") == kind]
-        personal = [] if glasbena else self._personal_items(_text(query, 120))
+        personal = self._personal_items(_text(query, 120))
+        if kind == "tv-v-zivo" and _text(genre, 20) not in ("", "moji"):
+            personal = []
+        if glasbena:
+            # Tudi na osebnih streznikih (Kodi, Funkwhale, DLNA ...) po zvrsti, ce jo vnos navaja.
+            ime_z, oznaka_j, oznaka_r = zakoniti_viri.GLASBENE_ZVRSTI[_text(genre, 20)]
+            iskane = {x.casefold() for x in (ime_z, oznaka_j, oznaka_r, _text(genre, 20)) if x}
+            personal = [item for item in personal if any(z in str(item.get("zanri") or "").casefold() for z in iskane)]
         if kind not in ("", "vse"):
             personal = [item for item in personal if item.get("vrsta") == kind]
         merged = merge_duplicates(local + remote + dynamic + lawful + personal)
@@ -2194,6 +2251,39 @@ class MediaCenter:
         item = self._dynamic_items.get(item_id) or next((item for item in self.catalog()["vnosi"] if item.get("id") == item_id), None)
         if not item:
             return None
+        # Posebni naslovi (Kodi dodatek, Stremio dodatek) so lahko tudi med razlicicami zdruzene kartice.
+        posebni = [str(item.get("url") or "")] + [str(v.get("url") or "") for v in (item.get("razlicice") or []) if isinstance(v, dict)]
+        kodi_url = next((u for u in posebni if u.startswith("kodi-dodatek:")), "")
+        if kodi_url:
+            server_id, _, dodatek = kodi_url[len("kodi-dodatek:"):].partition("|")
+            kodi = self._kodi_streznik(server_id)
+            if not kodi:
+                return dict(item, napaka="Kodi ni več povezan.")
+            try:
+                media_servers.kodi_odpri_dodatek(kodi[0]["url"], kodi[0].get("uporabnik", ""), kodi[1],
+                                                 dodatek, item.get("vrsta") == "glasba")
+            except Exception:
+                return dict(item, napaka="Kodi dodatka ni bilo mogoče odpreti.")
+            return dict(item, sporocilo="%s se odpira na napravi s Kodijem (%s)." % (item.get("naslov"), kodi[0].get("ime")))
+        stremio_url = next((u for u in posebni if u.startswith("stremio:")), "")
+        if stremio_url and not any(u.startswith(("http://", "https://")) for u in posebni):
+            koren, tip, ident = (stremio_url[len("stremio:"):].split("|") + ["", ""])[:3]
+            try:
+                tokovi = media_servers.stremio_tokovi(koren, tip, ident)
+            except Exception:
+                tokovi = []
+            neposredni = [t for t in tokovi if t.get("url") and not t.get("zunanje")
+                          and (t["url"].startswith("https://") or media_servers.dovoljen_naslov(t["url"]))]
+            if neposredni:
+                resolved = dict(item, url=neposredni[0]["url"], razlicice=neposredni[:10], stevilo_razlicic=len(neposredni[:10]))
+                self._dynamic_items[item_id] = resolved
+                return resolved
+            zunanji = [t for t in tokovi if t.get("zunanje")]
+            if zunanji:
+                return dict(item, url=zunanji[0]["url"], stran=zunanji[0]["url"])
+            if any(t.get("torrent") for t in tokovi):
+                return dict(item, napaka="Ta dodatek ponuja samo torrent povezave; Safeer predvaja neposredne tokove.")
+            return dict(item, napaka="Dodatek za to vsebino ni vrnil predvajalne povezave.")
         if item.get("peertube_uuid"):
             configured = [str(source.get("url") or "") for source in self.sources()]
             # Najprej glavna razlicica, nato ostale (zdruzena kartica ima vec
