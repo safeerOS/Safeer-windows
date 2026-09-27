@@ -1,0 +1,256 @@
+"""Javni, zakoniti katalogi za Safeer Media (PeerTube, Jamendo, Radio Browser)."""
+from __future__ import annotations
+
+import json
+import re
+import threading
+import time
+import unicodedata
+import urllib.parse
+import urllib.request
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any
+
+PEERTUBE_INSTANCES = ("peertube.tv", "tilvids.com", "framatube.org", "peertube.uno", "video.blender.org")
+JAMENDO_CLIENT_ID = "8d37f069"  # Javen client_id aplikacije Safeer TV.
+RADIO_TAGS = ("jazz", "rock", "pop", "news", "classical", "electronic")
+_TTL = 30 * 60
+_TIMEOUT = 10
+
+
+def _norm(value: Any) -> str:
+    raw = unicodedata.normalize("NFKD", str(value or "").casefold())
+    return re.sub(r"[^\w]+", " ", "".join(c for c in raw if not unicodedata.combining(c))).strip()
+
+
+class ZakonitiViri:
+    """API odjemalec z omejenim casom in mehkim neuspehom posameznega vira."""
+
+    def __init__(self, opener=None, clock=time.time):
+        self._opener = opener or urllib.request.urlopen
+        self._clock = clock
+        self._cache: dict[str, tuple[float, Any]] = {}
+        self._lock = threading.RLock()
+
+    def _json(self, url: str) -> Any:
+        request = urllib.request.Request(url, headers={
+            "User-Agent": "SafeerOS/1.0 (+https://safeer.si)",
+            "Accept": "application/json",
+        })
+        with self._opener(request, timeout=_TIMEOUT) as response:
+            if getattr(response, "status", 200) != 200:
+                raise OSError("HTTP %s" % response.status)
+            return json.loads(response.read(5 * 1024 * 1024 + 1).decode("utf-8"))
+
+    def _cached(self, key: str, fn):
+        now = self._clock()
+        with self._lock:
+            found = self._cache.get(key)
+            if found and now - found[0] < _TTL:
+                return found[1]
+        try:
+            value = fn()
+        except Exception:
+            return found[1] if found else []
+        with self._lock:
+            self._cache[key] = (now, value)
+        return value
+
+    def _video_hosts(self, configured: list[str]) -> list[str]:
+        hosts = list(PEERTUBE_INSTANCES)
+        for value in configured:
+            try:
+                parsed = urllib.parse.urlsplit(value if "://" in value else "https://" + value)
+                host = (parsed.hostname or "").lower()
+                if parsed.scheme == "https" and host and host not in hosts:
+                    hosts.append(host)
+            except ValueError:
+                pass
+        return hosts
+
+    def _peertube_video(self, row: dict, host: str, category: str) -> dict | None:
+        if not isinstance(row, dict) or row.get("nsfw"):
+            return None
+        title = str(row.get("name") or "").strip()
+        video_id = str(row.get("uuid") or "")
+        if not title or not video_id:
+            return None
+        channel = row.get("channel") if isinstance(row.get("channel"), dict) else {}
+        account = row.get("account") if isinstance(row.get("account"), dict) else {}
+        image = row.get("thumbnailPath") or row.get("previewPath") or ""
+        if image.startswith("/"):
+            image = "https://%s%s" % (host, image)
+        live = bool(row.get("isLive"))
+        duration = int(row.get("duration") or 0)
+        kind = "tv-v-zivo" if live else ("film" if duration > 40 * 60 else "video")
+        return {
+            "id": "peertube:" + video_id, "naslov": title, "vrsta": kind,
+            "url": "https://%s/videos/watch/%s" % (host, video_id),
+            "slika": image, "opis": str(row.get("description") or "")[:600],
+            "izvajalec": channel.get("displayName") or account.get("displayName") or host,
+            "trajanje": duration, "v_zivo": live, "skupina": category,
+            "vir": "PeerTube · " + host, "streznik": host,
+            "peertube_uuid": video_id,
+        }
+
+    def _peer_rows(self, host: str, endpoint: str, category: str) -> list[dict]:
+        key = "pt:%s:%s" % (host, endpoint)
+        def fetch():
+            data = self._json("https://%s%s" % (host, endpoint))
+            rows = data.get("data", []) if isinstance(data, dict) else []
+            return [item for row in rows if (item := self._peertube_video(row, host, category))]
+        return self._cached(key, fetch)
+
+    def _search_video(self, query: str, hosts: list[str]) -> list[dict]:
+        if not query:
+            return []
+        encoded = urllib.parse.urlencode({"search": query, "sort": "-match", "nsfw": "false", "count": 30})
+        def fetch():
+            result = []
+            try:
+                data = self._json("https://sepiasearch.org/api/v1/search/videos?" + encoded)
+                rows = data.get("data", []) if isinstance(data, dict) else []
+                for row in rows:
+                    host = str(row.get("host") or urllib.parse.urlsplit(str(row.get("url") or "")).hostname or "")
+                    if not host and row.get("channel"):
+                        host = str(row["channel"].get("host") or "")
+                    item = self._peertube_video(row, host, "Iskanje")
+                    if item:
+                        result.append(item)
+            except Exception:
+                pass
+            if not result:
+                for host in hosts:
+                    path = "/api/v1/search/videos?" + urllib.parse.urlencode({"search": query, "sort": "-match", "nsfw": "false", "count": 20})
+                    result.extend(self._peer_rows(host, path, "Iskanje"))
+                    if result:
+                        break
+            terms = [word for word in _norm(query).split() if len(word) > 1]
+            if terms:
+                result = [item for item in result if all(term in _norm(" ".join((item["naslov"], item["izvajalec"], item["opis"]))) for term in terms)]
+            return result[:40]
+        return self._cached("pt-search:" + query.casefold(), fetch)
+
+    def videos(self, query: str = "", configured_hosts: list[str] | None = None) -> list[dict]:
+        hosts = self._video_hosts(configured_hosts or [])
+        if query:
+            return self._search_video(query, hosts)
+        result = []
+        routes = (("trending", "/api/v1/videos?sort=-trending&count=18&nsfw=false&isLocal=true"),
+                  ("Najbolj gledani", "/api/v1/videos?sort=-views&count=18&nsfw=false&isLocal=true"),
+                  ("Nedavno", "/api/v1/videos?sort=-publishedAt&count=18&nsfw=false&isLocal=true"))
+        for label, path in routes:
+            with ThreadPoolExecutor(max_workers=min(8, len(hosts))) as pool:
+                for rows in pool.map(lambda host: self._peer_rows(host, path, label), hosts):
+                    result.extend(rows)
+        unique = {}
+        for item in result:
+            unique.setdefault(item["id"], item)
+        return list(unique.values())
+
+    def resolve_video(self, item: dict, configured_hosts: list[str] | None = None) -> dict | None:
+        host = item.get("streznik", "")
+        hosts = list(dict.fromkeys(([host] if host else []) + self._video_hosts(configured_hosts or [])))
+        video_id = item.get("peertube_uuid", "")
+        for server in hosts:
+            try:
+                data = self._json("https://%s/api/v1/videos/%s" % (server, urllib.parse.quote(video_id, safe="")))
+                live = bool(data.get("isLive"))
+                playlists = data.get("streamingPlaylists") or []
+                for playlist in playlists:
+                    url = playlist.get("playlistUrl")
+                    if url and urllib.parse.urlsplit(url).scheme == "https":
+                        return dict(item, url=url, v_zivo=live, mime="application/vnd.apple.mpegurl")
+                files = []
+                for file in data.get("files", []) + [f for p in playlists for f in p.get("files", [])]:
+                    url = file.get("fileUrl")
+                    height = int((file.get("resolution") or {}).get("id") or 0)
+                    if url and urllib.parse.urlsplit(url).scheme == "https" and 0 < height <= 1080:
+                        files.append((height, url))
+                if files:
+                    height, url = max(files)
+                    return dict(item, url=url, locljivost=height, kakovost="%dp" % height, mime="video/mp4")
+                for playlist in playlists:
+                    url = playlist.get("playlistUrl")
+                    if url and urllib.parse.urlsplit(url).scheme == "https":
+                        return dict(item, url=url, mime="application/vnd.apple.mpegurl")
+            except Exception:
+                continue
+        return None
+
+    def _jamendo(self, path: str, params: dict) -> list[dict]:
+        query = dict(params, client_id=JAMENDO_CLIENT_ID, format="json")
+        url = "https://api.jamendo.com/v3.0/%s?%s" % (path, urllib.parse.urlencode(query))
+        def fetch():
+            data = self._json(url)
+            return [self._track(row) for row in data.get("results", []) if row.get("audio", "").startswith("https://")]
+        return self._cached("jam:" + path + ":" + urllib.parse.urlencode(params), fetch)
+
+    @staticmethod
+    def _track(row: dict) -> dict:
+        return {"id": "jamendo:" + str(row.get("id")), "naslov": row.get("name", ""), "vrsta": "glasba",
+                "izvajalec": row.get("artist_name", ""), "url": row.get("audio", ""),
+                "slika": row.get("image") or row.get("album_image", ""),
+                "zunanja_povezava": row.get("shorturl") or row.get("shareurl", ""),
+                "vir": "Jamendo", "opis": "Jamendo · " + str(row.get("artist_name", ""))}
+
+    def music(self, query: str = "") -> list[dict]:
+        if not query:
+            return self._jamendo("tracks/", {"order": "popularity_total", "limit": 36, "audioformat": "mp32"})
+        def fetch():
+            artists = self._json("https://api.jamendo.com/v3.0/artists/?" + urllib.parse.urlencode({
+                "namesearch": query, "order": "popularity_total", "limit": 8,
+                "client_id": JAMENDO_CLIENT_ID, "format": "json"}))
+            selected = artists.get("results", [])[:6]
+            with ThreadPoolExecutor(max_workers=max(1, len(selected))) as pool:
+                return [track for rows in pool.map(lambda artist: self._jamendo("tracks/", {
+                    "artist_id": artist.get("id"), "order": "popularity_total", "limit": 8,
+                    "audioformat": "mp32"}), selected) for track in rows]
+        return self._cached("jam-search:" + query.casefold(), fetch)
+
+    def radio(self, query: str = "") -> list[dict]:
+        tags = [(query, "Iskanje")] if query else [("SI", "Slovenija")] + [(tag, tag.title()) for tag in RADIO_TAGS] + [("", "Najbolj poslušane")]
+        def load_tag(entry):
+            value, label = entry
+            params = {"order": "clickcount", "reverse": "true", "hidebroken": "true", "limit": "30", "is_https": "true"}
+            if value == "SI": params["countrycode"] = "SI"
+            elif value: params["tag"] = value
+            key = "radio:" + label
+            def fetch(params=params, label=label):
+                url = "https://de1.api.radio-browser.info/json/stations/search?" + urllib.parse.urlencode(params)
+                rows = self._json(url)
+                return [self._station(row, label) for row in rows if isinstance(row, dict)]
+            return self._cached(key, fetch)
+        with ThreadPoolExecutor(max_workers=len(tags)) as pool:
+            result = [station for rows in pool.map(load_tag, tags) for station in rows]
+        seen = set()
+        out = []
+        for station in result:
+            if station and station["id"] not in seen:
+                seen.add(station["id"]); out.append(station)
+        return out
+
+    @staticmethod
+    def _station(row: dict, group: str) -> dict | None:
+        url = row.get("url_resolved") or ""
+        if (not row.get("stationuuid") or not row.get("name") or not url.startswith("https://")
+                or str(row.get("lastcheckok", "1")) == "0"):
+            return None
+        try: bitrate = int(row.get("bitrate") or 0)
+        except (TypeError, ValueError): bitrate = 0
+        codec = str(row.get("codec") or "").upper()
+        return {"id": "radio:" + row["stationuuid"], "naslov": row["name"].strip(), "vrsta": "radio",
+                "url": url, "slika": row.get("favicon") or "", "izvajalec": row.get("country") or "",
+                "opis": " · ".join(part for part in (row.get("country"), codec, (str(bitrate) + " kb/s") if bitrate else "") if part),
+                "codec": codec, "bitrate": bitrate, "drzava": row.get("countrycode", ""),
+                "zanri": row.get("tags", ""), "skupina": group, "vir": "Radio Browser"}
+
+    def get(self, query: str = "", configured_hosts: list[str] | None = None) -> list[dict]:
+        tasks = ((self.videos, (query, configured_hosts)), (self.music, (query,)), (self.radio, (query,)))
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            futures = [pool.submit(fn, *args) for fn, args in tasks]
+            results = []
+            for future in futures:
+                try: results.extend(future.result())
+                except Exception: continue
+            return results

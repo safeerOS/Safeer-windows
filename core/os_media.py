@@ -29,6 +29,8 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
+from . import zakoniti_viri
+
 AUDIO = {".mp3", ".flac", ".ogg", ".oga", ".opus", ".m4a", ".aac", ".wav", ".wma"}
 VIDEO = {".mp4", ".mkv", ".webm", ".avi", ".mov", ".m4v", ".mpeg", ".mpg", ".ts", ".m3u8"}
 MEDIA_EXT = AUDIO | VIDEO
@@ -1245,6 +1247,7 @@ class MediaCenter:
         self._dynamic_items: dict[str, dict] = {}
         self._ping_cache: dict[str, tuple[float, float]] = {}
         self._ping_lock = threading.Lock()
+        self._zakoniti_viri = zakoniti_viri.ZakonitiViri()
 
     @staticmethod
     def _default_roots() -> list[Path]:
@@ -1562,7 +1565,14 @@ class MediaCenter:
         remote = [_series_catalog_card(item) for source in data.get("viri", []) for item in source.get("vnosi", [])
                   if isinstance(item, dict) and (kind in ("", "vse") or item.get("vrsta") == kind)] if page_num == 1 else []
         dynamic, tmdb_pages = self._tmdb_catalog(data, _text(query, 120), kind, _text(genre, 20), page_num) if self._ima_embed_vir(data) else ([], 1)
-        merged = merge_duplicates(local + remote + dynamic)
+        # Javni katalogi imajo svoj 30-minutni cache in se napake posameznega API-ja
+        # ne smejo prenesti v glavni katalog.
+        configured_hosts = [str(source.get("url") or "") for source in data.get("viri", [])
+                            if isinstance(source, dict) and source.get("url")]
+        lawful = self._zakoniti_viri.get(_text(query, 120), configured_hosts)
+        if kind not in ("", "vse"):
+            lawful = [item for item in lawful if item.get("vrsta") == kind]
+        merged = merge_duplicates(local + remote + dynamic + lawful)
         needle = _text(query, 120).casefold()
         if needle:
             def zadetek(item: dict) -> bool:
@@ -1769,6 +1779,13 @@ class MediaCenter:
     def resolve(self, item_id: str) -> Optional[dict]:
         item = self._dynamic_items.get(item_id) or next((item for item in self.catalog()["vnosi"] if item.get("id") == item_id), None)
         if not item:
+            return None
+        if item.get("peertube_uuid"):
+            configured = [str(source.get("url") or "") for source in self.sources()]
+            resolved = self._zakoniti_viri.resolve_video(item, configured)
+            if resolved:
+                self._dynamic_items[item_id] = resolved
+                return resolved
             return None
         return self._izberi_najhitrejsi(self._dodaj_predvajalne_razlicice(item))
 

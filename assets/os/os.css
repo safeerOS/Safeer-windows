@@ -604,6 +604,7 @@ div.vrstica { cursor: default; }
 .nedavno-vrsta { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin: 10px 0; }
 .nedavno-kartica { display: flex; align-items: center; gap: 14px; padding: 14px; border-radius: 16px; background: rgba(13, 21, 31, 0.82); border: 1px solid rgba(255,255,255,0.08); cursor: pointer; }
 .glasba-slika, .radio-slika, .video-slika { width: 54px; height: 54px; border-radius: 12px; background: linear-gradient(135deg, #1e3648, #0e1a26); display: grid; place-items: center; flex-shrink: 0; position: relative; }
+.media-skupina { grid-column: 1 / -1; margin: 18px 0 2px; color: var(--medlo); font-size: 15px; }
 .predvajaj-ikona { width: 32px; height: 32px; border-radius: 50%; background: var(--zelena); display: grid; place-items: center; border: 0; color: #000; }
 .predvajaj-ikona svg { width: 16px; height: 16px; fill: currentColor; }
 
