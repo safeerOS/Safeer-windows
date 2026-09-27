@@ -777,8 +777,39 @@ class SafeerControlBackend:
         elif vrsta == "share.text":
             self._oddaj_dogodek("besedilo", sporocilo.get("payload"))
 
+        elif vrsta in ("share.screen", "share.file"):
+            self._prejmi_deljenje(vrsta, sporocilo)
+
         elif vrsta == "cast.status":
             self._oddaj_dogodek("predvajanje", sporocilo.get("payload"))
+
+    def _prejmi_deljenje(self, vrsta: str, sporocilo: dict) -> None:
+        """Zaslon ali datoteka z druge naprave (npr. \"Odpri tukaj\" s televizorja, datoteka s telefona)."""
+        od = str(sporocilo.get("sender_name") or sporocilo.get("sender") or "naprava")
+        telo = sporocilo.get("payload") if isinstance(sporocilo.get("payload"), dict) else {}
+        if vrsta == "share.screen":
+            dejanje = str(telo.get("action") or "")
+            url = ""
+            if dejanje == "start":
+                pot = str(telo.get("path") or "")
+                if pot.startswith("/") and self.hub_url():
+                    url = link_deljenje._osnova(self.hub_url()) + pot
+            self._oddaj_dogodek("zaslon", {"od": od, "dejanje": dejanje, "url": url, "odtis": self.hub_fp()})
+            return
+        ime = str(telo.get("name") or "datoteka")
+        pot = str(telo.get("path") or "")
+        odtis_vsebine = str(telo.get("sha256") or "")
+        if not pot or not self.hub_url():
+            return
+
+        def _prenesi() -> None:
+            cilj, razlog = link_deljenje.prevzemi_datoteko(self.hub_url(), self.hub_fp(), pot, ime, odtis_vsebine)
+            self._oddaj_dogodek("prejetaDatoteka", {
+                "od": od, "ime": os.path.basename(cilj) if cilj else ime, "pot": cilj or "",
+                "uspeh": bool(cilj), "napaka": "" if cilj else str(razlog or ""),
+            })
+
+        threading.Thread(target=_prenesi, name="SafeerFileReceive", daemon=True).start()
 
     def _obdelaj_nadzorni_ukaz(self, sporocilo: dict) -> None:
         """Obdela dohodni ukaz daljinca z druge naprave (TV, telefon) na ločenem navideznem zaslonu."""

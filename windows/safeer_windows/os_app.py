@@ -572,6 +572,16 @@ class SafeerOsWindow(QMainWindow):
     def _na_dogodek_linka(self, vrsta: str, podatki: Any) -> None:
         if vrsta in ("povezava", "stanje", "naprave"):
             self.poslji_dogodek("fokus", None)
+        if vrsta == "zaslon" and isinstance(podatki, dict):
+            url = str(podatki.get("url") or "")
+            if podatki.get("dejanje") == "start" and url.startswith("https://"):
+                odtis = str(podatki.get("odtis") or "").replace(":", "").lower()
+                if odtis:
+                    browser.ZAUPANA_POTRDILA.add(odtis)
+                self.poslji_dogodek("zaslonZNaprave", {"od": podatki.get("od"), "dejanje": "start"})
+                self.dispatcher.dispatch(lambda: self._odpri_notranji_splet(url))
+        if vrsta == "prejetaDatoteka" and isinstance(podatki, dict):
+            self.poslji_dogodek("prejetaDatoteka", podatki)
         if vrsta == "deljenje" and isinstance(podatki, dict) and not podatki.get("tece"):
             # Konec posiljanja datoteke (ali napaka): uporabniku povemo izid.
             self.poslji_dogodek("posiljanjeKoncano", {k: podatki.get(k) for k in ("ime", "cilj", "uspeh", "napaka")})

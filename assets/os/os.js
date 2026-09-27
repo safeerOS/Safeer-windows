@@ -2035,6 +2035,11 @@
     if (vrsta === "mediaFallback" && podatki) predvajajHtml(podatki, 0);
     if (vrsta === "mediaOsvezen" && S.razdelek === "media") naloziMedia();
     if (vrsta === "kodaPrijave" && podatki) pokaziKodoPrijave(podatki);
+    if (vrsta === "zaslonZNaprave" && podatki) obvesti("Zaslon naprave " + (podatki.od || "") + " se odpira tukaj.");
+    if (vrsta === "prejetaDatoteka" && podatki) {
+      obvesti(podatki.uspeh ? ("Prejeto z naprave " + podatki.od + ": " + podatki.ime + " (mapa Prenosi)")
+                            : ("Datoteke " + podatki.ime + " ni bilo mogoče prevzeti: " + (podatki.napaka || "")));
+    }
     if (vrsta === "posiljanjeKoncano" && podatki) {
       obvesti(podatki.uspeh ? (podatki.ime + " je poslana.") : (podatki.napaka || "Pošiljanje ni uspelo."));
     }
