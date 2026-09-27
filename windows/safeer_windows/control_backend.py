@@ -1215,9 +1215,12 @@ class SafeerControlBackend:
                 except Exception:
                     pass
 
-    def zazeni_na_napravi(self, id_naprave: str, app: str) -> bool:
+    def zazeni_na_napravi(self, id_naprave: str, app: str) -> dict:
+        """Zagon programa na drugi napravi. Vrne ok + kodo in sporocilo naprave, da uporabnik
+        izve, zakaj ni uspelo (npr. Android potrebuje dovoljenje za zagon iz ozadja)."""
         r = self.ukaz_pocakaj(id_naprave, "apps.launch", {"app": app}, cas=6.0)
-        return bool(r.get("ok"))
+        return {"ok": bool(r.get("ok")), "koda": str(r.get("koda") or r.get("code") or ""),
+                "message": str(r.get("message") or "")}
 
     def odpri_tukaj(self, id_naprave: str, app: str) -> dict:
         r = self.ukaz_pocakaj(id_naprave, "apps.launch", {"app": app, "stream": True}, cas=8.0)
