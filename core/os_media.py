@@ -983,6 +983,33 @@ def _parse_m3u(text: str, base: str, source_id: str, source_name: str) -> list[d
     return out
 
 
+def _parse_pls(text: str, base: str, source_id: str, source_name: str) -> list[dict]:
+    """Razčleni standardni PLS seznam radijskih tokov."""
+    entries: dict[int, dict[str, str]] = {}
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith((";", "[")) or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        match = re.fullmatch(r"(File|Title|Length)(\d+)", key.strip(), re.IGNORECASE)
+        if match:
+            entries.setdefault(int(match.group(2)), {})[match.group(1).lower()] = value.strip()
+    result = []
+    for index in sorted(entries):
+        row = entries[index]
+        url = row.get("file", "")
+        if not url:
+            continue
+        title = row.get("title") or Path(urllib.parse.urlsplit(url).path).stem or source_name
+        item = _item(title, url, base=base, source_id=source_id, source_name=source_name,
+                     kind="radio", quality=row.get("length", ""))
+        if item:
+            result.append(item)
+        if len(result) >= MAX_SOURCE_ITEMS:
+            break
+    return result
+
+
 def _parse_xml(text: str, base: str, source_id: str, source_name: str) -> list[dict]:
     try:
         root = ET.fromstring(text)
@@ -1027,6 +1054,8 @@ def parse_payload(payload: bytes, content_type: str, source_url: str,
     text = payload.decode("utf-8", "replace")
     content = (content_type or "").lower()
     stripped = text.lstrip()
+    if "scpls" in content or "playlist" in content and stripped.lower().startswith("[playlist]") or source_url.lower().endswith(".pls"):
+        return _parse_pls(text, source_url, source_id, source_name)
     if "mpegurl" in content or source_url.lower().endswith((".m3u", ".m3u8")) or stripped.startswith("#EXTM3U"):
         return _parse_m3u(text, source_url, source_id, source_name)
     if "json" in content or stripped.startswith(("{", "[")):

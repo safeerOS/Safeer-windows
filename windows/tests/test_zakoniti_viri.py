@@ -5,7 +5,7 @@ import unittest
 from unittest import mock
 
 from core.zakoniti_viri import ZakonitiViri
-from core.os_media import MediaCenter
+from core.os_media import MediaCenter, parse_payload
 
 
 class Response:
@@ -69,6 +69,16 @@ class TestZakonitiViri(unittest.TestCase):
             found = center.catalog(kind="radio")["vnosi"]
             self.assertEqual(found[0]["codec"], "AAC")
             self.assertEqual(center.resolve(found[0]["id"])["url"], found[0]["url"])
+
+    def test_m3u_and_pls_user_radio_lists_are_parsed(self):
+        pls = b"[playlist]\nNumberOfEntries=2\nFile1=https://radio.test/jazz.m3u8\nTitle1=Jazz One\nLength1=-1\nFile2=/pop.mp3\nTitle2=Pop Two\n"
+        items = parse_payload(pls, "audio/x-scpls", "https://example.test/list.pls", "Moj seznam")
+        self.assertEqual([item["naslov"] for item in items], ["Jazz One", "Pop Two"])
+        self.assertEqual(items[0]["vrsta"], "radio")
+        self.assertEqual(items[1]["url"], "https://example.test/pop.mp3")
+        m3u = parse_payload(b"#EXTM3U\n#EXTINF:-1 group-title=Jazz,Jazz FM\nhttps://radio.test/aac\n",
+                            "audio/x-mpegurl", "https://example.test/list.m3u", "Radio")
+        self.assertEqual(m3u[0]["naslov"], "Jazz FM")
 
 
 if __name__ == "__main__":
