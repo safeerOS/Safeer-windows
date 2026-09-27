@@ -145,6 +145,9 @@ _VK = {
     "prejsnja": 0xB1, "glasneje": 0xAF, "tiseje": 0xAE, "utisaj": 0xAD, "celozaslonsko": 0x7A,
     "osvezi": 0x74, "iskanje_naprej": 0x72,
     **{f"f{i}": 0x6F + i for i in range(1, 13)},
+    "krmilka": 0x11, "alt": 0x12, "dvigalka": 0x10, "sistemska": 0x5B,
+    **{chr(k): k - 32 for k in range(ord("a"), ord("z") + 1)},
+    **{str(k): 0x30 + k for k in range(10)},
 }
 _KOMBINACIJE = {
     "isci": (0x11, 0x46), "kopiraj": (0x11, 0x43), "prilepi": (0x11, 0x56), "izrezi": (0x11, 0x58),
@@ -177,6 +180,7 @@ class WindowsVnos:
         self.slika = slika
         self.mozno = sys.platform == "win32"
         self._drzan: Optional[str] = None
+        self._drzane_tipke: set[int] = set()
 
     # -- nizka raven
     def _miska(self, zastavice: int, dx: int = 0, dy: int = 0, podatki: int = 0) -> bool:
@@ -211,6 +215,10 @@ class WindowsVnos:
                 if not vk:
                     return False
                 self._tipka_vk(vk, vrsta == "tipka_gor")
+                if vrsta == "tipka_gor":
+                    self._drzane_tipke.discard(vk)
+                else:
+                    self._drzane_tipke.add(vk)
                 return True
             if vrsta == "besedilo":
                 return self._besedilo(str(dogodek.get("besedilo") or ""))
@@ -276,10 +284,16 @@ class WindowsVnos:
             ctypes.windll.user32.SendInput(1, ctypes.byref(vhod), ctypes.sizeof(INPUT))
 
     def sprosti_vse(self) -> None:
-        """Povezava je padla: gumb, ki ga je televizor drzal (vlecenje), spustimo."""
+        """Povezava je padla: spustimo vse drzane tipke in miskin gumb."""
         if self._drzan and self._drzan in _GUMBI:
             try:
                 self._miska(_GUMBI[self._drzan][1])
             except Exception:
                 pass
         self._drzan = None
+        for vk in list(self._drzane_tipke):
+            try:
+                self._tipka_vk(vk, True)
+            except Exception:
+                pass
+        self._drzane_tipke.clear()

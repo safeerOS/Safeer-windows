@@ -38,6 +38,9 @@ TIPKE: Dict[str, str] = {
     "natisni": "ctrl+p", "iskanje_naprej": "F3",
     "f1": "F1", "f2": "F2", "f3": "F3", "f4": "F4", "f5": "F5", "f6": "F6",
     "f7": "F7", "f8": "F8", "f9": "F9", "f10": "F10", "f11": "F11", "f12": "F12",
+    "krmilka": "ctrl", "alt": "alt", "dvigalka": "shift", "sistemska": "super",
+    **{chr(k): chr(k) for k in range(ord("a"), ord("z") + 1)},
+    **{str(k): str(k) for k in range(10)},
 }
 
 #: Gumbi miske: levi, srednji, desni in kolesce (4 gor, 5 dol).
@@ -137,7 +140,7 @@ class Vnos:
         if tipka in self._drzane:
             self._drzane[tipka] = time.monotonic()   # televizor ponavlja, da se ve, da se drzi
             return True
-        if not self._pozeni(["keydown", "--clearmodifiers", tipka]):
+        if not self._pozeni(["keydown", tipka]):
             return False
         self._drzane[tipka] = time.monotonic()
         self._zbudi_strazo()
@@ -148,7 +151,7 @@ class Vnos:
         if tipka is None:
             return False
         self._drzane.pop(tipka, None)
-        return self._pozeni(["keyup", "--clearmodifiers", tipka])
+        return self._pozeni(["keyup", tipka])
 
     def drzane(self) -> List[str]:
         """Katere tipke ta trenutek drzimo (za teste in dnevnik)."""
@@ -163,7 +166,7 @@ class Vnos:
             self._pozeni(["mouseup", gumb])
         for tipka in list(self._drzane):
             self._drzane.pop(tipka, None)
-            self._pozeni(["keyup", "--clearmodifiers", tipka])
+            self._pozeni(["keyup", tipka])
         self._konec.set()
 
     def sprosti_pozabljene(self, zdaj: Optional[float] = None) -> None:
@@ -172,7 +175,7 @@ class Vnos:
         for tipka, ko in list(self._drzane.items()):
             if sedaj - ko > NAJVEC_DRZANJA_S:
                 self._drzane.pop(tipka, None)
-                self._pozeni(["keyup", "--clearmodifiers", tipka])
+                self._pozeni(["keyup", tipka])
 
     def _zbudi_strazo(self) -> None:
         """Straza sama spusti pozabljene tipke tudi, kadar od televizorja ne pride nic vec."""

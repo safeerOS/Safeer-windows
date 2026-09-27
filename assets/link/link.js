@@ -110,6 +110,7 @@
       predvajaj: "Predvajaj",
       naprej10: "10 s",
       povezaneNaprave: "Povezane naprave",
+      upravljajRacunalnik: "Upravljaj ta računalnik",
       osvezi: "Osveži",
       povezujem: "Povezujem se …",
       taNaprava: "Ta naprava",
@@ -222,6 +223,7 @@
       predvajaj: "Play",
       naprej10: "10 s",
       povezaneNaprave: "Connected devices",
+      upravljajRacunalnik: "Control this computer",
       osvezi: "Refresh",
       povezujem: "Connecting …",
       taNaprava: "This device",
@@ -1854,12 +1856,25 @@
       var pod = zasedena ? t("zasedenoDeli", { ime: n.zasedenaOdIme || n.zasedenaOd })
         : (deljivo ? t(jeNamizje() ? "deliKlik" : "deliDotik") : (jeZaslon ? t("zaslon") : t("naprava")));
       if (!zasedena && n.naslov && sorodniki[n.naslov]) pod = t("istaNaprava", { ime: "Safeer OS" }) + " · " + pod;
-      seznam.appendChild(vrstica(
+      var vrsticaOddaljene = vrstica(
         (jeZaslon && !n.platforma) ? "tv" : ikonaNapraveVSeznamu(n),
         prijaznoIme(n),
         pod,
         zasedena ? t("zasedenoKratko") : t("povezan"), zasedena ? "rumenaZnacka" : "zivo",
-        deljivo ? function () { odpriDeljenje(n); } : null));
+        deljivo ? function () { odpriDeljenje(n); } : null);
+      var ikona = ikonaNapraveVSeznamu(n);
+      if (jeNamizje() && ikona === "racunalnik" && most && most.oddaljeniZaslon) {
+        var gumb = document.createElement("button");
+        gumb.className = "glavni gumb-oddaljeni-zaslon";
+        gumb.textContent = t("upravljajRacunalnik");
+        gumb.addEventListener("click", function (dogodek) {
+          dogodek.stopPropagation();
+          most.oddaljeniZaslon(n.id, prijaznoIme(n));
+        });
+        gumb.addEventListener("keydown", function (dogodek) { dogodek.stopPropagation(); });
+        vrsticaOddaljene.appendChild(gumb);
+      }
+      seznam.appendChild(vrsticaOddaljene);
     });
 
     besedilo("opombaNaprave",
@@ -1871,7 +1886,8 @@
     var pl = (naprava && naprava.platforma) || "";
     var vr = (naprava && naprava.vrsta) || "";
     if (pl === "tv" || vr === "screen" && pl !== "tablet") return "tv";
-    if (pl === "linux" || pl === "windows" || pl === "macos" || vr === "computer" || vr === "control") return "racunalnik";
+    if (pl === "linux" || pl === "windows" || pl === "win32" || pl === "macos" ||
+        vr === "computer" || vr === "racunalnik" || vr === "control") return "racunalnik";
     if (pl === "phone" || pl === "tablet" || vr === "handheld") return "telefon";
     var opis = ((naprava && (naprava.ime || "")) + " " + (naprava && (naprava.id || ""))).toLowerCase();
     if (/(televizor|tv|philips|android tv)/.test(opis)) return "tv";
