@@ -1945,18 +1945,35 @@ class MediaCenter:
         local = [item for item in self._local_items() if (kind in ("", "vse") or item.get("vrsta") == kind)] if page_num == 1 else []
         remote = [_series_catalog_card(item) for source in data.get("viri", []) for item in source.get("vnosi", [])
                   if isinstance(item, dict) and (kind in ("", "vse") or item.get("vrsta") == kind)] if page_num == 1 else []
-        dynamic, tmdb_pages = self._tmdb_catalog(data, _text(query, 120), kind, _text(genre, 20), page_num) if self._ima_embed_vir(data) else ([], 1)
+        glasbena = kind in ("glasba", "radio") and _text(genre, 20) in zakoniti_viri.GLASBENE_ZVRSTI
+        dynamic, tmdb_pages = ([], 1) if glasbena else (
+            self._tmdb_catalog(data, _text(query, 120), kind, _text(genre, 20), page_num) if self._ima_embed_vir(data) else ([], 1))
         # Javni katalogi imajo svoj 30-minutni cache in se napake posameznega API-ja
         # ne smejo prenesti v glavni katalog.
         configured_hosts = [str(source.get("url") or "") for source in data.get("viri", [])
                             if isinstance(source, dict) and source.get("url")]
-        lawful = self._zakoniti_viri.get(_text(query, 120), configured_hosts)
+        lawful = (self._zakoniti_viri.get(_text(query, 120), configured_hosts, _text(genre, 20)) if glasbena
+                  else self._zakoniti_viri.get(_text(query, 120), configured_hosts))
+        if glasbena:
+            # Pri zvrsti pokazemo samo zadetke te zvrsti, ne tudi krajevnih datotek in osebnih virov.
+            local, remote = [], []
+        if kind == "tv-v-zivo":
+            try:
+                drzava = self.watch_country_settings("auto", "sl").get("drzava", "")
+            except Exception:
+                drzava = ""
+            lawful = lawful + zakoniti_viri.tv_v_zivo(drzava)
         if kind not in ("", "vse"):
             lawful = [item for item in lawful if item.get("vrsta") == kind]
-        personal = self._personal_items(_text(query, 120))
+        personal = [] if glasbena else self._personal_items(_text(query, 120))
         if kind not in ("", "vse"):
             personal = [item for item in personal if item.get("vrsta") == kind]
         merged = merge_duplicates(local + remote + dynamic + lawful + personal)
+        # Prenos, ki ga izdajatelj ponuja samo na svoji strani (RTV SLO): zdruzevanje polja ne ohrani.
+        strani = {str(item.get("url")): item["stran"] for item in lawful if isinstance(item, dict) and item.get("stran")}
+        if strani:
+            merged = [dict(item, stran=strani[str(item.get("url"))]) if str(item.get("url")) in strani else item
+                      for item in merged]
         needle = _text(query, 120).casefold()
         if needle:
             def zadetek(item: dict) -> bool:
