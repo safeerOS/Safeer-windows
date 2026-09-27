@@ -1483,7 +1483,7 @@ class MediaCenter:
                        razvrsti: str = "", izklopljeni: Iterable[str] = (), samo_lokalno: bool = False,
                        izklopljeni_jeziki: Iterable[str] = ()) -> str:
         # Prvi element je razlicica oblike pogleda: ob spremembi vrstnega reda stari pogledi ne veljajo.
-        return json.dumps(["v4", _text(query, 120).casefold(), kind or "vse", _text(genre, 20),
+        return json.dumps(["v5", _text(query, 120).casefold(), kind or "vse", _text(genre, 20),
                            max(1, int(page or 1)), self.izbrana_drzava or "auto", razvrsti or "",
                            sorted({str(x) for x in (izklopljeni or []) if x}), bool(samo_lokalno),
                            sorted({str(x) for x in (izklopljeni_jeziki or []) if x})], ensure_ascii=False)
