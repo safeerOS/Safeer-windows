@@ -12,7 +12,7 @@ class PredpomnilnikKatalogaTest(unittest.TestCase):
         center = os_media.MediaCenter(td, roots=[])
         klici = []
 
-        def katalog(query="", kind="vse", genre="", page=1):
+        def katalog(query="", kind="vse", genre="", page=1, **_moznosti):
             klici.append((query, kind, genre, page))
             return {"vnosi": list(vnosi), "viri": [], "skupaj": len(vnosi), "stran": page, "skupaj_strani": 1, "mape": []}
 
@@ -121,3 +121,37 @@ class StremioPreveriTest(unittest.TestCase):
             self.assertIn("brez predvajalnih", ms.stremio_preveri("https://dodatek.si/manifest.json"))
         finally:
             ms._request = stari
+
+
+class RazvrscanjeInFiltriTest(unittest.TestCase):
+    VNOSI = [
+        {"id": "1", "naslov": "Zebra", "leto": 1999, "vir_id": "a", "razlicice": [{"vir_id": "a", "vir": "A", "url": "https://a/1"}]},
+        {"id": "2", "naslov": "Ananas", "leto": 0, "datum": "2021-05-01", "vir_id": "b",
+         "razlicice": [{"vir_id": "b", "vir": "B", "url": "https://b/2"}, {"vir_id": "a", "vir": "A", "url": "https://a/2"}]},
+        {"id": "3", "naslov": "Čebula", "leto": 0, "vir_id": "b", "razlicice": [{"vir_id": "b", "vir": "B", "url": "https://b/3"}]},
+    ]
+
+    def test_po_letu_brez_letnice_na_konec(self):
+        r = os_media.MediaCenter._razvrsti_vnose(list(self.VNOSI), "novo")
+        self.assertEqual([x["id"] for x in r], ["2", "1", "3"])
+        r = os_media.MediaCenter._razvrsti_vnose(list(self.VNOSI), "staro")
+        self.assertEqual([x["id"] for x in r], ["1", "2", "3"])
+
+    def test_po_abecedi_s_sumniki(self):
+        r = os_media.MediaCenter._razvrsti_vnose(list(self.VNOSI), "az")
+        self.assertEqual([x["naslov"] for x in r], ["Ananas", "Čebula", "Zebra"])
+
+    def test_izklopljen_vir_skrije_samo_njegove_kartice(self):
+        r = os_media.MediaCenter._filtriraj_vire(list(self.VNOSI), {"b"})
+        self.assertEqual([x["id"] for x in r], ["1", "2"])
+        self.assertEqual(r[1]["url"], "https://a/2")
+        self.assertEqual(r[1]["stevilo_razlicic"], 1)
+
+    def test_samo_lokalno_brez_spletnih_katalogov(self):
+        with tempfile.TemporaryDirectory() as td:
+            center = os_media.MediaCenter(td, roots=[])
+            center._tmdb_catalog = lambda *a, **k: self.fail("samo lokalno ne sme klicati spleta")
+            center._local_items = lambda: [{"id": "L", "naslov": "Moj posnetek", "vrsta": "video", "url": "file:///x.mp4",
+                                            "vir_id": "lokalno", "vir": "Ta računalnik"}]
+            r = center.catalog_hitro("", "vse", samo_lokalno=True)
+            self.assertEqual([x["naslov"] for x in r["vnosi"]], ["Moj posnetek"])

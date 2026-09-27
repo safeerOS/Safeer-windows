@@ -1094,9 +1094,13 @@ class SafeerOsWindow(QMainWindow):
             genre = str(a[2]) if len(a) > 2 else ""
             page = int(a[3]) if len(a) > 3 else 1
             # Najprej shranjeni pogled (takoj), sveze podatke posljemo kot dogodek, ko prispejo.
+            razvrsti = str(a[4]) if len(a) > 4 and a[4] else ""
+            izklopljeni = [str(x) for x in a[5]][:200] if len(a) > 5 and isinstance(a[5], list) else []
+            samo_lokalno = bool(a[6]) if len(a) > 6 else False
             return self.media_center.catalog_hitro(
                 query, kind, genre, page,
-                ob_osvezitvi=lambda kljuc, rezultat: self.poslji_dogodek("mediaKatalogOsvezen", rezultat))
+                ob_osvezitvi=lambda kljuc, rezultat: self.poslji_dogodek("mediaKatalogOsvezen", rezultat),
+                razvrsti=razvrsti, izklopljeni=izklopljeni, samo_lokalno=samo_lokalno)
 
         if metoda == "mediaPodrobnosti":
             shramba = os_backend_win.nalozi_shrambo()

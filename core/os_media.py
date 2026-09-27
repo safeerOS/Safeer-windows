@@ -1473,9 +1473,11 @@ class MediaCenter:
                         zapis["cas"] = 0
         self._shrani_predpomnilnik()
 
-    def kljuc_kataloga(self, query: str = "", kind: str = "vse", genre: str = "", page: int = 1) -> str:
+    def kljuc_kataloga(self, query: str = "", kind: str = "vse", genre: str = "", page: int = 1,
+                       razvrsti: str = "", izklopljeni: Iterable[str] = (), samo_lokalno: bool = False) -> str:
         return json.dumps([_text(query, 120).casefold(), kind or "vse", _text(genre, 20),
-                           max(1, int(page or 1)), self.izbrana_drzava or "auto"], ensure_ascii=False)
+                           max(1, int(page or 1)), self.izbrana_drzava or "auto", razvrsti or "",
+                           sorted({str(x) for x in (izklopljeni or []) if x}), bool(samo_lokalno)], ensure_ascii=False)
 
     def _zapomni_katalog(self, kljuc: str, rezultat: dict) -> None:
         shranjeno = {k: v for k, v in rezultat.items() if k not in ("viri", "mape", "kljuc", "iz_predpomnilnika", "osvezujem")}
@@ -1485,13 +1487,20 @@ class MediaCenter:
         self._shrani_predpomnilnik()
 
     def catalog_hitro(self, query: str = "", kind: str = "vse", genre: str = "", page: int = 1,
-                      ob_osvezitvi=None) -> dict:
+                      ob_osvezitvi=None, razvrsti: str = "", izklopljeni: Iterable[str] = (),
+                      samo_lokalno: bool = False) -> dict:
         """Katalog najprej iz predpomnilnika (takoj), nato sveze v ozadju.
 
         ob_osvezitvi(kljuc, rezultat) se poklice samo, ce se je vsebina v ozadju res spremenila.
         Ce pogleda se ni v predpomnilniku, ga nalozimo normalno in shranimo za naslednjic.
         """
-        kljuc = self.kljuc_kataloga(query, kind, genre, page)
+        izklopljeni = sorted({str(x) for x in (izklopljeni or []) if x})
+        moznosti = {"razvrsti": razvrsti or "", "izklopljeni": izklopljeni, "samo_lokalno": bool(samo_lokalno)}
+        kljuc = self.kljuc_kataloga(query, kind, genre, page, **moznosti)
+        if samo_lokalno:
+            # Krajevne datoteke so takoj na voljo: brez predpomnilnika (vedno sveze).
+            return dict(self.catalog(query, kind, genre, page, **moznosti), kljuc=kljuc,
+                        iz_predpomnilnika=False, osvezujem=False)
         with self._predpomnilnik_lock:
             zapis = self._nalozi_predpomnilnik()["katalog"].get(kljuc)
             if isinstance(zapis, dict):
@@ -1504,11 +1513,11 @@ class MediaCenter:
             starost = time.time() - float(zapis.get("cas") or 0)
             osvezi = starost >= self.SVEZE_SEKUND
             if osvezi:
-                self._osvezi_v_ozadju(kljuc, query, kind, genre, page, ob_osvezitvi)
+                self._osvezi_v_ozadju(kljuc, query, kind, genre, page, ob_osvezitvi, moznosti)
             rezultat.update(viri=self.vidni_viri(), mape=[str(path) for path in self.roots],
                             kljuc=kljuc, iz_predpomnilnika=True, osvezujem=osvezi)
             return rezultat
-        rezultat = self.catalog(query, kind, genre, page)
+        rezultat = self.catalog(query, kind, genre, page, **moznosti)
         if rezultat.get("vnosi"):
             self._zapomni_katalog(kljuc, rezultat)
         return dict(rezultat, kljuc=kljuc, iz_predpomnilnika=False, osvezujem=False)
@@ -1518,7 +1527,8 @@ class MediaCenter:
         vnosi = (rezultat or {}).get("vnosi") or []
         return hashlib.sha1(json.dumps(vnosi, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")).hexdigest()
 
-    def _osvezi_v_ozadju(self, kljuc: str, query: str, kind: str, genre: str, page: int, ob_osvezitvi=None) -> None:
+    def _osvezi_v_ozadju(self, kljuc: str, query: str, kind: str, genre: str, page: int, ob_osvezitvi=None,
+                         moznosti: Optional[dict] = None) -> None:
         with self._predpomnilnik_lock:
             if kljuc in self._osvezujem:
                 return
@@ -1528,7 +1538,7 @@ class MediaCenter:
         def delo() -> None:
             try:
                 self.izbrana_drzava = drzava
-                svez = self.catalog(query, kind, genre, page)
+                svez = self.catalog(query, kind, genre, page, **(moznosti or {}))
                 with self._predpomnilnik_lock:
                     star = (self._nalozi_predpomnilnik()["katalog"].get(kljuc) or {}).get("rezultat")
                 if not svez.get("vnosi"):
@@ -2184,7 +2194,23 @@ class MediaCenter:
         self._dynamic_items[prepared["id"]] = prepared
         return prepared
 
-    def _tmdb_catalog(self, data: dict, query: str, kind: str, genre: str, page: int) -> tuple[list[dict], int]:
+    # Razvrscanje po letu izida ali abecedi; TMDB zna razvrstiti celoten katalog (ne samo stran).
+    RAZVRSTITVE = ("", "novo", "staro", "az", "za")
+
+    @staticmethod
+    def _tmdb_razvrstitev(razvrsti: str, media_type: str) -> dict:
+        datum = "first_air_date" if media_type == "tv" else "primary_release_date"
+        ime = "name" if media_type == "tv" else "title"
+        # Prag glasov: brez njega bi na vrhu stali neznani ali se neizdani naslovi.
+        return {
+            "novo": {"sort_by": datum + ".desc", datum + ".lte": _date.today().isoformat(), "vote_count.gte": 50},
+            "staro": {"sort_by": datum + ".asc", "vote_count.gte": 200},
+            "az": {"sort_by": ime + ".asc", "vote_count.gte": 300},
+            "za": {"sort_by": ime + ".desc", "vote_count.gte": 300},
+        }.get(razvrsti, {})
+
+    def _tmdb_catalog(self, data: dict, query: str, kind: str, genre: str, page: int,
+                      razvrsti: str = "") -> tuple[list[dict], int]:
         source = {}
         media_type = "tv" if kind == "serija" else "movie" if kind == "film" else "all"
         current_page = max(1, min(int(page or 1), 500))
@@ -2192,6 +2218,11 @@ class MediaCenter:
         if query:
             endpoint = "/search/multi"
             params["query"] = query
+        elif razvrsti and media_type != "all":
+            endpoint = f"/discover/{media_type}"
+            params.update(self._tmdb_razvrstitev(razvrsti, media_type))
+            if genre:
+                params["with_genres"] = genre
         elif genre:
             endpoint = f"/discover/{'tv' if media_type == 'tv' else 'movie'}"
             params.update({"with_genres": genre, "sort_by": "popularity.desc"})
@@ -2217,7 +2248,69 @@ class MediaCenter:
                 found.append(item)
         return found, tmdb_total_pages
 
-    def catalog(self, query: str = "", kind: str = "vse", genre: str = "", page: int = 1) -> dict:
+    @staticmethod
+    def _razvrsti_vnose(items: list[dict], razvrsti: str) -> list[dict]:
+        if razvrsti in ("az", "za"):
+            return sorted(items, key=lambda x: unicodedata.normalize("NFKD", str(x.get("naslov") or "")).casefold(),
+                          reverse=razvrsti == "za")
+        if razvrsti in ("novo", "staro"):
+            def leto(x: dict) -> int:
+                try:
+                    vrednost = int(x.get("leto") or 0)
+                except (TypeError, ValueError):
+                    vrednost = 0
+                if vrednost:
+                    return vrednost
+                datum = str(x.get("datum") or "")[:4]
+                return int(datum) if datum.isdigit() else 0
+            z_letom = [x for x in items if leto(x)]
+            brez = [x for x in items if not leto(x)]  # brez letnice vedno na konec
+            return sorted(z_letom, key=leto, reverse=razvrsti == "novo") + brez
+        return items
+
+    @staticmethod
+    def _filtriraj_vire(items: list[dict], izklopljeni: set[str]) -> list[dict]:
+        """Zacasno izklopljeni viri: iz kartice odstranimo njihove razlicice, prazne kartice skrijemo."""
+        if not izklopljeni:
+            return items
+        out = []
+        for item in items:
+            razlicice = [r for r in (item.get("razlicice") or []) if isinstance(r, dict)]
+            if not razlicice:
+                if str(item.get("vir_id") or "") not in izklopljeni:
+                    out.append(item)
+                continue
+            ostale = [r for r in razlicice if str(r.get("vir_id") or "") not in izklopljeni]
+            if not ostale:
+                continue
+            if len(ostale) == len(razlicice):
+                out.append(item)
+                continue
+            glavna = ostale[0]
+            out.append(dict(item, razlicice=ostale, stevilo_razlicic=len(ostale),
+                            url=glavna.get("url") or item.get("url"), vir=glavna.get("vir") or item.get("vir"),
+                            vir_id=glavna.get("vir_id") or item.get("vir_id"),
+                            viri=list(dict.fromkeys(r.get("vir", "") for r in ostale if r.get("vir")))))
+        return out
+
+    def catalog(self, query: str = "", kind: str = "vse", genre: str = "", page: int = 1,
+                razvrsti: str = "", izklopljeni: Iterable[str] = (), samo_lokalno: bool = False) -> dict:
+        razvrsti = razvrsti if razvrsti in self.RAZVRSTITVE else ""
+        izklopljeni = {str(x) for x in (izklopljeni or []) if x}
+        if samo_lokalno:
+            # Samo ta naprava: brez omrezja in brez cakanja na spletne kataloge.
+            page_num = max(1, int(page or 1))
+            local = [item for item in self._local_items() if (kind in ("", "vse") or item.get("vrsta") == kind)]
+            needle = _text(query, 120).casefold()
+            if needle:
+                local = [item for item in local if needle in " ".join(
+                    str(item.get(k) or "") for k in ("naslov", "izvajalec", "album", "opis")).casefold()]
+            merged = self._razvrsti_vnose(merge_duplicates(local), razvrsti)
+            for shown in merged:
+                if shown.get("id"):
+                    self._dynamic_items.setdefault(shown["id"], shown)
+            return {"vnosi": merged, "viri": self.vidni_viri(), "skupaj": len(merged), "stran": 1,
+                    "skupaj_strani": 1, "mape": [str(path) for path in self.roots]}
         with self._lock:
             data = self._load()
         page_num = max(1, int(page or 1))
@@ -2225,8 +2318,11 @@ class MediaCenter:
         remote = [_series_catalog_card(item) for source in data.get("viri", []) for item in source.get("vnosi", [])
                   if isinstance(item, dict) and (kind in ("", "vse") or item.get("vrsta") == kind)] if page_num == 1 else []
         glasbena = kind in ("glasba", "radio") and _text(genre, 20) in zakoniti_viri.GLASBENE_ZVRSTI
-        dynamic, tmdb_pages = ([], 1) if glasbena else (
-            self._tmdb_catalog(data, _text(query, 120), kind, _text(genre, 20), page_num) if self._ima_embed_vir(data) else ([], 1))
+        embed_ids = {str(provider.get("id") or host) for provider, _parsed, host in self._embed_viri(data)}
+        tmdb_izklopljen = bool(embed_ids) and embed_ids <= izklopljeni
+        dynamic, tmdb_pages = ([], 1) if (glasbena or tmdb_izklopljen) else (
+            self._tmdb_catalog(data, _text(query, 120), kind, _text(genre, 20), page_num, razvrsti)
+            if self._ima_embed_vir(data) else ([], 1))
         # Javni katalogi imajo svoj 30-minutni cache in se napake posameznega API-ja
         # ne smejo prenesti v glavni katalog.
         configured_hosts = [str(source.get("url") or "") for source in data.get("viri", [])
@@ -2257,7 +2353,7 @@ class MediaCenter:
             personal = [item for item in personal if any(z in str(item.get("zanri") or "").casefold() for z in iskane)]
         if kind not in ("", "vse"):
             personal = [item for item in personal if item.get("vrsta") == kind]
-        merged = merge_duplicates(local + remote + dynamic + lawful + personal)
+        merged = self._filtriraj_vire(merge_duplicates(local + remote + dynamic + lawful + personal), izklopljeni)
         # Prenos, ki ga izdajatelj ponuja samo na svoji strani (RTV SLO): zdruzevanje polja ne ohrani.
         strani = {str(item.get("url")): item["stran"] for item in lawful if isinstance(item, dict) and item.get("stran")}
         if strani:
@@ -2273,7 +2369,9 @@ class MediaCenter:
                 return any(difflib.SequenceMatcher(None, needle, token).ratio() >= 0.72
                            for token in re.findall(r"[\wÀ-ž]{3,}", hay))
             merged = [item for item in merged if zadetek(item)]
-        total_pages = (tmdb_pages if (self._ima_embed_vir(data) and tmdb_pages > 1 and kind in ("", "vse", "film", "serija"))
+        merged = self._razvrsti_vnose(merged, razvrsti)
+        total_pages = (tmdb_pages if (self._ima_embed_vir(data) and not tmdb_izklopljen and tmdb_pages > 1
+                                      and kind in ("", "vse", "film", "serija"))
                        else max(1, math.ceil(len(merged) / 24)))
         # Zapomni si vse prikazane vnose (tudi zadetke iskanja in zdruzene kartice),
         # da jih resolve() najde, ko uporabnik klikne - sicer se klik na zadetek

@@ -2506,7 +2506,9 @@
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", zacni); else zacni();
   // ------------------------------------------------------------------ Safeer Media
   // En katalog ne glede na vir. Zaledje zdruzi dvojnike in izbere najboljsi tok;
-  var media = { katalog: [], viri: [], filter: "vse", genre: "", query: "", page: 1, skupaj_strani: 1, aktivni: null, zahteva: 0, timer: 0 };
+  var media = { katalog: [], viri: [], filter: "film", genre: "", query: "", page: 1, skupaj_strani: 1, aktivni: null, zahteva: 0, timer: 0,
+                // Razvrstitev in zacasno izklopljeni viri veljajo do ponovnega zagona (namenoma ne shranjujemo).
+                razvrsti: "", izklopljeni: {}, samoLokalno: false, znaniViri: {} };
   function mediaIkona(vrsta) {
     if (vrsta === "glasba") return "glasba";
     if (vrsta === "radio") return "radio";
@@ -2556,13 +2558,14 @@
     });
     $("mediaPrazno").hidden = !!list.length;
     $("mediaPovzetek").textContent = t("mediaZadetkov", { n: list.length }) + (media.skupaj_strani > 1 ? " · Stran " + media.page + " od " + media.skupaj_strani : "");
-    if (media.filter === "radio" || media.filter === "video" || media.filter === "glasba") list.sort(function (a, b) {
+    var zdruzi = !media.razvrsti && (media.filter === "radio" || media.filter === "video" || media.filter === "glasba");
+    if (zdruzi) list.sort(function (a, b) {
       return (a.skupina || a.izvajalec || "").localeCompare(b.skupina || b.izvajalec || "");
     });
     var mediaZadnjaSkupina = "";
     list.forEach(function (x) {
       var skupina = x.skupina || (media.filter === "glasba" ? x.izvajalec : "");
-      if ((media.filter === "radio" || media.filter === "video" || media.filter === "glasba") && skupina && skupina !== mediaZadnjaSkupina) {
+      if (zdruzi && skupina && skupina !== mediaZadnjaSkupina) {
         mediaZadnjaSkupina = skupina;
         mreza.appendChild(el("h3", "media-skupina", ubezi(mediaZadnjaSkupina)));
       }
@@ -2799,7 +2802,43 @@
 
   // Katalog pride najprej iz predpomnilnika (takoj); ko v ozadju prispejo sveži podatki,
   // jih Python pošlje kot dogodek "mediaKatalogOsvezen" in pogled tiho posodobimo.
+  // Viri, ki jih uporabnik lahko zacasno izklopi: iz trenutnih kartic in seznama virov.
+  // Zapomnimo si jih, da izklopljen vir ne izgine iz seznama (sicer ga ne bi mogel spet vklopiti).
+  function zapomniMediaVire(response) {
+    ((response && response.vnosi) || []).forEach(function (x) {
+      var razl = (x.razlicice && x.razlicice.length) ? x.razlicice : [x];
+      razl.forEach(function (r) { if (r.vir_id && r.vir_id !== "lokalno") media.znaniViri[r.vir_id] = r.vir || r.vir_id; });
+    });
+    ((response && response.viri) || []).forEach(function (v) { if (v.id) media.znaniViri[v.id] = v.ime || v.id; });
+  }
+  function osveziGumbViri() {
+    var gumb = $("mediaViriFilterGumb"); if (!gumb) return;
+    var n = Object.keys(media.izklopljeni).length;
+    gumb.textContent = media.samoLokalno ? "Viri: samo ta naprava" : (n ? "Viri: " + n + " izklopljen" + (n === 1 ? "" : (n === 2 ? "a" : (n < 5 ? "i" : "ih"))) : "Viri: vsi");
+    gumb.classList.toggle("aktiven", media.samoLokalno || n > 0);
+  }
+  function narisiViriFilter() {
+    var seznam = $("mediaViriFilterSeznam"); if (!seznam) return;
+    seznam.innerHTML = "";
+    var ids = Object.keys(media.znaniViri).sort(function (a, b) { return String(media.znaniViri[a]).localeCompare(String(media.znaniViri[b])); });
+    if (!ids.length) seznam.appendChild(el("small", "", "Viri se pokažejo, ko se katalog naloži."));
+    ids.forEach(function (id) {
+      var vrstica = el("label"), cb = el("input");
+      cb.type = "checkbox"; cb.checked = !media.izklopljeni[id];
+      cb.onchange = function () {
+        if (cb.checked) delete media.izklopljeni[id]; else media.izklopljeni[id] = 1;
+        osveziGumbViri(); media.page = 1; naloziMedia();
+      };
+      var besedilo = el("span"); besedilo.appendChild(el("b", "", ubezi(media.znaniViri[id])));
+      vrstica.appendChild(cb); vrstica.appendChild(besedilo); seznam.appendChild(vrstica);
+    });
+    seznam.classList.toggle("onemogoceno", media.samoLokalno);
+    $("mediaSamoLokalno").checked = media.samoLokalno;
+  }
+
   function prevzemiMediaKatalog(response, tiho) {
+    zapomniMediaVire(response);
+    if (!$("mediaViriFilter").hidden) narisiViriFilter();
     media.kljuc = (response && response.kljuc) || "";
     media.katalog = (response && response.vnosi) || [];
     if (response && response.viri) media.viri = response.viri;
@@ -2814,7 +2853,8 @@
     narisiZanre();
     var zahteva = ++media.zahteva;
     $("mediaPovzetek").textContent = "Nalagam katalog …";
-    klic("mediaKatalog", [media.query, media.filter, media.genre, media.page || 1]).then(function (response) {
+    klic("mediaKatalog", [media.query, media.filter, media.genre, media.page || 1,
+                          media.razvrsti, Object.keys(media.izklopljeni), media.samoLokalno]).then(function (response) {
       if (zahteva !== media.zahteva) return;
       prevzemiMediaKatalog(response);
     }, function () { if (zahteva === media.zahteva) { media.katalog = []; media.viri = []; narisiMedia(); } });
@@ -2963,6 +3003,29 @@
   });
   document.querySelectorAll("[data-media-genre]").forEach(function (b) {
     b.onclick = function () { izberiZanr(b); };
+  });
+  on("mediaRazvrsti", "change", function () {
+    media.razvrsti = $("mediaRazvrsti").value; media.page = 1; naloziMedia();
+  });
+  on("mediaViriFilterGumb", "click", function (event) {
+    event.stopPropagation();
+    var plosca = $("mediaViriFilter"), odpri = plosca.hidden;
+    plosca.hidden = !odpri; $("mediaViriFilterGumb").setAttribute("aria-expanded", odpri ? "true" : "false");
+    if (odpri) narisiViriFilter();
+  });
+  on("mediaSamoLokalno", "change", function () {
+    media.samoLokalno = $("mediaSamoLokalno").checked;
+    narisiViriFilter(); osveziGumbViri(); media.page = 1; naloziMedia();
+  });
+  on("mediaViriFilterPonastavi", "click", function () {
+    media.izklopljeni = {}; media.samoLokalno = false;
+    narisiViriFilter(); osveziGumbViri(); media.page = 1; naloziMedia();
+  });
+  document.addEventListener("click", function (event) {
+    var plosca = $("mediaViriFilter");
+    if (plosca && !plosca.hidden && !event.target.closest(".media-filter-viri")) {
+      plosca.hidden = true; $("mediaViriFilterGumb").setAttribute("aria-expanded", "false");
+    }
   });
   on("mediaIskanje", "input", function () {
     media.query = this.value; media.page = 1; clearTimeout(media.timer); media.timer = setTimeout(naloziMedia, 350);

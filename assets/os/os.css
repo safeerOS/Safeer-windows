@@ -762,3 +762,20 @@ div.vrstica { cursor: default; }
 .zapisek-omembe-okno small { color: var(--medlo); margin-left: auto; }
 .zapiski-seznam > .media-iskanje, .zapiski-seznam > .gumb { flex: none; height: auto; min-height: 0; width: 100%; }
 .zapiski-postavitev { align-items: start; }
+
+/* Razvrscanje in zacasni filter virov v medijskem centru */
+.media-razvrsti{display:flex;align-items:center;gap:8px;color:var(--medlo);font-size:13px}
+.media-razvrsti select{height:42px;padding:0 12px;color:var(--besedilo);background:#17212c;border:1px solid var(--rob);border-radius:11px}
+.media-razvrsti select:focus{outline:0;border-color:var(--zelena)}
+.media-filter-viri{position:relative}
+.media-filter-viri>.gumb.aktiven{border-color:var(--zelena);color:var(--zelena)}
+.media-viri-filter{position:absolute;right:0;top:calc(100% + 8px);z-index:50;width:min(360px,86vw);max-height:60vh;overflow:auto;padding:14px;background:#0f1722;border:1px solid rgba(84,214,165,.4);border-radius:14px;box-shadow:0 22px 60px rgba(0,0,0,.6)}
+.media-viri-filter label{display:flex;align-items:flex-start;gap:10px;padding:8px 6px;border-radius:9px;cursor:pointer}
+.media-viri-filter label:hover{background:rgba(255,255,255,.05)}
+.media-viri-filter label b,.media-viri-filter label small{display:block}
+.media-viri-filter label small{color:var(--medlo);font-size:12px}
+.media-viri-filter input[type=checkbox]{margin-top:3px;accent-color:var(--zelena)}
+.media-viri-filter-lokalno{border-bottom:1px solid var(--rob);margin-bottom:6px;padding-bottom:12px!important}
+.media-viri-filter-seznam.onemogoceno{opacity:.45;pointer-events:none}
+.media-viri-filter-noga{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:10px;padding-top:10px;border-top:1px solid var(--rob)}
+.media-viri-filter-noga small{color:var(--medlo);font-size:12px}
