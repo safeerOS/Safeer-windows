@@ -223,6 +223,10 @@ class ShieldInterceptor(QWebEngineUrlRequestInterceptor):
 
     def interceptRequest(self, info: QWebEngineUrlRequestInfo) -> None:
         url = info.requestUrl().toString()
+        media_window = next((window for window in self.browser.windows
+                             if window.media_mode and window.embedded), None)
+        if media_window is not None:
+            self.browser.log_media_request(media_window, info)
         is_main = info.resourceType() == QWebEngineUrlRequestInfo.ResourceType.ResourceTypeMainFrame
         decision = policy.request_decision(url, is_main, info.firstPartyUrl().toString(),
                                            bool(self.browser.settings.get("adblock_enabled")))
@@ -230,7 +234,12 @@ class ShieldInterceptor(QWebEngineUrlRequestInterceptor):
             info.block(True)
             self.browser.note_blocked(url, decision)
             return
-        if self.browser.settings.get("gpc_dnt_enabled") and url.startswith(("http://", "https://")):
+        # Video-embed ponudniki (vidlink.pro, vidsrc.to in njihovi CDN-ji) pogosto
+        # zavrnejo zahtevo z zasebnostnima glavama Sec-GPC/DNT (npr. HTTP 428) -
+        # anti-bot zascita. Med aktivnim predvajanjem teh glav ne posiljamo, sicer
+        # ostajata vkljuceni povsod drugje v brskalniku.
+        if (self.browser.settings.get("gpc_dnt_enabled") and url.startswith(("http://", "https://"))
+                and media_window is None):
             info.setHttpHeader(QByteArray(b"Sec-GPC"), QByteArray(b"1"))
             info.setHttpHeader(QByteArray(b"DNT"), QByteArray(b"1"))
         if policy.is_google_auth_url(url):
@@ -243,6 +252,18 @@ class SafeerPage(QWebEnginePage):
         self.window_ref = window
         self.opened_as_popup = False
         self.committed_navigation = False
+        self.loadingChanged.connect(self._log_media_load)
+
+    def _log_media_load(self, info) -> None:
+        if not self.window_ref.media_mode:
+            return
+        status = info.status()
+        error = info.errorString()
+        host = (info.url().host() or "")[:120]
+        if error or "loadfailedstatus" in str(status).lower():
+            print(f"QT_MEDIA_LOAD failed host={host} code={info.errorCode()} error={error[:240]}", flush=True)
+        else:
+            print(f"QT_MEDIA_LOAD status={status} host={host}", flush=True)
 
     def acceptNavigationRequest(self, url: QUrl, nav_type: QWebEnginePage.NavigationType, is_main_frame: bool) -> bool:
         return self.window_ref.accept_navigation(self, url, nav_type, is_main_frame)
@@ -274,6 +295,12 @@ class SafeerPage(QWebEnginePage):
             payload = policy.parse_bridge_message(message)
             if payload is not None:
                 self.window_ref.app.on_bridge_message(self, payload)
+            return
+        if self.window_ref.media_mode:
+            lowered = message.lower()
+            if any(word in lowered for word in ("error", "failed", "blocked", "cors", "csp", "autoplay", "media")):
+                safe_message = re.sub(r"https?://[^\s\"'<>]+", "[url]", message)
+                print(f"QT_MEDIA_CONSOLE level={level} {safe_message[:400]}", flush=True)
 
 
 class Tabs(QTabWidget):
@@ -307,6 +334,7 @@ class SafeerBrowserApp(QObject):
         self.windows: List[BrowserWindow] = []
         self.downloads: List[QWebEngineDownloadRequest] = []
         self.blocked_log: List[Dict[str, str]] = []
+        self._media_request_counts: Dict[int, int] = {}
         self.closed_tabs: List[str] = []
         self.cookie_filter_status = "not-set"
         self.server: Optional[QLocalServer] = None
@@ -501,6 +529,20 @@ class SafeerBrowserApp(QObject):
         window.activateWindow()
 
     # -- shield counters ----------------------------------------------------
+    def log_media_request(self, window: "BrowserWindow", info: QWebEngineUrlRequestInfo) -> None:
+        """Zabeleži gostitelja in tip zahteve med Qt Media diagnostiko, brez poti/tokenov."""
+        key = id(window)
+        count = self._media_request_counts.get(key, 0)
+        if count >= 180:
+            return
+        self._media_request_counts[key] = count + 1
+        url = info.requestUrl()
+        host = (url.host() or "")[:120]
+        path = url.path().lower()
+        ext = os.path.splitext(path)[1]
+        kind = "stream" if ext in {".m3u8", ".mpd", ".mp4", ".m4v", ".webm", ".ts", ".m4s", ".aac", ".mp3", ".m4a", ".vtt"} else "resource"
+        print(f"QT_MEDIA_REQUEST #{count + 1} kind={kind} type={info.resourceType()} host={host}", flush=True)
+
     def note_blocked(self, url: str, decision: str) -> None:
         key = "total_threats_blocked" if decision == "block-threat" else "total_ads_blocked"
         self.settings.set(key, int(self.settings.get(key) or 0) + 1, save=False)
@@ -673,6 +715,10 @@ class BrowserWindow(QMainWindow):
         self.media_mode = enabled
         if not enabled:
             self.media_allowed_host = ""
+        else:
+            self.app._media_request_counts[id(self)] = 0
+            settings = self.profile.settings()
+            settings.setAttribute(QWebEngineSettings.WebAttribute.PlaybackRequiresUserGesture, False)
         self.tabs.tabBar().setVisible(not enabled)
         self.new_tab_button.setVisible(not enabled)
         self.statusBar().setVisible(not enabled)
