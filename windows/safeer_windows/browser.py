@@ -246,6 +246,11 @@ class ShieldInterceptor(QWebEngineUrlRequestInterceptor):
             info.setHttpHeader(QByteArray(b"User-Agent"), QByteArray(policy.WINDOWS_AUTH_FIREFOX_UA.encode("utf-8")))
 
 
+# Samopodpisana potrdila, ki jim zaupamo: SHA-256 (hex) potrdila Safeer Hub-a, s katerim je naprava
+# seznanjena. Samo za ogled zaslona z druge naprave (stran gledalca pride s Huba); nic drugega.
+ZAUPANA_POTRDILA: set = set()
+
+
 class SafeerPage(QWebEnginePage):
     def __init__(self, profile: QWebEngineProfile, window: "BrowserWindow", parent: QObject):
         super().__init__(profile, parent)
@@ -253,6 +258,25 @@ class SafeerPage(QWebEnginePage):
         self.opened_as_popup = False
         self.committed_navigation = False
         self.loadingChanged.connect(self._log_media_load)
+        try:
+            self.certificateError.connect(self._potrdilo_huba)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _potrdilo_huba(napaka) -> None:
+        """Sprejme samo potrdilo pripetega Huba (enak odtis); vse druge napake ostanejo zavrnjene."""
+        try:
+            veriga = napaka.certificateChain()
+            if veriga and ZAUPANA_POTRDILA:
+                import hashlib
+                odtis = hashlib.sha256(bytes(veriga[0].toDer())).hexdigest()
+                if odtis in ZAUPANA_POTRDILA:
+                    napaka.acceptCertificate()
+                    return
+            napaka.rejectCertificate()
+        except Exception:
+            pass
 
     def _log_media_load(self, info) -> None:
         if not self.window_ref.media_mode:
