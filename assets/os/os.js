@@ -2018,9 +2018,11 @@
     media.viri.forEach(function (source) {
       var row = el("div", "media-vir"); row.innerHTML = svg("splet");
       var info = el("div"); info.appendChild(el("b", "", ubezi(source.ime || source.url)));
-      var status = source.napaka ? source.napaka : (source.tip === "predvajalni_vir"
+      var status = source.napaka ? source.napaka : (source.vrsta === "streznik"
+        ? "Osebni strežnik · " + (source.ponudnik || "")
+        : (source.tip === "predvajalni_vir"
         ? "Predvajalni vir · " + t("mediaVirElementov", { n: source.stevilo || 0 })
-        : t("mediaVirElementov", { n: source.stevilo || 0 }));
+        : t("mediaVirElementov", { n: source.stevilo || 0 })));
       info.appendChild(el("small", source.napaka ? "media-vir-napaka" : "", ubezi(status + " · " + source.url)));
       row.appendChild(info);
       var refresh = el("button", "gumb-ikona", svg("ponovno")); refresh.title = t("mediaOsvezi");
@@ -2305,6 +2307,27 @@
       if (result && result.ok) $("mediaMapaPot").value = "";
       naloziMedia();
     }, function () { $("mediaVirSporocilo").textContent = t("mediaVirNapaka"); });
+  });
+  on("mediaDodajStreznik", "submit", function (event) {
+    event.preventDefault();
+    var provider = $("mediaStreznikVrsta").value;
+    var name = $("mediaStreznikIme").value.trim();
+    var url = $("mediaStreznikUrl").value.trim();
+    var username = $("mediaStreznikUporabnik").value.trim();
+    var secret = $("mediaStreznikSkrivnost").value;
+    if (!url || !secret) return;
+    $("mediaVirSporocilo").textContent = "Povezujem strežnik …";
+    klic("mediaDodajStreznik", [provider, name, url, username, secret]).then(function (result) {
+      $("mediaStreznikSkrivnost").value = "";
+      if (result && result.ok) {
+        $("mediaStreznikUrl").value = ""; $("mediaStreznikIme").value = "";
+        $("mediaVirSporocilo").textContent = "Strežnik je varno povezan.";
+      } else $("mediaVirSporocilo").textContent = (result && result.napaka) || t("mediaVirNapaka");
+      naloziMedia();
+    }, function () {
+      $("mediaStreznikSkrivnost").value = "";
+      $("mediaVirSporocilo").textContent = t("mediaVirNapaka");
+    });
   });
 
   // --- Safeer Media: Nastavitve, Uvoz & Izvoz JSON ---

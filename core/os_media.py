@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any, Iterable, Optional
 
 from . import zakoniti_viri
+from . import media_servers
 
 AUDIO = {".mp3", ".flac", ".ogg", ".oga", ".opus", ".m4a", ".aac", ".wav", ".wma"}
 VIDEO = {".mp4", ".mkv", ".webm", ".avi", ".mov", ".m4v", ".mpeg", ".mpg", ".ts", ".m3u8"}
@@ -66,6 +67,61 @@ def canonical_url(url: str) -> str:
 
 def _text(value: Any, limit: int = 300) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()[:limit]
+
+
+def _dpapi_protect(secret: str) -> str:
+    """Zaščiti poverilnico z Windows DPAPI, vezanim na trenutnega uporabnika."""
+    if os.name != "nt":
+        raise RuntimeError("Varno shranjevanje medijskih poverilnic zahteva Windows DPAPI.")
+    import base64
+    import ctypes
+    from ctypes import wintypes
+    class Blob(ctypes.Structure):
+        _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_byte))]
+    raw = secret.encode("utf-8")
+    source_buf = ctypes.create_string_buffer(raw)
+    source = Blob(len(raw), ctypes.cast(source_buf, ctypes.POINTER(ctypes.c_byte)))
+    target = Blob()
+    crypt32 = ctypes.windll.crypt32
+    crypt32.CryptProtectData.argtypes = [ctypes.POINTER(Blob), wintypes.LPCWSTR, ctypes.POINTER(Blob),
+                                         ctypes.c_void_p, ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(Blob)]
+    crypt32.CryptProtectData.restype = wintypes.BOOL
+    ctypes.windll.kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+    ctypes.windll.kernel32.LocalFree.restype = ctypes.c_void_p
+    ok = crypt32.CryptProtectData(ctypes.byref(source), "SafeerOS Media", None, None, None, 0, ctypes.byref(target))
+    if not ok:
+        raise OSError("Windows DPAPI zaščita ni uspela.")
+    try:
+        return "dpapi:" + base64.b64encode(ctypes.string_at(target.pbData, target.cbData)).decode("ascii")
+    finally:
+        ctypes.windll.kernel32.LocalFree(ctypes.cast(target.pbData, ctypes.c_void_p))
+
+
+def _dpapi_unprotect(value: str) -> str:
+    if os.name != "nt" or not value.startswith("dpapi:"):
+        raise RuntimeError("Zaščitene poverilnice niso dostopne v tej napravi.")
+    import base64
+    import ctypes
+    from ctypes import wintypes
+    class Blob(ctypes.Structure):
+        _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_byte))]
+    raw = base64.b64decode(value[6:])
+    source_buf = ctypes.create_string_buffer(raw)
+    source = Blob(len(raw), ctypes.cast(source_buf, ctypes.POINTER(ctypes.c_byte)))
+    target = Blob()
+    crypt32 = ctypes.windll.crypt32
+    crypt32.CryptUnprotectData.argtypes = [ctypes.POINTER(Blob), ctypes.c_void_p, ctypes.POINTER(Blob),
+                                           ctypes.c_void_p, ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(Blob)]
+    crypt32.CryptUnprotectData.restype = wintypes.BOOL
+    ctypes.windll.kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+    ctypes.windll.kernel32.LocalFree.restype = ctypes.c_void_p
+    ok = crypt32.CryptUnprotectData(ctypes.byref(source), None, None, None, None, 0, ctypes.byref(target))
+    if not ok:
+        raise OSError("Windows DPAPI odklep poverilnice ni uspel.")
+    try:
+        return ctypes.string_at(target.pbData, target.cbData).decode("utf-8")
+    finally:
+        ctypes.windll.kernel32.LocalFree(ctypes.cast(target.pbData, ctypes.c_void_p))
 
 
 def _absolute(base: str, value: Any) -> str:
@@ -1270,7 +1326,8 @@ def _series_catalog_card(item: dict) -> dict:
 class MediaCenter:
     """Trajen katalog virov z atomskim zapisom in enotno logiko za vse platforme."""
 
-    def __init__(self, config_dir: str, roots: Optional[Iterable[str | Path]] = None):
+    def __init__(self, config_dir: str, roots: Optional[Iterable[str | Path]] = None,
+                 secret_encryptor=None, secret_decryptor=None):
         self.config_dir = Path(config_dir)
         self.store_path = self.config_dir / "media.json"
         self.roots = [Path(path) for path in roots] if roots is not None else self._default_roots()
@@ -1280,6 +1337,9 @@ class MediaCenter:
         self._ping_cache: dict[str, tuple[float, float]] = {}
         self._ping_lock = threading.Lock()
         self._zakoniti_viri = zakoniti_viri.ZakonitiViri()
+        self._secret_encryptor = secret_encryptor or _dpapi_protect
+        self._secret_decryptor = secret_decryptor or _dpapi_unprotect
+        self._server_cache: dict[str, tuple[float, list[dict]]] = {}
 
     @staticmethod
     def _default_roots() -> list[Path]:
@@ -1311,8 +1371,77 @@ class MediaCenter:
 
     def sources(self) -> list[dict]:
         with self._lock:
-            return [{k: value for k, value in source.items() if k != "vnosi"}
-                    for source in self._load().get("viri", []) if isinstance(source, dict)]
+            data = self._load()
+            regular = [{k: value for k, value in source.items() if k != "vnosi"}
+                       for source in data.get("viri", []) if isinstance(source, dict)]
+            personal = [{k: value for k, value in source.items() if k not in ("secret_enc", "uporabnik")}
+                        for source in data.get("osebni_strezniki", []) if isinstance(source, dict)]
+            return regular + personal
+
+    def add_server(self, provider: str, name: str, url: str, username: str, secret: str) -> dict:
+        provider = _text(provider, 20).lower()
+        parsed = urllib.parse.urlsplit(_text(url, 1024))
+        username = _text(username, 160)
+        secret = str(secret or "")
+        if provider not in ("jellyfin", "emby", "navidrome", "plex"):
+            return {"ok": False, "napaka": "Nepodprta vrsta strežnika."}
+        if len(secret) > 4096:
+            return {"ok": False, "napaka": "Geslo ali žeton je predolg."}
+        if provider in ("jellyfin", "emby", "navidrome") and (not username or not secret):
+            return {"ok": False, "napaka": "Ta strežnik zahteva uporabniško ime in geslo."}
+        if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
+            return {"ok": False, "napaka": "Vnesi osnovni HTTPS naslov strežnika brez prijavnih podatkov ali parametrov."}
+        base = urllib.parse.urlunsplit(("https", parsed.netloc, parsed.path.rstrip("/"), "", ""))
+        raw_secret = secret
+        try:
+            auth = media_servers.authenticate(provider, base, username, raw_secret)
+            encrypted = self._secret_encryptor(auth.get("token") or raw_secret)
+        except Exception:
+            return {"ok": False, "napaka": "Prijava ni uspela; preveri HTTPS naslov in uporabniške podatke."}
+        source_id = "streznik-" + hashlib.sha256((provider + base + username).encode()).hexdigest()[:16]
+        source = {"id": source_id, "vrsta": "streznik", "ponudnik": provider,
+                  "ime": _text(name, 80) or urllib.parse.urlsplit(base).hostname,
+                  "url": base, "uporabnik": username, "user_id": auth.get("user_id", ""),
+                  "secret_enc": encrypted}
+        with self._lock:
+            data = self._load()
+            sources = data.setdefault("osebni_strezniki", [])
+            if any(item.get("id") == source_id for item in sources):
+                return {"ok": False, "napaka": "Ta strežnik je že dodan."}
+            sources.append(source)
+            self._save(data)
+        return {"ok": True, "vir": {k: v for k, v in source.items() if k not in ("secret_enc", "uporabnik")}}
+
+    def _personal_items(self, query: str) -> list[dict]:
+        with self._lock:
+            servers = list(self._load().get("osebni_strezniki", []))
+        result = []
+        now = time.time()
+        for server in servers:
+            provider = str(server.get("ponudnik") or "")
+            server_id = str(server.get("id") or "")
+            server_query = query if provider == "navidrome" else ""
+            key = server_id + ":" + server_query.casefold()
+            cached = self._server_cache.get(key)
+            if cached and now - cached[0] < 300:
+                rows = cached[1]
+                if query and provider != "navidrome":
+                    needle = query.casefold()
+                    rows = [item for item in rows if needle in " ".join((item.get("naslov", ""), item.get("izvajalec", ""),
+                                                                            item.get("album", ""), item.get("opis", ""))).casefold()]
+                result.extend(rows); continue
+            try:
+                secret = self._secret_decryptor(str(server.get("secret_enc") or ""))
+                rows = media_servers.catalog(provider, str(server.get("url") or ""), server, secret, server_query)
+                self._server_cache[key] = (now, rows)
+            except Exception:
+                rows = cached[1] if cached else []
+            if query and provider != "navidrome":
+                needle = query.casefold()
+                rows = [item for item in rows if needle in " ".join((item.get("naslov", ""), item.get("izvajalec", ""),
+                                                                        item.get("album", ""), item.get("opis", ""))).casefold()]
+            result.extend(rows)
+        return result
 
     def add_source(self, url: str, name: str = "") -> dict:
         canonical = canonical_url(url)
@@ -1343,6 +1472,14 @@ class MediaCenter:
     def remove_source(self, source_id: str) -> bool:
         with self._lock:
             data = self._load()
+            servers_before = len(data.get("osebni_strezniki", []))
+            data["osebni_strezniki"] = [server for server in data.get("osebni_strezniki", [])
+                                        if server.get("id") != source_id]
+            if len(data["osebni_strezniki"]) != servers_before:
+                self._server_cache = {key: value for key, value in self._server_cache.items()
+                                      if not key.startswith(source_id + ":")}
+                self._save(data)
+                return True
             before = len(data.get("viri", []))
             data["viri"] = [source for source in data.get("viri", []) if source.get("id") != source_id]
             if len(data["viri"]) == before:
@@ -1367,6 +1504,11 @@ class MediaCenter:
             return payload, response.headers.get_content_type(), final_url
 
     def refresh_source(self, source_id: str) -> dict:
+        if source_id.startswith("streznik-"):
+            with self._lock:
+                self._server_cache = {key: value for key, value in self._server_cache.items()
+                                      if not key.startswith(source_id + ":")}
+            return {"ok": any(item.get("id") == source_id for item in self.sources())}
         with self._lock:
             source = next((item.copy() for item in self._load().get("viri", [])
                            if item.get("id") == source_id), None)
@@ -1658,7 +1800,10 @@ class MediaCenter:
         lawful = self._zakoniti_viri.get(_text(query, 120), configured_hosts)
         if kind not in ("", "vse"):
             lawful = [item for item in lawful if item.get("vrsta") == kind]
-        merged = merge_duplicates(local + remote + dynamic + lawful)
+        personal = self._personal_items(_text(query, 120))
+        if kind not in ("", "vse"):
+            personal = [item for item in personal if item.get("vrsta") == kind]
+        merged = merge_duplicates(local + remote + dynamic + lawful + personal)
         needle = _text(query, 120).casefold()
         if needle:
             def zadetek(item: dict) -> bool:

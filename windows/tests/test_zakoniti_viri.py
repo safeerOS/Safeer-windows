@@ -1,3 +1,4 @@
+import base64
 import json
 import tempfile
 import unittest
@@ -6,6 +7,7 @@ from unittest import mock
 
 from core.zakoniti_viri import ZakonitiViri
 from core.os_media import MediaCenter, parse_payload
+from core import media_servers
 
 
 class Response:
@@ -92,6 +94,64 @@ class TestZakonitiViri(unittest.TestCase):
             self.assertEqual({item["vrsta"] for item in items}, {"slika", "glasba"})
             self.assertFalse(center.add_local_root(directory)["ok"])
             self.assertIn("NFS", center.add_local_root("nfs://server/share")["napaka"])
+
+    def test_personal_server_credentials_are_encrypted_and_not_exported(self):
+        with tempfile.TemporaryDirectory() as directory:
+            center = MediaCenter(directory, roots=[],
+                                 secret_encryptor=lambda text: "protected:" + base64.b64encode(text.encode()).decode(),
+                                 secret_decryptor=lambda text: base64.b64decode(text.removeprefix("protected:")).decode())
+            with mock.patch("core.os_media.media_servers.authenticate", return_value={"token": "private-token", "user_id": "u1"}):
+                result = center.add_server("jellyfin", "Domači", "https://media.example", "matej", "password")
+            self.assertTrue(result["ok"])
+            saved = json.loads(center.store_path.read_text())
+            stored = saved["osebni_strezniki"][0]
+            self.assertTrue(stored["secret_enc"].startswith("protected:"))
+            self.assertNotIn("private-token", center.store_path.read_text())
+            self.assertNotIn("password", center.store_path.read_text())
+            self.assertNotIn("secret_enc", center.sources()[-1])
+            self.assertEqual(center.export_json()["viri"], [])
+
+    def test_jellyfin_catalog_maps_movie_music_and_uses_official_api(self):
+        replies = [Response({"Items": [
+            {"Id": "m1", "Name": "Film", "Type": "Movie", "RunTimeTicks": 36000000000},
+            {"Id": "a1", "Name": "Song", "Type": "Audio", "Album": "Record", "AlbumArtist": "Artist"},
+        ]})]
+        urls = []
+        def fake_request(url, headers=None, body=None):
+            urls.append((url, headers or {}))
+            return replies.pop(0).payload
+        with mock.patch("core.media_servers._request", side_effect=fake_request):
+            rows = media_servers.catalog("jellyfin", "https://media.example", {"id": "s1", "ime": "Domači", "user_id": "u1"}, "token")
+        self.assertEqual([row["vrsta"] for row in rows], ["film", "glasba"])
+        self.assertIn("/Users/u1/Items", urls[0][0])
+        self.assertEqual(urls[0][1]["X-Emby-Token"], "token")
+        self.assertIn("api_key=token", rows[0]["url"])
+
+    def test_plex_reads_library_xml_and_creates_tokenized_stream(self):
+        replies = [b'<MediaContainer><Directory key="1"/></MediaContainer>',
+                   b'<MediaContainer><Video ratingKey="7" title="Open movie" type="movie"><Media><Part key="/library/parts/9/file.mp4"/></Media></Video></MediaContainer>']
+        urls = []
+        def fake_request(url, headers=None, body=None):
+            urls.append(url)
+            return replies.pop(0)
+        with mock.patch("core.media_servers._request", side_effect=fake_request):
+            rows = media_servers.catalog("plex", "https://plex.example", {"id": "p1", "ime": "Plex"}, "plex-token")
+        self.assertEqual(rows[0]["vrsta"], "film")
+        self.assertIn("/library/parts/9/file.mp4?X-Plex-Token=plex-token", rows[0]["url"])
+        self.assertTrue(all("plex-token" not in url for url in urls))
+
+    def test_navidrome_uses_subsonic_token_hash_and_stream_api(self):
+        urls = []
+        payload = json.dumps({"subsonic-response": {"randomSongs": {"song": [
+            {"id": "song1", "title": "A Tune", "artist": "Artist", "album": "Album", "duration": 210}
+        ]}}}).encode()
+        with mock.patch("core.media_servers._request", side_effect=lambda url, **kwargs: (urls.append(url) or payload)):
+            rows = media_servers.catalog("navidrome", "https://music.example", {
+                "id": "n1", "ime": "Navidrome", "uporabnik": "matej"}, "private-password")
+        self.assertEqual(rows[0]["vrsta"], "glasba")
+        self.assertIn("/rest/stream.view", rows[0]["url"])
+        self.assertIn("t=", urls[0])
+        self.assertNotIn("private-password", urls[0])
 
 
 if __name__ == "__main__":
