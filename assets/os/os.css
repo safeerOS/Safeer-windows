@@ -618,3 +618,9 @@ div.vrstica { cursor: default; }
   .kategorije-vrsta { grid-template-columns: repeat(3, 1fr); }
   .domov-sredina-mreza, .nedavno-vrsta, .hitri-vrsta-nov { grid-template-columns: 1fr; }
 }
+
+/* Kartica Spletne aplikacije na domaci strani */
+.spletne-mreza-mini { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 10px; margin-top: 12px; max-height: 260px; overflow-y: auto; }
+.spletne-mreza-mini .ploscica { width: auto; min-height: 92px; }
+.spletne-mreza-mini .drobno { grid-column: 1 / -1; margin: 6px 0; opacity: .75; }
