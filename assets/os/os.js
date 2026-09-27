@@ -517,8 +517,54 @@
     b.addEventListener("click", function () { obvesti(t("odpiram", { ime: a.ime })); otvoriSpletnoStran(a.url); });
     return b;
   }
-  // Kartica "Spletne aplikacije" na novi domaci strani: vse dodane spletne
-  // aplikacije kot ploscice, klik jo odpre v vgrajenem Safeer brskalniku.
+  // Kartica "Spletne aplikacije" na domaci strani. Brez drsnika: pokaze toliko
+  // ploscic, kolikor jih gre v 2 vrsti (3 na visokem zaslonu); ce jih je vec,
+  // je zadnja ploscica "Vec aplikacij (+N)", ki odpre pregled vseh. Vrstni red
+  // si uporabnik nastavi sam (vlecenje ali puscici) - prve so vidne tukaj.
+  function premakniSpletno(od, na) {
+    var seznam = spletne().slice();
+    if (od === na || od < 0 || na < 0 || od >= seznam.length || na >= seznam.length) return;
+    var a = seznam.splice(od, 1)[0];
+    seznam.splice(na, 0, a);
+    shraniSpletne(seznam);
+    if ($("slojVecApp") && $("slojVecApp").classList.contains("viden")) narisiVseSpletne();
+  }
+  function urejljivaPloscica(a, i, vPregledu) {
+    var b = ploscicaSpletne(a, i);
+    b.draggable = true;
+    b.dataset.indeks = i;
+    b.addEventListener("dragstart", function (e) {
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", String(i));
+      b.classList.add("vlecem");
+    });
+    b.addEventListener("dragend", function () { b.classList.remove("vlecem"); });
+    b.addEventListener("dragover", function (e) { e.preventDefault(); b.classList.add("cilj-spusta"); });
+    b.addEventListener("dragleave", function () { b.classList.remove("cilj-spusta"); });
+    b.addEventListener("drop", function (e) {
+      e.preventDefault(); b.classList.remove("cilj-spusta");
+      var od = parseInt(e.dataTransfer.getData("text/plain"), 10);
+      if (!isNaN(od)) premakniSpletno(od, i);
+    });
+    // Puscici za premik (miska, tipkovnica, daljinec).
+    var pus = el("span", "premik");
+    [["nazaj", -1, "Premakni levo"], ["desno", 1, "Premakni desno"]].forEach(function (d) {
+      var g = el("span", "premik-gumb", svg(d[0]));
+      g.title = d[2]; g.setAttribute("role", "button"); g.tabIndex = 0;
+      var akcija = function (e) { e.stopPropagation(); e.preventDefault(); premakniSpletno(i, i + d[1]); };
+      g.addEventListener("click", akcija);
+      g.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") akcija(e); });
+      pus.appendChild(g);
+    });
+    b.appendChild(pus);
+    b.addEventListener("keydown", function (e) {
+      if (!e.altKey) return;
+      if (e.key === "ArrowLeft") { e.preventDefault(); premakniSpletno(i, i - 1); }
+      if (e.key === "ArrowRight") { e.preventDefault(); premakniSpletno(i, i + 1); }
+    });
+    if (vPregledu) b.addEventListener("click", function () { zapriSloje(); });
+    return b;
+  }
   function narisiDomaceSpletne() {
     var cilj = $("domaceSpletneApp");
     if (!cilj) return;
@@ -528,7 +574,28 @@
       cilj.appendChild(el("p", "drobno", ubezi("Še ni spletnih aplikacij. Klikni »+ Dodaj« in vpiši naslov strani.")));
       return;
     }
-    seznam.forEach(function (a, i) { cilj.appendChild(ploscicaSpletne(a, i)); });
+    var sirina = cilj.clientWidth || 600, razmik = 12, najmanj = 112;
+    var stolpcev = Math.max(2, Math.floor((sirina + razmik) / (najmanj + razmik)));
+    var vrstic = window.innerHeight >= 1000 ? 3 : 2;
+    var mest = stolpcev * vrstic;
+    cilj.style.gridTemplateColumns = "repeat(" + stolpcev + ", minmax(0, 1fr))";
+    var prikazi = seznam.length > mest ? mest - 1 : seznam.length;
+    seznam.slice(0, prikazi).forEach(function (a, i) { cilj.appendChild(urejljivaPloscica(a, i, false)); });
+    if (seznam.length > prikazi) {
+      var vec = el("button", "ploscica vec-aplikacij", svg("programi") + '<span class="ime">Več aplikacij</span><span class="vec-stevilo">+' + (seznam.length - prikazi) + "</span>");
+      vec.addEventListener("click", odpriVecSpletnih);
+      cilj.appendChild(vec);
+    }
+  }
+  function narisiVseSpletne() {
+    var cilj = $("vseSpletneApp");
+    if (!cilj) return;
+    cilj.innerHTML = "";
+    spletne().forEach(function (a, i) { cilj.appendChild(urejljivaPloscica(a, i, true)); });
+  }
+  function odpriVecSpletnih() {
+    narisiVseSpletne();
+    $("slojVecApp").classList.add("viden");
   }
   function narisiDomov() {
     narisiDomaceSpletne();
@@ -1873,6 +1940,8 @@
     on("dodajPreklici", "click", zapriSloje);
     // Gumb "+ Dodaj" na kartici Spletne aplikacije (nova domaca stran).
     on("gumbOdpriDodajApp", "click", odpriDodaj);
+    on("vecAppZapri", "click", zapriSloje);
+    on("vecAppDodaj", "click", function () { zapriSloje(); odpriDodaj(); });
     on("obrazecDodaj", "submit", function (e) {
       e.preventDefault();
       var naslov = normalizirajNaslov($("dodajNaslov").value);
