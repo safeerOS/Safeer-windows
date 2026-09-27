@@ -31,6 +31,7 @@ from typing import Any, Iterable, Optional
 
 from . import zakoniti_viri
 from . import media_servers
+from . import watch_providers
 
 AUDIO = {".mp3", ".flac", ".ogg", ".oga", ".opus", ".m4a", ".aac", ".wav", ".wma"}
 VIDEO = {".mp4", ".mkv", ".webm", ".avi", ".mov", ".m4v", ".mpeg", ".mpg", ".ts", ".m3u8"}
@@ -43,6 +44,23 @@ TRACKING_QUERY = {"fbclid", "gclid", "mc_cid", "mc_eid", "ref", "source"}
 TMDB_API_KEY = os.environ.get("SAFEER_TMDB_API_KEY", "844dba0bfd8f3a4f3799f6130ef9e335")
 TMDB_API = "https://api.themoviedb.org/3"
 TMDB_IMAGE = "https://image.tmdb.org/t/p"
+
+# Uradne strani storitev; razsiritev preslikave ostane na enem mestu.
+WATCH_PROVIDER_SEARCH = {
+    "netflix": "https://www.netflix.com/search?q=",
+    "hbo max": "https://www.max.com/search?q=",
+    "max": "https://www.max.com/search?q=",
+    "skyshowtime": "https://www.skyshowtime.com/search?q=",
+    "disney plus": "https://www.disneyplus.com/search?query=",
+    "disney+": "https://www.disneyplus.com/search?query=",
+    "apple tv": "https://tv.apple.com/search?term=",
+    "apple tv store": "https://tv.apple.com/search?term=",
+    "rakuten tv": "https://rakuten.tv/search?q=",
+    "amazon prime video": "https://www.primevideo.com/search?phrase=",
+    "prime video": "https://www.primevideo.com/search?phrase=",
+    "amazon video": "https://www.primevideo.com/search?phrase=",
+    "voyo": "https://voyo.si/iskanje?q=",
+}
 
 
 def canonical_url(url: str) -> str:
@@ -1742,6 +1760,85 @@ class MediaCenter:
         self._tmdb_cache[url] = (time.time(), data)
         return data
 
+    def watch_regions(self, language: str = "sl") -> dict:
+        """List TMDB regions, cached for seven days; soft-fail on network errors."""
+        locale = {"sl": "sl-SI", "en": "en-GB", "de": "de-DE", "es": "es-ES",
+                  "fr": "fr-FR", "it": "it-IT"}.get(str(language).split("-")[0], "en-GB")
+        key = "watch-regions:" + locale
+        cached = self._tmdb_cache.get(key)
+        if cached and time.time() - cached[0] < 7 * 24 * 60 * 60:
+            return cached[1]
+        query = urllib.parse.urlencode({"api_key": TMDB_API_KEY, "language": locale})
+        request = urllib.request.Request(TMDB_API + "/watch/providers/regions?" + query,
+                                         headers={"User-Agent": "SafeerOS/1.0", "Accept": "application/json"})
+        try:
+            with urllib.request.urlopen(request, timeout=10) as response:
+                data = json.loads(response.read(MAX_DOWNLOAD).decode("utf-8"))
+            rows = data.get("results", []) if isinstance(data, dict) else []
+            regions = [{"code": str(row.get("iso_3166_1") or "").upper(),
+                        "native_name": str(row.get("native_name") or ""),
+                        "english_name": str(row.get("english_name") or "")}
+                       for row in rows if isinstance(row, dict) and re.fullmatch(
+                           r"[A-Z]{2}", str(row.get("iso_3166_1") or "").upper())]
+            result = {"regions": regions}
+            self._tmdb_cache[key] = (time.time(), result)
+            return result
+        except Exception:
+            return cached[1] if cached else {"regions": []}
+
+    def _watch_providers(self, media_type: str, tmdb_id: int, country: str, title: str = "") -> dict:
+        key = f"watch-providers:{media_type}:{int(tmdb_id)}:{country}"
+        cached = self._tmdb_cache.get(key)
+        if cached and time.time() - cached[0] < 12 * 60 * 60:
+            return cached[1]
+        try:
+            raw = self._tmdb(f"/{media_type}/{int(tmdb_id)}/watch/providers")
+            region = raw.get("results", {}).get(country, {}) if isinstance(raw, dict) else {}
+            groups = []
+            for group_id, keys, group_title in (
+                ("naročnina", ("flatrate",), "Naročnina"),
+                ("brezplačno", ("free", "ads"), "Brezplačno"),
+                ("izposoja", ("rent",), "Izposoja"),
+                ("nakup", ("buy",), "Nakup"),
+            ):
+                entries = []
+                seen = set()
+                for key_name in keys:
+                    for provider in region.get(key_name, []) if isinstance(region, dict) else []:
+                        if not isinstance(provider, dict):
+                            continue
+                        name = str(provider.get("provider_name") or "").strip()
+                        if not name or name.casefold() in seen:
+                            continue
+                        seen.add(name.casefold())
+                        base = WATCH_PROVIDER_SEARCH.get(name.casefold())
+                        encoded_title = urllib.parse.quote(title) if base else ""
+                        url = base + encoded_title if base else str(region.get("link") or "")
+                        logo_path = str(provider.get("logo_path") or "")
+                        entries.append({"ime": name,
+                                        "logo": TMDB_IMAGE + "/w92" + logo_path if logo_path.startswith("/") else "",
+                                        "povezava": url})
+                if entries:
+                    groups.append({"id": group_id, "naziv": group_title, "ponudniki": entries})
+            result = {"drzava": country, "skupine": groups, "link": str(region.get("link") or "")}
+            self._tmdb_cache[key] = (time.time(), result)
+            return result
+        except Exception:
+            return cached[1] if cached else {"drzava": country, "skupine": [], "link": ""}
+
+    def watch_country_settings(self, selected: str = "auto", language: str = "sl") -> dict:
+        detected = watch_providers.detect_country(language)
+        regions = self.watch_regions(language).get("regions", [])
+        names = {row["code"]: row.get("native_name") or row.get("english_name") or row["code"]
+                 for row in regions}
+        selected = str(selected or "auto").upper()
+        country = detected if selected == "AUTO" else selected
+        if not re.fullmatch(r"[A-Z]{2}", country):
+            country, selected = detected, "AUTO"
+        return {"izbrana": "auto" if selected == "AUTO" else country, "drzava": country,
+                "ime_drzave": names.get(country, country), "zaznana": detected,
+                "ime_zaznane": names.get(detected, detected), "regions": regions}
+
     @staticmethod
     def _tmdb_tip(value: str) -> str:
         return "serija" if value == "tv" else "film"
@@ -1881,7 +1978,7 @@ class MediaCenter:
             "mape": [str(path) for path in self.roots]
         }
 
-    def details(self, item_id: str) -> dict:
+    def details(self, item_id: str, country: str = "auto", language: str = "sl") -> dict:
         item = self.resolve(item_id)
         if not item or not item.get("tmdb_id"):
             return item or {}
@@ -1893,9 +1990,14 @@ class MediaCenter:
         seasons = [{"stevilka": s.get("season_number"), "ime": s.get("name") or f"Sezona {s.get('season_number')}",
                     "epizod": s.get("episode_count") or 0}
                    for s in raw.get("seasons", []) if int(s.get("season_number") or 0) > 0]
+        country_settings = self.watch_country_settings(country, language)
+        providers = self._watch_providers(media_type, int(item["tmdb_id"]),
+                                          country_settings["drzava"], str(item.get("naslov") or ""))
+        providers.update({"ime_drzave": country_settings["ime_drzave"],
+                          "vir": "JustWatch prek TMDB"})
         return dict(item, opis=raw.get("overview") or item.get("opis", ""),
                     ocena=round(float(raw.get("vote_average") or item.get("ocena") or 0), 1),
-                    sezone=seasons, media_type=media_type)
+                    sezone=seasons, media_type=media_type, kje_gledati=providers)
 
     def season(self, tmdb_id: int, season_number: int) -> dict:
         try:

@@ -252,6 +252,7 @@
             <button class="gumb-ikona" id="mediaPodrobnostiZapri" title="Zapri"><svg data-ikona="x"></svg></button>
           </div>
           <div class="media-podrobnosti-junak" id="mediaPodrobnostiJunak"></div>
+          <section class="media-kje-gledati" id="mediaWatchProviders" aria-live="polite"></section>
           <h3 id="mediaSezoneNaslov">Sezone</h3><div class="media-sezone" id="mediaSezone"></div>
           <h3 id="mediaEpizodeNaslov">Epizode</h3><div class="media-epizode" id="mediaEpizode"></div>
         </div>
@@ -365,6 +366,11 @@
         <div class="hitre" id="hitreNastavitve"></div>
         <h2 data-t="scit"></h2>
         <div class="hitre" id="blokScit"></div>
+        <h2 data-t="mediaWatchSettingsTitle">Media Center</h2>
+        <div class="media-drzava-nastavitev">
+          <label for="mediaWatchCountry" data-t="mediaWatchCountryLabel">Country for Where to watch</label>
+          <select id="mediaWatchCountry" aria-label="Country for Where to watch"></select>
+        </div>
         <h2>Safeer OS</h2>
         <div class="hitre">
           <button class="stikalo" id="stikaloCelozaslonsko" role="switch" aria-checked="true"><svg data-ikona="celozaslonsko"></svg><div><span data-t="celozaslonsko"></span><small data-t="celozaslonskoPod"></small></div><i></i></button>

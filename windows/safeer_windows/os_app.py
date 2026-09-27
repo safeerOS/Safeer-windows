@@ -7,6 +7,7 @@ import json
 import mimetypes
 import os
 import platform
+import re
 import socket
 import socketserver
 import sys
@@ -823,7 +824,25 @@ class SafeerOsWindow(QMainWindow):
             return self.media_center.catalog(query, kind, genre, page)
 
         if metoda == "mediaPodrobnosti":
-            return self.media_center.details(str(a[0]) if a else "")
+            shramba = os_backend_win.nalozi_shrambo()
+            language = str(a[1] if len(a) > 1 else shramba.get("jezik") or "sl")
+            return self.media_center.details(str(a[0]) if a else "",
+                                             str(shramba.get("media_watch_country") or "auto"), language)
+
+        if metoda == "mediaWatchSettings":
+            shramba = os_backend_win.nalozi_shrambo()
+            language = str(a[0] if a else shramba.get("jezik") or "sl")
+            return self.media_center.watch_country_settings(
+                str(shramba.get("media_watch_country") or "auto"), language)
+
+        if metoda == "mediaWatchCountry":
+            country = str(a[0] if a else "auto").strip().upper()
+            if country != "AUTO" and not re.fullmatch(r"[A-Z]{2}", country):
+                raise ValueError("Neveljavna koda države.")
+            shramba = os_backend_win.nalozi_shrambo()
+            shramba["media_watch_country"] = "auto" if country == "AUTO" else country
+            os_backend_win.shrani_shrambo(shramba)
+            return True
 
         if metoda == "mediaSezona":
             tmdb_id = int(a[0]) if a else 0
