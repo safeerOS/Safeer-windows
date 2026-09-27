@@ -21,6 +21,7 @@
       <button data-razdelek="programi"><svg data-ikona="programi"></svg><span data-t="programi">Programi</span></button>
       <button data-razdelek="datoteke"><svg data-ikona="mapa"></svg><span data-t="datoteke">Datoteke</span></button>
       <button data-razdelek="splet"><svg data-ikona="splet"></svg><span>Splet</span></button>
+      <button data-razdelek="zapiski"><svg data-ikona="datoteka"></svg><span>Zapiski</span></button>
       <button data-razdelek="nastavitve"><svg data-ikona="drsniki"></svg><span data-t="nastavitve">Nastavitve</span></button>
     </nav>
     <div class="stranska-dno">
@@ -265,6 +266,35 @@
           <div>
             <div class="drobtine" id="drobtine"></div>
             <div class="vrstice" id="vsebinaMape"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ZAPISKI (po zgledu Deta Surf): zapiski z @-omembami in izrezki s spleta z virom -->
+      <section class="razdelek" id="r-zapiski">
+        <h1>Zapiski</h1>
+        <p>Zapiski z omembami tvojih datotek, strani, programov in drugih zapiskov. V Spletu z gumbom »V zapisek« dodaš izbrano besedilo z virom. Vse ostane na tem računalniku.</p>
+        <div class="zapiski-postavitev">
+          <div class="zapiski-seznam">
+            <button class="gumb" id="zapisekNov">+ Nov zapisek</button>
+            <label class="media-iskanje"><svg data-ikona="isci"></svg><input id="zapiskiIskanje" type="search" placeholder="Išči po zapiskih …"></label>
+            <div id="zapiskiVrstice"></div>
+          </div>
+          <div class="zapisek-urejevalnik" id="zapisekUrejevalnik" hidden>
+            <div class="zapisek-glava">
+              <input id="zapisekNaslov" type="text" maxlength="160" placeholder="Naslov">
+              <button class="gumb" id="zapisekPogled" type="button">Pogled</button>
+              <button class="gumb" id="zapisekPripni" type="button">Pripni</button>
+              <button class="gumb" id="zapisekIzbrisi" type="button">Izbriši</button>
+            </div>
+            <textarea id="zapisekBesedilo" spellcheck="true" placeholder="Piši … Z @ omeniš datoteko, stran, program ali drug zapisek."></textarea>
+            <div class="zapisek-prikaz" id="zapisekPrikaz" hidden></div>
+            <div class="zapisek-omembe-okno" id="zapisekOmembeOkno" hidden></div>
+            <div class="zapisek-noga">
+              <div><h3>Viri v zapisku</h3><div class="zapisek-cipi" id="zapisekViri"></div></div>
+              <div><h3>Omenjajo ga</h3><div class="zapisek-cipi" id="zapisekPovratne"></div></div>
+              <span class="namig" id="zapisekStanje"></span>
+            </div>
           </div>
         </div>
       </section>

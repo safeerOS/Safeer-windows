@@ -710,6 +710,15 @@ class BrowserWindow(QMainWindow):
         self.shield_label = QLabel(self)
         self.shield_label.setObjectName("shield")
         self.toolbar.addWidget(self.shield_label)
+        # Safeer OS: izbrano besedilo (ali stran) z virom v zapisek. Nastavi ga okno Safeer OS.
+        self.na_zapisek = None
+        self.zapisek_button: Optional[QToolButton] = None
+        if embedded:
+            self.zapisek_button = self._tool("plus", lambda: self.na_zapisek and self.na_zapisek())
+            self.zapisek_button.setText("V zapisek")
+            self.zapisek_button.setToolTip("Dodaj izbrano besedilo ali to stran v zapisek (z virom)")
+            self.zapisek_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+            self.zapisek_button.hide()
         self.star_button = self._tool("star", self.add_current_to_home)
         self.downloads_button = self._tool("download", self.show_downloads)
         self.menu_button = QToolButton(self)
@@ -769,6 +778,8 @@ class BrowserWindow(QMainWindow):
                 self._set_toolbar_widget_visible(widget, True)
             if self.safeer_home_button is not None:
                 self.safeer_home_button.show()
+            if self.zapisek_button is not None:
+                self._set_toolbar_widget_visible(self.zapisek_button, True)
             self.address.setPlaceholderText("Išči ali vnesi spletni naslov")
         else:
             self.tabs.tabBar().show()
@@ -779,6 +790,8 @@ class BrowserWindow(QMainWindow):
                 self._set_toolbar_widget_visible(widget, True)
             if self.safeer_home_button is not None:
                 self.safeer_home_button.show()
+            if self.zapisek_button is not None:
+                self._set_toolbar_widget_visible(self.zapisek_button, False)
             self.address.setPlaceholderText(tr(self.app, "address"))
 
     def _set_toolbar_widget_visible(self, widget: QWidget, visible: bool) -> None:
