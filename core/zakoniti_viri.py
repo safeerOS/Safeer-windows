@@ -8,7 +8,7 @@ import time
 import unicodedata
 import urllib.parse
 import urllib.request
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeout
 from typing import Any
 
 PEERTUBE_INSTANCES = ("peertube.tv", "tilvids.com", "framatube.org", "peertube.uno", "video.blender.org")
@@ -58,15 +58,29 @@ class ZakonitiViri:
 
     def _video_hosts(self, configured: list[str]) -> list[str]:
         hosts = list(PEERTUBE_INSTANCES)
+        candidates = []
         for value in configured:
             try:
                 parsed = urllib.parse.urlsplit(value if "://" in value else "https://" + value)
                 host = (parsed.hostname or "").lower()
                 if parsed.scheme == "https" and host and host not in hosts:
-                    hosts.append(host)
+                    candidates.append(host)
             except ValueError:
                 pass
+        candidates = list(dict.fromkeys(candidates))
+        with ThreadPoolExecutor(max_workers=min(12, len(candidates) or 1)) as pool:
+            for host, valid in zip(candidates, pool.map(lambda candidate: self._cached(
+                    "pt-config:" + candidate, lambda: self._valid_peertube(candidate)), candidates)):
+                if valid:
+                    hosts.append(host)
         return hosts
+
+    def _valid_peertube(self, host: str) -> bool:
+        try:
+            config = self._json("https://%s/api/v1/config" % host)
+            return isinstance(config, dict) and isinstance(config.get("instance"), dict)
+        except Exception:
+            return False
 
     def _peertube_video(self, row: dict, host: str, category: str) -> dict | None:
         if not isinstance(row, dict) or row.get("nsfw"):
@@ -120,11 +134,19 @@ class ZakonitiViri:
             except Exception:
                 pass
             if not result:
-                for host in hosts:
+                def server_search(host):
                     path = "/api/v1/search/videos?" + urllib.parse.urlencode({"search": query, "sort": "-match", "nsfw": "false", "count": 20})
-                    result.extend(self._peer_rows(host, path, "Iskanje"))
-                    if result:
-                        break
+                    return self._peer_rows(host, path, "Iskanje")
+                with ThreadPoolExecutor(max_workers=min(8, len(hosts))) as pool:
+                    futures = [pool.submit(server_search, host) for host in hosts]
+                    try:
+                        for future in as_completed(futures, timeout=_TIMEOUT):
+                            rows = future.result()
+                            if rows:
+                                result.extend(rows)
+                                break
+                    except FuturesTimeout:
+                        pass
             terms = [word for word in _norm(query).split() if len(word) > 1]
             if terms:
                 result = [item for item in result if all(term in _norm(" ".join((item["naslov"], item["izvajalec"], item["opis"]))) for term in terms)]
@@ -139,10 +161,12 @@ class ZakonitiViri:
         routes = (("trending", "/api/v1/videos?sort=-trending&count=18&nsfw=false&isLocal=true"),
                   ("Najbolj gledani", "/api/v1/videos?sort=-views&count=18&nsfw=false&isLocal=true"),
                   ("Nedavno", "/api/v1/videos?sort=-publishedAt&count=18&nsfw=false&isLocal=true"))
-        for label, path in routes:
-            with ThreadPoolExecutor(max_workers=min(8, len(hosts))) as pool:
-                for rows in pool.map(lambda host: self._peer_rows(host, path, label), hosts):
-                    result.extend(rows)
+        jobs = [(host, label, path) for label, path in routes for host in hosts]
+        with ThreadPoolExecutor(max_workers=min(15, len(jobs))) as pool:
+            futures = [pool.submit(self._peer_rows, host, path, label) for host, label, path in jobs]
+            for future in futures:
+                try: result.extend(future.result())
+                except Exception: pass
         unique = {}
         for item in result:
             unique.setdefault(item["id"], item)
@@ -182,8 +206,18 @@ class ZakonitiViri:
         query = dict(params, client_id=JAMENDO_CLIENT_ID, format="json")
         url = "https://api.jamendo.com/v3.0/%s?%s" % (path, urllib.parse.urlencode(query))
         def fetch():
-            data = self._json(url)
-            return [self._track(row) for row in data.get("results", []) if row.get("audio", "").startswith("https://")]
+            for attempt in range(2):
+                try:
+                    data = self._json(url)
+                    rows = [self._track(row) for row in data.get("results", [])
+                            if row.get("audio", "").startswith("https://")]
+                    if rows or attempt:
+                        return rows
+                except Exception:
+                    if attempt:
+                        raise
+                time.sleep(0.3)
+            return []
         return self._cached("jam:" + path + ":" + urllib.parse.urlencode(params), fetch)
 
     @staticmethod

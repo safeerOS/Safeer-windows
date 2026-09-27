@@ -125,6 +125,10 @@ def _dpapi_unprotect(value: str) -> str:
 
 
 def _absolute(base: str, value: Any) -> str:
+    data_url = str(value or "").strip()
+    if (len(data_url) <= 2 * 1024 * 1024
+            and re.fullmatch(r"data:image/(?:jpeg|png|gif|webp);base64,[A-Za-z0-9+/]*={0,2}", data_url)):
+        return data_url
     raw = _text(value, 4096)
     if not raw:
         return ""
@@ -1605,6 +1609,17 @@ class MediaCenter:
 
     def _local_items(self) -> list[dict]:
         items = []
+        def tag_value(tags, *keys):
+            for key in keys:
+                value = tags.get(key) if tags else None
+                if value is None:
+                    continue
+                value = getattr(value, "text", value)
+                if isinstance(value, (list, tuple)):
+                    value = value[0] if value else ""
+                if value:
+                    return str(value)
+            return ""
         custom = [Path(value) for value in self._load().get("lokalne_mape", []) if isinstance(value, str)]
         for root in dict.fromkeys(self.roots + custom):
             if not root.is_dir():
@@ -1624,23 +1639,33 @@ class MediaCenter:
                     title, artist, album, year, image = path.stem, "", "", 0, ""
                     if ext in AUDIO:
                         try:
+                            import base64
                             from mutagen import File as MutagenFile
                             audio = MutagenFile(str(path), easy=True) or {}
-                            artist = str((audio.get("artist") or audio.get("albumartist") or [""])[0])
-                            album = str((audio.get("album") or [""])[0])
-                            title = str((audio.get("title") or [path.stem])[0])
-                            date_tag = str((audio.get("date") or [""])[0])
+                            artist = tag_value(audio, "artist", "albumartist", "TPE1", "TPE2", "ARTIST")
+                            album = tag_value(audio, "album", "TALB", "ALBUM")
+                            title = tag_value(audio, "title", "TIT2", "TITLE") or path.stem
+                            date_tag = tag_value(audio, "date", "year", "TDRC", "TYER", "DATE")
                             match = re.match(r"\d{4}", date_tag)
                             year = int(match.group()) if match else 0
                             raw = MutagenFile(str(path))
                             pictures = getattr(raw, "pictures", None)
                             cover = pictures[0].data if pictures else None
+                            cover_type = pictures[0].mime if pictures else "image/jpeg"
                             if not cover and getattr(raw, "tags", None):
-                                cover = next((value.data for value in raw.tags.values()
-                                              if value.__class__.__name__ == "APIC"), None)
+                                apic = next((value for value in raw.tags.values()
+                                             if value.__class__.__name__ == "APIC"), None)
+                                if apic:
+                                    cover, cover_type = apic.data, apic.mime
+                                if not cover:
+                                    picture_data = raw.tags.get("metadata_block_picture")
+                                    if picture_data:
+                                        from mutagen.flac import Picture
+                                        picture = Picture(base64.b64decode(picture_data[0]))
+                                        cover, cover_type = picture.data, picture.mime
                             if cover:
-                                import base64
-                                image = "data:image/jpeg;base64," + base64.b64encode(cover).decode("ascii")
+                                if len(cover) <= 1500 * 1024:
+                                    image = "data:%s;base64,%s" % (cover_type or "image/jpeg", base64.b64encode(cover).decode("ascii"))
                         except Exception:
                             pass
                     found = _item(title, path.as_uri(), base=path.as_uri(), source_id="lokalno",
@@ -1838,7 +1863,7 @@ class MediaCenter:
         needle = _text(query, 120).casefold()
         if needle:
             def zadetek(item: dict) -> bool:
-                hay = " ".join((item.get("naslov", ""), item.get("izvajalec", ""),
+                hay = " ".join((item.get("naslov", ""), item.get("izvajalec", ""), item.get("album", ""),
                                 item.get("opis", ""), item.get("imdb_id", ""),
                                 str(item.get("tmdb_id") or ""))).casefold()
                 if needle in hay:

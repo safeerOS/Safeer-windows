@@ -1930,6 +1930,7 @@
   function mediaOznaka(vrsta) {
     if (vrsta === "glasba") return t("mediaGlasba");
     if (vrsta === "video") return "Video";
+    if (vrsta === "slika") return "Slika";
     if (vrsta === "podcast") return "Podcast";
     if (vrsta === "radio") return "Radio";
     if (vrsta === "tv-v-zivo") return "TV v živo";
