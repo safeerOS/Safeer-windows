@@ -29,9 +29,14 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
+from . import zakoniti_viri
+from . import media_servers
+from . import watch_providers
+
 AUDIO = {".mp3", ".flac", ".ogg", ".oga", ".opus", ".m4a", ".aac", ".wav", ".wma"}
 VIDEO = {".mp4", ".mkv", ".webm", ".avi", ".mov", ".m4v", ".mpeg", ".mpg", ".ts", ".m3u8"}
-MEDIA_EXT = AUDIO | VIDEO
+IMAGES = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
+MEDIA_EXT = AUDIO | VIDEO | IMAGES
 MAX_FILES = 500
 MAX_SOURCE_ITEMS = 1500
 MAX_DOWNLOAD = 6 * 1024 * 1024
@@ -39,6 +44,23 @@ TRACKING_QUERY = {"fbclid", "gclid", "mc_cid", "mc_eid", "ref", "source"}
 TMDB_API_KEY = os.environ.get("SAFEER_TMDB_API_KEY", "844dba0bfd8f3a4f3799f6130ef9e335")
 TMDB_API = "https://api.themoviedb.org/3"
 TMDB_IMAGE = "https://image.tmdb.org/t/p"
+
+# Uradne strani storitev; razsiritev preslikave ostane na enem mestu.
+WATCH_PROVIDER_SEARCH = {
+    "netflix": "https://www.netflix.com/search?q=",
+    "hbo max": "https://www.max.com/search?q=",
+    "max": "https://www.max.com/search?q=",
+    "skyshowtime": "https://www.skyshowtime.com/search?q=",
+    "disney plus": "https://www.disneyplus.com/search?query=",
+    "disney+": "https://www.disneyplus.com/search?query=",
+    "apple tv": "https://tv.apple.com/search?term=",
+    "apple tv store": "https://tv.apple.com/search?term=",
+    "rakuten tv": "https://rakuten.tv/search?q=",
+    "amazon prime video": "https://www.primevideo.com/search?phrase=",
+    "prime video": "https://www.primevideo.com/search?phrase=",
+    "amazon video": "https://www.primevideo.com/search?phrase=",
+    "voyo": "https://voyo.si/iskanje?q=",
+}
 
 
 def canonical_url(url: str) -> str:
@@ -65,12 +87,94 @@ def _text(value: Any, limit: int = 300) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()[:limit]
 
 
+def _dpapi_protect(secret: str) -> str:
+    """Zaščiti poverilnico z Windows DPAPI, vezanim na trenutnega uporabnika."""
+    if os.name != "nt":
+        raise RuntimeError("Varno shranjevanje medijskih poverilnic zahteva Windows DPAPI.")
+    import base64
+    import ctypes
+    from ctypes import wintypes
+    class Blob(ctypes.Structure):
+        _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_byte))]
+    raw = secret.encode("utf-8")
+    source_buf = ctypes.create_string_buffer(raw)
+    source = Blob(len(raw), ctypes.cast(source_buf, ctypes.POINTER(ctypes.c_byte)))
+    target = Blob()
+    crypt32 = ctypes.windll.crypt32
+    crypt32.CryptProtectData.argtypes = [ctypes.POINTER(Blob), wintypes.LPCWSTR, ctypes.POINTER(Blob),
+                                         ctypes.c_void_p, ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(Blob)]
+    crypt32.CryptProtectData.restype = wintypes.BOOL
+    ctypes.windll.kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+    ctypes.windll.kernel32.LocalFree.restype = ctypes.c_void_p
+    ok = crypt32.CryptProtectData(ctypes.byref(source), "SafeerOS Media", None, None, None, 0, ctypes.byref(target))
+    if not ok:
+        raise OSError("Windows DPAPI zaščita ni uspela.")
+    try:
+        return "dpapi:" + base64.b64encode(ctypes.string_at(target.pbData, target.cbData)).decode("ascii")
+    finally:
+        ctypes.windll.kernel32.LocalFree(ctypes.cast(target.pbData, ctypes.c_void_p))
+
+
+def _dpapi_unprotect(value: str) -> str:
+    if os.name != "nt" or not value.startswith("dpapi:"):
+        raise RuntimeError("Zaščitene poverilnice niso dostopne v tej napravi.")
+    import base64
+    import ctypes
+    from ctypes import wintypes
+    class Blob(ctypes.Structure):
+        _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_byte))]
+    raw = base64.b64decode(value[6:])
+    source_buf = ctypes.create_string_buffer(raw)
+    source = Blob(len(raw), ctypes.cast(source_buf, ctypes.POINTER(ctypes.c_byte)))
+    target = Blob()
+    crypt32 = ctypes.windll.crypt32
+    crypt32.CryptUnprotectData.argtypes = [ctypes.POINTER(Blob), ctypes.c_void_p, ctypes.POINTER(Blob),
+                                           ctypes.c_void_p, ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(Blob)]
+    crypt32.CryptUnprotectData.restype = wintypes.BOOL
+    ctypes.windll.kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+    ctypes.windll.kernel32.LocalFree.restype = ctypes.c_void_p
+    ok = crypt32.CryptUnprotectData(ctypes.byref(source), None, None, None, None, 0, ctypes.byref(target))
+    if not ok:
+        raise OSError("Windows DPAPI odklep poverilnice ni uspel.")
+    try:
+        return ctypes.string_at(target.pbData, target.cbData).decode("utf-8")
+    finally:
+        ctypes.windll.kernel32.LocalFree(ctypes.cast(target.pbData, ctypes.c_void_p))
+
+
 def _absolute(base: str, value: Any) -> str:
+    data_url = str(value or "").strip()
+    if (len(data_url) <= 2 * 1024 * 1024
+            and re.fullmatch(r"data:image/(?:jpeg|png|gif|webp);base64,[A-Za-z0-9+/]*={0,2}", data_url)):
+        return data_url
     raw = _text(value, 4096)
     if not raw:
         return ""
     url = urllib.parse.urljoin(base, raw)
     return url if urllib.parse.urlsplit(url).scheme in ("http", "https", "file") else ""
+
+
+def _official_music_embed(url: str, source_id: str, source_name: str) -> tuple[list[dict] | None, str]:
+    """Prepozna samo SoundCloud in Bandcamp uradne vdelave; nikoli ne bere njihovih strani."""
+    parsed = urllib.parse.urlsplit(url)
+    host, path = (parsed.hostname or "").casefold(), parsed.path
+    if host in ("soundcloud.com", "www.soundcloud.com"):
+        encoded = urllib.parse.urlencode({"url": url, "auto_play": "false"})
+        embed_url = "https://w.soundcloud.com/player/?" + encoded
+    elif host == "w.soundcloud.com" and path.rstrip("/") == "/player":
+        embed_url = url
+    elif host == "bandcamp.com" and path.casefold().startswith("/embeddedplayer/"):
+        embed_url = url
+    elif host == "bandcamp.com" or host.endswith(".bandcamp.com"):
+        return None, "Vnesi javni uradni Bandcamp EmbeddedPlayer naslov; strani ne beremo."
+    else:
+        return None, ""
+    path_name = path.rstrip("/").split("/")[-1]
+    title = source_name or urllib.parse.unquote(path_name).replace("-", " ") or host
+    item = _item(title, embed_url, base=embed_url, source_id=source_id,
+                 source_name="SoundCloud" if "soundcloud.com" in host else "Bandcamp",
+                 kind="glasba", description="Uradni vdelani predvajalnik javne vsebine.")
+    return ([item] if item else []), ""
 
 
 def _kind(value: Any, url: str = "", title: str = "", season: int = 0, episode: int = 0) -> str:
@@ -87,6 +191,8 @@ def _kind(value: Any, url: str = "", title: str = "", season: int = 0, episode: 
         return "tv-v-zivo"
     if ext in AUDIO or any(x in hint for x in ("audio", "music", "song", "track", "album", "glasba", "/music/")):
         return "glasba"
+    if ext in IMAGES or any(x in hint for x in ("image", "slika", "photo", "fotografija")):
+        return "slika"
     if any(x in hint for x in ("series", "episode", "season", "show", "tv", "serija", "epizoda", "/tv/", "/series/")):
         return "serija"
     return "film"
@@ -981,6 +1087,33 @@ def _parse_m3u(text: str, base: str, source_id: str, source_name: str) -> list[d
     return out
 
 
+def _parse_pls(text: str, base: str, source_id: str, source_name: str) -> list[dict]:
+    """Razčleni standardni PLS seznam radijskih tokov."""
+    entries: dict[int, dict[str, str]] = {}
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith((";", "[")) or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        match = re.fullmatch(r"(File|Title|Length)(\d+)", key.strip(), re.IGNORECASE)
+        if match:
+            entries.setdefault(int(match.group(2)), {})[match.group(1).lower()] = value.strip()
+    result = []
+    for index in sorted(entries):
+        row = entries[index]
+        url = row.get("file", "")
+        if not url:
+            continue
+        title = row.get("title") or Path(urllib.parse.urlsplit(url).path).stem or source_name
+        item = _item(title, url, base=base, source_id=source_id, source_name=source_name,
+                     kind="radio", quality=row.get("length", ""))
+        if item:
+            result.append(item)
+        if len(result) >= MAX_SOURCE_ITEMS:
+            break
+    return result
+
+
 def _parse_xml(text: str, base: str, source_id: str, source_name: str) -> list[dict]:
     try:
         root = ET.fromstring(text)
@@ -1025,6 +1158,8 @@ def parse_payload(payload: bytes, content_type: str, source_url: str,
     text = payload.decode("utf-8", "replace")
     content = (content_type or "").lower()
     stripped = text.lstrip()
+    if "scpls" in content or "playlist" in content and stripped.lower().startswith("[playlist]") or source_url.lower().endswith(".pls"):
+        return _parse_pls(text, source_url, source_id, source_name)
     if "mpegurl" in content or source_url.lower().endswith((".m3u", ".m3u8")) or stripped.startswith("#EXTM3U"):
         return _parse_m3u(text, source_url, source_id, source_name)
     if "json" in content or stripped.startswith(("{", "[")):
@@ -1236,7 +1371,8 @@ def _series_catalog_card(item: dict) -> dict:
 class MediaCenter:
     """Trajen katalog virov z atomskim zapisom in enotno logiko za vse platforme."""
 
-    def __init__(self, config_dir: str, roots: Optional[Iterable[str | Path]] = None):
+    def __init__(self, config_dir: str, roots: Optional[Iterable[str | Path]] = None,
+                 secret_encryptor=None, secret_decryptor=None):
         self.config_dir = Path(config_dir)
         self.store_path = self.config_dir / "media.json"
         self.roots = [Path(path) for path in roots] if roots is not None else self._default_roots()
@@ -1245,11 +1381,15 @@ class MediaCenter:
         self._dynamic_items: dict[str, dict] = {}
         self._ping_cache: dict[str, tuple[float, float]] = {}
         self._ping_lock = threading.Lock()
+        self._zakoniti_viri = zakoniti_viri.ZakonitiViri()
+        self._secret_encryptor = secret_encryptor or _dpapi_protect
+        self._secret_decryptor = secret_decryptor or _dpapi_unprotect
+        self._server_cache: dict[str, tuple[float, list[dict]]] = {}
 
     @staticmethod
     def _default_roots() -> list[Path]:
         home, out = Path.home(), []
-        for name in ("Music", "Glasba", "Videos", "Video", "Movies", "Filmi"):
+        for name in ("Music", "Glasba", "Videos", "Video", "Movies", "Filmi", "Pictures", "Slike"):
             path = home / name
             if path.is_dir() and path not in out:
                 out.append(path)
@@ -1276,8 +1416,77 @@ class MediaCenter:
 
     def sources(self) -> list[dict]:
         with self._lock:
-            return [{k: value for k, value in source.items() if k != "vnosi"}
-                    for source in self._load().get("viri", []) if isinstance(source, dict)]
+            data = self._load()
+            regular = [{k: value for k, value in source.items() if k != "vnosi"}
+                       for source in data.get("viri", []) if isinstance(source, dict)]
+            personal = [{k: value for k, value in source.items() if k not in ("secret_enc", "uporabnik")}
+                        for source in data.get("osebni_strezniki", []) if isinstance(source, dict)]
+            return regular + personal
+
+    def add_server(self, provider: str, name: str, url: str, username: str, secret: str) -> dict:
+        provider = _text(provider, 20).lower()
+        parsed = urllib.parse.urlsplit(_text(url, 1024))
+        username = _text(username, 160)
+        secret = str(secret or "")
+        if provider not in ("jellyfin", "emby", "navidrome", "plex"):
+            return {"ok": False, "napaka": "Nepodprta vrsta strežnika."}
+        if len(secret) > 4096:
+            return {"ok": False, "napaka": "Geslo ali žeton je predolg."}
+        if provider in ("jellyfin", "emby", "navidrome") and (not username or not secret):
+            return {"ok": False, "napaka": "Ta strežnik zahteva uporabniško ime in geslo."}
+        if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
+            return {"ok": False, "napaka": "Vnesi osnovni HTTPS naslov strežnika brez prijavnih podatkov ali parametrov."}
+        base = urllib.parse.urlunsplit(("https", parsed.netloc, parsed.path.rstrip("/"), "", ""))
+        raw_secret = secret
+        try:
+            auth = media_servers.authenticate(provider, base, username, raw_secret)
+            encrypted = self._secret_encryptor(auth.get("token") or raw_secret)
+        except Exception:
+            return {"ok": False, "napaka": "Prijava ni uspela; preveri HTTPS naslov in uporabniške podatke."}
+        source_id = "streznik-" + hashlib.sha256((provider + base + username).encode()).hexdigest()[:16]
+        source = {"id": source_id, "vrsta": "streznik", "ponudnik": provider,
+                  "ime": _text(name, 80) or urllib.parse.urlsplit(base).hostname,
+                  "url": base, "uporabnik": username, "user_id": auth.get("user_id", ""),
+                  "secret_enc": encrypted}
+        with self._lock:
+            data = self._load()
+            sources = data.setdefault("osebni_strezniki", [])
+            if any(item.get("id") == source_id for item in sources):
+                return {"ok": False, "napaka": "Ta strežnik je že dodan."}
+            sources.append(source)
+            self._save(data)
+        return {"ok": True, "vir": {k: v for k, v in source.items() if k not in ("secret_enc", "uporabnik")}}
+
+    def _personal_items(self, query: str) -> list[dict]:
+        with self._lock:
+            servers = list(self._load().get("osebni_strezniki", []))
+        result = []
+        now = time.time()
+        for server in servers:
+            provider = str(server.get("ponudnik") or "")
+            server_id = str(server.get("id") or "")
+            server_query = query if provider == "navidrome" else ""
+            key = server_id + ":" + server_query.casefold()
+            cached = self._server_cache.get(key)
+            if cached and now - cached[0] < 300:
+                rows = cached[1]
+                if query and provider != "navidrome":
+                    needle = query.casefold()
+                    rows = [item for item in rows if needle in " ".join((item.get("naslov", ""), item.get("izvajalec", ""),
+                                                                            item.get("album", ""), item.get("opis", ""))).casefold()]
+                result.extend(rows); continue
+            try:
+                secret = self._secret_decryptor(str(server.get("secret_enc") or ""))
+                rows = media_servers.catalog(provider, str(server.get("url") or ""), server, secret, server_query)
+                self._server_cache[key] = (now, rows)
+            except Exception:
+                rows = cached[1] if cached else []
+            if query and provider != "navidrome":
+                needle = query.casefold()
+                rows = [item for item in rows if needle in " ".join((item.get("naslov", ""), item.get("izvajalec", ""),
+                                                                        item.get("album", ""), item.get("opis", ""))).casefold()]
+            result.extend(rows)
+        return result
 
     def add_source(self, url: str, name: str = "") -> dict:
         canonical = canonical_url(url)
@@ -1308,6 +1517,14 @@ class MediaCenter:
     def remove_source(self, source_id: str) -> bool:
         with self._lock:
             data = self._load()
+            servers_before = len(data.get("osebni_strezniki", []))
+            data["osebni_strezniki"] = [server for server in data.get("osebni_strezniki", [])
+                                        if server.get("id") != source_id]
+            if len(data["osebni_strezniki"]) != servers_before:
+                self._server_cache = {key: value for key, value in self._server_cache.items()
+                                      if not key.startswith(source_id + ":")}
+                self._save(data)
+                return True
             before = len(data.get("viri", []))
             data["viri"] = [source for source in data.get("viri", []) if source.get("id") != source_id]
             if len(data["viri"]) == before:
@@ -1332,13 +1549,24 @@ class MediaCenter:
             return payload, response.headers.get_content_type(), final_url
 
     def refresh_source(self, source_id: str) -> dict:
+        if source_id.startswith("streznik-"):
+            with self._lock:
+                self._server_cache = {key: value for key, value in self._server_cache.items()
+                                      if not key.startswith(source_id + ":")}
+            return {"ok": any(item.get("id") == source_id for item in self.sources())}
         with self._lock:
             source = next((item.copy() for item in self._load().get("viri", [])
                            if item.get("id") == source_id), None)
-            if source is None:
-                return {"ok": False, "napaka": "ni_vira"}
+        if source is None:
+            return {"ok": False, "napaka": "ni_vira"}
         try:
-            if source.get("tip") == "predvajalni_vir" or _je_predvajalni_vir(source["url"]):
+            music_embed, embed_error = _official_music_embed(source["url"], source["id"], source["ime"])
+            if embed_error:
+                raise ValueError(embed_error)
+            if music_embed is not None:
+                items = music_embed
+                source["tip"] = "uradni_vdelani_predvajalnik"
+            elif source.get("tip") == "predvajalni_vir" or _je_predvajalni_vir(source["url"]):
                 source["tip"] = "predvajalni_vir"
                 if _je_predloga_predvajalnika(source["url"]):
                     items = _katalog_iz_predloge(source["url"], source["id"], source["ime"])
@@ -1361,7 +1589,9 @@ class MediaCenter:
             source.update({"vnosi": items, "stevilo": len(items), "posodobljeno": int(time.time()), "napaka": ""})
             ok, error = True, ""
         except Exception as exc:
-            items = _resolve_embed_or_direct_source(source["url"], source["id"], source["ime"])
+            host = (urllib.parse.urlsplit(source["url"]).hostname or "").casefold()
+            restricted = host == "bandcamp.com" or host.endswith(".bandcamp.com")
+            items = [] if restricted else _resolve_embed_or_direct_source(source["url"], source["id"], source["ime"])
             if items:
                 source.update({"vnosi": items, "stevilo": len(items), "posodobljeno": int(time.time()), "napaka": ""})
                 ok, error = True, ""
@@ -1397,7 +1627,19 @@ class MediaCenter:
 
     def _local_items(self) -> list[dict]:
         items = []
-        for root in self.roots:
+        def tag_value(tags, *keys):
+            for key in keys:
+                value = tags.get(key) if tags else None
+                if value is None:
+                    continue
+                value = getattr(value, "text", value)
+                if isinstance(value, (list, tuple)):
+                    value = value[0] if value else ""
+                if value:
+                    return str(value)
+            return ""
+        custom = [Path(value) for value in self._load().get("lokalne_mape", []) if isinstance(value, str)]
+        for root in dict.fromkeys(self.roots + custom):
             if not root.is_dir():
                 continue
             for base, dirs, files in os.walk(root):
@@ -1410,16 +1652,79 @@ class MediaCenter:
                         modified = int(path.stat().st_mtime)
                     except OSError:
                         continue
-                    kind = "glasba" if path.suffix.lower() in AUDIO else "film"
-                    found = _item(path.stem, path.as_uri(), base=path.as_uri(), source_id="lokalno",
-                                  source_name="Ta računalnik", kind=kind,
-                                  quality=path.stem, description=str(path))
+                    ext = path.suffix.lower()
+                    kind = "glasba" if ext in AUDIO else "slika" if ext in IMAGES else "film"
+                    title, artist, album, year, image = path.stem, "", "", 0, ""
+                    if ext in AUDIO:
+                        try:
+                            import base64
+                            from mutagen import File as MutagenFile
+                            audio = MutagenFile(str(path), easy=True) or {}
+                            artist = tag_value(audio, "artist", "albumartist", "TPE1", "TPE2", "ARTIST")
+                            album = tag_value(audio, "album", "TALB", "ALBUM")
+                            title = tag_value(audio, "title", "TIT2", "TITLE") or path.stem
+                            date_tag = tag_value(audio, "date", "year", "TDRC", "TYER", "DATE")
+                            match = re.match(r"\d{4}", date_tag)
+                            year = int(match.group()) if match else 0
+                            raw = MutagenFile(str(path))
+                            pictures = getattr(raw, "pictures", None)
+                            cover = pictures[0].data if pictures else None
+                            cover_type = pictures[0].mime if pictures else "image/jpeg"
+                            if not cover and getattr(raw, "tags", None):
+                                apic = next((value for value in raw.tags.values()
+                                             if value.__class__.__name__ == "APIC"), None)
+                                if apic:
+                                    cover, cover_type = apic.data, apic.mime
+                                if not cover:
+                                    picture_data = raw.tags.get("metadata_block_picture")
+                                    if picture_data:
+                                        from mutagen.flac import Picture
+                                        picture = Picture(base64.b64decode(picture_data[0]))
+                                        cover, cover_type = picture.data, picture.mime
+                            if cover:
+                                if len(cover) <= 1500 * 1024:
+                                    image = "data:%s;base64,%s" % (cover_type or "image/jpeg", base64.b64encode(cover).decode("ascii"))
+                        except Exception:
+                            pass
+                    found = _item(title, path.as_uri(), base=path.as_uri(), source_id="lokalno",
+                                  source_name="Ta računalnik", kind=kind, artist=artist,
+                                  image=image, year=year, description=str(path))
                     if found:
-                        found.update({"pot": str(path), "cas": modified, "mime": mimetypes.guess_type(str(path))[0] or ""})
+                        found.update({"pot": str(path), "cas": modified, "mime": mimetypes.guess_type(str(path))[0] or "",
+                                      "album": album, "skupina": album or artist})
                         items.append(found)
                     if len(items) >= MAX_FILES:
                         return items
         return items
+
+    def add_local_root(self, value: str) -> dict:
+        raw = _text(value, 1024)
+        if raw.lower().startswith(("nfs://", "nfs:")):
+            nfs_client = False
+            if os.name == "nt":
+                try:
+                    import winreg
+                    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                                        r"SYSTEM\CurrentControlSet\Services\NfsClnt"):
+                        nfs_client = True
+                except OSError:
+                    pass
+            note = ("NFS odjemalec je nameščen; najprej priklopite izvoz s sistemskim mount ukazom, nato dodajte črko pogona."
+                    if nfs_client else "Windows NFS odjemalec ni zaznan; priklop NFS ni na voljo. Uporabite UNC pot ali namestite NFS odjemalec.")
+            return {"ok": False, "napaka": note}
+        path = Path(raw).expanduser()
+        is_unc = raw.startswith("\\\\")
+        if not raw or not (path.is_dir() or (is_unc and os.name == "nt")):
+            return {"ok": False, "napaka": "Mapa ne obstaja ali ni dosegljiva."}
+        with self._lock:
+            data = self._load()
+            roots = data.setdefault("lokalne_mape", [])
+            normalized = str(path)
+            if normalized in roots:
+                return {"ok": False, "napaka": "Mapa je že dodana."}
+            roots.append(normalized)
+            self._save(data)
+        return {"ok": True, "pot": normalized}
 
     def _ima_embed_vir(self, data: Optional[dict] = None) -> bool:
         configured = data if isinstance(data, dict) else self._load()
@@ -1454,6 +1759,85 @@ class MediaCenter:
             return {}
         self._tmdb_cache[url] = (time.time(), data)
         return data
+
+    def watch_regions(self, language: str = "sl") -> dict:
+        """List TMDB regions, cached for seven days; soft-fail on network errors."""
+        locale = {"sl": "sl-SI", "en": "en-GB", "de": "de-DE", "es": "es-ES",
+                  "fr": "fr-FR", "it": "it-IT"}.get(str(language).split("-")[0], "en-GB")
+        key = "watch-regions:" + locale
+        cached = self._tmdb_cache.get(key)
+        if cached and time.time() - cached[0] < 7 * 24 * 60 * 60:
+            return cached[1]
+        query = urllib.parse.urlencode({"api_key": TMDB_API_KEY, "language": locale})
+        request = urllib.request.Request(TMDB_API + "/watch/providers/regions?" + query,
+                                         headers={"User-Agent": "SafeerOS/1.0", "Accept": "application/json"})
+        try:
+            with urllib.request.urlopen(request, timeout=10) as response:
+                data = json.loads(response.read(MAX_DOWNLOAD).decode("utf-8"))
+            rows = data.get("results", []) if isinstance(data, dict) else []
+            regions = [{"code": str(row.get("iso_3166_1") or "").upper(),
+                        "native_name": str(row.get("native_name") or ""),
+                        "english_name": str(row.get("english_name") or "")}
+                       for row in rows if isinstance(row, dict) and re.fullmatch(
+                           r"[A-Z]{2}", str(row.get("iso_3166_1") or "").upper())]
+            result = {"regions": regions}
+            self._tmdb_cache[key] = (time.time(), result)
+            return result
+        except Exception:
+            return cached[1] if cached else {"regions": []}
+
+    def _watch_providers(self, media_type: str, tmdb_id: int, country: str, title: str = "") -> dict:
+        key = f"watch-providers:{media_type}:{int(tmdb_id)}:{country}"
+        cached = self._tmdb_cache.get(key)
+        if cached and time.time() - cached[0] < 12 * 60 * 60:
+            return cached[1]
+        try:
+            raw = self._tmdb(f"/{media_type}/{int(tmdb_id)}/watch/providers")
+            region = raw.get("results", {}).get(country, {}) if isinstance(raw, dict) else {}
+            groups = []
+            for group_id, keys, group_title in (
+                ("naročnina", ("flatrate",), "Naročnina"),
+                ("brezplačno", ("free", "ads"), "Brezplačno"),
+                ("izposoja", ("rent",), "Izposoja"),
+                ("nakup", ("buy",), "Nakup"),
+            ):
+                entries = []
+                seen = set()
+                for key_name in keys:
+                    for provider in region.get(key_name, []) if isinstance(region, dict) else []:
+                        if not isinstance(provider, dict):
+                            continue
+                        name = str(provider.get("provider_name") or "").strip()
+                        if not name or name.casefold() in seen:
+                            continue
+                        seen.add(name.casefold())
+                        base = WATCH_PROVIDER_SEARCH.get(name.casefold())
+                        encoded_title = urllib.parse.quote(title) if base else ""
+                        url = base + encoded_title if base else str(region.get("link") or "")
+                        logo_path = str(provider.get("logo_path") or "")
+                        entries.append({"ime": name,
+                                        "logo": TMDB_IMAGE + "/w92" + logo_path if logo_path.startswith("/") else "",
+                                        "povezava": url})
+                if entries:
+                    groups.append({"id": group_id, "naziv": group_title, "ponudniki": entries})
+            result = {"drzava": country, "skupine": groups, "link": str(region.get("link") or "")}
+            self._tmdb_cache[key] = (time.time(), result)
+            return result
+        except Exception:
+            return cached[1] if cached else {"drzava": country, "skupine": [], "link": ""}
+
+    def watch_country_settings(self, selected: str = "auto", language: str = "sl") -> dict:
+        detected = watch_providers.detect_country(language)
+        regions = self.watch_regions(language).get("regions", [])
+        names = {row["code"]: row.get("native_name") or row.get("english_name") or row["code"]
+                 for row in regions}
+        selected = str(selected or "auto").upper()
+        country = detected if selected == "AUTO" else selected
+        if not re.fullmatch(r"[A-Z]{2}", country):
+            country, selected = detected, "AUTO"
+        return {"izbrana": "auto" if selected == "AUTO" else country, "drzava": country,
+                "ime_drzave": names.get(country, country), "zaznana": detected,
+                "ime_zaznane": names.get(detected, detected), "regions": regions}
 
     @staticmethod
     def _tmdb_tip(value: str) -> str:
@@ -1562,11 +1946,21 @@ class MediaCenter:
         remote = [_series_catalog_card(item) for source in data.get("viri", []) for item in source.get("vnosi", [])
                   if isinstance(item, dict) and (kind in ("", "vse") or item.get("vrsta") == kind)] if page_num == 1 else []
         dynamic, tmdb_pages = self._tmdb_catalog(data, _text(query, 120), kind, _text(genre, 20), page_num) if self._ima_embed_vir(data) else ([], 1)
-        merged = merge_duplicates(local + remote + dynamic)
+        # Javni katalogi imajo svoj 30-minutni cache in se napake posameznega API-ja
+        # ne smejo prenesti v glavni katalog.
+        configured_hosts = [str(source.get("url") or "") for source in data.get("viri", [])
+                            if isinstance(source, dict) and source.get("url")]
+        lawful = self._zakoniti_viri.get(_text(query, 120), configured_hosts)
+        if kind not in ("", "vse"):
+            lawful = [item for item in lawful if item.get("vrsta") == kind]
+        personal = self._personal_items(_text(query, 120))
+        if kind not in ("", "vse"):
+            personal = [item for item in personal if item.get("vrsta") == kind]
+        merged = merge_duplicates(local + remote + dynamic + lawful + personal)
         needle = _text(query, 120).casefold()
         if needle:
             def zadetek(item: dict) -> bool:
-                hay = " ".join((item.get("naslov", ""), item.get("izvajalec", ""),
+                hay = " ".join((item.get("naslov", ""), item.get("izvajalec", ""), item.get("album", ""),
                                 item.get("opis", ""), item.get("imdb_id", ""),
                                 str(item.get("tmdb_id") or ""))).casefold()
                 if needle in hay:
@@ -1584,7 +1978,7 @@ class MediaCenter:
             "mape": [str(path) for path in self.roots]
         }
 
-    def details(self, item_id: str) -> dict:
+    def details(self, item_id: str, country: str = "auto", language: str = "sl") -> dict:
         item = self.resolve(item_id)
         if not item or not item.get("tmdb_id"):
             return item or {}
@@ -1596,9 +1990,14 @@ class MediaCenter:
         seasons = [{"stevilka": s.get("season_number"), "ime": s.get("name") or f"Sezona {s.get('season_number')}",
                     "epizod": s.get("episode_count") or 0}
                    for s in raw.get("seasons", []) if int(s.get("season_number") or 0) > 0]
+        country_settings = self.watch_country_settings(country, language)
+        providers = self._watch_providers(media_type, int(item["tmdb_id"]),
+                                          country_settings["drzava"], str(item.get("naslov") or ""))
+        providers.update({"ime_drzave": country_settings["ime_drzave"],
+                          "vir": "JustWatch prek TMDB"})
         return dict(item, opis=raw.get("overview") or item.get("opis", ""),
                     ocena=round(float(raw.get("vote_average") or item.get("ocena") or 0), 1),
-                    sezone=seasons, media_type=media_type)
+                    sezone=seasons, media_type=media_type, kje_gledati=providers)
 
     def season(self, tmdb_id: int, season_number: int) -> dict:
         try:
@@ -1769,6 +2168,13 @@ class MediaCenter:
     def resolve(self, item_id: str) -> Optional[dict]:
         item = self._dynamic_items.get(item_id) or next((item for item in self.catalog()["vnosi"] if item.get("id") == item_id), None)
         if not item:
+            return None
+        if item.get("peertube_uuid"):
+            configured = [str(source.get("url") or "") for source in self.sources()]
+            resolved = self._zakoniti_viri.resolve_video(item, configured)
+            if resolved:
+                self._dynamic_items[item_id] = resolved
+                return resolved
             return None
         return self._izberi_najhitrejsi(self._dodaj_predvajalne_razlicice(item))
 

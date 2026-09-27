@@ -7,6 +7,7 @@ import json
 import mimetypes
 import os
 import platform
+import re
 import socket
 import socketserver
 import sys
@@ -895,7 +896,25 @@ class SafeerOsWindow(QMainWindow):
             return self.media_center.catalog(query, kind, genre, page)
 
         if metoda == "mediaPodrobnosti":
-            return self.media_center.details(str(a[0]) if a else "")
+            shramba = os_backend_win.nalozi_shrambo()
+            language = str(a[1] if len(a) > 1 else shramba.get("jezik") or "sl")
+            return self.media_center.details(str(a[0]) if a else "",
+                                             str(shramba.get("media_watch_country") or "auto"), language)
+
+        if metoda == "mediaWatchSettings":
+            shramba = os_backend_win.nalozi_shrambo()
+            language = str(a[0] if a else shramba.get("jezik") or "sl")
+            return self.media_center.watch_country_settings(
+                str(shramba.get("media_watch_country") or "auto"), language)
+
+        if metoda == "mediaWatchCountry":
+            country = str(a[0] if a else "auto").strip().upper()
+            if country != "AUTO" and not re.fullmatch(r"[A-Z]{2}", country):
+                raise ValueError("Neveljavna koda države.")
+            shramba = os_backend_win.nalozi_shrambo()
+            shramba["media_watch_country"] = "auto" if country == "AUTO" else country
+            os_backend_win.shrani_shrambo(shramba)
+            return True
 
         if metoda == "mediaSezona":
             tmdb_id = int(a[0]) if a else 0
@@ -918,6 +937,14 @@ class SafeerOsWindow(QMainWindow):
             url = str(a[0]) if a else ""
             name = str(a[1]) if len(a) > 1 else ""
             return self.media_center.add_source(url, name)
+
+        if metoda == "mediaDodajMapo":
+            return self.media_center.add_local_root(str(a[0]) if a else "")
+
+        if metoda == "mediaDodajStreznik":
+            values = [str(value or "") for value in (a[:5] if isinstance(a, list) else [])]
+            values += [""] * (5 - len(values))
+            return self.media_center.add_server(*values)
 
         if metoda == "mediaUvoziJson":
             raw_json = a[0] if a else ""

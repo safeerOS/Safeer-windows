@@ -163,7 +163,7 @@
     }
   };
   var BESEDILA_MEDIA = {
-    sl: { mediaOpis:"Filmi, serije in glasba iz vseh tvojih virov v enem katalogu.",mediaOsvezi:"Osveži vire",mediaNastavitve:"Nastavitve",mediaNastavitveNaslov:"Nastavitve Safeer Media",mediaNastavitveOpis:"Uvoz in izvoz JSON knjižnic, neposreden vnos kode ter upravljanje virov.",mediaUvozDatoteke:"Naloži izvoženo JSON datoteko",mediaUvozDatotekeOpis:"Izberite .json datoteko kataloga ali virov, ki ste jo izvozili prej ali prejeli iz druge naprave.",mediaIzberiDatoteko:"Izberi .json datoteko",mediaNobenaDatoteka:"Nobena datoteka ni izbrana",mediaUvoziDatoteko:"Uvozi datoteko",mediaVnosJson:"Vnesi svojo JSON kodo",mediaVnosJsonOpis:"Prilepite JSON seznam medijev, prilagojeno konfiguracijo ali vir s tokovi.",mediaJsonImePh:"Ime zbirke ali vira (neobvezno)",mediaUvoziKodo:"Uvozi JSON kodo",mediaVstaviPrimer:"Primer kode (Code Example)",mediaPocisti:"Počisti",mediaPrimerVstavljen:"Primer JSON kode je bil uspešno vstavljen.",mediaIzvozJson:"Izvozi vsebine v JSON",mediaIzvozJsonOpis:"Prenesite celotno zbirko vaših virov in nastavitev v datoteko za varnostno kopijo ali prenos.",mediaPrenesiIzvoz:"Prenesi izvoženi JSON",mediaUvozUspesen:"Uspešno uvoženo: {n} vsebin v vir '{vir}'.",mediaUvozVirovUspesen:"Uspešno posodobljenih/dodanih virov: {n}.",mediaUvozNapaka:"Napaka pri uvozu JSON.",mediaVnesiteJson:"Prosimo, vnesite ali izberite veljavno JSON kodo.",mediaPredvaja:"PREDVAJA SE V SAFEER OS",mediaNapaka:"Tega toka ni mogoče predvajati. Poskusi drugo različico.",mediaIsci:"Išči filme, serije in glasbo",mediaVse:"Vse",mediaFilmi:"Filmi",mediaSerije:"Serije",mediaGlasba:"Glasba",mediaPrazno:"Ni zadetkov. Dodaj vir ali spremeni iskanje.",mediaViri:"Tvoji viri",mediaViriOpis:"Spletno stran, javni API, RSS ali M3U dodaš samo enkrat.",mediaVirIme:"Ime vira (neobvezno)",mediaVirUrl:"https://vidlink.pro",mediaDodaj:"Dodaj vir",mediaZadetkov:"{n} enotnih vsebin",mediaRazlicic:"{n} različic",mediaVirDodan:"Vir je dodan in katalog združen.",mediaVirPodvojen:"Ta vir je že dodan.",mediaVirNapaka:"Vira ni bilo mogoče prebrati.",mediaOsvezeno:"Viri so osveženi.",mediaBrezVirov:"Dodaj prvi spletni vir; lokalne mape so vključene samodejno.",mediaVirElementov:"{n} vsebin"},
+    sl: { mediaOpis:"Filmi, serije in glasba iz vseh tvojih virov v enem katalogu.",mediaOsvezi:"Osveži vire",mediaNastavitve:"Nastavitve",mediaNastavitveNaslov:"Nastavitve Safeer Media",mediaNastavitveOpis:"Uvoz in izvoz JSON knjižnic, neposreden vnos kode ter upravljanje virov.",mediaUvozDatoteke:"Naloži izvoženo JSON datoteko",mediaUvozDatotekeOpis:"Izberite .json datoteko kataloga ali virov, ki ste jo izvozili prej ali prejeli iz druge naprave.",mediaIzberiDatoteko:"Izberi .json datoteko",mediaNobenaDatoteka:"Nobena datoteka ni izbrana",mediaUvoziDatoteko:"Uvozi datoteko",mediaVnosJson:"Vnesi svojo JSON kodo",mediaVnosJsonOpis:"Prilepite JSON seznam medijev, prilagojeno konfiguracijo ali vir s tokovi.",mediaJsonImePh:"Ime zbirke ali vira (neobvezno)",mediaUvoziKodo:"Uvozi JSON kodo",mediaVstaviPrimer:"Primer kode (Code Example)",mediaPocisti:"Počisti",mediaPrimerVstavljen:"Primer JSON kode je bil uspešno vstavljen.",mediaIzvozJson:"Izvozi vsebine v JSON",mediaIzvozJsonOpis:"Prenesite celotno zbirko vaših virov in nastavitev v datoteko za varnostno kopijo ali prenos.",mediaPrenesiIzvoz:"Prenesi izvoženi JSON",mediaUvozUspesen:"Uspešno uvoženo: {n} vsebin v vir '{vir}'.",mediaUvozVirovUspesen:"Uspešno posodobljenih/dodanih virov: {n}.",mediaUvozNapaka:"Napaka pri uvozu JSON.",mediaVnesiteJson:"Prosimo, vnesite ali izberite veljavno JSON kodo.",mediaPredvaja:"PREDVAJA SE V SAFEER OS",mediaNapaka:"Tega toka ni mogoče predvajati. Poskusi drugo različico.",mediaIsci:"Išči filme, serije, videe, glasbo in radio",mediaVse:"Vse",mediaFilmi:"Filmi",mediaSerije:"Serije",mediaGlasba:"Glasba",mediaPrazno:"Ni zadetkov. Dodaj vir ali spremeni iskanje.",mediaViri:"Tvoji viri",mediaViriOpis:"Spletno stran, javni API, RSS ali M3U dodaš samo enkrat.",mediaVirIme:"Ime vira (neobvezno)",mediaVirUrl:"https://tilvids.com",mediaDodaj:"Dodaj vir",mediaZadetkov:"{n} enotnih vsebin",mediaRazlicic:"{n} različic",mediaVirDodan:"Vir je dodan in katalog združen.",mediaVirPodvojen:"Ta vir je že dodan.",mediaVirNapaka:"Vira ni bilo mogoče prebrati.",mediaOsvezeno:"Viri so osveženi.",mediaBrezVirov:"Dodaj prvi spletni vir; lokalne mape so vključene samodejno.",mediaVirElementov:"{n} vsebin"},
     en: { mediaOpis:"Movies, series and music from all your sources in one catalogue.",mediaOsvezi:"Refresh sources",mediaNastavitve:"Settings",mediaNastavitveNaslov:"Safeer Media Settings",mediaNastavitveOpis:"Import and export JSON libraries, enter custom code, and manage sources.",mediaUvozDatoteke:"Upload exported JSON file",mediaUvozDatotekeOpis:"Select a .json file of catalogue or sources previously exported or shared.",mediaIzberiDatoteko:"Choose .json file",mediaNobenaDatoteka:"No file selected",mediaUvoziDatoteko:"Import file",mediaVnosJson:"Add your own JSON code",mediaVnosJsonOpis:"Paste a JSON list of media, custom configuration, or streams.",mediaJsonImePh:"Collection or source name (optional)",mediaUvoziKodo:"Import JSON code",mediaVstaviPrimer:"Code Example",mediaPocisti:"Clear",mediaPrimerVstavljen:"JSON code example successfully inserted.",mediaIzvozJson:"Export catalogue to JSON",mediaIzvozJsonOpis:"Download the full collection of your sources and settings for backup or sharing.",mediaPrenesiIzvoz:"Download exported JSON",mediaUvozUspesen:"Successfully imported: {n} items into '{vir}'.",mediaUvozVirovUspesen:"Successfully updated/added sources: {n}.",mediaUvozNapaka:"Error importing JSON.",mediaVnesiteJson:"Please enter or select valid JSON code.",mediaPredvaja:"PLAYING IN SAFEER OS",mediaNapaka:"This stream cannot be played. Try another version.",mediaIsci:"Search movies, series and music",mediaVse:"All",mediaFilmi:"Movies",mediaSerije:"Series",mediaGlasba:"Music",mediaPrazno:"No results. Add a source or change the search.",mediaViri:"Your sources",mediaViriOpis:"Add a website, public API, RSS or M3U only once.",mediaVirIme:"Source name (optional)",mediaVirUrl:"https://example.com/catalogue.json",mediaDodaj:"Add source",mediaZadetkov:"{n} unique titles",mediaRazlicic:"{n} versions",mediaVirDodan:"Source added and catalogue merged.",mediaVirPodvojen:"This source has already been added.",mediaVirNapaka:"The source could not be read.",mediaOsvezeno:"Sources refreshed.",mediaBrezVirov:"Add your first web source; local folders are included automatically.",mediaVirElementov:"{n} titles"},
     de: { mediaOpis:"Filme, Serien und Musik aus allen Quellen in einem Katalog.",mediaOsvezi:"Quellen aktualisieren",mediaNastavitve:"Einstellungen",mediaNastavitveNaslov:"Safeer Media Einstellungen",mediaNastavitveOpis:"JSON-Bibliotheken importieren und exportieren sowie Quellen verwalten.",mediaUvozDatoteke:"Exportierte JSON-Datei hochladen",mediaUvozDatotekeOpis:"Wählen Sie eine .json-Datei aus, die Sie zuvor exportiert oder geteilt haben.",mediaIzberiDatoteko:".json-Datei auswählen",mediaNobenaDatoteka:"Keine Datei ausgewählt",mediaUvoziDatoteko:"Datei importieren",mediaVnosJson:"Eigenen JSON-Code eingeben",mediaVnosJsonOpis:"Fügen Sie eine JSON-Medienliste oder eigene Konfiguration ein.",mediaJsonImePh:"Name der Quelle (optional)",mediaUvoziKodo:"JSON-Code importieren",mediaVstaviPrimer:"Code-Beispiel",mediaPocisti:"Löschen",mediaPrimerVstavljen:"JSON-Codebeispiel erfolgreich eingefügt.",mediaIzvozJson:"Katalog in JSON exportieren",mediaIzvozJsonOpis:"Laden Sie die gesamte Quellensammlung für Backups oder Teilen herunter.",mediaPrenesiIzvoz:"Exportierte JSON herunterladen",mediaUvozUspesen:"Erfolgreich importiert: {n} Inhalte in '{vir}'.",mediaUvozVirovUspesen:"Erfolgreich aktualisiert/hinzugefügt: {n} Quellen.",mediaUvozNapaka:"Fehler beim Importieren von JSON.",mediaVnesiteJson:"Bitte geben Sie gültigen JSON-Code ein.",mediaPredvaja:"WIEDERGABE IN SAFEER OS",mediaNapaka:"Dieser Stream kann nicht abgespielt werden. Probiere eine andere Version.",mediaIsci:"Filme, Serien und Musik suchen",mediaVse:"Alle",mediaFilmi:"Filme",mediaSerije:"Serien",mediaGlasba:"Musik",mediaPrazno:"Keine Ergebnisse. Quelle hinzufügen oder Suche ändern.",mediaViri:"Deine Quellen",mediaViriOpis:"Website, öffentliche API, RSS oder M3U nur einmal hinzufügen.",mediaVirIme:"Name der Quelle (optional)",mediaVirUrl:"https://beispiel.de/katalog.json",mediaDodaj:"Quelle hinzufügen",mediaZadetkov:"{n} eindeutige Inhalte",mediaRazlicic:"{n} Versionen",mediaVirDodan:"Quelle hinzugefügt und Katalog zusammengeführt.",mediaVirPodvojen:"Diese Quelle wurde bereits hinzugefügt.",mediaVirNapaka:"Die Quelle konnte nicht gelesen werden.",mediaOsvezeno:"Quellen aktualisiert.",mediaBrezVirov:"Füge deine erste Webquelle hinzu; lokale Ordner sind automatisch enthalten.",mediaVirElementov:"{n} Inhalte"},
     es: { mediaOpis:"Películas, series y música de todas tus fuentes en un catálogo.",mediaOsvezi:"Actualizar fuentes",mediaNastavitve:"Ajustes",mediaNastavitveNaslov:"Ajustes de Safeer Media",mediaNastavitveOpis:"Importar y exportar bibliotecas JSON y gestionar fuentes.",mediaUvozDatoteke:"Subir archivo JSON exportado",mediaUvozDatotekeOpis:"Seleccione un archivo .json de catálogo o fuentes exportado previamente.",mediaIzberiDatoteko:"Seleccionar archivo .json",mediaNobenaDatoteka:"Ningún archivo seleccionado",mediaUvoziDatoteko:"Importar archivo",mediaVnosJson:"Añade tu propio código JSON",mediaVnosJsonOpis:"Pega una lista JSON de medios, configuración personalizada o flujos.",mediaJsonImePh:"Nombre de la fuente (opcional)",mediaUvoziKodo:"Importar código JSON",mediaVstaviPrimer:"Ejemplo de código",mediaPocisti:"Limpiar",mediaPrimerVstavljen:"Ejemplo de código JSON insertado con éxito.",mediaIzvozJson:"Exportar catálogo a JSON",mediaIzvozJsonOpis:"Descarga la colección completa de tus fuentes y ajustes.",mediaPrenesiIzvoz:"Descargar JSON exportado",mediaUvozUspesen:"Importado con éxito: {n} contenidos en '{vir}'.",mediaUvozVirovUspesen:"Fuentes actualizadas/añadidas con éxito: {n}.",mediaUvozNapaka:"Error al importar JSON.",mediaVnesiteJson:"Por favor introduce un código JSON válido.",mediaPredvaja:"REPRODUCIENDO EN SAFEER OS",mediaNapaka:"No se puede reproducir este flujo. Prueba otra versión.",mediaIsci:"Buscar películas, series y música",mediaVse:"Todo",mediaFilmi:"Películas",mediaSerije:"Series",mediaGlasba:"Música",mediaPrazno:"No hay resultados. Añade una fuente o cambia la búsqueda.",mediaViri:"Tus fuentes",mediaViriOpis:"Añade una web, API pública, RSS o M3U una sola vez.",mediaVirIme:"Nombre de la fuente (opcional)",mediaVirUrl:"https://ejemplo.es/catalogo.json",mediaDodaj:"Añadir fuente",mediaZadetkov:"{n} contenidos únicos",mediaRazlicic:"{n} versiones",mediaVirDodan:"Fuente añadida y catálogo combinado.",mediaVirPodvojen:"Esta fuente ya está añadida.",mediaVirNapaka:"No se pudo leer la fuente.",mediaOsvezeno:"Fuentes actualizadas.",mediaBrezVirov:"Añade tu primera fuente web; las carpetas locales ya están incluidas.",mediaVirElementov:"{n} contenidos"},
@@ -267,6 +267,7 @@
     if (razdelek === "naprave") { osveziPovezavo(); napraveZanka(); }
     if (razdelek === "nastavitve") {
       narisiNastavitve(); nalozScit(); scitZanka(); naloziMedia();
+      naloziMediaWatchSettings();
       var mediaPlosca = $("mediaNastavitvePlosca"), mediaMesto = $("mediaNastavitveMesto");
       if (mediaPlosca && mediaMesto && mediaPlosca.parentNode !== mediaMesto) mediaMesto.appendChild(mediaPlosca);
       if (mediaPlosca) mediaPlosca.hidden = false;
@@ -2090,6 +2091,8 @@
   }
   function mediaOznaka(vrsta) {
     if (vrsta === "glasba") return t("mediaGlasba");
+    if (vrsta === "video") return "Video";
+    if (vrsta === "slika") return "Slika";
     if (vrsta === "podcast") return "Podcast";
     if (vrsta === "radio") return "Radio";
     if (vrsta === "tv-v-zivo") return "TV v živo";
@@ -2128,10 +2131,19 @@
     });
     $("mediaPrazno").hidden = !!list.length;
     $("mediaPovzetek").textContent = t("mediaZadetkov", { n: list.length }) + (media.skupaj_strani > 1 ? " · Stran " + media.page + " od " + media.skupaj_strani : "");
+    if (media.filter === "radio" || media.filter === "video" || media.filter === "glasba") list.sort(function (a, b) {
+      return (a.skupina || a.izvajalec || "").localeCompare(b.skupina || b.izvajalec || "");
+    });
+    var mediaZadnjaSkupina = "";
     list.forEach(function (x) {
+      var skupina = x.skupina || (media.filter === "glasba" ? x.izvajalec : "");
+      if ((media.filter === "radio" || media.filter === "video" || media.filter === "glasba") && skupina && skupina !== mediaZadnjaSkupina) {
+        mediaZadnjaSkupina = skupina;
+        mreza.appendChild(el("h3", "media-skupina", ubezi(mediaZadnjaSkupina)));
+      }
       var card = el("button", "media-kartica");
       card.setAttribute("aria-label", (x.naslov || "Safeer Media") + " — " + mediaOznaka(x.vrsta));
-      if (x.slika) {
+    if (x.slika) {
         var image = document.createElement("img"); image.alt = ""; image.loading = "lazy"; image.src = x.slika;
         image.onerror = function () { image.replaceWith(el("span", "media-brez-slike", svg(mediaIkona(x.vrsta)))); };
         card.appendChild(image);
@@ -2140,6 +2152,8 @@
       data.appendChild(el("b", "", ubezi(x.naslov || "")));
       var meta = el("span", "media-meta");
       var metaOznaka = mediaOznaka(x.vrsta);
+      if (x.v_zivo) metaOznaka += " · V ŽIVO";
+      if (x.codec || x.bitrate) metaOznaka += " · " + [x.codec, x.bitrate ? x.bitrate + " kb/s" : ""].filter(Boolean).join(" ");
       if (x.vrsta === "serija" && (x.sezona || x.epizoda)) {
         metaOznaka += " · S" + String(x.sezona || 1).padStart(2, "0") + "E" + String(x.epizoda || 1).padStart(2, "0");
       }
@@ -2150,7 +2164,7 @@
       card.appendChild(el("span", "media-kakovost", ubezi(x.kakovost || "1080p")));
       if (Number(x.ocena || 0) > 0) card.appendChild(el("span", "media-ocena", "★ " + Number(x.ocena).toFixed(1)));
       card.onclick = function () {
-        if (x.tmdb_id || x.vrsta === "serija" || x.vrsta === "film") {
+        if (x.tmdb_id || x.vrsta === "serija" || (x.vrsta === "film" && !x.peertube_uuid)) {
           odpriMediaPodrobnosti(x.id);
         } else {
           odpriMedia(x.id);
@@ -2167,9 +2181,11 @@
     media.viri.forEach(function (source) {
       var row = el("div", "media-vir"); row.innerHTML = svg("splet");
       var info = el("div"); info.appendChild(el("b", "", ubezi(source.ime || source.url)));
-      var status = source.napaka ? source.napaka : (source.tip === "predvajalni_vir"
+      var status = source.napaka ? source.napaka : (source.vrsta === "streznik"
+        ? "Osebni strežnik · " + (source.ponudnik || "")
+        : (source.tip === "predvajalni_vir"
         ? "Predvajalni vir · " + t("mediaVirElementov", { n: source.stevilo || 0 })
-        : t("mediaVirElementov", { n: source.stevilo || 0 }));
+        : t("mediaVirElementov", { n: source.stevilo || 0 })));
       info.appendChild(el("small", source.napaka ? "media-vir-napaka" : "", ubezi(status + " · " + source.url)));
       row.appendChild(info);
       var refresh = el("button", "gumb-ikona", svg("ponovno")); refresh.title = t("mediaOsvezi");
@@ -2183,14 +2199,15 @@
     var variants = item.razlicice && item.razlicice.length ? item.razlicice : [{ url:item.url, vir:item.vir, kakovost:item.kakovost, vrsta:item.vrsta }];
     var variant = variants[index || 0] || variants[0], audio = item.vrsta === "glasba" || item.vrsta === "radio" || item.vrsta === "podcast";
     var url = variant.url || "";
-    var isDirectMedia = /\.(mp4|mkv|webm|avi|mov|m4v|mp3|flac|ogg|opus|m4a|aac|wav|m3u8)($|\?)/i.test(url) || url.startsWith("file:");
-    var video = $("mediaVideo"), playerAudio = $("mediaAudio"), iframe = $("mediaIframe");
+    var isDirectMedia = /\.(mp4|mkv|webm|avi|mov|m4v|mp3|flac|ogg|opus|m4a|aac|wav|m3u8)($|\?)/i.test(url) || url.startsWith("file:") || /mpegurl/i.test(variant.mime || item.mime || "");
+    var video = $("mediaVideo"), playerAudio = $("mediaAudio"), iframe = $("mediaIframe"), playerImage = $("mediaSlika");
 
     if (media.timer) { window.clearTimeout(media.timer); media.timer = 0; }
 
     if (video) { video.pause(); video.removeAttribute("src"); video.hidden = true; video.style.display = "none"; }
     if (playerAudio) { playerAudio.pause(); playerAudio.removeAttribute("src"); playerAudio.hidden = true; playerAudio.style.display = "none"; }
     if (iframe) { iframe.src = "about:blank"; iframe.hidden = true; }
+    if (playerImage) { playerImage.removeAttribute("src"); playerImage.hidden = true; }
 
     var pl = $("mediaPredvajalnik");
     if (pl) { pl.hidden = false; pl.classList.remove("kino"); }
@@ -2216,7 +2233,10 @@
       return false;
     }
 
-    if (isDirectMedia) {
+    if (item.vrsta === "slika" && playerImage) {
+      playerImage.hidden = false;
+      playerImage.src = url;
+    } else if (isDirectMedia) {
       var player = audio ? playerAudio : video;
       if (player) {
         player.hidden = false;
@@ -2292,6 +2312,7 @@
       if (player) { player.pause(); player.removeAttribute("src"); player.load(); player.hidden = true; player.style.display = "none"; }
     });
     var iframe = $("mediaIframe"); if (iframe) { iframe.src = "about:blank"; iframe.hidden = true; }
+    var playerImage = $("mediaSlika"); if (playerImage) { playerImage.removeAttribute("src"); playerImage.hidden = true; }
     var pl = $("mediaPredvajalnik");
     if (pl) { pl.hidden = true; pl.classList.remove("kino"); }
     media.aktivni = null;
@@ -2311,6 +2332,56 @@
 
   function zapriMediaPodrobnosti() {
     var panel = $("mediaPodrobnosti"); if (panel) panel.hidden = true;
+  }
+  function mediaWatchCountryName(code, fallback) {
+    try { return new Intl.DisplayNames([LOKALE[jezik] || "en-GB"], {type:"region"}).of(code) || fallback || code; }
+    catch (_) { return fallback || code; }
+  }
+  function naloziMediaWatchSettings() {
+    var select = $("mediaWatchCountry"); if (!select) return;
+    klic("mediaWatchSettings", [jezik]).then(function (settings) {
+      if (!settings) return;
+      var automatic = document.createElement("option"); automatic.value = "auto";
+      automatic.textContent = t("mediaWatchAuto", {country:mediaWatchCountryName(settings.zaznana, settings.ime_zaznane)});
+      select.replaceChildren(automatic);
+      (settings.regions || []).slice().sort(function (a,b) {
+        return String(a.native_name || a.english_name).localeCompare(String(b.native_name || b.english_name), LOKALE[jezik] || "en");
+      }).forEach(function (region) {
+        var option = document.createElement("option"); option.value = region.code;
+        option.textContent = mediaWatchCountryName(region.code, region.native_name || region.english_name);
+        select.appendChild(option);
+      });
+      select.value = settings.izbrana || "auto";
+      if (!select.value) select.value = "auto";
+    }).catch(function () {});
+  }
+  on("mediaWatchCountry", "change", function () {
+    klic("mediaWatchCountry", [this.value]).then(function () { obvesti(t("mediaOsvezeno")); })
+      .catch(function () { obvesti(t("mediaVirNapaka")); });
+  });
+  function narisiMediaWatchProviders(item) {
+    var target = $("mediaWatchProviders"); if (!target) return;
+    target.innerHTML = "";
+    var data = item.kje_gledati || {};
+    var countryName = mediaWatchCountryName(data.drzava, data.ime_drzave);
+    target.appendChild(el("h3", "", t("mediaWatchTitle", {country:countryName})));
+    var groups = data.skupine || [];
+    if (!groups.length) target.appendChild(el("p", "", t("mediaWatchNone", {country:countryName})));
+    var groupLabels = {"naročnina":"mediaWatchSubscription", "brezplačno":"mediaWatchFree", "izposoja":"mediaWatchRent", "nakup":"mediaWatchBuy"};
+    groups.forEach(function (group) {
+      var section = el("div", "media-kje-gledati-skupina");
+      section.appendChild(el("h4", "", t(groupLabels[group.id] || group.id)));
+      var providers = el("div", "media-ponudniki");
+      (group.ponudniki || []).forEach(function (provider) {
+        var button = el("button", "media-ponudnik", ""); button.type = "button";
+        if (provider.logo) { var logo = document.createElement("img"); logo.src = provider.logo; logo.alt = ""; logo.loading = "lazy"; button.appendChild(logo); }
+        button.appendChild(el("span", "", ubezi(provider.ime || "")));
+        button.onclick = function () { if (provider.povezava) klic("splet", [provider.povezava]); };
+        providers.appendChild(button);
+      });
+      section.appendChild(providers); target.appendChild(section);
+    });
+    target.appendChild(el("p", "media-kje-gledati-vira", t("mediaWatchSource")));
   }
   function naloziMediaSezono(item, season, button) {
     document.querySelectorAll("#mediaSezone button").forEach(function (b) { b.classList.toggle("izbran", b === button); });
@@ -2337,7 +2408,7 @@
     });
   }
   function odpriMediaPodrobnosti(id) {
-    klic("mediaPodrobnosti", [id]).then(function (item) {
+    klic("mediaPodrobnosti", [id, jezik]).then(function (item) {
       if (!item) return;
       var panel = $("mediaPodrobnosti"); panel.hidden = false;
       var hero = $("mediaPodrobnostiJunak"); hero.innerHTML = "";
@@ -2345,6 +2416,7 @@
       var info = el("div"); info.appendChild(el("h2", "", ubezi(item.naslov || "")));
       info.appendChild(el("p", "media-detail-meta", ubezi([item.leto, item.ocena ? "★ " + item.ocena : "", item.vrsta === "serija" ? "Serija" : "Film"].filter(Boolean).join(" · "))));
       if (item.opis) info.appendChild(el("p", "", ubezi(item.opis))); hero.appendChild(info);
+      narisiMediaWatchProviders(item);
       var seasons = $("mediaSezone"); seasons.innerHTML = "";
       var episodes = $("mediaEpizode"); episodes.innerHTML = "";
 
@@ -2439,6 +2511,37 @@
       else $("mediaVirSporocilo").textContent = (result && result.napaka === "podvojen") ? t("mediaVirPodvojen") : ((result && result.napaka) ? result.napaka : t("mediaVirNapaka"));
       naloziMedia();
     }, function () { $("mediaVirSporocilo").textContent = t("mediaVirNapaka"); });
+  });
+  on("mediaDodajMapo", "submit", function (event) {
+    event.preventDefault();
+    var pot = $("mediaMapaPot").value.trim();
+    if (!pot) return;
+    klic("mediaDodajMapo", [pot]).then(function (result) {
+      $("mediaVirSporocilo").textContent = result && result.ok ? "Mapa je dodana." : ((result && result.napaka) || t("mediaVirNapaka"));
+      if (result && result.ok) $("mediaMapaPot").value = "";
+      naloziMedia();
+    }, function () { $("mediaVirSporocilo").textContent = t("mediaVirNapaka"); });
+  });
+  on("mediaDodajStreznik", "submit", function (event) {
+    event.preventDefault();
+    var provider = $("mediaStreznikVrsta").value;
+    var name = $("mediaStreznikIme").value.trim();
+    var url = $("mediaStreznikUrl").value.trim();
+    var username = $("mediaStreznikUporabnik").value.trim();
+    var secret = $("mediaStreznikSkrivnost").value;
+    if (!url || !secret) return;
+    $("mediaVirSporocilo").textContent = "Povezujem strežnik …";
+    klic("mediaDodajStreznik", [provider, name, url, username, secret]).then(function (result) {
+      $("mediaStreznikSkrivnost").value = "";
+      if (result && result.ok) {
+        $("mediaStreznikUrl").value = ""; $("mediaStreznikIme").value = "";
+        $("mediaVirSporocilo").textContent = "Strežnik je varno povezan.";
+      } else $("mediaVirSporocilo").textContent = (result && result.napaka) || t("mediaVirNapaka");
+      naloziMedia();
+    }, function () {
+      $("mediaStreznikSkrivnost").value = "";
+      $("mediaVirSporocilo").textContent = t("mediaVirNapaka");
+    });
   });
 
   // --- Safeer Media: Nastavitve, Uvoz & Izvoz JSON ---

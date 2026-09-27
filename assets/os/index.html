@@ -173,6 +173,14 @@
             <svg data-ikona="glasba"></svg>
             <b>Glasba</b>
           </button>
+          <button class="kategorija-ploscica" data-media-filter="video">
+            <svg data-ikona="film"></svg>
+            <b>Video</b>
+          </button>
+          <button class="kategorija-ploscica" data-media-filter="slika">
+            <svg data-ikona="slika"></svg>
+            <b>Slike</b>
+          </button>
           <button class="kategorija-ploscica" data-media-filter="radio">
             <svg data-ikona="radio"></svg>
             <b>Radio</b>
@@ -199,7 +207,8 @@
               <button class="gumb-ikona" id="mediaZapri" data-naslov="zapri" title="Zapri"><svg data-ikona="x"></svg></button>
             </div>
           </div>
-          <video id="mediaVideo" controls playsinline preload="metadata" hidden></video>
+        <video id="mediaVideo" controls playsinline preload="metadata" hidden></video>
+          <img id="mediaSlika" alt="" hidden>
           <audio id="mediaAudio" controls preload="metadata" hidden></audio>
           <iframe id="mediaIframe" title="Safeer Media predvajalnik"
                   allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
@@ -229,6 +238,7 @@
             <button class="gumb-ikona" id="mediaPodrobnostiZapri" title="Zapri"><svg data-ikona="x"></svg></button>
           </div>
           <div class="media-podrobnosti-junak" id="mediaPodrobnostiJunak"></div>
+          <section class="media-kje-gledati" id="mediaWatchProviders" aria-live="polite"></section>
           <h3 id="mediaSezoneNaslov">Sezone</h3><div class="media-sezone" id="mediaSezone"></div>
           <h3 id="mediaEpizodeNaslov">Epizode</h3><div class="media-epizode" id="mediaEpizode"></div>
         </div>
@@ -364,6 +374,11 @@
           <p class="drobno" data-t="br_opis"></p>
           <div class="browser-settings" id="browserSettings" aria-live="polite"></div>
         </section>
+        <h2 data-t="mediaWatchSettingsTitle">Media Center</h2>
+        <div class="media-drzava-nastavitev">
+          <label for="mediaWatchCountry" data-t="mediaWatchCountryLabel">Country for Where to watch</label>
+          <select id="mediaWatchCountry" aria-label="Country for Where to watch"></select>
+        </div>
         <h2>Safeer OS</h2>
         <div class="hitre">
           <button class="stikalo" id="stikaloCelozaslonsko" role="switch" aria-checked="true"><svg data-ikona="celozaslonsko"></svg><div><span data-t="celozaslonsko"></span><small data-t="celozaslonskoPod"></small></div><i></i></button>
@@ -374,11 +389,26 @@
         <div class="media-viri-glava"><div><h2 data-t="mediaViri">Viri Safeer Media</h2><p data-t="mediaViriOpis">Spletno stran, javni API, RSS ali M3U dodaš samo enkrat.</p></div></div>
         <form class="media-dodaj-vir" id="mediaDodajVir">
           <input id="mediaVirIme" type="text" maxlength="80" data-ph="mediaVirIme" placeholder="Ime vira (neobvezno)">
-          <input id="mediaVirUrl" type="url" required data-ph="mediaVirUrl" placeholder="https://vidlink.pro">
+          <input id="mediaVirUrl" type="url" required data-ph="mediaVirUrl" placeholder="https://primer.si/seznam.m3u">
           <button class="gumb glavni" type="submit"><svg data-ikona="plus"></svg><span data-t="mediaDodaj">Dodaj vir</span></button>
         </form>
         <p class="namig" id="mediaVirSporocilo"></p>
         <div class="media-viri" id="mediaViri"></div>
+        <form class="media-dodaj-vir" id="mediaDodajMapo">
+          <input id="mediaMapaPot" type="text" required placeholder="Pot mape, tudi \\strežnik\mapa (UNC)">
+          <button class="gumb" type="submit">Dodaj lokalno ali omrežno mapo</button>
+        </form>
+        <form class="media-dodaj-vir" id="mediaDodajStreznik" autocomplete="off">
+          <select id="mediaStreznikVrsta" aria-label="Vrsta medijskega strežnika">
+            <option value="jellyfin">Jellyfin</option><option value="emby">Emby</option>
+            <option value="navidrome">Navidrome</option><option value="plex">Plex</option>
+          </select>
+          <input id="mediaStreznikIme" type="text" maxlength="80" placeholder="Ime (neobvezno)">
+          <input id="mediaStreznikUrl" type="url" required placeholder="https://strežnik:vrata">
+          <input id="mediaStreznikUporabnik" type="text" autocomplete="username" placeholder="Uporabniško ime (Plex: neobvezno)">
+          <input id="mediaStreznikSkrivnost" type="password" autocomplete="new-password" required placeholder="Geslo ali X-Plex-Token">
+          <button class="gumb" type="submit">Poveži medijski strežnik</button>
+        </form>
         <div id="mediaNastavitveMesto"></div>
         <div id="skupineNastavitev"></div>
         <p class="o-sistemu" id="oSistemu"></p>
