@@ -204,3 +204,36 @@ class TestZakonitiViri(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestIskanjeInPredvajanje(unittest.TestCase):
+    """Regresija 27. 9.: klik na zadetek iskanja (zdruzena PeerTube kartica) se ni odprl,
+    ker resolve() ni nasel ID-ja, ki ga pozna samo katalog z iskalnim nizom."""
+
+    def test_zadetek_iskanja_se_razresi_tudi_ce_prvi_streznik_odpove(self):
+        def video(host, uuid):
+            return {"id": "peertube:" + uuid, "naslov": "Sintel", "vrsta": "video", "leto": 2010,
+                    "url": "https://%s/videos/watch/%s" % (host, uuid), "vir": "PeerTube · " + host,
+                    "streznik": host, "peertube_uuid": uuid, "razlicice": [], "slika": ""}
+        zadetki = [video("prvi.test", "aaaaaaaa-1111"), video("drugi.test", "bbbbbbbb-2222")]
+
+        class LazniViri:
+            def get(self, query="", configured_hosts=None):
+                return [dict(z) for z in zadetki] if query == "Sintel" else []
+
+            def resolve_video(self, item, configured_hosts=None):
+                if item.get("streznik") == "prvi.test":
+                    return None  # prvi streznik ne odgovori
+                return dict(item, url="https://drugi.test/master.m3u8")
+
+        with tempfile.TemporaryDirectory() as mapa:
+            m = MediaCenter(mapa, roots=[])
+            m._zakoniti_viri = LazniViri()
+            kartice = [x for x in m.catalog(query="Sintel", kind="video")["vnosi"] if x.get("naslov") == "Sintel"]
+            self.assertEqual(len(kartice), 1)
+            razreseno = m.resolve(kartice[0]["id"])
+            self.assertIsNotNone(razreseno)
+            self.assertEqual(razreseno["url"], "https://drugi.test/master.m3u8")
+            self.assertEqual(razreseno["id"], kartice[0]["id"])
+            # Predvajalnik bere razlicice: vse morajo biti predvajalni tokovi, ne spletne strani.
+            self.assertEqual([v["url"] for v in razreseno["razlicice"]], ["https://drugi.test/master.m3u8"])
