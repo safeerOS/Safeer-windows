@@ -12,6 +12,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as
 from typing import Any
 
 PEERTUBE_INSTANCES = ("peertube.tv", "tilvids.com", "framatube.org", "peertube.uno", "video.blender.org")
+# Filmi v javni lasti z Internet Archive: samo vnosi z izrecno licenco javne lasti (CC PD / CC0).
+# Zbirka feature_films vsebuje tudi uporabniske nalozbe, zato brez licence ne prikazemo nicesar.
+ARCHIVE_PD_QUERY = "collection:feature_films AND mediatype:movies AND licenseurl:*publicdomain*"
+_ARCHIVE_SUMLJIVO = re.compile(r"torrent|\b(?:dvd|br|web|hd|bd)?rip\b|\bhdcam\b|\bx26[45]\b|\bxvid\b|\bcam\b", re.I)
 JAMENDO_CLIENT_ID = "8d37f069"  # Javen client_id aplikacije Safeer TV.
 RADIO_TAGS = ("jazz", "rock", "pop", "news", "classical", "electronic")
 #: Glasbene zvrsti za Glasbo in Radio v Medijskem centru (kot zanri pri filmih):
@@ -373,13 +377,82 @@ class ZakonitiViri:
                 "codec": codec, "bitrate": bitrate, "drzava": row.get("countrycode", ""),
                 "zanri": row.get("tags", ""), "skupina": group, "vir": "Radio Browser"}
 
+    def _archive_datoteka(self, ident: str) -> tuple[str, int] | None:
+        """Neposredna datoteka MP4 (H.264) izdelka; brez nje filma ne pokazemo."""
+        data = self._json("https://archive.org/metadata/%s" % urllib.parse.quote(ident, safe=""))
+        licenca = str((data.get("metadata") or {}).get("licenseurl") or "")
+        if "publicdomain" not in licenca:
+            return None
+        kandidati = []
+        for f in data.get("files") or []:
+            ime = str(f.get("name") or "")
+            if not ime.lower().endswith(".mp4"):
+                continue
+            try:
+                visina = int(f.get("height") or 0)
+            except (TypeError, ValueError):
+                visina = 0
+            kandidati.append((min(visina, 1080) if visina else 240, ime))
+        if not kandidati:
+            return None
+        visina, ime = max(kandidati)
+        return "https://archive.org/download/%s/%s" % (urllib.parse.quote(ident, safe=""), urllib.parse.quote(ime)), visina
+
+    def resolve_archive(self, item: dict) -> dict | None:
+        datoteka = self._archive_datoteka(str(item.get("archive_id") or ""))
+        if not datoteka:
+            return None
+        url, visina = datoteka
+        return dict(item, url=url, mime="video/mp4", locljivost=visina, kakovost="%dp" % visina,
+                    stran="https://archive.org/details/" + urllib.parse.quote(str(item.get("archive_id")), safe=""))
+
+    def javna_last(self, query: str = "") -> list[dict]:
+        """Filmi v javni lasti (Internet Archive); tocno datoteko MP4 poiscemo ob kliku (resolve_archive)."""
+        iskanje = re.sub(r"[^\w\s-]", " ", query or "", flags=re.UNICODE).strip()
+        q = ARCHIVE_PD_QUERY + (" AND title:(%s)" % iskanje if iskanje else "")
+        url = "https://archive.org/advancedsearch.php?" + urllib.parse.urlencode(
+            [("q", q), ("fl[]", "identifier"), ("fl[]", "title"), ("fl[]", "year"), ("fl[]", "description"), ("fl[]", "format"),
+             ("sort[]", "downloads desc"), ("rows", "40"), ("output", "json")])
+
+        def fetch():
+            vrstice = ((self._json(url) or {}).get("response") or {}).get("docs") or []
+            out = []
+            for v in vrstice:
+                if not isinstance(v, dict) or not v.get("identifier") or not v.get("title"):
+                    continue
+                if _ARCHIVE_SUMLJIVO.search(str(v.get("title")) + " " + str(v.get("identifier"))):
+                    continue
+                formati = v.get("format") if isinstance(v.get("format"), list) else [str(v.get("format") or "")]
+                # Samo izdelki z videom MP4 (H.264 / MPEG4) - te predvajalnik zna predvajati.
+                if not any(f in ("h.264", "512Kb MPEG4", "MPEG4", "h.264 IA") for f in formati):
+                    continue
+                ident = str(v["identifier"])
+                try:
+                    leto = int(str(v.get("year") or "0")[:4])
+                except ValueError:
+                    leto = 0
+                opis = v.get("description")
+                opis = " ".join(opis) if isinstance(opis, list) else str(opis or "")
+                out.append({
+                    "id": "archive:" + ident, "naslov": str(v["title"])[:200], "vrsta": "film",
+                    "url": "https://archive.org/details/" + urllib.parse.quote(ident, safe=""),
+                    "archive_id": ident, "leto": leto,
+                    "slika": "https://archive.org/services/img/" + urllib.parse.quote(ident, safe=""),
+                    "opis": re.sub(r"<[^>]+>", " ", opis)[:600],
+                    "vir": "Internet Archive · javna last", "vir_id": "archive-javna-last", "skupina": "Javna last",
+                })
+            return out
+
+        return self._cached("archive-pd:" + iskanje.casefold(), fetch)
+
     def get(self, query: str = "", configured_hosts: list[str] | None = None, zvrst: str = "") -> list[dict]:
         if zvrst:
             # Glasbena zvrst velja samo za glasbo in radio (video nima teh zvrsti).
             tasks = ((self.music, (query, zvrst)), (self.radio, (query, zvrst)))
         else:
-            tasks = ((self.videos, (query, configured_hosts)), (self.music, (query,)), (self.radio, (query,)))
-        with ThreadPoolExecutor(max_workers=3) as pool:
+            tasks = ((self.videos, (query, configured_hosts)), (self.music, (query,)), (self.radio, (query,)),
+                     (self.javna_last, (query,)))
+        with ThreadPoolExecutor(max_workers=4) as pool:
             futures = [pool.submit(fn, *args) for fn, args in tasks]
             results = []
             for future in futures:

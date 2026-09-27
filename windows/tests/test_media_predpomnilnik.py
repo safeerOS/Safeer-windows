@@ -155,3 +155,35 @@ class RazvrscanjeInFiltriTest(unittest.TestCase):
                                             "vir_id": "lokalno", "vir": "Ta računalnik"}]
             r = center.catalog_hitro("", "vse", samo_lokalno=True)
             self.assertEqual([x["naslov"] for x in r["vnosi"]], ["Moj posnetek"])
+
+
+class JavnaLastTest(unittest.TestCase):
+    def test_samo_pd_mp4_brez_sumljivih_naslovov(self):
+        from core import zakoniti_viri as z
+        docs = [
+            {"identifier": "his_girl_friday", "title": "His Girl Friday", "year": "1940", "format": ["h.264", "Ogg Video"]},
+            {"identifier": "film-drip-torrent", "title": "Film 2020 DRip Mp3 Torrent", "format": ["h.264"]},
+            {"identifier": "samo_ogg", "title": "Samo Ogg", "format": ["Ogg Video"]},
+        ]
+        v = z.ZakonitiViri()
+        v._json = lambda url: {"response": {"docs": docs}}
+        r = v.javna_last()
+        self.assertEqual([x["archive_id"] for x in r], ["his_girl_friday"])
+        self.assertEqual(r[0]["leto"], 1940)
+        self.assertEqual(r[0]["vrsta"], "film")
+
+
+class PriporocenoTest(unittest.TestCase):
+    def test_privzeto_najprej_priljubljeno_iz_najboljsih_virov(self):
+        with tempfile.TemporaryDirectory() as td:
+            center = os_media.MediaCenter(td, roots=[])
+            center._local_items = lambda: [{"id": "l", "naslov": "Aaa domaci", "vrsta": "film", "url": "file:///a.mp4"}]
+            center._ima_embed_vir = lambda data=None: True
+            center._embed_viri = lambda data: []
+            center._tmdb_catalog = lambda *a, **k: ([{"naslov": "Zzz uspesnica", "vrsta": "film", "url": "https://t/1", "leto": 2024},
+                                                     {"naslov": "Mmm druga", "vrsta": "film", "url": "https://t/2", "leto": 2023}], 1)
+            center._zakoniti_viri.get = lambda *a, **k: [{"naslov": "Bbb javna last", "vrsta": "film", "url": "https://a/1",
+                                                          "vir_id": "archive-javna-last"}]
+            center._personal_items = lambda q: []
+            r = center.catalog("", "film")
+            self.assertEqual([x["naslov"] for x in r["vnosi"]], ["Zzz uspesnica", "Mmm druga", "Bbb javna last", "Aaa domaci"])
