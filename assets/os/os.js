@@ -1249,13 +1249,34 @@
 
   // Naprave v Linku s preimenovanjem: ime hrani sredisce, zato ga vidijo vse naprave (telefon, TV, tablica).
   var preimenujem = null;
+  // Ena naprava ima lahko v Linku vec vnosov (TV: sprejemnik zaslona "n-x" in Safeer OS "n-x-os";
+  // racunalnik: "pc-y" in "pc-y-control"). Uporabnik vidi eno napravo: zdruzimo jih po osnovnem id-ju,
+  // obdrzimo osnovni vnos (ta zna daljinec in zaslon) in zdruzimo zmoznosti. Ta racunalnik je prvi.
+  function zdruziSorodnike(naprave) {
+    var poOsnovi = {}, vrstniRed = [];
+    (naprave || []).forEach(function (n) {
+      if (!n || !n.id) return;
+      var osnova = String(n.id).replace(/-(os|control)$/, "");
+      var obstojec = poOsnovi[osnova];
+      if (!obstojec) { poOsnovi[osnova] = Object.assign({}, n); vrstniRed.push(osnova); return; }
+      var jeOsnovni = n.id === osnova;
+      var glavni = jeOsnovni ? Object.assign({}, n) : obstojec, drugi = jeOsnovni ? obstojec : n;
+      var zm = (glavni.zmoznosti || []).slice();
+      (drugi.zmoznosti || []).forEach(function (z) { if (zm.indexOf(z) < 0) zm.push(z); });
+      glavni.zmoznosti = zm;
+      glavni.ta = !!(glavni.ta || drugi.ta);
+      poOsnovi[osnova] = glavni;
+    });
+    var izid = vrstniRed.map(function (k) { return poOsnovi[k]; });
+    return izid.filter(function (n) { return n.ta; }).concat(izid.filter(function (n) { return !n.ta; }));
+  }
   function narisiSeznamNaprav(pokaziSeznam) {
     var blok = $("blokSeznamNaprav");
     blok.hidden = !pokaziSeznam;
     if (!pokaziSeznam) { preimenujem = null; return; }
     klic("vseNaprave").then(function (naprave) {
       var ul = $("seznamNaprav"); ul.innerHTML = "";
-      (naprave || []).forEach(function (n) {
+      zdruziSorodnike(naprave).forEach(function (n) {
         var li = el("li");
         var opis = n.ta ? t("taRacunalnik") : (n.platforma ? t("plat_" + n.platforma) : (n.vrsta || ""));
         if (preimenujem === n.id) {
