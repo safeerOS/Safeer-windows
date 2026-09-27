@@ -633,6 +633,7 @@ class SafeerOsWindow(QMainWindow):
                 "mape": os_backend_win.uporabniske_mape(),
                 "celozaslonsko": self.isFullScreen(),
                 "namizje": "windows",
+                "nedavne_app": shramba.get("nedavne_app", []),
                 "spletne": shramba.get("spletne", [
                     {"ime": "Gmail", "url": "https://mail.google.com"},
                     {"ime": "YouTube", "url": "https://www.youtube.com"},
@@ -763,6 +764,19 @@ class SafeerOsWindow(QMainWindow):
 
         if metoda in ("nazajVMint", "nazajVWindows", "namizje"):
             self.dispatcher.dispatch(self.showMinimized)
+            return True
+
+        if metoda == "shraniNedavneApp":
+            # Nedavno odprti programi, spletne aplikacije in strani (najvec 20, najnovejsi prvi).
+            seznam = a[0] if a and isinstance(a[0], list) else []
+            cisti = []
+            for vnos in seznam[:20]:
+                if isinstance(vnos, dict) and vnos.get("kljuc") and vnos.get("ime"):
+                    cisti.append({k: vnos.get(k) for k in ("kljuc", "vrsta", "ime", "id", "url", "naprava",
+                                                           "ime_naprave", "ikona", "cas") if vnos.get(k) is not None})
+            shramba = os_backend_win.nalozi_shrambo()
+            shramba["nedavne_app"] = cisti
+            os_backend_win.shrani_shrambo(shramba)
             return True
 
         if metoda == "shraniSpletne":

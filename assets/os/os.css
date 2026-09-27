@@ -702,3 +702,19 @@ div.vrstica { cursor: default; }
   max-height: calc(100vh - 120px); overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
 #slojVecApp .gumbi-glave { display: flex; gap: 8px; align-items: center; }
 .spletne-mreza-vse { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 12px; }
+
+/* Nedavne aplikacije na domaci strani */
+#domaceNedavne { display: flex; flex-direction: column; gap: 8px; overflow: hidden; }
+.nedavna-vrstica { position: relative; display: flex; align-items: center; gap: 12px; width: 100%; padding: 8px 36px 8px 8px;
+  border-radius: 12px; background: rgba(255,255,255,.03); border: 1px solid transparent; text-align: left; color: inherit; cursor: pointer; }
+.nedavna-vrstica:hover, .nedavna-vrstica:focus { background: rgba(84,214,165,.10); border-color: rgba(84,214,165,.35); outline: none; }
+.nedavna-vrstica img, .nedavna-vrstica .crka { width: 34px; height: 34px; flex-shrink: 0; border-radius: 9px; font-size: 16px;
+  display: grid; place-items: center; color: #fff; font-weight: 700; object-fit: contain; }
+.nedavna-vrstica .besedilo { display: flex; flex-direction: column; min-width: 0; }
+.nedavna-vrstica .besedilo b, .nedavna-vrstica .besedilo small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nedavna-vrstica .besedilo small { color: var(--medlo); font-size: 12px; }
+.nedavna-vrstica .odstrani { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); width: 22px; height: 22px;
+  display: none; place-items: center; border-radius: 6px; }
+.nedavna-vrstica:hover .odstrani, .nedavna-vrstica:focus-within .odstrani { display: grid; }
+.nedavna-vrstica .odstrani:hover { background: rgba(255,255,255,.12); }
+.nedavna-vrstica .odstrani svg { width: 14px; height: 14px; }

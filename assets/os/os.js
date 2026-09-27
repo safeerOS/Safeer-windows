@@ -243,7 +243,7 @@
     // Multi-host: datoteke drugih naprav v Safeer Linku
     napraveDatoteke: [], izbranaNapravaDatoteke: "", daljinskaPot: [],
     daljinskiKoreni: {}, daljinskiServer: {},
-    povezava: { stanje: "nov", control: true }, spletne: null, nedavne: [], brskalnikNastavitve: null
+    povezava: { stanje: "nov", control: true }, spletne: null, nedavne: [], nedavneApp: [], brskalnikNastavitve: null
   };
   var PRIVZETE_SPLETNE = [
     { ime: "YouTube", url: "https://www.youtube.com" },
@@ -282,9 +282,83 @@
     pojdi("splet");
     klic("iskanjeSplet", [String(niz || "").trim()]);
   }
-  function otvoriSpletnoStran(url) {
+  function otvoriSpletnoStran(url, ime) {
+    zabeleziNedavno({ vrsta: "stran", url: url, ime: ime });
     pojdi("splet");
     klic("splet", [url]);
+  }
+
+  // ------------------------------------------------------------------ nedavne aplikacije
+  // Programi (tudi na drugih napravah), spletne aplikacije in spletne strani, ki jih je
+  // uporabnik nazadnje odprl. Najnovejsi prvi, brez podvojitev, shranjeno v os.json.
+  function imeIzNaslova(url) {
+    try { return new URL(url).hostname.replace(/^www\./, ""); } catch (e) { return String(url || ""); }
+  }
+  function zabeleziNedavno(v) {
+    if (!v) return;
+    var vnos = { vrsta: v.vrsta, cas: Math.floor(Date.now() / 1000) };
+    if (v.vrsta === "program") {
+      vnos.id = v.id; vnos.ime = v.ime; vnos.ikona = v.ikona || "";
+      if (v.naprava) { vnos.naprava = v.naprava; vnos.ime_naprave = v.ime_naprave || ""; }
+      vnos.kljuc = "p:" + (v.naprava || "") + ":" + v.id;
+    } else {
+      var url = String(v.url || "");
+      if (!/^https?:\/\//i.test(url)) return;
+      var aplikacija = spletne().find(function (a) { return imeIzNaslova(a.url) === imeIzNaslova(url); });
+      vnos.vrsta = aplikacija ? "spletna" : "stran";
+      vnos.url = url;
+      vnos.ime = v.ime || (aplikacija && aplikacija.ime) || imeIzNaslova(url);
+      vnos.kljuc = "s:" + (aplikacija ? imeIzNaslova(url) : url.replace(/[#?].*$/, ""));
+    }
+    if (!vnos.ime) return;
+    var seznam = (S.nedavneApp || []).filter(function (x) { return x.kljuc !== vnos.kljuc; });
+    seznam.unshift(vnos);
+    S.nedavneApp = seznam.slice(0, 20);
+    klic("shraniNedavneApp", [S.nedavneApp]).catch(function () {});
+    narisiDomaceNedavne();
+  }
+  function kdajPrej(cas) {
+    var s_ = Math.max(0, Math.floor(Date.now() / 1000 - (cas || 0)));
+    if (s_ < 60) return "pravkar";
+    if (s_ < 3600) return "pred " + Math.floor(s_ / 60) + " min";
+    if (s_ < 86400) return "pred " + Math.floor(s_ / 3600) + " h";
+    return "pred " + Math.floor(s_ / 86400) + " d";
+  }
+  function narisiDomaceNedavne() {
+    var cilj = $("domaceNedavne");
+    if (!cilj) return;
+    cilj.innerHTML = "";
+    var seznam = S.nedavneApp || [];
+    if (!seznam.length) {
+      cilj.appendChild(el("p", "drobno", ubezi("Tu se prikažejo programi, spletne aplikacije in strani, ki jih odpreš.")));
+      return;
+    }
+    var prostora = Math.max(3, Math.floor(((cilj.clientHeight || 240) + 8) / 52));
+    seznam.slice(0, prostora).forEach(function (v) {
+      var b = el("button", "nedavna-vrstica");
+      b.appendChild(v.vrsta === "program" ? slikaAliCrka(v.ikona, v.ime) : crka(v.ime));
+      var opis = v.vrsta === "program" ? (v.ime_naprave ? "Program · " + v.ime_naprave : "Program")
+               : v.vrsta === "spletna" ? "Spletna aplikacija" : imeIzNaslova(v.url);
+      b.appendChild(el("span", "besedilo", "<b>" + ubezi(v.ime) + "</b><small>" + ubezi(opis + " · " + kdajPrej(v.cas)) + "</small>"));
+      var x = el("span", "odstrani", svg("x"));
+      x.title = t("odstrani");
+      x.addEventListener("click", function (e) {
+        e.stopPropagation();
+        S.nedavneApp = (S.nedavneApp || []).filter(function (y) { return y.kljuc !== v.kljuc; });
+        klic("shraniNedavneApp", [S.nedavneApp]).catch(function () {});
+        narisiDomaceNedavne();
+      });
+      b.appendChild(x);
+      b.addEventListener("click", function () {
+        if (v.vrsta === "program") {
+          var p = (S.programi || []).find(function (q) { return q.id === v.id && (q.naprava || "") === (v.naprava || ""); });
+          zazeni(p || { id: v.id, ime: v.ime, ikona: v.ikona, naprava: v.naprava });
+        } else {
+          otvoriSpletnoStran(v.url, v.ime);
+        }
+      });
+      cilj.appendChild(b);
+    });
   }
   window.safeerOsPojdi = function (kam) {
     kam = String(kam || "");
@@ -332,13 +406,17 @@
     if (p.naprava) {
       var n = S.naprave.find(function (x) { return x.id === p.naprava; }) || { ime: "" };
       obvesti(t("zaganjamNa", { ime: p.ime, naprava: n.ime }));
-      klic("zazeniNaNapravi", [p.naprava, p.id]).then(function (ok) { if (!ok) obvesti(t("niUspelo")); },
+      klic("zazeniNaNapravi", [p.naprava, p.id]).then(function (ok) {
+        if (!ok) { obvesti(t("niUspelo")); return; }
+        zabeleziNedavno({ vrsta: "program", id: p.id, ime: p.ime, ikona: p.ikona, naprava: p.naprava, ime_naprave: n.ime });
+      },
                                                         function () { obvesti(t("niUspelo")); });
       return;
     }
     obvesti(t("odpiram", { ime: p.ime }));
     klic("zazeni", [p.id]).then(function (ok) {
       if (!ok) { obvesti(t("niUspelo")); return; }
+      zabeleziNedavno({ vrsta: "program", id: p.id, ime: p.ime, ikona: p.ikona });
       p.uporaba = (p.uporaba || 0) + 1;
       p.zadnjic = Date.now() / 1000;
       setTimeout(narisiDomov, 400);
@@ -515,7 +593,7 @@
       shraniSpletne(nove);
     });
     b.appendChild(x);
-    b.addEventListener("click", function () { obvesti(t("odpiram", { ime: a.ime })); otvoriSpletnoStran(a.url); });
+    b.addEventListener("click", function () { obvesti(t("odpiram", { ime: a.ime })); otvoriSpletnoStran(a.url, a.ime); });
     return b;
   }
   // Kartica "Spletne aplikacije" na domaci strani. Brez drsnika: pokaze toliko
@@ -600,6 +678,7 @@
   }
   function narisiDomov() {
     narisiDomaceSpletne();
+    narisiDomaceNedavne();
     var vrsta = $("domaciProgrami");
     if (!vrsta) return;
     var sirina = vrsta.clientWidth || 1000;
@@ -1996,6 +2075,11 @@
     on("dodajPreklici", "click", zapriSloje);
     // Gumb "+ Dodaj" na kartici Spletne aplikacije (nova domaca stran).
     on("gumbOdpriDodajApp", "click", odpriDodaj);
+    on("gumbPocistiNedavne", "click", function () {
+      S.nedavneApp = [];
+      klic("shraniNedavneApp", [[]]).catch(function () {});
+      narisiDomaceNedavne();
+    });
     on("vecAppZapri", "click", zapriSloje);
     on("vecAppDodaj", "click", function () { zapriSloje(); odpriDodaj(); });
     on("obrazecDodaj", "submit", function (e) {
@@ -2059,6 +2143,7 @@
       if (BESEDILA_OS[z.jezik]) jezik = z.jezik;
       prevedi();
       if (Array.isArray(z.spletne)) S.spletne = z.spletne;
+      if (Array.isArray(z.nedavne_app)) S.nedavneApp = z.nedavne_app;
       if (z.ozadje) $("ozadje").style.backgroundImage = 'url("' + z.ozadje.replace(/"/g, "%22") + '")';
       var ime = String(z.ime || "");
       if ($("imeUporabnika")) $("imeUporabnika").textContent = ime;
@@ -2376,7 +2461,7 @@
         var button = el("button", "media-ponudnik", ""); button.type = "button";
         if (provider.logo) { var logo = document.createElement("img"); logo.src = provider.logo; logo.alt = ""; logo.loading = "lazy"; button.appendChild(logo); }
         button.appendChild(el("span", "", ubezi(provider.ime || "")));
-        button.onclick = function () { if (provider.povezava) klic("splet", [provider.povezava]); };
+        button.onclick = function () { if (provider.povezava) otvoriSpletnoStran(provider.povezava, provider.ime); };
         providers.appendChild(button);
       });
       section.appendChild(providers); target.appendChild(section);
