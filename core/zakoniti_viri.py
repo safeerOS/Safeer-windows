@@ -11,7 +11,15 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeout
 from typing import Any
 
-PEERTUBE_INSTANCES = ("peertube.tv", "tilvids.com", "framatube.org", "peertube.uno", "video.blender.org")
+# Vgrajeni PeerTube strezniki z urejeno vsebino. peertube.tv in peertube.uno sta 27. 9. 2026 med najbolj
+# gledanimi imela celotne komercialne filme (piratske nalozbe), zato ju ne uporabljamo in ju izlocimo tudi iz iskanja.
+PEERTUBE_INSTANCES = ("tilvids.com", "framatube.org", "video.blender.org")
+PEERTUBE_BLOKIRANI = frozenset({"peertube.tv", "peertube.uno"})
+# Znaki piratske nalozbe v naslovu (celoten film "v streamingu", rip z YouTuba ipd.).
+_PEERTUBE_SUMLJIVO = re.compile(
+    r"(?:film|documentario|pel[ií]cula|documental)\s+complet|full\s+movie|ganzer\s+film|film\s+complet|"
+    r"streaming\s+(?:sub\s+)?ita|\bsub\s+ita\b|\b(?:hd|dvd|br|web)rip\b|\bweb-?dl\b|\bbluray\b|\bhdcam\b|"
+    r"\[[A-Za-z0-9_-]{11}\]\s*$", re.I)
 # Filmi v javni lasti z Internet Archive: samo vnosi z izrecno licenco javne lasti (CC PD / CC0).
 # Zbirka feature_films vsebuje tudi uporabniske nalozbe, zato brez licence ne prikazemo nicesar.
 ARCHIVE_PD_QUERY = "collection:feature_films AND mediatype:movies AND licenseurl:*publicdomain*"
@@ -146,7 +154,7 @@ class ZakonitiViri:
             try:
                 parsed = urllib.parse.urlsplit(value if "://" in value else "https://" + value)
                 host = (parsed.hostname or "").lower()
-                if parsed.scheme == "https" and host and host not in hosts:
+                if parsed.scheme == "https" and host and host not in hosts and host not in PEERTUBE_BLOKIRANI:
                     candidates.append(host)
             except ValueError:
                 pass
@@ -168,7 +176,11 @@ class ZakonitiViri:
     def _peertube_video(self, row: dict, host: str, category: str) -> dict | None:
         if not isinstance(row, dict) or row.get("nsfw"):
             return None
+        if str(host or "").lower() in PEERTUBE_BLOKIRANI:
+            return None
         title = str(row.get("name") or "").strip()
+        if _PEERTUBE_SUMLJIVO.search(title):
+            return None
         video_id = str(row.get("uuid") or "")
         if not title or not video_id:
             return None
