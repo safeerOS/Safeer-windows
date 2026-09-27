@@ -2513,7 +2513,11 @@
     if (znan && znan.stran) { otvoriSpletnoStran(znan.stran, znan.naslov); return; }
     klic("mediaPredvajaj", [id]).then(function (item) {
       if (!item) { obvesti(t("mediaVirNapaka")); return; }
+      if (item.napaka) { obvesti(item.napaka); return; }
+      if (item.sporocilo) { obvesti(item.sporocilo); return; }
+      if (item.stran) { otvoriSpletnoStran(item.stran, item.naslov); return; }
       media.aktivni = item;
+      klic("mediaImaKodi").then(function (ima) { var g = $("mediaNaKodi"); if (g) g.hidden = !ima; });
       if (!item.native) predvajajHtml(item, 0);
     }, function () { obvesti(t("mediaVirNapaka")); });
   }
@@ -2534,7 +2538,7 @@
   var FILMSKI_ZANRI = null;
   function skupinaZanrov(filter) {
     if (filter === "film" || filter === "serija" || filter === "vse") return "film";
-    if (filter === "glasba" || filter === "radio") return filter;
+    if (filter === "glasba" || filter === "radio" || filter === "tv-v-zivo") return filter;
     return "";
   }
   function izberiZanr(b) {
@@ -2563,7 +2567,7 @@
     if (!skupina) return;
     vrstica.innerHTML = "";
     var vse = el("button", "izbran"); vse.setAttribute("data-media-genre", "");
-    vse.textContent = skupina === "radio" ? "Vse postaje" : "Vsa glasba";
+    vse.textContent = skupina === "radio" ? "Vse postaje" : skupina === "tv-v-zivo" ? "Vse države" : "Vsa glasba";
     vse.onclick = function () { izberiZanr(vse); };
     vrstica.appendChild(vse);
     klic("mediaZvrsti", [skupina]).then(function (zvrsti) {
@@ -2739,6 +2743,14 @@
   on("mediaPodrobnostiNazaj", "click", zapriMediaPodrobnosti);
   on("mediaPodrobnostiZapri", "click", zapriMediaPodrobnosti);
   on("mediaZapri", "click", zapriMediaHtml);
+  on("mediaNaKodi", "click", function () {
+    var item = media.aktivni;
+    if (!item) return;
+    klic("mediaNaKodi", [item.id]).then(function (r) {
+      if (r && r.ok) { obvesti(item.naslov + " se predvaja na " + r.kodi + "."); zapriMediaHtml(); }
+      else obvesti((r && r.napaka) || t("niUspelo"));
+    });
+  });
   on("mediaPredvajalnikNazaj", "click", zapriMediaHtml);
   window.addEventListener("keydown", function (e) {
     if (e.key === "Escape") {
@@ -2783,7 +2795,12 @@
     var url = $("mediaStreznikUrl").value.trim();
     var username = $("mediaStreznikUporabnik").value.trim();
     var secret = $("mediaStreznikSkrivnost").value;
-    if (!url || !secret) return;
+    var potrebnaPrijava = { jellyfin: 1, emby: 1, navidrome: 1, plex: 1 };
+    if (!url) return;
+    if (potrebnaPrijava[provider] && !secret) {
+      $("mediaVirSporocilo").textContent = "Ta strežnik potrebuje geslo ali žeton.";
+      return;
+    }
     $("mediaVirSporocilo").textContent = "Povezujem strežnik …";
     klic("mediaDodajStreznik", [provider, name, url, username, secret]).then(function (result) {
       $("mediaStreznikSkrivnost").value = "";
@@ -2796,6 +2813,30 @@
       $("mediaStreznikSkrivnost").value = "";
       $("mediaVirSporocilo").textContent = t("mediaVirNapaka");
     });
+  });
+
+  // DLNA/UPnP (Gerbera, MiniDLNA, NAS, TV sprejemniki): poiscemo jih v domacem omrezju in jih
+  // ponudimo za povezavo z enim klikom - uporabnik naslova opisa naprave ne pozna.
+  on("mediaOdkrijDlna", "click", function () {
+    var sporocilo = $("mediaVirSporocilo");
+    sporocilo.textContent = "Iščem medijske strežnike v domačem omrežju …";
+    klic("mediaOdkrijDlna").then(function (najdeni) {
+      var seznam = najdeni || [];
+      if (!seznam.length) { sporocilo.textContent = "V domačem omrežju ni najdenega strežnika DLNA/UPnP."; return; }
+      sporocilo.textContent = "Najdeni strežniki – klikni za povezavo:";
+      seznam.forEach(function (n) {
+        var g = el("button", "gumb"); g.type = "button"; g.textContent = "Poveži " + n.ime;
+        g.addEventListener("click", function () {
+          sporocilo.textContent = "Povezujem " + n.ime + " …";
+          klic("mediaDodajStreznik", ["dlna", n.ime, n.url, "", ""]).then(function (r) {
+            sporocilo.textContent = r && r.ok ? (n.ime + " je povezan.") : ((r && r.napaka) || t("mediaVirNapaka"));
+            naloziMedia();
+          });
+        });
+        sporocilo.appendChild(document.createElement("br"));
+        sporocilo.appendChild(g);
+      });
+    }, function () { sporocilo.textContent = t("mediaVirNapaka"); });
   });
 
   // --- Safeer Media: Nastavitve, Uvoz & Izvoz JSON ---

@@ -203,6 +203,7 @@
               </div>
             </div>
             <div class="media-predvajalnik-akcije">
+              <button class="gumb" id="mediaNaKodi" title="Predvajaj na napravi s Kodijem" hidden>Na Kodi</button>
               <button class="gumb-ikona" id="mediaKino" title="Kino način (celozaslonsko)"><svg data-ikona="celozaslonsko"></svg></button>
               <button class="gumb-ikona" id="mediaZapri" data-naslov="zapri" title="Zapri"><svg data-ikona="x"></svg></button>
             </div>
@@ -402,12 +403,17 @@
           <select id="mediaStreznikVrsta" aria-label="Vrsta medijskega strežnika">
             <option value="jellyfin">Jellyfin</option><option value="emby">Emby</option>
             <option value="navidrome">Navidrome</option><option value="plex">Plex</option>
+            <option value="kodi">Kodi</option><option value="tvheadend">TVHeadend (TV v živo)</option>
+            <option value="dlna">DLNA / UPnP (Gerbera, MiniDLNA, NAS)</option>
+            <option value="funkwhale">Funkwhale (glasba)</option><option value="azuracast">AzuraCast (radio)</option>
+            <option value="stremio">Stremio dodatek (naslov manifest.json)</option>
           </select>
           <input id="mediaStreznikIme" type="text" maxlength="80" placeholder="Ime (neobvezno)">
-          <input id="mediaStreznikUrl" type="url" required placeholder="https://strežnik:vrata">
+          <input id="mediaStreznikUrl" type="url" required placeholder="https://strežnik:vrata (doma tudi http://192.168.x.x:vrata)">
           <input id="mediaStreznikUporabnik" type="text" autocomplete="username" placeholder="Uporabniško ime (Plex: neobvezno)">
-          <input id="mediaStreznikSkrivnost" type="password" autocomplete="new-password" required placeholder="Geslo ali X-Plex-Token">
+          <input id="mediaStreznikSkrivnost" type="password" autocomplete="new-password" placeholder="Geslo ali žeton (kjer je potreben)">
           <button class="gumb" type="submit">Poveži medijski strežnik</button>
+          <button class="gumb" type="button" id="mediaOdkrijDlna">Poišči strežnike v domačem omrežju</button>
         </form>
         <div id="mediaNastavitveMesto"></div>
         <div id="skupineNastavitev"></div>
