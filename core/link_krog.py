@@ -55,24 +55,23 @@ def javni_kljuc_b64() -> str:
     with _zaklep:
         if _javni:
             return _javni
-        der = subprocess.run(["openssl", "pkey", "-in", _pot_kljuca(), "-pubout", "-outform", "DER"],
-                             check=True, capture_output=True).stdout
+        from core import link_kripto
+        der = link_kripto.javni_kljuc_der(_pot_kljuca())
         _javni = base64.b64encode(der).decode("ascii")
         return _javni
 
 
 def podpisi(podatki: bytes) -> str:
     """Podpis SHA256withECDSA (DER), base64 - isto kot HubTls.podpisi na Androidu."""
-    podpis = subprocess.run(["openssl", "dgst", "-sha256", "-sign", _pot_kljuca()],
-                            input=podatki, check=True, capture_output=True).stdout
-    return base64.b64encode(podpis).decode("ascii")
+    from core import link_kripto
+    return base64.b64encode(link_kripto.podpisi(_pot_kljuca(), podatki)).decode("ascii")
 
 
 def preveri_podpis(kljuc_b64: str, podatki: bytes, podpis_b64: str) -> bool:
     """Ali je `podpis_b64` res podpis `podatki` s tem javnim kljucem (SHA256withECDSA)?
 
     Rabi ga hub, ko preverja prijavo naprave iz kroga - doslej je racunalnik znal samo podpisati,
-    ker ni bil nikoli hub. Isto orodje kot pri podpisovanju (openssl), zato brez nove odvisnosti.
+    ker ni bil nikoli hub. Isto orodje kot pri podpisovanju (core.link_kripto).
     Vsaka napaka pomeni False: neveljaven kljuc ali pokvarjen podpis nista izjema, ampak zavrnitev.
     """
     if not kljuc_b64 or not podpis_b64:
@@ -84,27 +83,8 @@ def preveri_podpis(kljuc_b64: str, podatki: bytes, podpis_b64: str) -> bool:
         return False
     if not podpis or not _veljaven_kljuc(kljuc_b64):
         return False
-    import tempfile
-    mapa = tempfile.mkdtemp(prefix="safeer-podpis-")
-    try:
-        pot_kljuca = os.path.join(mapa, "kljuc.der")
-        pot_podpisa = os.path.join(mapa, "podpis.bin")
-        with open(pot_kljuca, "wb") as d:
-            d.write(der)
-        with open(pot_podpisa, "wb") as d:
-            d.write(podpis)
-        r = subprocess.run(["openssl", "dgst", "-sha256", "-verify", pot_kljuca,
-                            "-keyform", "DER", "-signature", pot_podpisa],
-                           input=podatki, capture_output=True)
-        return r.returncode == 0
-    except Exception:
-        return False
-    finally:
-        try:
-            import shutil
-            shutil.rmtree(mapa, ignore_errors=True)
-        except Exception:
-            pass
+    from core import link_kripto
+    return link_kripto.preveri(der, podatki, podpis)
 
 
 def podatki_clana(device_id: str, kljuc: str, platforma: str, dodano: float, dodal: str) -> bytes:
