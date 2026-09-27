@@ -231,8 +231,22 @@ def doh_template(settings: SettingsStore) -> Optional[str]:
     provider = settings.get("doh_provider")
     if provider == "custom":
         custom = str(settings.get("custom_doh_url") or "").strip()
-        return custom if custom.lower().startswith("https://") else None
+        return custom if valid_doh_url(custom) else None
     return DOH_TEMPLATES.get(provider)
+
+
+def valid_doh_url(value: Any) -> bool:
+    """DoH endpoints must use HTTPS, have a host, and contain no credentials."""
+    text = str(value or "").strip()
+    if not text or any(character.isspace() for character in text):
+        return False
+    try:
+        parsed = urllib.parse.urlsplit(text)
+        parsed.port  # force urllib to reject an invalid port number
+        return (parsed.scheme.lower() == "https" and bool(parsed.hostname)
+                and not parsed.username and not parsed.password)
+    except ValueError:
+        return False
 
 
 def chromium_flags(existing: str, settings: SettingsStore) -> str:
