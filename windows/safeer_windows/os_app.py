@@ -237,6 +237,9 @@ class SafeerOsWindow(QMainWindow):
         self.control_backend = control_backend.get_backend()
         self.control_window: Optional[control_window.SafeerControlWindow] = None
         self.control_backend.dodaj_poslusalca(self._na_dogodek_linka)
+        from core import link_hub_streznik
+        link_hub_streznik.POSLUSALCI_KODE.append(
+            lambda ime, koda: self.poslji_dogodek("kodaPrijave", {"ime": ime, "koda": koda}))
         self.media_center = os_media.MediaCenter(os_backend_win.CONFIG_DIR)
 
         # Safeer Ščit za zaščito celotne naprave (DNS filtriranje na napravi)
