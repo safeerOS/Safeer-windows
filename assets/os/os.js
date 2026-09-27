@@ -816,6 +816,13 @@
       if (d.mapa) { pojdi("datoteke"); odpriMapo(d.pot); }
       else { obvesti(t("odpiram", { ime: d.ime })); klic("odpriDatoteko", [d.pot]); }
     });
+    if (!d.mapa && d.pot && S.povezava && S.povezava.stanje === "povezan") {
+      // Poslji na drugo napravo v Safeer Linku (telefon, televizor, tablica).
+      var p = el("span", "pozabi poslji-na", svg("poslji"));
+      p.title = "Pošlji na napravo";
+      p.addEventListener("click", function (e) { e.stopPropagation(); izberiNapravoZaPosiljanje(d); });
+      b.appendChild(p);
+    }
     if (nedavna) {
       // Iz seznama nedavnih (datoteka ostane): X na vsaki vrstici.
       var x = el("span", "pozabi", svg("x"));
@@ -827,6 +834,42 @@
       b.appendChild(x);
     }
     return b;
+  }
+  function posljiNaNapravo(d, n) {
+    obvesti("Pošiljam " + d.ime + " na " + n.ime + " …");
+    klic("posljiDatoteko", [n.id, d.pot]).then(function (ok) {
+      if (!ok) obvesti("Datoteke ni bilo mogoče poslati na " + n.ime + ".");
+    });
+  }
+  function izberiNapravoZaPosiljanje(d) {
+    var naprave = S.napraveDatoteke || [];
+    if (!naprave.length) {
+      klic("napraveSDatoteki").then(function (n) {
+        S.napraveDatoteke = n || [];
+        if (S.napraveDatoteke.length) izberiNapravoZaPosiljanje(d);
+        else obvesti("V Safeer Linku ni naprave, ki sprejema datoteke.");
+      });
+      return;
+    }
+    if (naprave.length === 1) { posljiNaNapravo(d, naprave[0]); return; }
+    var staro = document.getElementById("slojPoslji");
+    if (staro) staro.remove();
+    var sloj = el("div", "sloj-koda-prijave");
+    sloj.id = "slojPoslji";
+    var okno = el("div", "koda-prijave-okno");
+    var h = el("h2"); h.textContent = "Pošlji " + d.ime;
+    okno.appendChild(h);
+    naprave.forEach(function (n) {
+      var g = el("button", "vrstica"); g.textContent = n.ime;
+      g.addEventListener("click", function () { sloj.remove(); posljiNaNapravo(d, n); });
+      okno.appendChild(g);
+    });
+    var z = el("button", "koda-prijave-gumb"); z.textContent = "Prekliči";
+    z.addEventListener("click", function () { sloj.remove(); });
+    okno.appendChild(z);
+    sloj.addEventListener("click", function (e) { if (e.target === sloj) sloj.remove(); });
+    sloj.appendChild(okno);
+    document.body.appendChild(sloj);
   }
   function osveziNedavne() {
     narisiNedavneDomov();
@@ -1992,6 +2035,9 @@
     if (vrsta === "mediaFallback" && podatki) predvajajHtml(podatki, 0);
     if (vrsta === "mediaOsvezen" && S.razdelek === "media") naloziMedia();
     if (vrsta === "kodaPrijave" && podatki) pokaziKodoPrijave(podatki);
+    if (vrsta === "posiljanjeKoncano" && podatki) {
+      obvesti(podatki.uspeh ? (podatki.ime + " je poslana.") : (podatki.napaka || "Pošiljanje ni uspelo."));
+    }
     if (vrsta === "naprave") {
       if (S.razdelek === "programi") nalozNaprave();
       if (S.razdelek === "datoteke") nalozNapraveSDatoteki();
