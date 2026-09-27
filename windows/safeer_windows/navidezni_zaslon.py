@@ -28,7 +28,7 @@ if CORE_DIR not in sys.path:
     sys.path.insert(0, CORE_DIR)
 
 from core.link_datoteke import TLS_MAPA, zagotovi_potrdilo
-from safeer_windows import os_backend_win, policy
+from safeer_windows import os_backend_win, policy, zajem_zaslona
 
 # Dimenzije navideznega zaslona
 PRIVZETA_SIRINA = 1920
@@ -90,6 +90,8 @@ class NavidezniZaslon:
         self.sirina = sirina
         self.visina = visina
         self.tls_mapa = tls_mapa
+        self._vnos_windows = None
+        self._slika_seje = (sirina, visina)
 
         # Navidezno stanje kazalca in izbire
         self.kazalec_x = sirina // 2
@@ -609,7 +611,10 @@ class NavidezniZaslon:
             self._tece = True
 
             k = KAKOVOSTI.get(kakovost) or KAKOVOSTI[PRIVZETA_KAKOVOST]
-            fps = int(k.get("fps", 60))
+            # Pravi zaslon Windows (zajem + H.264 v procesu): 30 sl./s je za namizje dovolj in zajem
+            # GDI hitreje ne gre; velikost je zaslon, pomanjsan v 1080p.
+            fps = min(30, int(k.get("fps", 30)))
+            self._slika_seje = zajem_zaslona.velikost_slike()
 
             self._seja_nit = threading.Thread(target=self._streci_sejo, args=(posluh, ctx, fps),
                                               name="safeer-navidezni-zaslon-streznik", daemon=True)
@@ -621,14 +626,14 @@ class NavidezniZaslon:
                 "token": self._zeton,
                 "v": 2,
                 "codec": "h264",
-                "width": self.sirina,
-                "height": self.visina,
+                "width": self._slika_seje[0],
+                "height": self._slika_seje[1],
                 "fps": fps,
                 "quality": kakovost,
                 "audio": None,
                 "input": True,
                 "gamepad": True,
-                "screen": "virtual",
+                "screen": "desktop",
                 "secure": True,
                 "game": False,
                 "focus": True,
@@ -656,19 +661,38 @@ class NavidezniZaslon:
                 odjemalec.close()
                 return
 
+            try:
+                zajem = zajem_zaslona.H264Zajem(fps=fps)
+            except Exception as e:  # ni PyAV ali kodirnika: televizorju povemo, zakaj slike ni
+                print(f"[NavidezniZaslon] Zajema zaslona ni mogoce zaceti: {e}")
+                glava = {"v": 2, "w": 2, "h": 2, "fps": fps, "zvok": None, "vnos": False, "plosek": False}
+                odjemalec.sendall((json.dumps(glava) + "\n").encode("utf-8"))
+                obvestilo = json.dumps({"konec": "ni_kodirnika",
+                                        "sporocilo": "Na racunalniku manjka kodirnik slike (PyAV)."}).encode("utf-8")
+                odjemalec.sendall(bytes([3]) + len(obvestilo).to_bytes(4, "big") + obvestilo)
+                return
+
             glava = {
-                "v": 2, "w": self.sirina, "h": self.visina, "fps": fps,
-                "zvok": None, "vnos": True, "plosek": True
+                "v": 2, "w": zajem.sirina, "h": zajem.visina, "fps": zajem.fps,
+                "zvok": None, "vnos": True, "plosek": False
             }
             odjemalec.sendall((json.dumps(glava) + "\n").encode("utf-8"))
             odjemalec.settimeout(None)
             self._odjemalec = odjemalec
+            self._vnos_windows = zajem_zaslona.WindowsVnos(zajem.izvor, (zajem.sirina, zajem.visina))
 
             # Nit za branje povratnega vnosa iz naprave (TV daljinec, telefon)
             nit_vnos = threading.Thread(target=self._beri_povratni_vnos, args=(odjemalec,),
                                         name="safeer-navidezni-zaslon-vnos", daemon=True)
             nit_vnos.start()
-            nit_vnos.join()
+            print(f"[NavidezniZaslon] Zaslon {zajem.sirina}x{zajem.visina} @ {zajem.fps} ({zajem.kodirnik})", flush=True)
+            try:
+                for kos in zajem.okvirji(lambda: self._tece and nit_vnos.is_alive()):
+                    odjemalec.sendall(bytes([1]) + len(kos).to_bytes(4, "big") + kos)
+            finally:
+                zajem.zapri()
+                if self._vnos_windows is not None:
+                    self._vnos_windows.sprosti_vse()
 
         except Exception as e:
             # Zapiranje poslušalca med običajnim `ustavi_sejo` prekine blokirani accept/recv.
@@ -697,7 +721,10 @@ class NavidezniZaslon:
                         continue
                     try:
                         dogodek = json.loads(vrstica.decode("utf-8", "replace"))
-                        self.obdelaj_vnosni_dogodek(dogodek)
+                        # Pravi zaslon: dogodek gre na pravo misko/tipkovnico; ce ga ne pozna, ga
+                        # obdela se navidezni kontekst (glasnost, stanje programov).
+                        if not (self._vnos_windows is not None and self._vnos_windows.izvedi(dogodek)):
+                            self.obdelaj_vnosni_dogodek(dogodek)
                     except Exception:
                         continue
         except Exception:
