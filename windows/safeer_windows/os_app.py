@@ -1016,7 +1016,7 @@ class SafeerOsWindow(QMainWindow):
 
         return None
 
-    def odpri_splet(self, url: str) -> bool:
+    def odpri_splet(self, url: str):
         url = str(url or "").strip()
         if not url:
             return False
@@ -1024,6 +1024,10 @@ class SafeerOsWindow(QMainWindow):
             url = "https://" + url
         if urllib.parse.urlsplit(url).scheme.lower() not in ("http", "https"):
             return False
+        if os_backend_win.je_drm_storitev(url):
+            izid = os_backend_win.odpri_drm_storitev(url)
+            if izid.get("zunanje"):
+                return izid
         self.dispatcher.dispatch(lambda: self._odpri_notranji_splet(url))
         return True
 
