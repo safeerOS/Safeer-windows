@@ -572,6 +572,9 @@ class SafeerOsWindow(QMainWindow):
     def _na_dogodek_linka(self, vrsta: str, podatki: Any) -> None:
         if vrsta in ("povezava", "stanje", "naprave"):
             self.poslji_dogodek("fokus", None)
+        if vrsta == "deljenje" and isinstance(podatki, dict) and not podatki.get("tece"):
+            # Konec posiljanja datoteke (ali napaka): uporabniku povemo izid.
+            self.poslji_dogodek("posiljanjeKoncano", {k: podatki.get(k) for k in ("ime", "cilj", "uspeh", "napaka")})
 
     def odpri_control(self, razdelek: str = "", id_naprave: str = "", prijava_ob_zagonu: bool = False) -> bool:
         def _odpri():
@@ -663,6 +666,14 @@ class SafeerOsWindow(QMainWindow):
         if metoda == "odpriDatoteko":
             pot = str(a[0]) if a else ""
             return os_backend_win.odpri_datoteko(pot)
+
+        if metoda == "posljiDatoteko":
+            if len(a) < 2:
+                return False
+            cilj, pot = str(a[0]), str(a[1])
+            if not os.path.isfile(pot):
+                return False
+            return self.control_backend.poslji_datoteko(cilj, pot)
 
         if metoda == "pokaziVMapi":
             pot = str(a[0]) if a else ""

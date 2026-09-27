@@ -730,3 +730,5 @@ div.vrstica { cursor: default; }
   font-variant-numeric: tabular-nums; margin-bottom: 22px; }
 .koda-prijave-gumb { padding: 10px 26px; border-radius: 12px; border: 0; background: var(--zelena);
   color: var(--zelena-temna); font-weight: 700; font-size: 16px; cursor: pointer; }
+.vrstica .poslji-na:hover { background: rgba(84, 214, 165, .18); color: var(--zelena); }
+#slojPoslji .vrstica { width: 100%; margin-bottom: 8px; justify-content: center; }
