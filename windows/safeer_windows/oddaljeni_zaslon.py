@@ -148,9 +148,12 @@ class _DekodirnaNit(threading.Thread):
                 elif vrsta == OKVIR_SLIKA:
                     for paket in dekoder.parse(bytes(telo)):
                         for okvir in dekoder.decode(paket):
-                            polje = okvir.to_ndarray(format="bgra")
-                            slika = QImage(polje.data, okvir.width, okvir.height,
-                                           int(polje.strides[0]), QImage.Format.Format_ARGB32).copy()
+                            # Brez numpy (ni ga na vseh racunalnikih): surova ravnina BGRA iz PyAV.
+                            bgra = okvir.reformat(format="bgra")
+                            ravnina = bgra.planes[0]
+                            podatki = bytes(ravnina)
+                            slika = QImage(podatki, bgra.width, bgra.height,
+                                           int(ravnina.line_size), QImage.Format.Format_ARGB32).copy()
                             self.signali.slika.emit(slika)
             if self._tece.is_set():
                 raise ConnectionError("Naprava je koncala povezavo.")
