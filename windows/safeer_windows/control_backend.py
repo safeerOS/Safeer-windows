@@ -751,8 +751,19 @@ class SafeerControlBackend:
             telo = dict(payload) if isinstance(payload, dict) else {}
             if ref in self._cakajoci:
                 event, res_holder = self._cakajoci[ref]
-                res_holder[0] = telo or sporocilo
-                event.set()
+                if vrsta == "control.result":
+                    res_holder[0] = telo or sporocilo
+                    event.set()
+                elif str(sporocilo.get("status") or "") != "accepted":
+                    # "accepted" confirms only that the hub forwarded the RPC;
+                    # the device's data arrives later as control.result.
+                    # Rejections, on the other hand, are terminal responses.
+                    res_holder[0] = {
+                        "ok": False,
+                        "koda": str(sporocilo.get("error_code") or sporocilo.get("error") or sporocilo.get("status") or "zavrnjeno"),
+                        "message": str(sporocilo.get("error") or sporocilo.get("message") or "Ukaz je bil zavrnjen."),
+                    }
+                    event.set()
             odziv_podatki = dict(telo)
             odziv_podatki["ref"] = ref
             odziv_podatki["ref_id"] = ref

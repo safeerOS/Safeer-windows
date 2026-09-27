@@ -4,6 +4,7 @@ import base64
 import json
 import os
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -708,6 +709,42 @@ class TestOsWindows(unittest.TestCase):
             self.assertTrue(odgovor["ok"])
             self.assertEqual({p["id"] for p in odgovor["programi"]},
                              {"si.safeer.mobile", "org.videolan.vlc"})
+
+    def test_control_backend_waits_for_result_after_accepted_ack(self):
+        """Hub acceptance is an interim ACK; remote apps/data arrive in control.result."""
+        with tempfile.TemporaryDirectory() as td:
+            backend = control_backend.SafeerControlBackend(config_pot=os.path.join(td, "link.json"))
+            event = threading.Event()
+            holder = [None]
+            backend._cakajoci["rpc-1"] = (event, holder)
+
+            backend._na_sporocilo({
+                "type": "control.ack", "ref_id": "rpc-1", "status": "accepted"
+            })
+            self.assertFalse(event.is_set())
+            self.assertIsNone(holder[0])
+
+            backend._na_sporocilo({
+                "type": "control.result", "ref_id": "rpc-1",
+                "payload": {"ok": True, "data": {"items": [{"id": "app", "icon": "data:image/webp;base64,AA=="}]}}
+            })
+            self.assertTrue(event.is_set())
+            self.assertTrue(holder[0]["ok"])
+            self.assertIn("icon", holder[0]["data"]["items"][0])
+
+    def test_control_backend_rejected_ack_finishes_wait(self):
+        with tempfile.TemporaryDirectory() as td:
+            backend = control_backend.SafeerControlBackend(config_pot=os.path.join(td, "link.json"))
+            event = threading.Event()
+            holder = [None]
+            backend._cakajoci["rpc-2"] = (event, holder)
+            backend._na_sporocilo({
+                "type": "control.ack", "ref_id": "rpc-2", "status": "rejected",
+                "error_code": "brez_daljinca", "error": "Cilj ne podpira ukaza."
+            })
+            self.assertTrue(event.is_set())
+            self.assertFalse(holder[0]["ok"])
+            self.assertEqual(holder[0]["koda"], "brez_daljinca")
 
     def test_control_backend_accepts_legacy_mobile_response_shapes(self):
         with tempfile.TemporaryDirectory() as td:
