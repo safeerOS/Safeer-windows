@@ -685,6 +685,12 @@ class BrowserWindow(QMainWindow):
         self.tabs.setElideMode(Qt.TextElideMode.ElideRight)
         self.tabs.tabCloseRequested.connect(self.close_tab)
         self.tabs.currentChanged.connect(self.on_current_changed)
+        # Varcevanje z RAM-om: neaktivni zavihki se zamrznejo, kasneje izgubijo renderer (ostane samo
+        # URL + zgodovina); ob vrnitvi se renderer obnovi. En aktiven renderer v ospredju.
+        self._zivljenje_timer = QTimer(self)
+        self._zivljenje_timer.setInterval(30_000)
+        self._zivljenje_timer.timeout.connect(self.uskladi_zivljenje_zavihkov)
+        self._zivljenje_timer.start()
         self.new_tab_button = QToolButton(self)
         self.new_tab_button.setIcon(app.icons["plus"])
         self.new_tab_button.clicked.connect(lambda: self.new_tab(policy.HOME_URL))
@@ -1231,10 +1237,43 @@ class BrowserWindow(QMainWindow):
             if view.url().scheme() == "safeer":
                 self.push_home_state(view)
 
+    ZAMRZNI_PO_S = 60          # neaktiven zavihek: brez JS casovnikov in izrisovanja
+    ZAVRZI_PO_S = 10 * 60      # dolgo neaktiven zavihek: renderer se sprosti, ostane poceni stanje
+
+    def uskladi_zivljenje_zavihkov(self) -> None:
+        zdaj = time.monotonic()
+        aktivni = self.current_view()
+        stanja = QWebEnginePage.LifecycleState
+        for view in self.views():
+            page = view.page()
+            if view is aktivni:
+                view.setProperty("safeer_zadnjic", zdaj)
+                continue
+            zadnjic = view.property("safeer_zadnjic")
+            if zadnjic is None:
+                view.setProperty("safeer_zadnjic", zdaj)
+                continue
+            mirovanje = zdaj - float(zadnjic)
+            zelja = (stanja.Discarded if mirovanje >= self.ZAVRZI_PO_S
+                     else stanja.Frozen if mirovanje >= self.ZAMRZNI_PO_S else stanja.Active)
+            # Qt pove, kaj je varno (predvajanje zvoka, obrazec, razvijalska orodja ...): nikoli dlje od tega.
+            dovoljeno = page.recommendedState()
+            if zelja.value > dovoljeno.value:
+                zelja = dovoljeno
+            if page.lifecycleState() != zelja and zelja.value > page.lifecycleState().value:
+                try:
+                    page.setLifecycleState(zelja)
+                except Exception:
+                    pass
+
     def on_current_changed(self, index: int) -> None:
         view = self.current_view()
         if view is None:
             return
+        # Zavihek v ospredju je vedno aktiven; zavrzenega Qt ob tem znova nalozi iz shranjene zgodovine.
+        view.setProperty("safeer_zadnjic", time.monotonic())
+        if view.page().lifecycleState() != QWebEnginePage.LifecycleState.Active:
+            view.page().setLifecycleState(QWebEnginePage.LifecycleState.Active)
         self.address.setText(policy.display_url(view.url().toString()))
         self.on_load_state(view, bool(view.property("loading")))
         self.on_title_changed(view, view.title())
