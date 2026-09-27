@@ -71,7 +71,7 @@ def preveri_podpis(kljuc_b64: str, podatki: bytes, podpis_b64: str) -> bool:
     """Ali je `podpis_b64` res podpis `podatki` s tem javnim kljucem (SHA256withECDSA)?
 
     Rabi ga hub, ko preverja prijavo naprave iz kroga - doslej je racunalnik znal samo podpisati,
-    ker ni bil nikoli hub. Isto orodje kot pri podpisovanju (openssl), zato brez nove odvisnosti.
+    ker ni bil nikoli hub. Isto orodje kot pri podpisovanju (core.link_kripto).
     Vsaka napaka pomeni False: neveljaven kljuc ali pokvarjen podpis nista izjema, ampak zavrnitev.
     """
     if not kljuc_b64 or not podpis_b64:
