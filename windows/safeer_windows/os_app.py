@@ -523,8 +523,13 @@ class SafeerOsWindow(QMainWindow):
             self.browser_window.load_media(url)
         else:
             self.browser_window.set_media_mode(False)
+            self.browser_window.set_safeer_os_web_mode(True)
             self.browser_window.load_in_current(url)
         self.zaslon.setCurrentWidget(self.browser_window)
+        if not media:
+            # QMainWindow lahko ob prvem prikazu znova pokaže svoje toolbar
+            # akcije; način odseka Splet zato uveljavi tudi po preklopu widgeta.
+            self.browser_window.set_safeer_os_web_mode(True)
         self.setWindowTitle("Safeer OS · Media" if media else "Safeer OS · Splet")
 
     def _zapri_browser(self) -> None:
@@ -534,6 +539,7 @@ class SafeerOsWindow(QMainWindow):
                 view.setUrl(QUrl("about:blank"))
         self._browser_media_active = False
         self.browser_window.set_media_mode(False)
+        self.browser_window.set_safeer_os_web_mode(False)
         self.zaslon.setCurrentWidget(self.view)
         self.setWindowTitle("Safeer OS")
         self.poslji_dogodek("fokus", None)
@@ -677,8 +683,7 @@ class SafeerOsWindow(QMainWindow):
 
         if metoda == "iskanjeSplet":
             poizvedba = str(a[0]) if a else ""
-            url = "https://duckduckgo.com/?q=" + urllib.parse.quote(poizvedba)
-            return self.odpri_splet(url)
+            return self.odpri_spletno_iskanje(poizvedba)
 
         if metoda == "celozaslonsko":
             novo = bool(a[0]) if a else not self.isFullScreen()
@@ -913,6 +918,23 @@ class SafeerOsWindow(QMainWindow):
             return False
         self.dispatcher.dispatch(lambda: self._odpri_notranji_splet(url))
         return True
+
+    def odpri_spletno_iskanje(self, poizvedba: str) -> bool:
+        poizvedba = str(poizvedba or "").strip()
+        if not poizvedba:
+            return False
+        self.dispatcher.dispatch(lambda: self._odpri_spletno_iskanje(poizvedba))
+        return True
+
+    def _odpri_spletno_iskanje(self, poizvedba: str) -> None:
+        # Uporabi isti resolver/nastavljeni iskalnik kot Safeer Browser, ne ločenega
+        # iskalnega URL-ja. S tem ostanejo aktivni tudi njegova pravila za naslove.
+        self.browser_window.set_media_mode(False)
+        self.browser_window.set_safeer_os_web_mode(True)
+        self.browser_window.open_input(poizvedba)
+        self.zaslon.setCurrentWidget(self.browser_window)
+        self.browser_window.set_safeer_os_web_mode(True)
+        self.setWindowTitle("Safeer OS · Splet")
 
     def closeEvent(self, event) -> None:
         try:
