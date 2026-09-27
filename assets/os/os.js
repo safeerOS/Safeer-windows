@@ -2328,7 +2328,7 @@
     var mreza = $("mediaMreza"); if (!mreza) return; mreza.innerHTML = "";
     var zanriEl = $("mediaZanri");
     if (zanriEl) {
-      var prikaziZanre = (media.filter === "vse" || media.filter === "film" || media.filter === "serija");
+      var prikaziZanre = !!skupinaZanrov(media.filter);
       zanriEl.style.display = prikaziZanre ? "flex" : "none";
     }
     var iskano = media.query.trim().toLocaleLowerCase();
@@ -2369,7 +2369,7 @@
       meta.appendChild(el("span", "", ubezi(metaOznaka)));
       if (x.stevilo_razlicic > 1) meta.appendChild(el("span", "", ubezi(t("mediaRazlicic", { n: x.stevilo_razlicic }))));
       data.appendChild(meta); card.appendChild(data);
-      card.appendChild(el("span", "media-kakovost", ubezi(x.kakovost || "1080p")));
+      card.appendChild(el("span", "media-kakovost", ubezi(x.kakovost || (x.vrsta === "tv-v-zivo" ? "V živo" : x.vrsta === "radio" ? "Radio" : x.vrsta === "glasba" ? "Glasba" : "HD"))));
       if (Number(x.ocena || 0) > 0) card.appendChild(el("span", "media-ocena", "★ " + Number(x.ocena).toFixed(1)));
       card.onclick = function () {
         if (x.tmdb_id || x.vrsta === "serija" || (x.vrsta === "film" && !x.peertube_uuid)) {
