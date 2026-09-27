@@ -212,7 +212,9 @@
         <video id="mediaVideo" controls playsinline preload="metadata" hidden></video>
           <img id="mediaSlika" alt="" hidden>
           <audio id="mediaAudio" controls preload="metadata" hidden></audio>
+          <!-- Lazji sandbox: predvajalnik tece, a ne sme odpirati novih oken ali preusmeriti Safeer OS. -->
           <iframe id="mediaIframe" title="Safeer Media predvajalnik"
+                  sandbox="allow-scripts allow-same-origin allow-presentation allow-forms"
                   allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
                   allowfullscreen referrerpolicy="no-referrer" hidden></iframe>
           <p class="media-napaka" id="mediaNapaka" hidden data-t="mediaNapaka">Tega toka ni mogoče predvajati. Poskusi drugo različico.</p>
