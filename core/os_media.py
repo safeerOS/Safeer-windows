@@ -33,7 +33,8 @@ from . import zakoniti_viri
 
 AUDIO = {".mp3", ".flac", ".ogg", ".oga", ".opus", ".m4a", ".aac", ".wav", ".wma"}
 VIDEO = {".mp4", ".mkv", ".webm", ".avi", ".mov", ".m4v", ".mpeg", ".mpg", ".ts", ".m3u8"}
-MEDIA_EXT = AUDIO | VIDEO
+IMAGES = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
+MEDIA_EXT = AUDIO | VIDEO | IMAGES
 MAX_FILES = 500
 MAX_SOURCE_ITEMS = 1500
 MAX_DOWNLOAD = 6 * 1024 * 1024
@@ -89,6 +90,8 @@ def _kind(value: Any, url: str = "", title: str = "", season: int = 0, episode: 
         return "tv-v-zivo"
     if ext in AUDIO or any(x in hint for x in ("audio", "music", "song", "track", "album", "glasba", "/music/")):
         return "glasba"
+    if ext in IMAGES or any(x in hint for x in ("image", "slika", "photo", "fotografija")):
+        return "slika"
     if any(x in hint for x in ("series", "episode", "season", "show", "tv", "serija", "epizoda", "/tv/", "/series/")):
         return "serija"
     return "film"
@@ -1281,7 +1284,7 @@ class MediaCenter:
     @staticmethod
     def _default_roots() -> list[Path]:
         home, out = Path.home(), []
-        for name in ("Music", "Glasba", "Videos", "Video", "Movies", "Filmi"):
+        for name in ("Music", "Glasba", "Videos", "Video", "Movies", "Filmi", "Pictures", "Slike"):
             path = home / name
             if path.is_dir() and path not in out:
                 out.append(path)
@@ -1429,7 +1432,8 @@ class MediaCenter:
 
     def _local_items(self) -> list[dict]:
         items = []
-        for root in self.roots:
+        custom = [Path(value) for value in self._load().get("lokalne_mape", []) if isinstance(value, str)]
+        for root in dict.fromkeys(self.roots + custom):
             if not root.is_dir():
                 continue
             for base, dirs, files in os.walk(root):
@@ -1442,16 +1446,69 @@ class MediaCenter:
                         modified = int(path.stat().st_mtime)
                     except OSError:
                         continue
-                    kind = "glasba" if path.suffix.lower() in AUDIO else "film"
-                    found = _item(path.stem, path.as_uri(), base=path.as_uri(), source_id="lokalno",
-                                  source_name="Ta računalnik", kind=kind,
-                                  quality=path.stem, description=str(path))
+                    ext = path.suffix.lower()
+                    kind = "glasba" if ext in AUDIO else "slika" if ext in IMAGES else "film"
+                    title, artist, album, year, image = path.stem, "", "", 0, ""
+                    if ext in AUDIO:
+                        try:
+                            from mutagen import File as MutagenFile
+                            audio = MutagenFile(str(path), easy=True) or {}
+                            artist = str((audio.get("artist") or audio.get("albumartist") or [""])[0])
+                            album = str((audio.get("album") or [""])[0])
+                            title = str((audio.get("title") or [path.stem])[0])
+                            date_tag = str((audio.get("date") or [""])[0])
+                            match = re.match(r"\d{4}", date_tag)
+                            year = int(match.group()) if match else 0
+                            raw = MutagenFile(str(path))
+                            pictures = getattr(raw, "pictures", None)
+                            cover = pictures[0].data if pictures else None
+                            if not cover and getattr(raw, "tags", None):
+                                cover = next((value.data for value in raw.tags.values()
+                                              if value.__class__.__name__ == "APIC"), None)
+                            if cover:
+                                import base64
+                                image = "data:image/jpeg;base64," + base64.b64encode(cover).decode("ascii")
+                        except Exception:
+                            pass
+                    found = _item(title, path.as_uri(), base=path.as_uri(), source_id="lokalno",
+                                  source_name="Ta računalnik", kind=kind, artist=artist,
+                                  image=image, year=year, description=str(path))
                     if found:
-                        found.update({"pot": str(path), "cas": modified, "mime": mimetypes.guess_type(str(path))[0] or ""})
+                        found.update({"pot": str(path), "cas": modified, "mime": mimetypes.guess_type(str(path))[0] or "",
+                                      "album": album, "skupina": album or artist})
                         items.append(found)
                     if len(items) >= MAX_FILES:
                         return items
         return items
+
+    def add_local_root(self, value: str) -> dict:
+        raw = _text(value, 1024)
+        if raw.lower().startswith(("nfs://", "nfs:")):
+            nfs_client = False
+            if os.name == "nt":
+                try:
+                    import winreg
+                    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                                        r"SYSTEM\CurrentControlSet\Services\NfsClnt"):
+                        nfs_client = True
+                except OSError:
+                    pass
+            note = ("NFS odjemalec je nameščen; najprej priklopite izvoz s sistemskim mount ukazom, nato dodajte črko pogona."
+                    if nfs_client else "Windows NFS odjemalec ni zaznan; priklop NFS ni na voljo. Uporabite UNC pot ali namestite NFS odjemalec.")
+            return {"ok": False, "napaka": note}
+        path = Path(raw).expanduser()
+        is_unc = raw.startswith("\\\\")
+        if not raw or not (path.is_dir() or (is_unc and os.name == "nt")):
+            return {"ok": False, "napaka": "Mapa ne obstaja ali ni dosegljiva."}
+        with self._lock:
+            data = self._load()
+            roots = data.setdefault("lokalne_mape", [])
+            normalized = str(path)
+            if normalized in roots:
+                return {"ok": False, "napaka": "Mapa je že dodana."}
+            roots.append(normalized)
+            self._save(data)
+        return {"ok": True, "pot": normalized}
 
     def _ima_embed_vir(self, data: Optional[dict] = None) -> bool:
         configured = data if isinstance(data, dict) else self._load()
