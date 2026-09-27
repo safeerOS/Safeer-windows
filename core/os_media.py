@@ -142,6 +142,22 @@ def _dpapi_unprotect(value: str) -> str:
         ctypes.windll.kernel32.LocalFree(ctypes.cast(target.pbData, ctypes.c_void_p))
 
 
+# Datoteke, ki jih predvajalnik ne more predvajati (torrenti, arhivi, namestitveni paketi):
+# takih vnosov v medijskem centru ne pokazemo, ker bi klik samo spodletel.
+NEPREDVAJLJIVE_KONCNICE = (".torrent", ".nzb", ".iso", ".rar", ".zip", ".7z", ".exe", ".msi",
+                           ".apk", ".dmg", ".img", ".bin")
+
+
+def je_predvajljiv_naslov(url: str) -> bool:
+    try:
+        deli = urllib.parse.urlsplit(str(url or ""))
+    except ValueError:
+        return False
+    if deli.scheme not in ("http", "https", "file"):
+        return False
+    return not urllib.parse.unquote(deli.path).lower().endswith(NEPREDVAJLJIVE_KONCNICE)
+
+
 def _absolute(base: str, value: Any) -> str:
     data_url = str(value or "").strip()
     if (len(data_url) <= 2 * 1024 * 1024
@@ -492,7 +508,7 @@ def _item(title: Any, url: Any, *, base: str, source_id: str, source_name: str,
           tmdb_id: Any = 0) -> Optional[dict]:
     media_url = _absolute(base, url)
     clean_title = _text(title, 200)
-    if not media_url or not clean_title:
+    if not media_url or not clean_title or not je_predvajljiv_naslov(media_url):
         return None
     try:
         year_int = int(year or 0)
@@ -1385,6 +1401,166 @@ class MediaCenter:
         self._secret_encryptor = secret_encryptor or _dpapi_protect
         self._secret_decryptor = secret_decryptor or _dpapi_unprotect
         self._server_cache: dict[str, tuple[float, list[dict]]] = {}
+        # Trajni predpomnilnik kataloga in podatkov TMDB: ob odprtju se prikaze takoj,
+        # sveze podatke dobimo v ozadju (uporabnik ne caka na prazen zaslon).
+        self._predpomnilnik: Optional[dict] = None
+        self._predpomnilnik_lock = threading.RLock()
+        self._predpomnilnik_casovnik: Optional[threading.Timer] = None
+        self._osvezujem: set[str] = set()
+
+    # --- trajni predpomnilnik -------------------------------------------------
+    PREDPOMNILNIK_KATALOG = 80        # najvec shranjenih pogledov (vrsta/zvrst/stran/iskanje)
+    PREDPOMNILNIK_TMDB = 400          # najvec shranjenih odgovorov TMDB (podrobnosti, ponudniki)
+    SVEZE_SEKUND = 10 * 60            # mlajsega pogleda ne osvezujemo v ozadju
+
+    @property
+    def pot_predpomnilnika(self) -> Path:
+        return self.config_dir / "media-predpomnilnik.json"
+
+    def _nalozi_predpomnilnik(self) -> dict:
+        with self._predpomnilnik_lock:
+            if self._predpomnilnik is None:
+                data: Any = None
+                try:
+                    if self.pot_predpomnilnika.exists():
+                        data = json.loads(self.pot_predpomnilnika.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    data = None
+                if not isinstance(data, dict):
+                    data = {}
+                katalog = data.get("katalog") if isinstance(data.get("katalog"), dict) else {}
+                tmdb = data.get("tmdb") if isinstance(data.get("tmdb"), dict) else {}
+                self._predpomnilnik = {"katalog": katalog, "tmdb": tmdb}
+            return self._predpomnilnik
+
+    def _shrani_predpomnilnik_zdaj(self) -> None:
+        with self._predpomnilnik_lock:
+            self._predpomnilnik_casovnik = None
+            shramba = self._nalozi_predpomnilnik()
+            for ime, meja in (("katalog", self.PREDPOMNILNIK_KATALOG), ("tmdb", self.PREDPOMNILNIK_TMDB)):
+                zapisi = shramba[ime]
+                if len(zapisi) > meja:
+                    stari = sorted(zapisi, key=lambda k: float((zapisi[k] or {}).get("uporabljeno") or 0))
+                    for kljuc in stari[:len(zapisi) - meja]:
+                        zapisi.pop(kljuc, None)
+            besedilo = json.dumps(shramba, ensure_ascii=False, separators=(",", ":"))
+        try:
+            self.config_dir.mkdir(parents=True, exist_ok=True)
+            zacasna = self.pot_predpomnilnika.with_suffix(".tmp")
+            zacasna.write_text(besedilo, encoding="utf-8")
+            os.replace(zacasna, self.pot_predpomnilnika)
+        except OSError:
+            pass
+
+    def _shrani_predpomnilnik(self) -> None:
+        """Zapis z zamikom: vec sprememb v kratkem casu zdruzimo v en zapis na disk."""
+        with self._predpomnilnik_lock:
+            if self._predpomnilnik_casovnik is not None:
+                return
+            self._predpomnilnik_casovnik = threading.Timer(1.5, self._shrani_predpomnilnik_zdaj)
+            self._predpomnilnik_casovnik.daemon = True
+            self._predpomnilnik_casovnik.start()
+
+    def ozastari_predpomnilnik(self, izbrisi: bool = False) -> None:
+        """Po spremembi virov: pogledi ostanejo za takojsen prikaz, a se ob naslednjem odprtju osvezijo."""
+        with self._predpomnilnik_lock:
+            katalog = self._nalozi_predpomnilnik()["katalog"]
+            if izbrisi:
+                katalog.clear()
+            else:
+                for zapis in katalog.values():
+                    if isinstance(zapis, dict):
+                        zapis["cas"] = 0
+        self._shrani_predpomnilnik()
+
+    def kljuc_kataloga(self, query: str = "", kind: str = "vse", genre: str = "", page: int = 1) -> str:
+        return json.dumps([_text(query, 120).casefold(), kind or "vse", _text(genre, 20),
+                           max(1, int(page or 1)), self.izbrana_drzava or "auto"], ensure_ascii=False)
+
+    def _zapomni_katalog(self, kljuc: str, rezultat: dict) -> None:
+        shranjeno = {k: v for k, v in rezultat.items() if k not in ("viri", "mape", "kljuc", "iz_predpomnilnika", "osvezujem")}
+        zdaj = time.time()
+        with self._predpomnilnik_lock:
+            self._nalozi_predpomnilnik()["katalog"][kljuc] = {"cas": zdaj, "uporabljeno": zdaj, "rezultat": shranjeno}
+        self._shrani_predpomnilnik()
+
+    def catalog_hitro(self, query: str = "", kind: str = "vse", genre: str = "", page: int = 1,
+                      ob_osvezitvi=None) -> dict:
+        """Katalog najprej iz predpomnilnika (takoj), nato sveze v ozadju.
+
+        ob_osvezitvi(kljuc, rezultat) se poklice samo, ce se je vsebina v ozadju res spremenila.
+        Ce pogleda se ni v predpomnilniku, ga nalozimo normalno in shranimo za naslednjic.
+        """
+        kljuc = self.kljuc_kataloga(query, kind, genre, page)
+        with self._predpomnilnik_lock:
+            zapis = self._nalozi_predpomnilnik()["katalog"].get(kljuc)
+            if isinstance(zapis, dict):
+                zapis["uporabljeno"] = time.time()
+        if isinstance(zapis, dict) and isinstance(zapis.get("rezultat"), dict) and zapis["rezultat"].get("vnosi"):
+            rezultat = dict(zapis["rezultat"])
+            for item in rezultat.get("vnosi") or []:
+                if isinstance(item, dict) and item.get("id"):
+                    self._dynamic_items.setdefault(item["id"], item)
+            starost = time.time() - float(zapis.get("cas") or 0)
+            osvezi = starost >= self.SVEZE_SEKUND
+            if osvezi:
+                self._osvezi_v_ozadju(kljuc, query, kind, genre, page, ob_osvezitvi)
+            rezultat.update(viri=self.vidni_viri(), mape=[str(path) for path in self.roots],
+                            kljuc=kljuc, iz_predpomnilnika=True, osvezujem=osvezi)
+            return rezultat
+        rezultat = self.catalog(query, kind, genre, page)
+        if rezultat.get("vnosi"):
+            self._zapomni_katalog(kljuc, rezultat)
+        return dict(rezultat, kljuc=kljuc, iz_predpomnilnika=False, osvezujem=False)
+
+    @staticmethod
+    def _odtis_vnosov(rezultat: Optional[dict]) -> str:
+        vnosi = (rezultat or {}).get("vnosi") or []
+        return hashlib.sha1(json.dumps(vnosi, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+
+    def _osvezi_v_ozadju(self, kljuc: str, query: str, kind: str, genre: str, page: int, ob_osvezitvi=None) -> None:
+        with self._predpomnilnik_lock:
+            if kljuc in self._osvezujem:
+                return
+            self._osvezujem.add(kljuc)
+            drzava = self.izbrana_drzava
+
+        def delo() -> None:
+            try:
+                self.izbrana_drzava = drzava
+                svez = self.catalog(query, kind, genre, page)
+                with self._predpomnilnik_lock:
+                    star = (self._nalozi_predpomnilnik()["katalog"].get(kljuc) or {}).get("rezultat")
+                if not svez.get("vnosi"):
+                    return  # brez omrezja ali napaka vira: raje ohranimo zadnji dober pogled
+                spremenjeno = self._odtis_vnosov(svez) != self._odtis_vnosov(star)
+                self._zapomni_katalog(kljuc, svez)
+                if spremenjeno and ob_osvezitvi is not None:
+                    ob_osvezitvi(kljuc, dict(svez, kljuc=kljuc, iz_predpomnilnika=False, osvezujem=False))
+            except Exception:
+                pass
+            finally:
+                with self._predpomnilnik_lock:
+                    self._osvezujem.discard(kljuc)
+
+        threading.Thread(target=delo, name="media-osvezi", daemon=True).start()
+
+    def prednalozi(self, vrste: Iterable[str] = ("vse", "film", "serija", "glasba", "radio", "tv-v-zivo")) -> None:
+        """Ob zagonu v ozadju pripravi prve strani glavnih pogledov, da je ze prvi klik takojsen."""
+        def delo() -> None:
+            for vrsta in vrste:
+                kljuc = self.kljuc_kataloga("", vrsta, "", 1)
+                with self._predpomnilnik_lock:
+                    zapis = self._nalozi_predpomnilnik()["katalog"].get(kljuc) or {}
+                if time.time() - float(zapis.get("cas") or 0) < self.SVEZE_SEKUND:
+                    continue
+                try:
+                    rezultat = self.catalog("", vrsta, "", 1)
+                    if rezultat.get("vnosi"):
+                        self._zapomni_katalog(kljuc, rezultat)
+                except Exception:
+                    continue
+        threading.Thread(target=delo, name="media-prednalozi", daemon=True).start()
 
     @staticmethod
     def _default_roots() -> list[Path]:
@@ -1413,6 +1589,9 @@ class MediaCenter:
         temporary = self.store_path.with_suffix(".tmp")
         temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
         os.replace(temporary, self.store_path)
+        # Viri so se spremenili: shranjeni pogledi se ob naslednjem odprtju osvezijo v ozadju.
+        if self._predpomnilnik is not None:
+            self.ozastari_predpomnilnik()
 
     def sources(self) -> list[dict]:
         with self._lock:
@@ -1422,6 +1601,12 @@ class MediaCenter:
             personal = [{k: value for k, value in source.items() if k not in ("secret_enc", "uporabnik")}
                         for source in data.get("osebni_strezniki", []) if isinstance(source, dict)]
             return regular + personal
+
+    def vidni_viri(self) -> list[dict]:
+        """Viri za prikaz v medijskem centru: brez tistih, iz katerih ni nic predvajljivega."""
+        return [vir for vir in self.sources()
+                if vir.get("vrsta") == "streznik" or int(vir.get("stevilo") or 0) > 0
+                or (vir.get("tip") == "predvajalni_vir" and not vir.get("napaka"))]
 
     def add_server(self, provider: str, name: str, url: str, username: str, secret: str) -> dict:
         provider = _text(provider, 20).lower()
@@ -1449,6 +1634,13 @@ class MediaCenter:
             encrypted = self._secret_encryptor(auth.get("token") or raw_secret)
         except Exception:
             return {"ok": False, "napaka": "Prijava ni uspela; preveri HTTPS naslov in uporabniške podatke."}
+        if provider == "stremio":
+            try:
+                razlog = media_servers.stremio_preveri(base)
+            except Exception:
+                razlog = "Dodatka ni bilo mogoče prebrati; preveri naslov manifest.json."
+            if razlog:
+                return {"ok": False, "napaka": razlog, "sporocilo": razlog}
         source_id = "streznik-" + hashlib.sha256((provider + base + username).encode()).hexdigest()[:16]
         source = {"id": source_id, "vrsta": "streznik", "ponudnik": provider,
                   "ime": _text(name, 80) or urllib.parse.urlsplit(base).hostname,
@@ -1562,7 +1754,21 @@ class MediaCenter:
         # Odziv vira začnemo meriti takoj ob dodajanju, da je meritev navadno
         # že na voljo, ko uporabnik prvič izbere film ali epizodo.
         threading.Thread(target=self._izmeri_ping, args=(canonical,), daemon=True).start()
-        return self.refresh_source(source["id"])
+        rezultat = self.refresh_source(source["id"])
+        vir = rezultat.get("vir") or {}
+        # Vir predvajalnika (TMDB katalog + vdelani predvajalnik) nima lastnih vnosov, a je predvajljiv.
+        if rezultat.get("ok") and (int(vir.get("stevilo") or 0) > 0 or source.get("tip") == "predvajalni_vir"
+                                   or vir.get("tip") in ("predvajalni_vir", "uradni_vdelani_predvajalnik")):
+            return rezultat
+        # Vira, iz katerega ne moremo nicesar predvajati, ne pustimo v medijskem centru - in povemo zakaj.
+        with self._lock:
+            data = self._load()
+            data["viri"] = [item for item in data.get("viri", []) if item.get("id") != source["id"]]
+            self._save(data)
+        razlog = _text(rezultat.get("napaka"), 180)
+        sporocilo = ("Safeer v tem viru ni našel ničesar, kar bi lahko predvajal, zato ga nismo dodali."
+                     + (" (" + razlog + ")" if razlog and razlog != "ni_vira" else ""))
+        return {"ok": False, "napaka": razlog or "nepredvajljiv", "nepredvajljiv": True, "sporocilo": sporocilo}
 
     def remove_source(self, source_id: str) -> bool:
         with self._lock:
@@ -1574,12 +1780,14 @@ class MediaCenter:
                 self._server_cache = {key: value for key, value in self._server_cache.items()
                                       if not key.startswith(source_id + ":")}
                 self._save(data)
+                self.ozastari_predpomnilnik(izbrisi=True)  # odstranjen vir ne sme vec kazati svojih vnosov
                 return True
             before = len(data.get("viri", []))
             data["viri"] = [source for source in data.get("viri", []) if source.get("id") != source_id]
             if len(data["viri"]) == before:
                 return False
             self._save(data)
+            self.ozastari_predpomnilnik(izbrisi=True)
             return True
 
     def _download(self, url: str) -> tuple[bytes, str, str]:
@@ -1801,13 +2009,34 @@ class MediaCenter:
         cached = self._tmdb_cache.get(url)
         if cached and time.time() - cached[0] < 2 * 60 * 60:
             return cached[1]
+        # Kljuc na disku je odtis naslova (brez API kljuca v datoteki).
+        disk_kljuc = hashlib.sha1(url.encode("utf-8")).hexdigest()
+        with self._predpomnilnik_lock:
+            na_disku = self._nalozi_predpomnilnik()["tmdb"].get(disk_kljuc)
+        if (not cached and isinstance(na_disku, dict) and isinstance(na_disku.get("podatki"), dict)
+                and time.time() - float(na_disku.get("cas") or 0) < 24 * 60 * 60):
+            self._tmdb_cache[url] = (float(na_disku["cas"]), na_disku["podatki"])
+            if time.time() - float(na_disku["cas"]) < 2 * 60 * 60:
+                return na_disku["podatki"]
         request = urllib.request.Request(url, headers={"User-Agent": "SafeerOS/1.0", "Accept": "application/json"})
-        with urllib.request.urlopen(request, timeout=10) as response:
-            payload = response.read(MAX_DOWNLOAD)
-        data = json.loads(payload.decode("utf-8"))
+        try:
+            with urllib.request.urlopen(request, timeout=10) as response:
+                payload = response.read(MAX_DOWNLOAD)
+            data = json.loads(payload.decode("utf-8"))
+        except (OSError, ValueError):
+            # Brez omrezja: raje starejsi podatki kot prazen zaslon.
+            if isinstance(na_disku, dict) and isinstance(na_disku.get("podatki"), dict):
+                return na_disku["podatki"]
+            if cached:
+                return cached[1]
+            raise
         if not isinstance(data, dict):
             return {}
-        self._tmdb_cache[url] = (time.time(), data)
+        zdaj = time.time()
+        self._tmdb_cache[url] = (zdaj, data)
+        with self._predpomnilnik_lock:
+            self._nalozi_predpomnilnik()["tmdb"][disk_kljuc] = {"cas": zdaj, "uporabljeno": zdaj, "podatki": data}
+        self._shrani_predpomnilnik()
         return data
 
     def watch_regions(self, language: str = "sl") -> dict:
@@ -2057,7 +2286,7 @@ class MediaCenter:
                 self._dynamic_items.pop(old_key, None)
         return {
             "vnosi": merged,
-            "viri": self.sources(),
+            "viri": self.vidni_viri(),
             "skupaj": len(merged),
             "stran": page_num,
             "skupaj_strani": total_pages,
@@ -2229,7 +2458,7 @@ class MediaCenter:
 
             items = _items_from_json(data, base="", source_id=source_id, source_name=custom_name)
             if not items:
-                return {"ok": False, "napaka": "V JSON podatkih ni bilo mogoče najti medijskih vsebin (preverite naslov in url)."}
+                return {"ok": False, "napaka": "V JSON podatkih ni vsebin, ki bi jih Safeer lahko predvajal (torrentov, arhivov in namestitvenih datotek ne predvaja)."}
 
             najden = next((x for x in obstojeci_viri if x.get("id") == source_id), None)
             if najden:

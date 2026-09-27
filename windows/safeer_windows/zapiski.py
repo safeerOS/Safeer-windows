@@ -85,6 +85,12 @@ class Zapiski:
         zapiski = sorted(zapiski, key=lambda z: (not z.get("pripet"), -int(z.get("spremenjeno") or 0)))
         return [self._povzetek(z) for z in zapiski]
 
+    def zadnji(self) -> str:
+        with self._kljuc:
+            data = self._nalozi()
+        ident = str(data.get("zadnji") or "")
+        return ident if any(z.get("id") == ident for z in data["zapiski"]) else ""
+
     def dobi(self, ident: str) -> Optional[dict]:
         with self._kljuc:
             data = self._nalozi()
