@@ -624,3 +624,34 @@ div.vrstica { cursor: default; }
   gap: 10px; margin-top: 12px; max-height: 260px; overflow-y: auto; }
 .spletne-mreza-mini .ploscica { width: auto; min-height: 92px; }
 .spletne-mreza-mini .drobno { grid-column: 1 / -1; margin: 6px 0; opacity: .75; }
+
+/* Začetno stanje odseka Splet */
+.splet-zacetek{max-width:1080px;min-height:calc(100vh - 180px);margin:20px auto 0;padding:clamp(28px,5vw,64px);border:1px solid rgba(84,214,165,.28);border-radius:28px;background:radial-gradient(ellipse at 92% 8%,rgba(36,139,126,.24),transparent 34%),linear-gradient(135deg,rgba(17,29,41,.96),rgba(10,17,27,.94));box-shadow:var(--senca);display:flex;flex-direction:column;justify-content:center}
+.splet-oznaka{display:flex;align-items:center;gap:10px;color:var(--zelena);font-size:13px;font-weight:800;letter-spacing:.17em}
+.splet-oznaka .pika{width:9px;height:9px;border-radius:50%;background:var(--zelena);box-shadow:0 0 16px rgba(84,214,165,.65)}
+.splet-zacetek h1{font-size:clamp(36px,4vw,58px);margin:18px 0 8px}
+.splet-zacetek>p{font-size:19px;color:var(--medlo);margin:0 0 30px}
+.splet-iskalnik{display:flex;align-items:center;gap:14px;min-height:72px;padding:9px 11px 9px 22px;border:1px solid rgba(84,214,165,.34);border-radius:19px;background:rgba(5,11,19,.7);box-shadow:0 12px 34px rgba(0,0,0,.22)}
+.splet-iskalnik:focus-within{border-color:var(--zelena);box-shadow:0 0 0 3px rgba(84,214,165,.12),0 12px 34px rgba(0,0,0,.22)}
+.splet-iskalnik>svg{color:var(--zelena);width:26px;height:26px}
+.splet-iskalnik input{flex:1;min-width:0;height:50px;border:0;outline:0;background:transparent;font-size:19px}
+.splet-iskalnik input::placeholder{color:#82919b}
+.splet-iskalnik .gumb{height:50px;padding:0 25px;font-size:16px}
+.splet-hitro-glava{display:flex;align-items:baseline;gap:16px;margin:38px 0 14px}
+.splet-hitro-glava h2{margin:0;font-size:15px}
+.splet-hitro-glava>span{color:var(--medlo);font-size:13px}
+.splet-hitro{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+.spletna-bliznjica{display:flex;align-items:center;gap:14px;min-width:0;padding:15px 16px;border:1px solid var(--rob);border-radius:16px;background:rgba(255,255,255,.045);text-align:left;transition:transform .16s ease,border-color .16s ease,background .16s ease}
+.spletna-bliznjica:hover,.spletna-bliznjica:focus-visible{transform:translateY(-2px);border-color:var(--zelena);background:rgba(84,214,165,.1);outline:0}
+.spletna-bliznjica-znak{display:grid;place-items:center;width:46px;height:46px;flex:none;border-radius:14px;background:linear-gradient(145deg,rgba(84,214,165,.25),rgba(24,74,81,.5));color:var(--zelena);font-size:22px;font-weight:800}
+.spletna-bliznjica-podatki{flex:1;min-width:0}
+.spletna-bliznjica-podatki b,.spletna-bliznjica-podatki small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.spletna-bliznjica-podatki b{font-size:16px}
+.spletna-bliznjica-podatki small{margin-top:4px;color:var(--medlo);font-size:13px}
+.spletna-bliznjica-puscica{color:var(--medlo);font-size:26px}
+.splet-zasebnost{display:flex;align-items:center;gap:13px;margin-top:34px;padding:15px 17px;border:1px solid rgba(84,214,165,.14);border-radius:15px;background:rgba(84,214,165,.045)}
+.splet-zasebnost>svg{color:var(--zelena);width:23px;height:23px}
+.splet-zasebnost b,.splet-zasebnost small{display:block}
+.splet-zasebnost b{font-size:14px}
+.splet-zasebnost small{margin-top:3px;color:var(--medlo);font-size:13px}
+@media(max-width:700px){.splet-zacetek{padding:28px 20px;margin:8px auto;min-height:calc(100vh - 140px)}.splet-iskalnik{flex-wrap:wrap;padding:10px 12px}.splet-iskalnik input{font-size:16px}.splet-iskalnik .gumb{width:100%;justify-content:center}.splet-hitro{grid-template-columns:1fr}}

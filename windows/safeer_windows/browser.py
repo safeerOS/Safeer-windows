@@ -646,6 +646,7 @@ class BrowserWindow(QMainWindow):
         self.private = private
         self.embedded = embedded
         self.media_mode = False
+        self.safeer_os_web_mode = False
         self.media_allowed_host = ""
         self.on_safeer_home = on_safeer_home
         self.profile = app.get_private_profile() if private else app.profile
@@ -724,10 +725,45 @@ class BrowserWindow(QMainWindow):
         self.statusBar().setVisible(not enabled)
         for widget in (self.forward_button, self.home_button, self.address, self.shield_label,
                        self.star_button, self.downloads_button, self.menu_button):
-            widget.setVisible(not enabled)
+            self._set_toolbar_widget_visible(widget, not enabled)
         # Nazaj, osveži in »Safeer OS« ostanejo vidni ter so resnične akcije.
         self.back_button.setVisible(True)
         self.reload_button.setVisible(True)
+
+    def set_safeer_os_web_mode(self, enabled: bool) -> None:
+        """Prikaže Safeer Browser kot vdelan odsek Splet v glavnem oknu Safeer OS."""
+        enabled = bool(enabled and self.embedded and not self.media_mode)
+        self.safeer_os_web_mode = enabled
+        if enabled:
+            self.tabs.tabBar().hide()
+            self.new_tab_button.hide()
+            self.statusBar().hide()
+            for widget in (self.home_button, self.star_button, self.downloads_button, self.menu_button):
+                self._set_toolbar_widget_visible(widget, False)
+            for widget in (self.back_button, self.forward_button, self.reload_button,
+                           self.address, self.shield_label):
+                self._set_toolbar_widget_visible(widget, True)
+            if self.safeer_home_button is not None:
+                self.safeer_home_button.show()
+            self.address.setPlaceholderText("Išči ali vnesi spletni naslov")
+        else:
+            self.tabs.tabBar().show()
+            self.new_tab_button.show()
+            self.statusBar().show()
+            for widget in (self.home_button, self.star_button, self.downloads_button, self.menu_button,
+                           self.forward_button, self.address, self.shield_label):
+                self._set_toolbar_widget_visible(widget, True)
+            if self.safeer_home_button is not None:
+                self.safeer_home_button.show()
+            self.address.setPlaceholderText(tr(self.app, "address"))
+
+    def _set_toolbar_widget_visible(self, widget: QWidget, visible: bool) -> None:
+        """QToolBar owns embedded controls through QWidgetAction; toggle both layers."""
+        widget.setVisible(visible)
+        for action in self.toolbar.actions():
+            if self.toolbar.widgetForAction(action) == widget:
+                action.setVisible(visible)
+                break
 
     def load_media(self, url: str) -> None:
         """Odpre ponudnika kot izolirano vrhnjo stran znotraj Safeer Media.

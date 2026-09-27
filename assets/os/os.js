@@ -275,6 +275,15 @@
     if (razdelek === "omrezje") nalozOmrezje(false);
     if (razdelek === "zvok") { nalozZvok(); zvokZanka(); if (!jblStanje) nalozJbl(); }
     if (razdelek === "media") naloziMedia();
+    if (razdelek === "splet") narisiSpletnoZacetno();
+  }
+  function odpriSpletnoIskanje(niz) {
+    pojdi("splet");
+    klic("iskanjeSplet", [String(niz || "").trim()]);
+  }
+  function otvoriSpletnoStran(url) {
+    pojdi("splet");
+    klic("splet", [url]);
   }
   window.safeerOsPojdi = function (kam) {
     kam = String(kam || "");
@@ -505,7 +514,7 @@
       shraniSpletne(nove);
     });
     b.appendChild(x);
-    b.addEventListener("click", function () { obvesti(t("odpiram", { ime: a.ime })); klic("splet", [a.url]); });
+    b.addEventListener("click", function () { obvesti(t("odpiram", { ime: a.ime })); otvoriSpletnoStran(a.url); });
     return b;
   }
   // Kartica "Spletne aplikacije" na novi domaci strani: vse dodane spletne
@@ -563,9 +572,31 @@
 
   // ------------------------------------------------------------------ spletne aplikacije
   function spletne() { return Array.isArray(S.spletne) ? S.spletne : PRIVZETE_SPLETNE; }
+  function narisiSpletnoZacetno() {
+    var cilj = $("spletneAplikacije");
+    if (!cilj) return;
+    cilj.innerHTML = "";
+    spletne().forEach(function (app) {
+      if (!app || !app.url) return;
+      var gumb = el("button", "spletna-bliznjica");
+      gumb.type = "button";
+      gumb.title = app.url;
+      var ime = String(app.ime || app.url).trim();
+      gumb.appendChild(el("span", "spletna-bliznjica-znak", ubezi(ime.charAt(0).toUpperCase() || "S")));
+      var podatki = el("span", "spletna-bliznjica-podatki");
+      podatki.appendChild(el("b", "", ubezi(app.ime || app.url)));
+      try { podatki.appendChild(el("small", "", ubezi(new URL(app.url).hostname.replace(/^www\./, "")))); }
+      catch (e) { podatki.appendChild(el("small", "", ubezi(app.url))); }
+      gumb.appendChild(podatki);
+      gumb.appendChild(el("span", "spletna-bliznjica-puscica", "›"));
+      gumb.addEventListener("click", function () { otvoriSpletnoStran(app.url); });
+      cilj.appendChild(gumb);
+    });
+  }
   function shraniSpletne(seznam) {
     S.spletne = seznam;
     narisiDomov();
+    narisiSpletnoZacetno();
     klic("shraniSpletne", [seznam]).catch(function () {});
   }
   function normalizirajNaslov(s) {
@@ -1676,9 +1707,9 @@
     z.appendChild(el("h4", "", ubezi(t("isciSplet"))));
     if (jeNaslov(niz)) {
       var naslov = normalizirajNaslov(niz);
-      z.appendChild(zadetek("splet", t("odpriNaslov"), naslov, function () { klic("splet", [naslov]); }));
+      z.appendChild(zadetek("splet", t("odpriNaslov"), naslov, function () { otvoriSpletnoStran(naslov); }));
     }
-    z.appendChild(zadetek("isci", "“" + niz + "”", t("isciSplet"), function () { klic("iskanjeSplet", [niz]); }));
+    z.appendChild(zadetek("isci", "“" + niz + "”", t("isciSplet"), function () { odpriSpletnoIskanje(niz); }));
     // Datoteke (pocasneje, z zamikom)
     var mestoDatotek = el("div");
     z.appendChild(mestoDatotek);
@@ -1850,6 +1881,11 @@
       shraniSpletne(spletne().concat([{ ime: ime.slice(0, 40), url: naslov }]).slice(0, 24));
       zapriSloje();
     });
+    on("spletIskalnik", "submit", function (e) {
+      e.preventDefault();
+      var vnos = $("spletVnos");
+      if (vnos && vnos.value.trim()) odpriSpletnoIskanje(vnos.value);
+    });
     var iskanje = $("iskanje");
     if (iskanje) {
       iskanje.addEventListener("input", isci);
@@ -1910,6 +1946,7 @@
       osveziUro();
       narisiMape();
       narisiDomov();
+      narisiSpletnoZacetno();
       nalozPrograme();
       osveziStanje();
       osveziOkna();
