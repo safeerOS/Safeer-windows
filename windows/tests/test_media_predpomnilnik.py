@@ -69,6 +69,15 @@ class PredpomnilnikKatalogaTest(unittest.TestCase):
             self.assertTrue(center.remove_source("v1"))
             self.assertEqual(center._nalozi_predpomnilnik()["katalog"], {})
 
+    def test_sprotno_iskanje_bere_samo_predpomnilnik(self):
+        with tempfile.TemporaryDirectory() as td:
+            center, klici = self._center(td, [{"id": "sintel", "naslov": "Sintel", "vrsta": "film"}])
+            center.catalog_hitro("", "film")
+            klici.clear()
+            center.catalog = lambda *a, **k: self.fail("sprotno iskanje ne sme na omrežje")
+            self.assertEqual([x["id"] for x in center.isci_v_predpomnilniku("sint")], ["sintel"])
+            self.assertEqual(klici, [])
+
 
 if __name__ == "__main__":
     unittest.main()

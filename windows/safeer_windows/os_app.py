@@ -952,6 +952,10 @@ class SafeerOsWindow(QMainWindow):
             url = str(a[0]) if a else ""
             return self.odpri_splet(url)
 
+        if metoda == "spletNotranji":
+            url = str(a[0]) if a else ""
+            return self.odpri_splet(url, vedno_notri=True)
+
         if metoda == "iskanjeSplet":
             poizvedba = str(a[0]) if a else ""
             return self.odpri_spletno_iskanje(poizvedba)
@@ -1224,6 +1228,9 @@ class SafeerOsWindow(QMainWindow):
                 razvrsti=razvrsti, izklopljeni=izklopljeni, samo_lokalno=samo_lokalno,
                 izklopljeni_jeziki=izklopljeni_jeziki)
 
+        if metoda == "mediaIsciPredpomnilnik":
+            return self.media_center.isci_v_predpomnilniku(str(a[0]) if a else "", 8)
+
         if metoda == "mediaPodrobnosti":
             shramba = os_backend_win.nalozi_shrambo()
             language = str(a[1] if len(a) > 1 else shramba.get("jezik") or "sl")
@@ -1331,7 +1338,7 @@ class SafeerOsWindow(QMainWindow):
 
         return None
 
-    def odpri_splet(self, url: str):
+    def odpri_splet(self, url: str, vedno_notri: bool = False):
         url = str(url or "").strip()
         if not url:
             return False
@@ -1339,7 +1346,7 @@ class SafeerOsWindow(QMainWindow):
             url = "https://" + url
         if urllib.parse.urlsplit(url).scheme.lower() not in ("http", "https"):
             return False
-        if os_backend_win.je_drm_storitev(url):
+        if not vedno_notri and os_backend_win.je_drm_storitev(url):
             izid = os_backend_win.odpri_drm_storitev(url)
             if izid.get("zunanje"):
                 return izid

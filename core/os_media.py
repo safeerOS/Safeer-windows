@@ -1582,6 +1582,36 @@ class MediaCenter:
                     continue
         threading.Thread(target=delo, name="media-prednalozi", daemon=True).start()
 
+    def isci_v_predpomnilniku(self, query: str, meja: int = 8) -> list[dict]:
+        """Poišči za sprotne predloge brez omrežja in brez osveževanja kataloga."""
+        iskano = _text(query, 120).casefold().strip()
+        if not iskano:
+            return []
+        kandidati: list[dict] = []
+        with self._predpomnilnik_lock:
+            for zapis in self._nalozi_predpomnilnik()["katalog"].values():
+                rezultat = zapis.get("rezultat") if isinstance(zapis, dict) else None
+                if isinstance(rezultat, dict):
+                    kandidati.extend(x for x in (rezultat.get("vnosi") or []) if isinstance(x, dict))
+        # Uporabnikovi uvoženi viri so že na disku in zato prav tako ne povzročijo omrežnega klica.
+        with self._lock:
+            for vir in self._load().get("viri", []):
+                kandidati.extend(x for x in (vir.get("vnosi") or []) if isinstance(x, dict))
+
+        zadetki, videni = [], set()
+        for item in kandidati:
+            haystack = " ".join(str(item.get(k) or "") for k in ("naslov", "izvajalec", "album", "opis", "vrsta")).casefold()
+            if iskano not in haystack:
+                continue
+            kljuc = str(item.get("id") or (item.get("naslov"), item.get("vrsta")))
+            if kljuc in videni:
+                continue
+            videni.add(kljuc)
+            zadetki.append({k: item.get(k) for k in ("id", "naslov", "izvajalec", "opis", "vrsta", "slika") if item.get(k) is not None})
+            if len(zadetki) >= max(1, min(int(meja or 8), 20)):
+                break
+        return zadetki
+
     @staticmethod
     def _default_roots() -> list[Path]:
         home, out = Path.home(), []

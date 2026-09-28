@@ -37,7 +37,7 @@
     <header id="vrh">
       <label class="iskanje">
         <svg data-ikona="isci"></svg>
-        <input id="iskanje" type="text" autocomplete="off" spellcheck="false" placeholder="Išči programe, datoteke, splet, naprave ...">
+        <input id="iskanje" type="text" autocomplete="off" spellcheck="false" data-ph="pametnoIskanje" placeholder="Išči programe, datoteke, splet, naprave ...">
       </label>
       <div class="vrh-naprave">
         <span class="omrezje-znacka" id="stanjeOmrezje" title="Omrežje"><svg data-ikona="wifi"></svg><span>Povezano</span></span>
@@ -274,6 +274,7 @@
       <section class="razdelek" id="r-programi">
         <h1 data-t="programi"></h1>
         <p id="programiPod"></p>
+        <label class="ciljno-iskanje"><svg data-ikona="isci"></svg><input id="programiIskanje" type="search" autocomplete="off" data-ph="programiIsci"></label>
         <div class="filtri naprave-filtri" id="filtriNaprav" hidden></div>
         <div class="filtri" id="filtri"></div>
         <div class="mreza" id="vsiProgrami"></div>
@@ -283,6 +284,7 @@
       <section class="razdelek" id="r-datoteke">
         <h1 data-t="datoteke"></h1>
         <p id="datotekeOpis" data-t="datotekeOpis"></p>
+        <label class="ciljno-iskanje"><svg data-ikona="isci"></svg><input id="datotekeIskanje" type="search" autocomplete="off" data-ph="datotekeIsci"></label>
         <div class="filtri naprave-filtri" id="filtriNapravDatoteke" hidden></div>
         <div class="datoteke-postavitev">
           <div class="mape-seznam" id="mapeSeznam"></div>
@@ -326,6 +328,7 @@
       <section class="razdelek" id="r-naprave">
         <h1 data-t="naprave"></h1>
         <p data-t="napraveOpis"></p>
+        <label class="ciljno-iskanje"><svg data-ikona="isci"></svg><input id="napraveIskanje" type="search" autocomplete="off" data-ph="napraveIsci"></label>
         <div class="panel">
           <h3><i class="pika siva" id="napravePika"></i><span id="napraveNaslov"></span></h3>
           <p id="napraveBesedilo"></p>
@@ -519,6 +522,7 @@
 </div>
 <div id="obvestilo"></div>
 <script src="besedila.js"></script>
+<script src="namera-iskanja.js"></script>
 <script src="os.js"></script>
 </body>
 </html>

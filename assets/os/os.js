@@ -242,9 +242,9 @@
 
   // ------------------------------------------------------------------ stanje
   var S = {
-    zacetek: null, programi: [], skupina: "vse", razdelek: "domov", pot: "", stanje: null,
+    zacetek: null, programi: [], skupina: "vse", programIskanje: "", razdelek: "domov", pot: "", stanje: null,
     // Multi-host: programi drugih naprav v Safeer Linku (id naprave -> seznam), izbrana naprava ("" = ta racunalnik).
-    naprave: [], programiNaprav: {}, nalagam: {}, naprava: "",
+    naprave: [], iskalneNaprave: [], programiNaprav: {}, nalagam: {}, naprava: "",
     // Multi-host: datoteke drugih naprav v Safeer Linku
     napraveDatoteke: [], izbranaNapravaDatoteke: "", daljinskaPot: [],
     daljinskiKoreni: {}, daljinskiServer: {},
@@ -290,15 +290,18 @@
     if (razdelek === "splet") narisiSpletnoZacetno();
   }
   function odpriSpletnoIskanje(niz) {
+    if ($("spletVnos")) $("spletVnos").value = String(niz || "").trim();
     pojdi("splet");
     klic("iskanjeSplet", [String(niz || "").trim()]);
   }
-  function otvoriSpletnoStran(url, ime) {
+  function otvoriSpletnoStran(url, ime, vednoNotri) {
+    if ($("spletVnos")) $("spletVnos").value = url;
     zabeleziNedavno({ vrsta: "stran", url: url, ime: ime });
-    klic("splet", [url]).then(function (r) {
+    if (vednoNotri) pojdi("splet");
+    klic(vednoNotri ? "spletNotranji" : "splet", [url]).then(function (r) {
       // Storitve z DRM (Netflix ...) odpre Edge, ker vgrajeni pogon nima Widevine.
       if (r && r.zunanje) { obvesti((ime || imeIzNaslova(url)) + " se odpira v " + r.brskalnik + " (zaščitena vsebina, DRM)."); return; }
-      pojdi("splet");
+      if (!vednoNotri) pojdi("splet");
     });
   }
 
@@ -512,8 +515,14 @@
       S.naprave = n || [];
       if (S.naprava && !S.naprave.some(function (x) { return x.id === S.naprava; })) S.naprava = "";
       narisiPrograme();
-      S.naprave.forEach(function (x) { if (!S.programiNaprav[x.id]) nalozProgrameNaprave(x.id); });
+      S.naprave.forEach(function (x) {
+        var shranjeni = S.programiNaprav[x.id];
+        if (!shranjeni || (shranjeni.length && shranjeni.every(function (p) { return !p.ikona; }))) nalozProgrameNaprave(x.id);
+      });
     }, function () {});
+  }
+  function osveziIskalneNaprave() {
+    klic("vseNaprave").then(function (seznam) { S.iskalneNaprave = zdruziSorodnike(seznam || []); }, function () {});
   }
   function nalozProgrameNaprave(id) {
     if (S.nalagam[id]) return;
@@ -579,8 +588,16 @@
         if (seznamN.napaka !== "ne_deli") return;
       }
     }
-    programi.filter(function (p) { return S.skupina === "vse" || p.skupina === S.skupina; })
-      .forEach(function (p) { mreza.appendChild(ploscicaPrograma(p, !p.naprava)); });
+    var iskano = String(S.programIskanje || "").trim().toLocaleLowerCase();
+    var prikazani = programi.filter(function (p) {
+      if (S.skupina !== "vse" && p.skupina !== S.skupina) return false;
+      return !iskano || [p.ime, p.splosno, p.opis, (p.kljucne || []).join(" ")].join(" ").toLocaleLowerCase().indexOf(iskano) >= 0;
+    });
+    prikazani.forEach(function (p, i) {
+      var ploscica = ploscicaPrograma(p, !p.naprava);
+      if (iskano && prikazani.length === 1 && i === 0) ploscica.classList.add("iskalni-zadetek");
+      mreza.appendChild(ploscica);
+    });
   }
   // Programi, ki jih ima vsak Mint, kot zacetni izbor, dokler uporabnik se nicesar ne odpira.
   var PRIVZETI = ["safeer-browser.desktop", "firefox.desktop", "nemo.desktop", "org.gnome.Terminal.desktop",
@@ -1284,8 +1301,12 @@
     if (!pokaziSeznam) { preimenujem = null; return; }
     klic("vseNaprave").then(function (naprave) {
       var ul = $("seznamNaprav"); ul.innerHTML = "";
-      zdruziSorodnike(naprave).forEach(function (n) {
+      var iskano = $("napraveIskanje") ? $("napraveIskanje").value.trim().toLocaleLowerCase() : "";
+      zdruziSorodnike(naprave).filter(function (n) {
+        return !iskano || [n.ime, n.id, n.platforma, n.vrsta].join(" ").toLocaleLowerCase().indexOf(iskano) >= 0;
+      }).forEach(function (n, indeks) {
         var li = el("li");
+        if (iskano && indeks === 0) { li.classList.add("iskalni-zadetek"); li.tabIndex = -1; }
         var opis = n.ta ? t("taRacunalnik") : (n.platforma ? t("plat_" + n.platforma) : (n.vrsta || ""));
         if (preimenujem === n.id) {
           li.innerHTML = svg(ikonaNaprave(n)) + '<input class="vnosImena" maxlength="64"><button class="gumb glavni majhen"></button><button class="gumb majhen"></button>';
@@ -1961,7 +1982,8 @@
 
   // ------------------------------------------------------------------ iskanje
   var iskanjeZamik = 0, iskanjeStevec = 0;
-  function jeNaslov(s) { return /^(https?:\/\/)?[\w-]+(\.[\w-]+)+(:\d+)?(\/\S*)?$/i.test(s) && !/\s/.test(s); }
+  var pametniRezultati = { datoteke: [], mediji: [] };
+  function jeNaslov(s) { return SafeerPametnoIskanje.jeNaslov(s); }
   function ujemanje(besedilo, niz) {
     besedilo = String(besedilo || "").toLowerCase();
     if (!besedilo) return 0;
@@ -1969,12 +1991,88 @@
     if (besedilo.indexOf(" " + niz) >= 0) return 2;
     return besedilo.indexOf(niz) >= 0 ? 1 : 0;
   }
-  function zadetek(ikonaEl, naslov, pod, ob) {
+  function zadetek(ikonaEl, naslov, pod, ob, razred) {
     var b = el("button", "zadetek");
+    if (razred) b.classList.add(razred);
     if (typeof ikonaEl === "string") b.innerHTML = svg(ikonaEl); else b.appendChild(ikonaEl);
     b.appendChild(el("div", "", "<b>" + ubezi(naslov) + "</b>" + (pod ? "<span>" + ubezi(pod) + "</span>" : "")));
     b.addEventListener("click", function () { zapriSloje(); ob(); });
     return b;
+  }
+  function naslovSkupine(cilj, kljuc) { cilj.appendChild(el("h4", "", ubezi(t(kljuc)))); }
+  function podatkiPametnegaIskanja() {
+    return {
+      spletne: spletne(),
+      programi: S.programi.concat(vsiProgramiNaprav()),
+      datoteke: pametniRezultati.datoteke,
+      mediji: pametniRezultati.mediji,
+      naprave: [{ ime: "Safeer Link", id: "safeer-link" }].concat(S.iskalneNaprave || [], S.naprave || [], S.napraveDatoteke || [])
+    };
+  }
+  function odpriProgramIskanje(niz, program) {
+    zapriSloje();
+    S.programIskanje = String(niz || "").trim();
+    S.skupina = "vse";
+    if (program) S.naprava = program.naprava || "";
+    if ($("programiIskanje")) $("programiIskanje").value = S.programIskanje;
+    pojdi("programi");
+    narisiPrograme();
+    setTimeout(function () {
+      var prvi = $("vsiProgrami").querySelector(".ploscica");
+      if (prvi) prvi.focus(); else if ($("programiIskanje")) $("programiIskanje").focus();
+    }, 30);
+  }
+  function prikaziIskanjeDatotek(niz, seznam) {
+    S.pot = "@iskanje";
+    narisiMape();
+    var dr = $("drobtine"); dr.innerHTML = "";
+    dr.appendChild(el("b", "", ubezi(t("rezultatiIskanja", { niz: niz }))));
+    var v = $("vsebinaMape"); v.innerHTML = "";
+    (seznam || []).forEach(function (d, i) {
+      var vrstica = vrsticaDatoteke(d, true, false);
+      if (i === 0) vrstica.classList.add("iskalni-zadetek");
+      v.appendChild(vrstica);
+    });
+    if (!(seznam || []).length) v.appendChild(el("div", "prazno", ubezi(t("niZadetkov"))));
+    setTimeout(function () { var prvi = v.querySelector("button"); if (prvi) prvi.focus(); }, 30);
+  }
+  function odpriDatotekeIskanje(niz, seznam) {
+    zapriSloje();
+    S.pot = "@iskanje";
+    if ($("datotekeIskanje")) $("datotekeIskanje").value = niz;
+    pojdi("datoteke");
+    if (seznam) prikaziIskanjeDatotek(niz, seznam);
+    else klic("isciDatoteke", [niz]).then(function (r) { prikaziIskanjeDatotek(niz, r || []); });
+  }
+  function odpriMediaIskanje(niz) {
+    zapriSloje();
+    media.query = String(niz || "").trim(); media.filter = "vse"; media.page = 1;
+    if ($("mediaIskanje")) $("mediaIskanje").value = media.query;
+    document.querySelectorAll("[data-media-filter]").forEach(function (b) {
+      var izbran = b.getAttribute("data-media-filter") === "vse";
+      b.classList.toggle("izbran", izbran); b.classList.toggle("izbrana", izbran);
+    });
+    pojdi("media");
+  }
+  function odpriNapraveIskanje(niz) {
+    zapriSloje();
+    if ($("napraveIskanje")) $("napraveIskanje").value = niz;
+    pojdi("naprave");
+    setTimeout(function () {
+      var prvi = document.querySelector("#seznamNaprav li.iskalni-zadetek") || $("gumbControl");
+      if (prvi && prvi.focus) prvi.focus();
+    }, 80);
+  }
+  function izvediNamero(niz) {
+    var namera = SafeerPametnoIskanje.nameraIskanja(niz, podatkiPametnegaIskanja());
+    if (namera.vrsta === "programi") return odpriProgramIskanje(niz, namera.zadetek);
+    if (namera.vrsta === "datoteke") return odpriDatotekeIskanje(niz, pametniRezultati.datoteke);
+    if (namera.vrsta === "media") return odpriMediaIskanje(niz);
+    if (namera.vrsta === "naprave") return odpriNapraveIskanje(niz);
+    zapriSloje();
+    if (namera.spletna) return otvoriSpletnoStran(namera.spletna.url, namera.spletna.ime, true);
+    if (namera.naslov) return otvoriSpletnoStran(normalizirajNaslov(niz), niz, true);
+    odpriSpletnoIskanje(niz);
   }
   function isci() {
     var niz = $("iskanje").value.trim();
@@ -1986,6 +2084,21 @@
     var n = niz.toLowerCase();
     var z = $("zadetki");
     z.innerHTML = "";
+    pametniRezultati.datoteke = [];
+    pametniRezultati.mediji = [];
+    // Spletne aplikacije: ime, domena in kratica (npr. yt -> YouTube).
+    var spletneZ = spletne().map(function (a) {
+      var ocena = SafeerPametnoIskanje.oceni(n, [a.ime, imeIzNaslova(a.url), (String(a.ime).match(/[A-ZČŠŽ]/g) || []).join("")]);
+      return { a: a, ocena: ocena };
+    }).filter(function (x) { return x.ocena > 0; }).sort(function (a, b) { return b.ocena - a.ocena; }).slice(0, 5);
+    if (spletneZ.length) {
+      naslovSkupine(z, "zSpletneAplikacije");
+      spletneZ.forEach(function (x) {
+        z.appendChild(zadetek(crka(x.a.ime), x.a.ime, imeIzNaslova(x.a.url), function () {
+          otvoriSpletnoStran(x.a.url, x.a.ime, true);
+        }, "spletni"));
+      });
+    }
     // Programi
     var programi = S.programi.concat(vsiProgramiNaprav()).map(function (p) {
       var ocena = ujemanje(p.ime, n) * 10 + ujemanje(p.splosno, n) * 3 + ujemanje((p.kljucne || []).join(" "), n) * 2 +
@@ -1994,63 +2107,62 @@
       return { p: p, ocena: ocena + (ocena ? Math.min(5, p.uporaba || 0) : 0) };
     }).filter(function (x) { return x.ocena > 0; }).sort(function (a, b) { return b.ocena - a.ocena; }).slice(0, 6);
     if (programi.length) {
-      z.appendChild(el("h4", "", ubezi(t("zProgrami"))));
+      naslovSkupine(z, "zProgrami");
       programi.forEach(function (x) {
         var n2 = x.p.naprava ? S.naprave.find(function (y) { return y.id === x.p.naprava; }) : null;
-        z.appendChild(zadetek(slikaAliCrka(x.p.ikona, x.p.ime), x.p.ime, n2 ? n2.ime : x.p.opis, function () { zazeni(x.p); }));
+        z.appendChild(zadetek(slikaAliCrka(x.p.ikona, x.p.ime), x.p.ime, n2 ? n2.ime : x.p.opis, function () { odpriProgramIskanje(x.p.ime, x.p); }));
       });
     }
-    // Nastavitve
-    var nastavitve = [];
-    seznamNastavitev().forEach(function (g) {
-      g.elementi.forEach(function (e) { if (ujemanje(e.ime, n)) nastavitve.push({ e: e, g: g.naslov }); });
-    });
-    if (nastavitve.length) {
-      z.appendChild(el("h4", "", ubezi(t("zNastavitve"))));
-      nastavitve.slice(0, 5).forEach(function (x) {
-        z.appendChild(zadetek(x.e.ikona, x.e.ime, x.g, function () { odpriNastavitev(x.e); }));
-      });
+    // Datoteke in mediji pridejo iz lokalnih predpomnilnikov po 250 ms.
+    var mestoDatotek = el("div"), mestoMedijev = el("div");
+    z.appendChild(mestoDatotek);
+    z.appendChild(mestoMedijev);
+    var naprave = [{ ime: "Safeer Link", platforma: "" }].concat(S.iskalneNaprave || [], S.naprave || [], S.napraveDatoteke || []).filter(function (x, i, a) {
+      return a.findIndex(function (y) { return (y.id || y.ime) === (x.id || x.ime); }) === i;
+    }).filter(function (x) { return ujemanje(x.ime, n) || ujemanje(x.platforma, n); }).slice(0, 5);
+    if (naprave.length) {
+      naslovSkupine(z, "zNaprave");
+      naprave.forEach(function (x) { z.appendChild(zadetek(ikonaNaprave(x), x.ime, "Safeer Link", function () { odpriNapraveIskanje(x.ime); })); });
     }
-    // Splet
-    z.appendChild(el("h4", "", ubezi(t("isciSplet"))));
+    naslovSkupine(z, "isciSplet");
     if (jeNaslov(niz)) {
       var naslov = normalizirajNaslov(niz);
-      z.appendChild(zadetek("splet", t("odpriNaslov"), naslov, function () { otvoriSpletnoStran(naslov); }));
+      z.appendChild(zadetek("splet", t("odpriNavedeniNaslov", { naslov: naslov }), naslov, function () { otvoriSpletnoStran(naslov, niz, true); }, "spletni"));
     }
-    z.appendChild(zadetek("isci", "“" + niz + "”", t("isciSplet"), function () { odpriSpletnoIskanje(niz); }));
-    // Datoteke (pocasneje, z zamikom)
-    var mestoDatotek = el("div");
-    z.appendChild(mestoDatotek);
-    oznaciPrvega();
+    z.appendChild(zadetek("isci", t("isciNaSpletu", { niz: niz }), t("isciSplet"), function () { odpriSpletnoIskanje(niz); }, "spletni"));
     clearTimeout(iskanjeZamik);
     var moj = ++iskanjeStevec;
     if (n.length >= 2) {
-      mestoDatotek.appendChild(el("h4", "", ubezi(t("zDatoteke")) + ' <span style="opacity:.6;letter-spacing:0;text-transform:none">' + ubezi(t("iscem")) + "</span>"));
       iskanjeZamik = setTimeout(function () {
         klic("isciDatoteke", [niz]).then(function (seznam) {
           if (moj !== iskanjeStevec) return;
           mestoDatotek.innerHTML = "";
           seznam = (seznam || []).slice(0, 8);
+          pametniRezultati.datoteke = seznam;
           if (!seznam.length) return;
-          mestoDatotek.appendChild(el("h4", "", ubezi(t("zDatoteke"))));
+          naslovSkupine(mestoDatotek, "zDatoteke");
           seznam.forEach(function (d) {
-            mestoDatotek.appendChild(zadetek(IKONA_VRSTE[d.vrsta] || "datoteka", d.ime, skrajsajPot(d.pot), function () {
-              if (d.mapa) { pojdi("datoteke"); odpriMapo(d.pot); } else klic("odpriDatoteko", [d.pot]);
-            }));
+            mestoDatotek.appendChild(zadetek(IKONA_VRSTE[d.vrsta] || "datoteka", d.ime, skrajsajPot(d.pot), function () { odpriDatotekeIskanje(niz, seznam); }));
           });
         }, function () { mestoDatotek.innerHTML = ""; });
-      }, 260);
+        klic("mediaIsciPredpomnilnik", [niz]).then(function (seznam) {
+          if (moj !== iskanjeStevec) return;
+          mestoMedijev.innerHTML = ""; seznam = (seznam || []).slice(0, 8); pametniRezultati.mediji = seznam;
+          if (!seznam.length) return;
+          naslovSkupine(mestoMedijev, "zMediji");
+          seznam.forEach(function (m) {
+            mestoMedijev.appendChild(zadetek(mediaIkona(m.vrsta), m.naslov, mediaOznaka(m.vrsta), function () { odpriMediaIskanje(niz); }));
+          });
+        }, function () { mestoMedijev.innerHTML = ""; });
+      }, 250);
     }
   }
   function zadetki() { return Array.prototype.slice.call(document.querySelectorAll("#zadetki .zadetek")); }
-  function oznaciPrvega() {
-    var vsi = zadetki();
-    vsi.forEach(function (b, i) { b.classList.toggle("aktiven", i === 0); });
-  }
   function premakniIzbiro(smer) {
     var vsi = zadetki();
     if (!vsi.length) return;
     var i = vsi.findIndex(function (b) { return b.classList.contains("aktiven"); });
+    if (i < 0) i = smer > 0 ? -1 : 0;
     i = Math.max(0, Math.min(vsi.length - 1, i + smer));
     vsi.forEach(function (b, j) { b.classList.toggle("aktiven", j === i); });
     vsi[i].scrollIntoView({ block: "nearest" });
@@ -2355,6 +2467,7 @@
       obvesti(podatki.uspeh ? (podatki.ime + " je poslana.") : (podatki.napaka || "Pošiljanje ni uspelo."));
     }
     if (vrsta === "naprave") {
+      osveziIskalneNaprave();
       if (S.razdelek === "programi") nalozNaprave();
       if (S.razdelek === "datoteke") nalozNapraveSDatoteki();
     }
@@ -2499,11 +2612,25 @@
         else if (e.key === "ArrowUp") { e.preventDefault(); premakniIzbiro(-1); }
         else if (e.key === "Enter") {
           var a = document.querySelector("#zadetki .zadetek.aktiven");
-          if (a) { e.preventDefault(); a.click(); iskanje.value = ""; iskanje.blur(); }
+          e.preventDefault();
+          if (a) a.click(); else izvediNamero(iskanje.value);
+          iskanje.value = ""; iskanje.blur();
         }
       });
       iskanje.addEventListener("focus", function () { if (iskanje.value) isci(); });
     }
+    on("programiIskanje", "input", function () { S.programIskanje = this.value; S.skupina = "vse"; narisiPrograme(); });
+    on("programiIskanje", "keydown", function (e) {
+      if (e.key !== "Enter") return;
+      var prvi = $("vsiProgrami").querySelector(".ploscica");
+      if (prvi) { e.preventDefault(); prvi.click(); }
+    });
+    on("datotekeIskanje", "input", function () {
+      var niz = this.value.trim(); clearTimeout(iskanjeZamik);
+      if (niz.length < 2) return;
+      iskanjeZamik = setTimeout(function () { klic("isciDatoteke", [niz]).then(function (r) { prikaziIskanjeDatotek(niz, r || []); }); }, 250);
+    });
+    on("napraveIskanje", "input", function () { narisiSeznamNaprav(S.povezava.stanje === "povezan" && !!S.povezava.control); });
     // Kot meni Start: kar zacnes tipkati, gre v iskanje.
     document.addEventListener("keydown", function (e) {
       if (e.key === "Escape") {
@@ -2553,6 +2680,7 @@
       narisiMape();
       narisiDomov();
       narisiSpletnoZacetno();
+      osveziIskalneNaprave();
       nalozPrograme();
       osveziStanje();
       osveziOkna();
@@ -2627,6 +2755,7 @@
         mreza.appendChild(el("h3", "media-skupina", ubezi(mediaZadnjaSkupina)));
       }
       var card = el("button", "media-kartica");
+      if (iskano && mreza.querySelectorAll(".media-kartica").length === 0) card.classList.add("iskalni-zadetek");
       card.setAttribute("aria-label", (x.naslov || "Medijski center") + " — " + mediaOznaka(x.vrsta));
     if (x.slika) {
         var image = document.createElement("img"); image.alt = ""; image.loading = "lazy"; image.src = x.slika;
@@ -2935,11 +3064,12 @@
     narisiZanre();
     var zahteva = ++media.zahteva;
     $("mediaPovzetek").textContent = "Nalagam katalog …";
-    klic("mediaKatalog", [media.query, media.filter, media.genre, media.page || 1,
+    return klic("mediaKatalog", [media.query, media.filter, media.genre, media.page || 1,
                           media.razvrsti, Object.keys(media.izklopljeni), media.samoLokalno,
                           Object.keys(media.izklopljeniJeziki)]).then(function (response) {
       if (zahteva !== media.zahteva) return;
       prevzemiMediaKatalog(response);
+      if (media.query) setTimeout(function () { var prvi = $("mediaMreza").querySelector(".media-kartica"); if (prvi) prvi.focus(); }, 30);
     }, function () { if (zahteva === media.zahteva) { media.katalog = []; media.viri = []; narisiMedia(); } });
   }
 
