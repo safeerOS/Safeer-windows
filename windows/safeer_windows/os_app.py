@@ -1172,7 +1172,19 @@ class SafeerOsWindow(QMainWindow):
         if metoda == "odpriTukaj":
             id_n = str(a[0]) if a else ""
             app = str(a[1]) if len(a) > 1 else ""
-            return self.control_backend.odpri_tukaj(id_n, app)
+            izid = self.control_backend.odpri_tukaj(id_n, app)
+            # Racunalnik (Linux/Windows) program samo zazene; sliko prinesemo mi - odpremo njegov oddaljeni
+            # zaslon in program upravljamo od tu (Android pa sam zacne deliti zaslon, "tu": True).
+            naprava = next((n for n in (self.control_backend.naprave or [])
+                            if str(n.get("id") or "") == id_n), {})
+            platforma = str(naprava.get("platforma") or naprava.get("platform") or "").lower()
+            racunalnik = platforma in ("linux", "windows", "win32", "macos") or id_n.endswith("-control")
+            if isinstance(izid, dict) and izid.get("ok") and racunalnik and not izid.get("tu"):
+                from . import oddaljeni_zaslon
+                ime = str(naprava.get("ime") or naprava.get("name") or id_n)
+                self.dispatcher.dispatch(lambda: oddaljeni_zaslon.odpri(self.control_backend, id_n, ime))
+                izid = dict(izid, tu=True, zaslon=True)
+            return izid
 
         if metoda == "preimenujNapravo":
             id_n = str(a[0]) if a else ""
