@@ -1004,7 +1004,9 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
             res_apps = poslana[0]
             self.assertTrue(res_apps["payload"]["ok"])
             self.assertIn("items", res_apps["payload"]["data"])
-            self.assertIn("apps", res_apps["payload"]["data"])
+            # Seznam gre v Link enkrat: podvojen "apps" je odgovor s 60 ikonami potisnil cez mejo huba.
+            self.assertNotIn("apps", res_apps["payload"]["data"])
+            self.assertLess(len(json.dumps(res_apps)), 256 * 1024)
 
             # Odpiranje URL na ločenem navideznem zaslonu
             cmd_url = {

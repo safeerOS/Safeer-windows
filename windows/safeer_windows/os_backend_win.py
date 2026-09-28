@@ -6,6 +6,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -296,6 +297,16 @@ def doloci_skupino(ime: str, pot: str) -> str:
     return "drugo"
 
 
+_NI_PROGRAM = re.compile(
+    r"\b(uninstall|uninstaller|odstrani|odstranitev|readme|read me|help|pomoč|manuals?|documentation|"
+    r"setup|registration|release notes|what is new|license|licence)\b", re.IGNORECASE)
+
+
+def _ni_program(ime: str) -> bool:
+    """Pomožni vnosi v meniju Start (odstranjevalniki, navodila, namestitve) niso programi za seznam."""
+    return bool(_NI_PROGRAM.search(ime))
+
+
 def poisci_start_menu_programe() -> List[dict]:
     programi = []
     videni = set()
@@ -322,10 +333,13 @@ def poisci_start_menu_programe() -> List[dict]:
             for file in files:
                 if file.lower().endswith((".lnk", ".desktop", ".exe")):
                     stem = os.path.splitext(file)[0]
-                    ime = stem.replace("-", " ").replace("_", " ").title()
+                    ime = stem.replace("-", " ").replace("_", " ")
+                    # Imena bližnjic so že človeška (»Safeer OS«, »YouTube«); .title() jih je kvaril v »Safeer Os«.
+                    if not any(c.isupper() for c in ime):
+                        ime = ime.title()
                     # Odstrani odvečne sistemske besede
-                    ime = ime.replace("Shortcut", "").strip()
-                    if not ime or ime.lower() in ("uninstall", "odstrani", "help", "readme"):
+                    ime = ime.replace("Shortcut", "").replace("- Bližnjica", "").strip()
+                    if not ime or _ni_program(ime):
                         continue
                     if ime.lower() in videni:
                         continue
@@ -490,7 +504,10 @@ def napajanje(dejanje: str) -> bool:
 
 def pridobi_stanje_omrezja() -> dict:
     povezan = False
-    ime_omrezja = "Žična povezava (LAN)"
+    # Pri žični povezavi ostane ime prazno: vmesnik izpiše prevedeno »Žična povezava«,
+    # zasebni naslov IP pa se ne kaže na zaslonu (le v polju "ip").
+    ime_omrezja = ""
+    naslov_ip = ""
     vrsta = "ethernet"
     try:
         import socket
@@ -501,7 +518,7 @@ def pridobi_stanje_omrezja() -> dict:
         s.close()
         if ip and not ip.startswith("127."):
             povezan = True
-            ime_omrezja = f"Povezano ({ip})"
+            naslov_ip = ip
     except Exception:
         try:
             import socket
@@ -510,7 +527,7 @@ def pridobi_stanje_omrezja() -> dict:
                 ip = info[4][0]
                 if ip and not ip.startswith("127.") and not ip.startswith("169.254."):
                     povezan = True
-                    ime_omrezja = f"Povezano ({ip})"
+                    naslov_ip = ip
                     break
         except Exception:
             pass
@@ -536,8 +553,9 @@ def pridobi_stanje_omrezja() -> dict:
             "povezan": True,
             "vrsta": vrsta,
             "ime": ime_omrezja,
-            "omrezja": [{"ssid": ime_omrezja, "povezan": True, "moc": 100}],
-            "naprave": [{"ime": ime_omrezja, "vrsta": vrsta, "povezan": True}],
+            "ip": naslov_ip,
+            "omrezja": [{"ssid": ime_omrezja or "Ethernet", "povezan": True, "moc": 100}],
+            "naprave": [{"ime": ime_omrezja or "Ethernet", "vrsta": vrsta, "povezan": True}],
             "shranjene": [],
             "wifi_vklopljen": True,
             "napredno": True

@@ -960,7 +960,10 @@ class SafeerControlBackend:
                 ikone = params.get("icons") is not False
                 od = int(params.get("offset") or 0)
                 meja = int(params.get("limit") or 50)
-                podatki = self.navidezni_zaslon.seznam_programov_za_daljinec(z_ikonami=ikone, od=od, meja=meja)
+                podatki = dict(self.navidezni_zaslon.seznam_programov_za_daljinec(z_ikonami=ikone, od=od, meja=meja))
+                # V Link gre seznam samo enkrat ("items"): "apps" je isti seznam z istimi ikonami in je
+                # odgovor podvojil cez mejo sporocila v hubu (325 kB) - Linux ni dobil nobenega programa.
+                podatki.pop("apps", None)
                 izid = {"ok": True, "message": f"{len(podatki['items'])} programov", "data": podatki}
 
             elif akcija in ("apps.launch", "launch_app"):

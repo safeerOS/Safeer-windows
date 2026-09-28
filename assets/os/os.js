@@ -190,6 +190,7 @@
     document.querySelectorAll("[data-t]").forEach(function (el) { el.textContent = t(el.getAttribute("data-t")); });
     document.querySelectorAll("[data-ph]").forEach(function (el) { el.placeholder = t(el.getAttribute("data-ph")); });
     document.querySelectorAll("[data-naslov]").forEach(function (el) { el.title = t(el.getAttribute("data-naslov")); });
+    if (typeof S !== "undefined" && S.povezava) narisiHeroLink();
     document.querySelectorAll("svg[data-ikona]").forEach(function (el) {
       el.setAttribute("viewBox", "0 0 24 24");
       el.innerHTML = '<path d="' + (IK[el.getAttribute("data-ikona")] || "") + '"/>';
@@ -339,10 +340,10 @@
   }
   function kdajPrej(cas) {
     var s_ = Math.max(0, Math.floor(Date.now() / 1000 - (cas || 0)));
-    if (s_ < 60) return "pravkar";
-    if (s_ < 3600) return "pred " + Math.floor(s_ / 60) + " min";
-    if (s_ < 86400) return "pred " + Math.floor(s_ / 3600) + " h";
-    return "pred " + Math.floor(s_ / 86400) + " d";
+    if (s_ < 60) return t("pravkar");
+    if (s_ < 3600) return t("predMin", { n: Math.floor(s_ / 60) });
+    if (s_ < 86400) return t("predH", { n: Math.floor(s_ / 3600) });
+    return t("predD", { n: Math.floor(s_ / 86400) });
   }
   function narisiDomaceNedavne() {
     var cilj = $("domaceNedavne");
@@ -350,15 +351,15 @@
     cilj.innerHTML = "";
     var seznam = S.nedavneApp || [];
     if (!seznam.length) {
-      cilj.appendChild(el("p", "drobno", ubezi("Tu se prikažejo programi, spletne aplikacije in strani, ki jih odpreš.")));
+      cilj.appendChild(el("p", "drobno", ubezi(t("nedavnePrazno"))));
       return;
     }
     var prostora = Math.max(3, Math.floor(((cilj.clientHeight || 240) + 8) / 52));
     seznam.slice(0, prostora).forEach(function (v) {
       var b = el("button", "nedavna-vrstica");
       b.appendChild(v.vrsta === "program" ? slikaAliCrka(v.ikona, v.ime) : crka(v.ime));
-      var opis = v.vrsta === "program" ? (v.ime_naprave ? "Program · " + v.ime_naprave : "Program")
-               : v.vrsta === "spletna" ? "Spletna aplikacija" : imeIzNaslova(v.url);
+      var opis = v.vrsta === "program" ? (v.ime_naprave ? t("vrstaProgram") + " · " + v.ime_naprave : t("vrstaProgram"))
+               : v.vrsta === "spletna" ? t("vrstaSpletna") : imeIzNaslova(v.url);
       b.appendChild(el("span", "besedilo", "<b>" + ubezi(v.ime) + "</b><small>" + ubezi(opis + " · " + kdajPrej(v.cas)) + "</small>"));
       var x = el("span", "odstrani", svg("x"));
       x.title = t("odstrani");
@@ -473,7 +474,7 @@
     b.addEventListener("click", function () { zazeni(p); });
     if (p.naprava) {
       var tam = el("span", "pripni", svg("zaslon"));
-      tam.title = "Zaženi na napravi";
+      tam.title = t("zazeniNaNapravi");
       tam.addEventListener("click", function (e) { e.stopPropagation(); zazeniNaSamiNapravi(p); });
       b.appendChild(tam);
     }
@@ -511,6 +512,22 @@
     var vsi = [];
     Object.keys(S.programiNaprav).forEach(function (id) { vsi = vsi.concat(S.programiNaprav[id]); });
     return vsi;
+  }
+  function narisiHeroLink() {
+    var st = $("heroLinkStanje"), pod = $("heroLinkPod");
+    if (!st || !pod) return;
+    var povezan = S.povezava && S.povezava.stanje === "povezan";
+    st.textContent = povezan ? t("linkPovezano") : t("linkNiPovezan");
+    pod.textContent = !povezan ? t("linkPovezi") : (S.heroStevilo == null ? "" : t("linkNapraveN", { n: S.heroStevilo }));
+  }
+  // Stevilo drugih naprav v Linku za kartico na Domov; Control je ob zagonu lahko se prazen, zato nekajkrat ponovi.
+  function prestejHeroNaprave(poskus) {
+    klic("vseNaprave").then(function (seznam) {
+      var n = zdruziSorodnike(seznam || []).filter(function (x) { return !x.ta; }).length;
+      if (!n && poskus < 8) { setTimeout(function () { prestejHeroNaprave(poskus + 1); }, 4000); return; }
+      S.heroStevilo = n;
+      narisiHeroLink();
+    }, function () { if (poskus < 8) setTimeout(function () { prestejHeroNaprave(poskus + 1); }, 4000); });
   }
   function nalozNaprave() {
     if (S.povezava.stanje !== "povezan") { S.naprave = []; narisiPrograme(); return; }
@@ -698,7 +715,7 @@
     cilj.innerHTML = "";
     var seznam = spletne();
     if (!seznam.length) {
-      cilj.appendChild(el("p", "drobno", ubezi("Še ni spletnih aplikacij. Klikni »+ Dodaj« in vpiši naslov strani.")));
+      cilj.appendChild(el("p", "drobno", ubezi(t("spletnePrazno"))));
       return;
     }
     var sirina = cilj.clientWidth || 600, razmik = 12, najmanj = 112;
@@ -709,7 +726,7 @@
     var prikazi = seznam.length > mest ? mest - 1 : seznam.length;
     seznam.slice(0, prikazi).forEach(function (a, i) { cilj.appendChild(urejljivaPloscica(a, i, false)); });
     if (seznam.length > prikazi) {
-      var vec = el("button", "ploscica vec-aplikacij", svg("programi") + '<span class="ime">Več aplikacij</span><span class="vec-stevilo">+' + (seznam.length - prikazi) + "</span>");
+      var vec = el("button", "ploscica vec-aplikacij", svg("programi") + '<span class="ime">' + ubezi(t("vecAplikacij")) + '</span><span class="vec-stevilo">+' + (seznam.length - prikazi) + "</span>");
       vec.addEventListener("click", odpriVecSpletnih);
       cilj.appendChild(vec);
     }
@@ -1237,6 +1254,9 @@
     var p = S.povezava;
     if (S.stanje) setTimeout(function () { narisiStanje(S.stanje); }, 0);
     var povezan = p.stanje === "povezan";
+    narisiHeroLink();
+    if (povezan && !S.heroNaprave) { S.heroNaprave = true; prestejHeroNaprave(0); }
+    if (!povezan) S.heroNaprave = false;
     if ($("napravePika")) $("napravePika").className = "pika" + (povezan ? "" : " siva");
     if ($("napraveNaslov")) $("napraveNaslov").textContent = t(povezan ? "povezanNaslov" : (p.stanje === "brez" ? "brezNaslov" : "novNaslov"));
     var hubi = p.hubi || [];

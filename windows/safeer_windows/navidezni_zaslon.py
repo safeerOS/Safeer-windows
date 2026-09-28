@@ -448,6 +448,10 @@ class NavidezniZaslon:
         """Vrne seznam programov v obliki, ki jo podpirata tako daljinec.js kot apps.list."""
         vsi = []
         for p in self._vsi_programi():
+            # Drugim napravam ponudimo samo prave programe (bližnjica v meniju Start). Vgrajene ploščice
+            # navideznega namizja (Brskalnik, Dokumenti ...) nimajo poti - apps.launch jih ne more zagnati.
+            if not p.get("pot"):
+                continue
             vsi.append({
                 "id": p["id"],
                 "package": p["id"],
