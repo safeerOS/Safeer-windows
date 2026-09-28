@@ -18,6 +18,40 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWi
 from .media_diagnostics import source_rejection
 
 
+def _koren_sej() -> Path:
+    return Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir())) / "SafeerOS/WebView2Sessions"
+
+
+def pocisti_seje(koren: Optional[Path] = None, razen: str = "", starejse_od_s: float = 0.0) -> int:
+    """Pobrise zacasne profile WebView2, ki jih nihce vec ne uporablja; vrne stevilo pobrisanih.
+
+    Takoj po zaprtju predvajalnika msedgewebview2.exe se nekaj trenutkov drzi datotek, zato je
+    rmtree prej tiho spodletel in seje so se kopicile (47 map, 680 MB). Zaklenjene mape preskocimo
+    in jih pobrisemo ob naslednjem ciscenju.
+    """
+    koren = koren or _koren_sej()
+    pobrisanih = 0
+    try:
+        mape = list(koren.iterdir())
+    except OSError:
+        return 0
+    zdaj = time.time()
+    for mapa in mape:
+        if not mapa.is_dir() or not mapa.name.startswith("session-"):
+            continue
+        if razen and os.path.normcase(str(mapa)) == os.path.normcase(razen):
+            continue
+        try:
+            if starejse_od_s and zdaj - mapa.stat().st_mtime < starejse_od_s:
+                continue
+        except OSError:
+            continue
+        shutil.rmtree(mapa, ignore_errors=True)
+        if not mapa.exists():
+            pobrisanih += 1
+    return pobrisanih
+
+
 class WebView2MediaWidget(QWidget):
     def __init__(self, on_home: Callable[[], None], parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -123,7 +157,12 @@ class WebView2MediaWidget(QWidget):
                 self.process.kill()
         self.process = None
         if self.session_dir:
-            shutil.rmtree(self.session_dir, ignore_errors=True)
+            stara = self.session_dir
+            shutil.rmtree(stara, ignore_errors=True)
+            if os.path.exists(stara):
+                # WebView2 se zapira v ozadju: poskusimo znova, ko sprosti datoteke.
+                for zamik in (1500, 5000, 15000):
+                    QTimer.singleShot(zamik, lambda m=stara: shutil.rmtree(m, ignore_errors=True))
         self.session_dir = ""
         self.command_path = ""
         self.state_path = ""
@@ -136,8 +175,10 @@ class WebView2MediaWidget(QWidget):
         url = str(variant.get("url") or "")
         if not url.startswith("https://"):
             return False
-        root = Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir())) / "SafeerOS/WebView2Sessions"
+        root = _koren_sej()
         root.mkdir(parents=True, exist_ok=True)
+        # Ostanki prejsnjih zagonov (npr. po sesutju ali prisilnem zaprtju) - samo starejsi od ure.
+        pocisti_seje(root, starejse_od_s=3600)
         self.session_dir = tempfile.mkdtemp(prefix="session-", dir=str(root))
         profile = str(Path(self.session_dir) / "profile")
         self.command_path = str(Path(self.session_dir) / "command.txt")
