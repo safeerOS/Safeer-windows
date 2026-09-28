@@ -1334,7 +1334,9 @@ class SafeerOsWindow(QMainWindow):
                   f"embed={is_embed} direct={is_direct_stream} native={native}", flush=True)
             if native:
                 self.dispatcher.dispatch(lambda: self._odpri_media(item))
-            elif is_embed and url.startswith(("http://", "https://")) and (
+            # Spletna stran, ki jo je uporabnik sam dodal kot vir (ni neposreden tok), se odpre kot stran
+            # v vgrajenem pogledu - nevtralno kot v brskalniku; uporabnik po njej brska sam.
+            elif (is_embed or not is_direct_stream) and url.startswith(("http://", "https://")) and (
                     self.media_engine == "qt" or self.webview2_media.available):
                 # WebView2 prejme le trenutno izbrani ponudnikov URL. Ne
                 # poskušaj zaporedoma vseh ponudnikov ob enem uporabniškem kliku.

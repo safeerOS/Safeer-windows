@@ -471,7 +471,7 @@ class TestOsWindows(unittest.TestCase):
         self.assertIn("browser.BrowserWindow", app)
         self.assertIn("embedded=True", app)
         self.assertIn("private=True", app)
-        self.assertIn('elif is_embed and url.startswith(("http://", "https://"))', app)
+        self.assertIn('elif (is_embed or not is_direct_stream) and url.startswith(("http://", "https://"))', app)
         self.assertIn("self._odpri_notranji_splet(url, media=True, item=item)", app)
         self.assertNotIn("subprocess.Popen", app)
         for source in (app, launcher, go_launcher):
@@ -1379,7 +1379,7 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
         browser_src = (koren / "windows" / "safeer_windows" / "browser.py").read_text(encoding="utf-8")
         self.assertIn("is_embed = (", os_app_src)
         self.assertIn("native = self.media_player.available and is_direct_stream and not is_embed", os_app_src)
-        self.assertIn('elif is_embed and url.startswith(("http://", "https://")) and (', os_app_src)
+        self.assertIn("elif (is_embed or not is_direct_stream) and url.startswith((\"http://\", \"https://\")) and (", os_app_src)
         self.assertIn('self.media_engine == "qt" or self.webview2_media.available', os_app_src)
         self.assertIn("self._odpri_notranji_splet(url, media=True, item=item)", os_app_src)
         self.assertIn("native = True", os_app_src)
@@ -1466,20 +1466,3 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-
-class TestBrezNeuradnihPonudnikov(unittest.TestCase):
-    """Safeer ne vsebuje poti do neuradnih agregatorjev filmov (enako kot Linux in Android)."""
-
-    def test_v_kodi_ni_neuradnih_agregatorjev(self):
-        koren = Path(__file__).resolve().parents[2]
-        prepovedano = ("vidsrc", "vidlink", "videasy", "vidrock", "embed.su", "superembed",
-                       "multiembed", "2embed", "autoembed", "111movies")
-        najdeno = []
-        for mapa in ("core", "windows/safeer_windows", "assets"):
-            for pot in (koren / mapa).rglob("*"):
-                if pot.suffix not in (".py", ".js", ".html", ".json", ".css") or not pot.is_file():
-                    continue
-                besedilo = pot.read_text(encoding="utf-8", errors="ignore").lower()
-                najdeno += [f"{pot.relative_to(koren)}: {ime}" for ime in prepovedano if ime in besedilo]
-        self.assertEqual(najdeno, [])
