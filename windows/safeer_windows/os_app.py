@@ -1182,7 +1182,7 @@ class SafeerOsWindow(QMainWindow):
             if isinstance(izid, dict) and izid.get("ok") and racunalnik and not izid.get("tu"):
                 from . import oddaljeni_zaslon
                 ime = str(naprava.get("ime") or naprava.get("name") or id_n)
-                self.dispatcher.dispatch(lambda: oddaljeni_zaslon.odpri(self.control_backend, id_n, ime))
+                self.dispatcher.dispatch(lambda: oddaljeni_zaslon.odpri(self.control_backend, id_n, ime, zaslon="apps"))
                 izid = dict(izid, tu=True, zaslon=True)
             return izid
 
