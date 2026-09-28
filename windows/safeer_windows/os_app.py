@@ -29,6 +29,22 @@ from core import os_media, os_scit, os_sporocila
 from . import en_primerek
 from . import browser, control_backend, control_window, os_backend_win, policy, vlc_player, webview2_media, zapiski
 
+
+JEZIKI_VMESNIKA = ("sl", "en", "de", "es", "fr", "it")
+
+
+def _jezik_vmesnika(shramba: dict) -> str:
+    """Jezik Safeer OS: SAFEER_OS_JEZIK (posnetki/razvoj), izbira v nastavitvah, sicer jezik sistema.
+
+    Prej je bil vedno "sl" - angleski Windows je dobil slovenski vmesnik.
+    """
+    for kandidat in (os.environ.get("SAFEER_OS_JEZIK"), shramba.get("jezik")):
+        k = str(kandidat or "")[:2].lower()
+        if k in JEZIKI_VMESNIKA:
+            return k
+    return policy.ui_language("")
+
+
 class ShrambaWrapper:
     def get(self, key: str, default: Any = None) -> Any:
         return os_backend_win.nalozi_shrambo().get(key, default)
@@ -900,7 +916,7 @@ class SafeerOsWindow(QMainWindow):
         if metoda == "zacetek":
             shramba = os_backend_win.nalozi_shrambo()
             return {
-                "jezik": "sl",
+                "jezik": _jezik_vmesnika(shramba),
                 "ime": os.environ.get("USERNAME", "Uporabnik"),
                 "racunalnik": platform.node(),
                 "ozadje": "",
