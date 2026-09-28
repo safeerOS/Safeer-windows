@@ -5,12 +5,13 @@ from __future__ import annotations
 import argparse
 import getpass
 import json
+import threading
 import os
 import re
 import sys
 import time
 import urllib.parse
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from PySide6.QtCore import (QBuffer, QByteArray, QCoreApplication, QEvent, QIODevice, QObject, QSize, QStandardPaths,
                             Qt, QTimer, QUrl)
@@ -127,6 +128,34 @@ QComboBox, QListWidget, QDialog QLineEdit { background: #19241e; color: #f1f5f9;
 QPushButton { background: #19241e; color: #f1f5f9; border: 1px solid #50616b; border-radius: 8px; padding: 6px 14px; }
 QPushButton:hover { background: #20312d; border-color: #6b7c86; }
 QPushButton:default { background: #57D6AD; color: #0b120e; border-color: #57D6AD; }
+"""
+
+
+SPLET_BESEDILA = {
+    "sl": ("Nov zavihek", "Išči ali vnesi spletni naslov …"), "en": ("New tab", "Search or enter a web address …"),
+    "de": ("Neuer Tab", "Suchen oder Webadresse eingeben …"), "es": ("Nueva pestaña", "Busca o escribe una dirección web …"),
+    "fr": ("Nouvel onglet", "Rechercher ou saisir une adresse web …"), "it": ("Nuova scheda", "Cerca o inserisci un indirizzo web …"),
+}
+
+
+# Splet v Safeer OS: videz po predlogi (zavihki z zaobljenimi vrhovi, sirok naslov z zelenim robom).
+SPLET_STYLE = """
+QWidget#chrome { background: #0a141c; }
+QToolBar { background: #0a141c; padding: 6px 14px 8px 14px; spacing: 6px; }
+QToolButton { padding: 6px 8px; border-radius: 10px; }
+QTabBar { background: #0a141c; }
+QTabBar::tab { background: #0d1a23; color: #c5d3cf; padding: 10px 16px; margin: 8px 4px 0 0; min-width: 190px; max-width: 230px;
+               border: 1px solid rgba(181,220,209,.12); border-bottom: 0; border-top-left-radius: 12px; border-top-right-radius: 12px;
+               font-size: 14px; }
+QTabBar::tab:first { margin-left: 12px; }
+QTabBar::tab:selected { background: #13252f; color: #f2f7f5; border-color: rgba(87,214,173,.55); border-top: 2px solid #57D6AD; }
+QTabBar::tab:hover:!selected { background: #11202a; }
+QLineEdit#address { background: #0c1820; color: #f2f7f5; border: 2px solid rgba(87,214,173,.55); border-radius: 20px;
+                    padding: 8px 10px; font-size: 15px; min-height: 22px; }
+QLineEdit#address:focus { border-color: #57D6AD; }
+QLabel#povezavaZnacka { color: #e5efec; border: 1px solid rgba(87,214,173,.55); border-radius: 14px; padding: 5px 14px;
+                        margin: 8px 18px 0 8px; font-size: 13px; font-weight: 600; background: rgba(87,214,173,.08); }
+QLabel#povezavaZnacka[ok="false"] { border-color: rgba(181,220,209,.25); color: #a6b8b5; background: transparent; }
 """
 
 
@@ -339,8 +368,10 @@ class Tabs(QWidget):
         self._tab_row = QHBoxLayout()
         self._tab_row.setContentsMargins(0, 0, 0, 0)
         self._tab_row.setSpacing(0)
-        self._tab_row.addWidget(self._bar, 1)
+        self._tab_row.addWidget(self._bar, 0)
+        self._bar.setExpanding(False)
         self._corner: Optional[QWidget] = None
+        self._desno: Optional[QWidget] = None
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.setSpacing(0)
@@ -379,6 +410,15 @@ class Tabs(QWidget):
         if self._corner is not None:
             self._tab_row.removeWidget(self._corner)
         self._corner = widget
+        self._tab_row.insertWidget(1, widget)
+        if self._tab_row.count() == 2:
+            self._tab_row.addStretch(1)
+
+    def setRightWidget(self, widget: QWidget) -> None:
+        """Desno v vrstici zavihkov (Safeer OS: stanje povezave)."""
+        if self._corner is not None and self._tab_row.count() == 2:
+            self._tab_row.addStretch(1)
+        self._desno = widget
         self._tab_row.addWidget(widget)
 
     def tabBar(self) -> QTabBar:
@@ -545,6 +585,51 @@ class SafeerBrowserApp(QObject):
             self.private_profile = QWebEngineProfile(self)
             self.configure_profile(self.private_profile)
         return self.private_profile
+
+    def zagotovi_ikone(self) -> None:
+        """Bliznjicam brez shranjene ikone v ozadju prenese ikono z njihove strani (brez tujih storitev)."""
+        if getattr(self, "_ikone_nit", None) is not None and self._ikone_nit.is_alive():
+            return
+        portals = [dict(p) for p in self.settings.get("custom_portals") or []]
+        manjkajo = [p.get("url") for p in portals
+                    if p.get("url") and not str(p.get("favicon") or "").startswith("data:")
+                    and p.get("url") not in getattr(self, "_ikone_poskusene", set())]
+        if not manjkajo:
+            return
+        self._ikone_poskusene = getattr(self, "_ikone_poskusene", set()) | set(manjkajo)
+        self._ikone_rezultat: Dict[str, str] = {}
+
+        def delo() -> None:
+            for url in manjkajo[:40]:
+                ikona = policy.ikona_strani(url)
+                if ikona:
+                    self._ikone_rezultat[url] = ikona
+
+        self._ikone_nit = threading.Thread(target=delo, name="safeer-ikone", daemon=True)
+        self._ikone_nit.start()
+        if getattr(self, "_ikone_casovnik", None) is None:
+            self._ikone_casovnik = QTimer(self)
+            self._ikone_casovnik.setInterval(1000)
+            self._ikone_casovnik.timeout.connect(self._uveljavi_ikone)
+        self._ikone_casovnik.start()
+
+    def _uveljavi_ikone(self) -> None:
+        koncano = self._ikone_nit is None or not self._ikone_nit.is_alive()
+        rezultat = dict(self._ikone_rezultat)
+        if rezultat:
+            self._ikone_rezultat.clear()
+            portals = [dict(p) for p in self.settings.get("custom_portals") or []]
+            for p in portals:
+                if p.get("url") in rezultat:
+                    p["favicon"] = rezultat[p["url"]]
+            self.settings.set("custom_portals", portals)
+            for window in list(self.windows):
+                try:
+                    window.refresh_home_tabs()
+                except RuntimeError:
+                    pass
+        if koncano:
+            self._ikone_casovnik.stop()
 
     def refresh_preferences(self) -> None:
         self.lang = policy.ui_language(self.settings.get("language"))
@@ -767,6 +852,10 @@ class BrowserWindow(QMainWindow):
         self.on_safeer_home = on_safeer_home
         self.on_fullscreen_changed = on_fullscreen_changed
         self._embedded_content_visible = not embedded
+        # Vdelan v Safeer OS: nov zavihek in Domov odpreta zacetno stran Splet (enaka na vseh razlicicah).
+        self.home_url = policy.SPLET_URL if embedded else policy.HOME_URL
+        self.stanje_povezave: Optional[Callable[[], Tuple[str, bool]]] = None
+        self.jezik_vmesnika: Optional[Callable[[], str]] = None
         self.profile = app.get_private_profile() if private else app.profile
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, not embedded)
         self.devtools: Optional[QWebEngineView] = None
@@ -787,7 +876,7 @@ class BrowserWindow(QMainWindow):
         self._zivljenje_timer.start()
         self.new_tab_button = QToolButton(self)
         self.new_tab_button.setIcon(app.icons["plus"])
-        self.new_tab_button.clicked.connect(lambda: self.new_tab(policy.HOME_URL))
+        self.new_tab_button.clicked.connect(lambda: self.new_tab(self.home_url))
         self.tabs.setCornerWidget(self.new_tab_button, Qt.Corner.TopRightCorner)
 
         self.toolbar = QToolBar(self)
@@ -801,7 +890,7 @@ class BrowserWindow(QMainWindow):
         self.back_button = self._tool("back", lambda: self.current_view() and self.current_view().back())
         self.forward_button = self._tool("forward", lambda: self.current_view() and self.current_view().forward())
         self.reload_button = self._tool("reload", self.reload_or_stop)
-        self.home_button = self._tool("home", lambda: self.load_in_current(policy.HOME_URL))
+        self.home_button = self._tool("home", lambda: self.load_in_current(self.home_url))
         self.address_lock = QLabel("🔒", self)
         self.address_lock.setObjectName("addressLock")
         self.toolbar.addWidget(self.address_lock)
@@ -839,6 +928,20 @@ class BrowserWindow(QMainWindow):
         self.menu = QMenu(self)
         self.menu_button.setMenu(self.menu)
         self.toolbar.addWidget(self.menu_button)
+
+        # Splet v Safeer OS: kljucavnica in zvezdica sta v naslovni vrstici (kot na vseh razlicicah Safeer OS).
+        self._naslov_kljucavnica = self.address.addAction(make_icon("lock", "#57D6AD"), QLineEdit.ActionPosition.LeadingPosition)
+        self._naslov_zvezdica = self.address.addAction(app.icons["star"], QLineEdit.ActionPosition.TrailingPosition)
+        self._naslov_zvezdica.triggered.connect(self.add_current_to_home)
+        self._naslov_kljucavnica.setVisible(False)
+        self._naslov_zvezdica.setVisible(False)
+        self.povezava_znacka = QLabel(self)
+        self.povezava_znacka.setObjectName("povezavaZnacka")
+        self.povezava_znacka.hide()
+        self.tabs.setRightWidget(self.povezava_znacka)
+        self._povezava_casovnik = QTimer(self)
+        self._povezava_casovnik.setInterval(5000)
+        self._povezava_casovnik.timeout.connect(self.osvezi_povezavo)
 
         self.find_bar = self._build_find_bar()
         container = QWidget(self)
@@ -892,8 +995,30 @@ class BrowserWindow(QMainWindow):
                 self._set_toolbar_widget_visible(self.zapisek_button, True)
             if self.ob_strani_button is not None:
                 self._set_toolbar_widget_visible(self.ob_strani_button, True)
-            self.address.setPlaceholderText("Išči ali vnesi spletni naslov …")
+            self.address.setPlaceholderText(self._splet_besedila()[1])
+            # Po predlogi Splet: brez odvecnih gumbov (prenosi, razsiritve, zapisek so v meniju).
+            for widget in (self.address_lock, self.star_button, self.downloads_button, self.extensions_button):
+                self._set_toolbar_widget_visible(widget, False)
+            if self.zapisek_button is not None:
+                self._set_toolbar_widget_visible(self.zapisek_button, False)
+            if self.ob_strani_button is not None:
+                self._set_toolbar_widget_visible(self.ob_strani_button, False)
+            self._naslov_kljucavnica.setVisible(True)
+            self._naslov_zvezdica.setVisible(True)
+            self.setStyleSheet(SPLET_STYLE)
+            self.tabs.tabBar().setIconSize(QSize(18, 18))
+            self.povezava_znacka.show()
+            self.osvezi_povezavo()
+            self._povezava_casovnik.start()
+            self.update_shield()
+            for view in self.views():   # naslovi zavihkov v jeziku vmesnika Safeer OS
+                self.on_title_changed(view, view.title())
         else:
+            self.setStyleSheet("")
+            self._naslov_kljucavnica.setVisible(False)
+            self._naslov_zvezdica.setVisible(False)
+            self.povezava_znacka.hide()
+            self._povezava_casovnik.stop()
             self.tabs.tabBar().show()
             self.new_tab_button.show()
             self.statusBar().show()
@@ -961,7 +1086,7 @@ class BrowserWindow(QMainWindow):
 
     def _install_shortcuts(self) -> None:
         bindings = [
-            ("Ctrl+T", lambda: self.new_tab(policy.HOME_URL)),
+            ("Ctrl+T", lambda: self.new_tab(self.home_url)),
             ("Ctrl+W", lambda: self.close_tab(self.tabs.currentIndex())),
             ("Ctrl+F4", lambda: self.close_tab(self.tabs.currentIndex())),
             ("Ctrl+Shift+T", self.reopen_closed_tab),
@@ -973,7 +1098,7 @@ class BrowserWindow(QMainWindow):
             ("Ctrl+PgDown", lambda: self.cycle_tab(1)), ("Ctrl+PgUp", lambda: self.cycle_tab(-1)),
             ("Alt+Left", lambda: self.current_view() and self.current_view().back()),
             ("Alt+Right", lambda: self.current_view() and self.current_view().forward()),
-            ("Alt+Home", lambda: self.load_in_current(policy.HOME_URL)),
+            ("Alt+Home", lambda: self.load_in_current(self.home_url)),
             ("Ctrl+D", self.add_current_to_home), ("Ctrl+J", self.show_downloads),
             ("Ctrl++", lambda: self.zoom(0.1)), ("Ctrl+=", lambda: self.zoom(0.1)),
             ("Ctrl+-", lambda: self.zoom(-0.1)), ("Ctrl+0", lambda: self.zoom(0)),
@@ -1014,7 +1139,7 @@ class BrowserWindow(QMainWindow):
         self.find_input.setPlaceholderText(tr(app, "find_placeholder"))
         self.menu.clear()
         entries = [
-            ("new_tab", "Ctrl+T", lambda: self.new_tab(policy.HOME_URL)),
+            ("new_tab", "Ctrl+T", lambda: self.new_tab(self.home_url)),
             *(([] if self.embedded else [
                 ("new_window", "Ctrl+N", lambda: self.app.new_window()),
                 ("private_window", "Ctrl+Shift+N", lambda: self.app.new_window(private=True)),
@@ -1045,6 +1170,19 @@ class BrowserWindow(QMainWindow):
             action = QAction(tr(app, key) + (f"\t{shortcut}" if shortcut else ""), self.menu)
             action.triggered.connect(callback)
             self.menu.addAction(action)
+        if self.embedded:
+            # Zapisek iz Spleta je v meniju (predloga Splet nima locenih gumbov v vrstici).
+            jezik = str(app.settings.get("language") or "sl")[:2]
+            besedila = {"sl": ("V zapisek", "Zapisek ob strani"), "en": ("Add to note", "Note beside the page"),
+                        "de": ("Zur Notiz", "Notiz neben der Seite"), "es": ("A la nota", "Nota junto a la página"),
+                        "fr": ("Dans une note", "Note à côté de la page"), "it": ("Nella nota", "Nota accanto alla pagina")}
+            v_zapisek, ob_strani = besedila.get(jezik, besedila["en"])
+            self.menu.addSeparator()
+            for besedilo, klic in ((v_zapisek, lambda: self.na_zapisek and self.na_zapisek()),
+                                   (ob_strani, lambda: self.na_zapisek_ob_strani and self.na_zapisek_ob_strani())):
+                action = QAction(besedilo, self.menu)
+                action.triggered.connect(klic)
+                self.menu.addAction(action)
         self.update_nav_state()
 
     # -- tabs -----------------------------------------------------------------
@@ -1074,7 +1212,9 @@ class BrowserWindow(QMainWindow):
             page.featurePermissionRequested.connect(lambda origin, feature, p=page: self.on_feature_permission(p, origin, feature))
         return view
 
-    def new_tab(self, url: str = policy.HOME_URL, switch: bool = True, after_current: bool = False) -> QWebEngineView:
+    def new_tab(self, url: Optional[str] = None, switch: bool = True, after_current: bool = False) -> QWebEngineView:
+        if url is None:
+            url = self.home_url
         view = self.create_view()
         index = self.tabs.currentIndex() + 1 if after_current and self.tabs.count() else self.tabs.count()
         self.tabs.insertTab(index, view, tr(self.app, "new_tab"))
@@ -1082,7 +1222,7 @@ class BrowserWindow(QMainWindow):
             self.tabs.setCurrentIndex(index)
         if url:
             view.load(QUrl(url))
-        if switch and url == policy.HOME_URL:
+        if switch and url in (policy.HOME_URL, policy.SPLET_URL):
             QTimer.singleShot(0, self.focus_address)
         return view
 
@@ -1256,6 +1396,9 @@ class BrowserWindow(QMainWindow):
         if index < 0:
             return
         url = view.url().toString()
+        if self.embedded and url.startswith(policy.SPLET_URL):
+            title = self._splet_besedila()[0]
+            self.tabs.setTabIcon(index, make_icon("globe", "#57D6AD"))
         label = title if title and title != url else (tr(self.app, "home") if url.startswith("safeer://") else url or tr(self.app, "new_tab"))
         self.tabs.setTabText(index, label[:28] + ("…" if len(label) > 28 else ""))
         self.tabs.setTabToolTip(index, label)
@@ -1263,6 +1406,11 @@ class BrowserWindow(QMainWindow):
             self.setWindowTitle(f"{label} — {policy.APP_NAME}" + (f" ({tr(self.app, 'private')})" if self.private else ""))
 
     def on_url_changed(self, view: QWebEngineView, url: QUrl) -> None:
+        # Nase strani (safeer://) so ze temne: vsiljeni temni nacin bi jih obrnil (bela kartica »Novice«).
+        dark = getattr(QWebEngineSettings.WebAttribute, "ForceDarkMode", None)
+        if dark is not None:
+            view.page().settings().setAttribute(
+                dark, False if url.scheme() == "safeer" else bool(self.app.settings.get("force_dark_mode")))
         if view is self.current_view() and not self.address.hasFocus():
             self.address.setText(policy.display_url(url.toString()))
         self.update_nav_state()
@@ -1277,8 +1425,9 @@ class BrowserWindow(QMainWindow):
 
     def on_load_finished(self, view: QWebEngineView, ok: bool) -> None:
         self.on_load_state(view, False)
-        if view.url().scheme() == "safeer" and view.url().path() in ("", "/"):
+        if view.url().scheme() == "safeer" and view.url().path() in ("", "/", "/splet", "/splet.html"):
             self.push_home_state(view)
+            self.app.zagotovi_ikone()
         if ok:
             self.schedule_fake_bank_check(view)
         self.update_nav_state()
@@ -1328,7 +1477,10 @@ class BrowserWindow(QMainWindow):
         QTimer.singleShot(2500, run)  # pages that draw their login form later
 
     def push_home_state(self, view: QWebEngineView) -> None:
-        state = json.dumps(policy.home_state(self.app.settings), ensure_ascii=False)
+        stanje = policy.home_state(self.app.settings)
+        if self.embedded:
+            stanje["language"] = self._splet_jezik()
+        state = json.dumps(stanje, ensure_ascii=False)
         view.page().runJavaScript(f"window.safeerWindowsInit && window.safeerWindowsInit({state});")
 
     def refresh_home_tabs(self) -> None:
@@ -1401,7 +1553,38 @@ class BrowserWindow(QMainWindow):
     def update_shield(self) -> None:
         settings = self.app.settings
         total = int(settings.get("total_ads_blocked") or 0) + int(settings.get("total_threats_blocked") or 0)
-        self.shield_label.setText(f"🛡 {total:,}".replace(",", "."))
+        stevilo = f"{total:,}".replace(",", ".")
+        if self.safeer_os_web_mode:
+            self.shield_label.setText("")
+            self.shield_label.setPixmap(make_icon("shield", "#57D6AD").pixmap(20, 20))
+            self.shield_label.setToolTip(f"{tr(self.app, 'shield')}: {stevilo}")
+        else:
+            self.shield_label.setPixmap(QPixmap())
+            self.shield_label.setText(f"🛡 {stevilo}")
+
+    def _splet_jezik(self) -> str:
+        try:
+            jezik = str(self.jezik_vmesnika() if self.jezik_vmesnika else self.app.settings.get("language") or "sl")[:2]
+        except Exception:
+            jezik = "sl"
+        return jezik if jezik in SPLET_BESEDILA else "en"
+
+    def _splet_besedila(self) -> Tuple[str, str]:
+        return SPLET_BESEDILA[self._splet_jezik()]
+
+    def osvezi_povezavo(self) -> None:
+        """Znacka desno v vrstici zavihkov: stanje omrezja/Safeer Linka, ki ga poda Safeer OS (brez IP)."""
+        if self.stanje_povezave is None:
+            self.povezava_znacka.hide()
+            return
+        try:
+            besedilo, ok = self.stanje_povezave()
+        except Exception:
+            return
+        self.povezava_znacka.setText(("● " if ok else "○ ") + besedilo)
+        self.povezava_znacka.setProperty("ok", bool(ok))
+        self.povezava_znacka.style().unpolish(self.povezava_znacka)
+        self.povezava_znacka.style().polish(self.povezava_znacka)
 
     def on_render_terminated(self, view: QWebEngineView, status, code: int) -> None:
         normal = QWebEnginePage.RenderProcessTerminationStatus.NormalTerminationStatus

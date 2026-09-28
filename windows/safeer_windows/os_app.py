@@ -55,6 +55,16 @@ def _nastavi_jezik_oken(jezik: str) -> str:
     return jezik
 
 
+def _jezik_oken() -> str:
+    from . import oddaljeni_zaslon
+    return oddaljeni_zaslon._JEZIK
+
+
+_POVEZAVA = {"sl": ("Povezano", "Ni povezano"), "en": ("Connected", "Not connected"),
+             "de": ("Verbunden", "Nicht verbunden"), "es": ("Conectado", "No conectado"),
+             "fr": ("Connecté", "Non connecté"), "it": ("Connesso", "Non connesso")}
+
+
 class ShrambaWrapper:
     def get(self, key: str, default: Any = None) -> Any:
         return os_backend_win.nalozi_shrambo().get(key, default)
@@ -357,7 +367,9 @@ class SafeerOsWindow(QMainWindow):
         self.browser_window.na_zapisek_ob_strani = self._preklopi_zapisek_ob_strani
         self._zapisek_dock = None
         self.browser_app.windows.append(self.browser_window)
-        self.browser_window.new_tab(policy.HOME_URL)
+        self.browser_window.stanje_povezave = self._stanje_povezave_za_splet
+        self.browser_window.jezik_vmesnika = _jezik_oken
+        self.browser_window.new_tab()
         self.os_postavitev.addWidget(self.browser_window, 1)
         self.browser_window.hide()
         self.browser_window.set_embedded_content_visible(False)
@@ -617,9 +629,10 @@ class SafeerOsWindow(QMainWindow):
 
     def _izmeri_stransko_in_pokazi_splet(self) -> None:
         js = (
-            "(function(){var s=document.getElementById('stranska');"
-            "var w=s?s.getBoundingClientRect().width:0;"
-            "document.body.classList.add('nacin-splet');"
+            "(function(){var s=document.getElementById('stranska'),b=document.body;"
+            # Sirino stranske vrstice izmeri samo, ko nacin Splet se ni vklopljen (sicer je 100 %).
+            "var w=b.classList.contains('nacin-splet')?Number(b.dataset.stranska||0):(s?s.getBoundingClientRect().width:0);"
+            "b.dataset.stranska=String(w);b.classList.add('nacin-splet');"
             "if(window.safeerOsPojdi)window.safeerOsPojdi('splet');return w;})()"
         )
         self.view.page().runJavaScript(js, self._dokoncaj_spletni_nacin)
@@ -662,12 +675,23 @@ class SafeerOsWindow(QMainWindow):
         self.view.setVisible(not enabled)
 
     def _vrni_spletni_nacin(self) -> None:
-        if not self._spletna_stran_odprta:
-            return
+        # Splet je vedno vdelan Safeer Browser z zacetno stranjo Splet (enako na vseh razlicicah Safeer OS);
+        # locene HTML strani Splet v lupini ni vec.
+        self._spletna_stran_odprta = True
         self.browser_window.set_media_mode(False)
         self.browser_window.set_safeer_os_web_mode(True)
         self._pokazi_spletni_nacin()
         self.setWindowTitle("Safeer OS · Splet")
+
+    def _stanje_povezave_za_splet(self):
+        """Znacka v vrstici zavihkov Spleta: stanje Safeer Linka v jeziku vmesnika (brez naslova IP)."""
+        from . import oddaljeni_zaslon
+        da, ne = _POVEZAVA.get(oddaljeni_zaslon._JEZIK, _POVEZAVA["en"])
+        try:
+            ok = bool(self.control_backend.je_povezan())
+        except Exception:
+            ok = False
+        return (da if ok else ne), ok
 
     def _zapri_browser(self, razdelek: str = "domov") -> None:
         if self._browser_media_active:
@@ -1024,7 +1048,7 @@ class SafeerOsWindow(QMainWindow):
 
         if metoda == "vrniSplet":
             self.dispatcher.dispatch(self._vrni_spletni_nacin)
-            return self._spletna_stran_odprta
+            return True
 
         if metoda == "browserSettingsGet":
             settings = self.browser_app.settings

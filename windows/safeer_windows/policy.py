@@ -31,6 +31,8 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 APP_NAME = "Safeer Browser"
 APP_ID = "SafeerBrowser"
 HOME_URL = "safeer://home/"
+# Zacetna stran odseka Splet v Safeer OS (ista stran na vseh razlicicah Safeer OS).
+SPLET_URL = "safeer://home/splet"
 BRIDGE_PREFIX = "__safeer_bridge__:"
 PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -639,7 +641,19 @@ _HOME_FILES = {
     "home.js": ("ui/home.js", "application/javascript"),
     "assets/safeer-mark.svg": ("assets/safeer-mark.svg", "image/svg+xml"),
     "assets/icon.png": ("assets/icon.png", "image/png"),
+    "splet.css": ("ui/splet.css", "text/css"),
+    "splet.js": ("ui/splet.js", "application/javascript"),
+    "splet-gore.webp": ("ui/splet-gore.webp", "image/webp"),
 }
+
+
+def splet_html() -> str:
+    """Zacetna stran Splet v Safeer OS; most do brskalnika gre prek konzole (kot pri home.html)."""
+    with open(shared_path("ui/splet.html"), encoding="utf-8") as handle:
+        page = handle.read()
+    return page.replace('<script src="splet.js"></script>',
+                        '<script src="storage-guard.js"></script>\n  <script>window.__safeerKonzolniMost = 1;</script>\n'
+                        '  <script src="splet.js"></script>')
 
 UI_STRINGS: Dict[str, Dict[str, str]] = {
     "sl": {
@@ -794,6 +808,8 @@ def scheme_resource(host: str, path: str, query: str, lang: str = "sl") -> Optio
     name = (path or "/").lstrip("/")
     if name in ("", "home.html", "index.html"):
         return "text/html", home_html().encode("utf-8")
+    if name in ("splet", "splet.html"):
+        return "text/html", splet_html().encode("utf-8")
     if name == "blocked":
         target = urllib.parse.parse_qs(query or "").get("url", [""])[0]
         return "text/html", blocked_html(target, lang).encode("utf-8")
@@ -820,6 +836,10 @@ def scheme_resource(host: str, path: str, query: str, lang: str = "sl") -> Optio
 
 
 ICON_SHAPES = {
+    "shield": '<path d="M12 3 4.5 6v5.5c0 4.6 3.1 8.1 7.5 9.5 4.4-1.4 7.5-4.9 7.5-9.5V6z"/><path d="m8.8 12 2.2 2.2 4.4-4.6"/>',
+    "lock": '<rect x="5.5" y="11" width="13" height="9" rx="2"/><path d="M8.5 11V8a3.5 3.5 0 0 1 7 0v3"/>',
+    "globe": '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.4 2.5 3.5 5.3 3.5 8.5s-1.1 6-3.5 8.5c-2.4-2.5-3.5-5.3-3.5-8.5s1.1-6 3.5-8.5z"/>',
+    "link": '<rect x="4" y="6" width="16" height="10" rx="2"/><path d="M9 20h6M12 16v4"/>',
     "back": '<polyline points="15 18 9 12 15 6"/>',
     "forward": '<polyline points="9 18 15 12 9 6"/>',
     "reload": '<path d="M20 12a8 8 0 1 1-2.34-5.66"/><polyline points="20 4 20 9 15 9"/>',
@@ -841,6 +861,87 @@ def icon_svg(name: str, color: str = "#e2e8f0", fill: str = "none", size: int = 
     return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}" viewBox="0 0 24 24" '
             f'fill="{fill}" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
             f'{ICON_SHAPES[name]}</svg>')
+
+
+class _IkonePovezave(html.parser.HTMLParser):
+    """Poisce <link rel="icon|apple-touch-icon" href sizes> v glavi strani."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.ikone: List[Tuple[int, str]] = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag != "link":
+            return
+        a = {k.lower(): (v or "") for k, v in attrs}
+        rel = a.get("rel", "").lower()
+        if "icon" not in rel or not a.get("href"):
+            return
+        velikost = 0
+        for del_ in a.get("sizes", "").lower().split():
+            if "x" in del_ and del_.split("x")[0].isdigit():
+                velikost = max(velikost, int(del_.split("x")[0]))
+        if "apple-touch-icon" in rel and not velikost:
+            velikost = 180
+        if a.get("href", "").lower().endswith(".svg") or "svg" in a.get("type", ""):
+            velikost = max(velikost, 256)
+        self.ikone.append((velikost or 16, a["href"]))
+
+
+def _prenesi(url: str, meja: int, cas: float = 6.0) -> Tuple[bytes, str]:
+    import urllib.request
+    zahteva = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+                                                   "Accept": "*/*"})
+    with urllib.request.urlopen(zahteva, timeout=cas) as odziv:
+        vrsta = (odziv.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        return odziv.read(meja + 1)[:meja + 1], vrsta
+
+
+def ikona_strani(url: str) -> str:
+    """Ikona spletne strani kot data URL, prenesena NEPOSREDNO s te strani (brez tujih storitev za ikone).
+
+    Najprej najvecja ikona iz <link rel=icon/apple-touch-icon>, sicer /apple-touch-icon.png in /favicon.ico.
+    Prazen niz, ce ikone ni (ploscica potem pokaze crko)."""
+    import base64
+    try:
+        razcl = urllib.parse.urlsplit(url)
+        if razcl.scheme not in ("http", "https") or not razcl.hostname:
+            return ""
+        if adblock.is_ad_domain(url):
+            return ""
+        koren = f"{razcl.scheme}://{razcl.netloc}"
+        kandidati: List[str] = []
+        try:
+            vsebina, _ = _prenesi(url, 400_000)
+            iskalnik = _IkonePovezave()
+            iskalnik.feed(vsebina.decode("utf-8", "ignore"))
+            for _, href in sorted(iskalnik.ikone, key=lambda x: -x[0]):
+                kandidati.append(urllib.parse.urljoin(url, href))
+        except Exception:
+            pass
+        kandidati += [koren + "/apple-touch-icon.png", koren + "/favicon.ico"]
+        for kandidat in kandidati:
+            if not kandidat.startswith(("http://", "https://")):
+                continue
+            try:
+                podatki, vrsta = _prenesi(kandidat, 300_000)
+            except Exception:
+                continue
+            if not podatki or len(podatki) > 300_000:
+                continue
+            if not vrsta.startswith("image/"):
+                if podatki[:4] == b"\x89PNG":
+                    vrsta = "image/png"
+                elif podatki[:4] == b"\x00\x00\x01\x00":
+                    vrsta = "image/x-icon"
+                elif b"<svg" in podatki[:400].lower():
+                    vrsta = "image/svg+xml"
+                else:
+                    continue
+            return f"data:{vrsta};base64," + base64.b64encode(podatki).decode("ascii")
+    except Exception:
+        return ""
+    return ""
 
 
 def home_state(settings: SettingsStore) -> Dict[str, Any]:

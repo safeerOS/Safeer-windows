@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="sl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark">
+  <title>Safeer Browser</title>
+  <link rel="stylesheet" href="splet.css">
+</head>
+<body>
+  <div class="ozadje" aria-hidden="true"></div>
+  <main class="stran">
+    <section class="uvod">
+      <h1>Safeer Browser</h1>
+      <p id="podnaslov">Varno, hitro in zasebno brskanje znotraj Safeer OS.</p>
+      <form class="iskanje" id="iskanje" autocomplete="off">
+        <svg class="lupa" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4.2-4.2"/></svg>
+        <input id="vnos" type="text" spellcheck="false" aria-label="">
+        <button type="submit" id="pojdi" aria-label=""><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"/></svg></button>
+      </form>
+    </section>
+
+    <section class="bliznjice" id="bliznjice" aria-label=""></section>
+
+    <section class="predlogi">
+      <div class="predlogi-glava">
+        <button type="button" class="predlogi-naslov" id="predlogiNaslov"><span id="predlogiBesedilo">Predlogi za vas</span>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button>
+        <div class="cipi" id="cipi" role="tablist"></div>
+      </div>
+      <div class="kartice" id="kartice"></div>
+    </section>
+  </main>
+  <script src="splet.js"></script>
+</body>
+</html>
