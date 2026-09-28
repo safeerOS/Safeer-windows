@@ -872,6 +872,20 @@ AD_TRACKER_DOMAINS = {
     "1xbet-partner.com",
     "vulkanvegas-play.top",
     "parimatch-aff.com"
+    # Video oglasi in sledilci (seznam iz m6-adblock, MIT, Frederic Guiose).
+    "stickyadstv.com",
+    "videoplaza.tv",
+    "smartadserver.com",
+    "tealiumiq.com",
+    "tiqcdn.com",
+    "gemius.pl",
+    "kameleoon.com",
+    "kameleoon.eu",
+    "tagcommander.com",
+    "commander1.com",
+    "bttrack.com",
+    "criteo.net",
+    "nr-data.net",
 }
 
 
