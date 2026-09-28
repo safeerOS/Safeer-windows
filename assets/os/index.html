@@ -276,12 +276,14 @@
       <section class="razdelek" id="r-sporocila">
         <div class="sporocila-glava">
           <div><h1 data-t="sporocila"></h1><p data-t="sporocilaOpis"></p></div>
-          <button class="gumb glavni" id="sporocilaDodaj"><svg data-ikona="plus"></svg><span data-t="dodajKanal"></span></button>
+          <div class="gumbi-glave"><button class="gumb" id="sporocilaPisi"><svg data-ikona="povezava"></svg><span data-t="pisiNapravi"></span></button>
+          <button class="gumb glavni" id="sporocilaDodaj"><svg data-ikona="plus"></svg><span data-t="dodajKanal"></span></button></div>
         </div>
         <div class="filtri" id="sporocilaFiltri">
           <button class="izbran" data-kanal="" data-t="vsiKanali"></button>
           <button data-kanal-vrsta="email" data-t="eposta"></button>
           <button data-kanal-vrsta="chatwoot">Chatwoot</button>
+          <button data-kanal-vrsta="safeer">Safeer Link</button>
         </div>
         <div class="kanali-seznam" id="sporocilaKanali"></div>
         <div class="sporocila-postavitev">
@@ -516,6 +518,15 @@
     <input id="kanalUrediGeslo" type="password" autocomplete="current-password" data-ph="gesloAplikacije">
     <div class="gumbi"><button type="button" class="gumb" id="kanalOdstrani" data-t="odstraniKanal"></button><button type="button" class="gumb" id="kanalUrediPreklici" data-t="preklici"></button><button class="gumb glavni" type="submit" data-t="povezi"></button></div>
   </form>
+</div>
+
+<!-- Safeer Chat: izbira naprave v Linku -->
+<div class="sloj" id="slojPisi"><div class="tancica"></div>
+  <div class="plosca kanal-carovnik">
+    <h3 data-t="pisiNapravi"></h3>
+    <div class="pisi-naprave" id="pisiNaprave"></div>
+    <div class="gumbi"><button type="button" class="gumb" id="pisiPreklici" data-t="preklici"></button></div>
+  </div>
 </div>
 
 <!-- Dodaj komunikacijski kanal -->

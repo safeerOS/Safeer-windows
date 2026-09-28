@@ -67,6 +67,15 @@
       return [a.ime, host, host.split(".")[0], kratica(a.ime)];
     });
     if (/^https?:\/\//i.test(niz)) return { vrsta: "splet", naslov: true, niz: niz };
+    // E-postni naslov znane osebe odpre pogovor, ne spletne strani.
+    if (niz.indexOf("@") > 0) {
+      var poNaslovu = (podatki.sporocila || []).filter(function (s) {
+        return (s.pogovori || []).length && ((s.oseba || {}).identitete || []).some(function (i) {
+          return besedilo(i[1]) === besedilo(niz);
+        });
+      })[0];
+      if (poNaslovu) return { vrsta: "sporocila", zadetek: poNaslovu, ocena: 100, niz: niz };
+    }
     if (jePotAliDatoteka(niz)) return { vrsta: "datoteke", niz: niz };
     if (jeNaslov(niz)) return { vrsta: "splet", naslov: true, niz: niz };
     if (spletna.ocena >= 65) return { vrsta: "splet", spletna: spletna.vnos, ocena: spletna.ocena, niz: niz };
@@ -91,6 +100,12 @@
     if (/^(safeer\s*)?link$/i.test(niz) || naprava.ocena >= 65) {
       return { vrsta: "naprave", zadetek: naprava.vnos, ocena: naprava.ocena, niz: niz };
     }
+    // Ime osebe iz Sporocil (npr. "Ana") odpre pogovor z njo.
+    var oseba = najboljsi(niz, (podatki.sporocila || []).filter(function (s) { return (s.pogovori || []).length; }),
+      function (s) {
+        return [(s.oseba || {}).ime].concat(((s.oseba || {}).identitete || []).map(function (i) { return i[1]; }));
+      });
+    if (oseba.ocena >= 80) return { vrsta: "sporocila", zadetek: oseba.vnos, ocena: oseba.ocena, niz: niz };
     return { vrsta: "splet", iskanje: true, niz: niz };
   }
 

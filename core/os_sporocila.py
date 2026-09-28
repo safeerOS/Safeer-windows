@@ -5,7 +5,8 @@ from __future__ import annotations
 import json
 import threading
 import uuid
-from typing import Optional
+from datetime import datetime, timezone
+from typing import Callable, List, Optional
 
 from .sporocila.chatwoot import ChatwootAdapter
 from .sporocila.email import EmailAdapter
@@ -28,11 +29,41 @@ PONUDNIKI = {
     "live.com": ("outlook.office365.com", "smtp.office365.com", "oauth"),
 }
 INTERVAL_S = 120
+#: Safeer Chat: sporocila med napravami v Safeer Linku (en pogovor na napravo).
+KANAL_LINKA = "safeer-link"
+VRSTA_LINKA = "safeer"
+NAJVEC_KLEPET = 16 * 1024
+NAPAKE_KLEPETA = {
+    "ni_povezave": "Safeer Link ni povezan.",
+    "ni_controla": "Safeer Control ne teče.",
+    "ni_naprave": "Te naprave ni več v Safeer Linku.",
+    "meja": "Sporočilo je predolgo.",
+    "potek": "Središče Safeer Linka ni odgovorilo.",
+}
+
+
+def _cas_zdaj() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def _cas_klepeta(vrednost: str) -> str:
+    """Cas posiljatelja v nasi obliki (UTC do sekunde); nerazumljiv cas -> cas prejema."""
+    try:
+        d = datetime.fromisoformat(str(vrednost).replace("Z", "+00:00"))
+        if d.tzinfo is None:
+            raise ValueError
+        return d.astimezone(timezone.utc).replace(microsecond=0).isoformat()
+    except (TypeError, ValueError):
+        return _cas_zdaj()
 
 
 class SporocilaOS:
     def __init__(self, pot=None, zazeni: bool = True):
         self.storitev = StoritevSporocil(pot, interval=INTERVAL_S)
+        #: Posiljanje po Linku (nastavi gostitelj): (naprava, besedilo, cas) -> "accepted"/"queued"/koda napake
+        self.poslji_klepet: Optional[Callable[[str, str, str], str]] = None
+        #: Naprave v Linku, ki znajo klepet (nastavi gostitelj): [{"id", "ime"}]
+        self.naprave_klepeta: Optional[Callable[[], List[dict]]] = None
         self._nalozi()
         if zazeni and self.storitev.adapterji:
             self.storitev.zazeni()
@@ -142,7 +173,81 @@ class SporocilaOS:
         besedilo = str(besedilo).strip()
         if not besedilo:
             raise ValueError("Prazno sporočilo")
+        if kanal_id == KANAL_LINKA:
+            return self._poslji_po_linku(str(pogovor_id), besedilo)
         return self.storitev.poslji(kanal_id, pogovor_id, besedilo).slovar()
+
+    # ------------------------------------------------------------------ Safeer Chat (Link)
+    def _zagotovi_kanal_linka(self) -> None:
+        st = self.storitev
+        with st._zaklep, st.db:
+            st.db.execute("INSERT OR IGNORE INTO kanali VALUES(?,?,?,?,?)",
+                          (KANAL_LINKA, VRSTA_LINKA, "Safeer Link", "povezan", "{}"))
+
+    def _pogovor_linka(self, naprava_id: str, ime: str, zadnje: str, cas: str, novih: int) -> None:
+        st = self.storitev
+        oseba = st.graf.dodaj(ime.strip() or naprava_id, [(VRSTA_LINKA, naprava_id)]).id
+        with st._zaklep, st.db:
+            prej = st.db.execute("SELECT neprebrano, zadnje_sporocilo, cas FROM pogovori WHERE id=? AND kanal_id=?",
+                                 (naprava_id, KANAL_LINKA)).fetchone()
+            neprebrano = (int(prej["neprebrano"] or 0) if prej else 0) + novih
+            if prej and not zadnje:
+                zadnje, cas = prej["zadnje_sporocilo"] or "", prej["cas"] or cas
+            st.db.execute("INSERT OR REPLACE INTO pogovori VALUES(?,?,?,?,?,?,?)",
+                          (naprava_id, KANAL_LINKA, oseba, "", zadnje[:240], neprebrano, cas))
+
+    def prejmi_klepet(self, od: str, ime: str, besedilo: str, cas: str = "", sid: str = "") -> bool:
+        """chat.send z druge naprave; vrne True, ce je sporocilo novo (ne ponovljena dostava)."""
+        od, besedilo = str(od or "").strip(), str(besedilo or "")[:NAJVEC_KLEPET]
+        if not od or not besedilo.strip():
+            return False
+        self._zagotovi_kanal_linka()
+        sid = "chat:" + (str(sid) or uuid.uuid4().hex)
+        st = self.storitev
+        with st._zaklep:
+            if st.db.execute("SELECT 1 FROM sporocila WHERE id=? AND kanal_id=?", (sid, KANAL_LINKA)).fetchone():
+                return False
+        cas = _cas_klepeta(cas)
+        with st._zaklep, st.db:
+            st.db.execute("INSERT OR REPLACE INTO sporocila VALUES(?,?,?,?,?,?,?,?)",
+                          (sid, od, KANAL_LINKA, "noter", besedilo, cas, "[]", "prejeto"))
+        self._pogovor_linka(od, ime, besedilo.replace("\n", " "), cas, 1)
+        return True
+
+    def zacni_klepet(self, naprava_id: str, ime: str) -> dict:
+        """Uporabnik pise napravi prvi: pogovor obstaja, preden je kaj poslano."""
+        naprava_id = str(naprava_id or "").strip()
+        if not naprava_id:
+            raise ValueError("Ni naprave")
+        self._zagotovi_kanal_linka()
+        self._pogovor_linka(naprava_id, str(ime or ""), "", _cas_zdaj(), 0)
+        return self.seznam()
+
+    def naprave_za_klepet(self) -> list:
+        try:
+            return list(self.naprave_klepeta() if self.naprave_klepeta else [])
+        except Exception:
+            return []
+
+    def _poslji_po_linku(self, naprava_id: str, besedilo: str) -> dict:
+        if len(besedilo.encode("utf-8")) > NAJVEC_KLEPET:
+            raise ValueError(NAPAKE_KLEPETA["meja"])
+        if self.poslji_klepet is None:
+            raise ValueError(NAPAKE_KLEPETA["ni_controla"])
+        cas = _cas_zdaj()
+        izid = str(self.poslji_klepet(naprava_id, besedilo, cas) or "")
+        if izid not in ("accepted", "queued"):
+            raise ValueError(NAPAKE_KLEPETA.get(izid, "Sporočila ni bilo mogoče poslati."))
+        sid = "chat:ven:" + uuid.uuid4().hex
+        st = self.storitev
+        with st._zaklep, st.db:
+            st.db.execute("INSERT OR REPLACE INTO sporocila VALUES(?,?,?,?,?,?,?,?)",
+                          (sid, naprava_id, KANAL_LINKA, "ven", besedilo, cas, "[]",
+                           "caka" if izid == "queued" else "poslano"))
+            st.db.execute("UPDATE pogovori SET zadnje_sporocilo=?,cas=? WHERE id=? AND kanal_id=?",
+                          (besedilo[:240], cas, naprava_id, KANAL_LINKA))
+        return {"id": sid, "pogovor_id": naprava_id, "smer": "ven", "besedilo": besedilo, "cas": cas,
+                "stanje": "caka" if izid == "queued" else "poslano", "caka": izid == "queued"}
 
     def isci(self, niz: str) -> list:
         n = str(niz).casefold().strip()

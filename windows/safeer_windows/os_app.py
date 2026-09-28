@@ -321,6 +321,10 @@ class SafeerOsWindow(QMainWindow):
         self.zapiski = zapiski.Zapiski(os.path.join(os_backend_win.CONFIG_DIR, "zapiski.json"))
         # Sporocila: e-posta in Chatwoot v eni niti na osebo; gesla samo v Upravitelju poverilnic.
         self.sporocila = os_sporocila.SporocilaOS(os.path.join(os_backend_win.CONFIG_DIR, "sporocila.sqlite3"))
+        # Safeer Chat: po Linku, ki ga drzi vgrajeni Control.
+        self.sporocila.poslji_klepet = lambda n, b, c: self.control_backend.poslji_klepet(n, b, c)
+        self.sporocila.naprave_klepeta = lambda: self.control_backend.naprave_za_klepet()
+        self.control_backend.ob_klepetu = self._prejmi_klepet
         # Zacasni profili predvajalnika iz prejsnjih zagonov; v ozadju, da zagon ni pocasnejsi.
         threading.Thread(target=webview2_media.pocisti_seje, kwargs={"starejse_od_s": 120}, daemon=True).start()
         self.browser_window.na_zapisek = self._izrezek_iz_spleta
@@ -783,6 +787,27 @@ class SafeerOsWindow(QMainWindow):
             self.poslji_dogodek("zapiskiSpremenjeni", None)
 
         view.page().runJavaScript("window.getSelection ? String(window.getSelection()) : ''", 0, _potrdi)
+
+    def _prejmi_klepet(self, sporocilo: dict) -> None:
+        """chat.send z druge naprave (nit povezave): shrani, osvezi Sporocila in pokaze obvestilo."""
+        telo = sporocilo.get("payload") if isinstance(sporocilo.get("payload"), dict) else {}
+        od = str(sporocilo.get("sender_device") or sporocilo.get("sender") or "")
+        posiljatelj = str(sporocilo.get("sender") or "")
+        ime = next((n.get("ime", "") for n in self.control_backend.naprave
+                    if n.get("id") == posiljatelj or (n.get("naprava") and n.get("naprava") == od)), "") \
+            or str(sporocilo.get("sender_name") or "") or od
+        besedilo = str(telo.get("text") or "")
+        if not self.sporocila.prejmi_klepet(od, ime, besedilo, str(telo.get("created_at") or ""), str(sporocilo.get("id") or "")):
+            return
+        self.poslji_dogodek("sporocilaNova", {"od": od, "ime": ime})
+        def pokazi() -> None:
+            ikona = getattr(self, "pladenj", None) or getattr(self, "tray", None)
+            try:
+                if ikona is not None and hasattr(ikona, "showMessage"):
+                    ikona.showMessage(ime, besedilo[:300])
+            except Exception:
+                pass
+        self.dispatcher.dispatch(pokazi)
 
     def poslji_dogodek(self, vrsta: str, podatki: Any) -> None:
         payload_js = json.dumps(podatki, ensure_ascii=False)
@@ -1396,6 +1421,10 @@ class SafeerOsWindow(QMainWindow):
         prvi = str(a[0]) if a else ""
         if metoda == "sporocilaSeznam":
             return s.seznam(prvi)
+        if metoda == "sporocilaNaprave":
+            return s.naprave_za_klepet()
+        if metoda == "sporocilaZacni":
+            return s.zacni_klepet(prvi, str(a[1]) if len(a) > 1 else "")
         if metoda == "sporocilaPogovor":
             return s.pogovor(str(a[0]), str(a[1]))
         if metoda == "sporocilaDodaj":
