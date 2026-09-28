@@ -62,7 +62,13 @@ jobs:
           python -m pip install -r windows/requirements.txt
           python -c "import PySide6, PyInstaller; from PySide6.QtCore import qVersion; print('PySide6', PySide6.__version__, 'Qt', qVersion(), 'PyInstaller', PyInstaller.__version__)"
       - name: Unit tests
-        run: python -m unittest discover -s windows/tests -v
+        # Isto kot doma (pytest + conftest.py, ki javne medijske API-je zamenja s ponaredkom):
+        # unittest ne nalozi conftest.py, zato so testi klicali pravi splet in padali.
+        env:
+          PYTHONPATH: windows
+        run: |
+          python -m pip install "pytest>=8,<9"
+          python -m pytest windows/tests -q
       - name: No Windows Error Reporting dialogs during unattended runs
         # A crashed exe would otherwise sit in a WerFault window until the job times out.
         run: |
