@@ -6,3 +6,4 @@ cryptography>=43,<47
 python-vlc>=3.0.21203,<4
 mutagen>=1.47,<2
 truststore>=0.9
+pypng>=0.20220715.0,<1  # vendored qrcode (windows/qrcode) uvozi png; brez njega QR za Safeer Link ne nastane
