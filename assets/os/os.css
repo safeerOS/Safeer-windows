@@ -112,9 +112,13 @@ nav button.izbran { background: var(--kartica-poudarek); border-color: var(--zel
 #vsebina { flex: 1; overflow-y: auto; padding: 14px 48px 36px; scroll-behavior: smooth; }
 #vsebina::-webkit-scrollbar { width: 10px; }
 #vsebina::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, .12); border-radius: 5px; }
-.razdelek { display: none; animation: pojav .18s ease-out; }
+.razdelek { display: none; transition: opacity .2s ease, transform .2s ease; animation: pojav .2s ease-out; }
 .razdelek.viden { display: block; }
 @keyframes pojav { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .razdelek { transition: none; animation: none; }
+  #slojIskanje .plosca { transition: none; }
+}
 
 h1 { font-size: 46px; margin: 8px 0 6px; letter-spacing: -.02em; }
 h1 + p { color: var(--medlo); font-size: 20px; margin: 0 0 26px; }
@@ -237,6 +241,14 @@ h2 .dodatno + .dodatno { margin-left: 14px; }
 .naprave-filtri button.izbran svg { color: var(--zelena-temna); }
 .naprave-filtri button svg { color: var(--zelena); }
 .programi-obvestilo { color: var(--medlo); padding: 10px 4px 18px; }
+.ciljno-iskanje {
+  display:flex;align-items:center;gap:10px;width:min(620px,100%);height:46px;margin:14px 0 18px;
+  padding:0 15px;border:1px solid var(--rob);border-radius:13px;background:rgba(9,13,21,.72)
+}
+.ciljno-iskanje:focus-within{border-color:var(--zelena)}
+.ciljno-iskanje svg{width:20px;height:20px;color:var(--zelena)}
+.ciljno-iskanje input{width:100%;border:0;outline:0;background:transparent}
+.ploscica.iskalni-zadetek,.vrstica.iskalni-zadetek,.seznam-naprav li.iskalni-zadetek{border-color:var(--zelena);box-shadow:0 0 0 2px rgba(84,214,165,.18)}
 
 /* Naprave */
 .panel {
@@ -341,6 +353,9 @@ h2 .dodatno + .dodatno { margin-left: 14px; }
 .zadetek span { display: block; color: var(--medlo); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .zadetek:hover, .zadetek.aktiven { background: var(--kartica-poudarek); }
 .zadetek.aktiven { box-shadow: inset 3px 0 0 var(--zelena); }
+.zadetek.spletni { color: var(--zelena); }
+.zadetek.spletni b { color: var(--besedilo); }
+.zadetek.spletni span { color: #86e5c0; }
 #slojHitro .plosca { right: 48px; top: 92px; width: 420px; display: flex; flex-direction: column; gap: 12px; }
 #slojHitro .drsnik, #slojHitro .stikalo { padding: 14px 16px; }
 #slojHitro .drsnik label { min-width: 0; display: none; }
