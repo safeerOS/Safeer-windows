@@ -71,3 +71,11 @@ def test_tipke_s_pravimi_qt_modifikatorji():
     assert preslikaj_tipko(Qt.Key.Key_Space, " ", False, Qt.KeyboardModifier.NoModifier)["vrsta"] == "tipka_gor"
     assert preslikaj_tipko(Qt.Key.Key_C, "c", True, Qt.KeyboardModifier.ControlModifier) == \
         {"vrsta": "tipka_dol", "tipka": "c"}
+
+
+def test_igra_odpre_celozaslonsko():
+    from safeer_windows.oddaljeni_zaslon_protokol import je_igra
+    assert je_igra({"port": 1, "game": True})
+    assert je_igra({"result": {"game": True}})
+    assert not je_igra({"port": 1, "game": False})
+    assert not je_igra(None)
