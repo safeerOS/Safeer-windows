@@ -45,6 +45,16 @@ def _jezik_vmesnika(shramba: dict) -> str:
     return policy.ui_language("")
 
 
+def _nastavi_jezik_oken(jezik: str) -> str:
+    """Isti jezik dobijo tudi okna Qt (oddaljeni zaslon), ne le spletni vmesnik."""
+    try:
+        from . import oddaljeni_zaslon
+        oddaljeni_zaslon.nastavi_jezik(jezik)
+    except Exception:
+        pass
+    return jezik
+
+
 class ShrambaWrapper:
     def get(self, key: str, default: Any = None) -> Any:
         return os_backend_win.nalozi_shrambo().get(key, default)
@@ -916,7 +926,7 @@ class SafeerOsWindow(QMainWindow):
         if metoda == "zacetek":
             shramba = os_backend_win.nalozi_shrambo()
             return {
-                "jezik": _jezik_vmesnika(shramba),
+                "jezik": _nastavi_jezik_oken(_jezik_vmesnika(shramba)),
                 "ime": os.environ.get("USERNAME", "Uporabnik"),
                 "racunalnik": platform.node(),
                 "ozadje": "",
