@@ -24,7 +24,7 @@ from PySide6.QtWebEngineCore import (QWebEnginePage, QWebEngineProfile, QWebEngi
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QMainWindow, QStackedWidget, QWidget
 
-from core import os_media, os_scit
+from core import os_media, os_scit, os_sporocila
 
 from . import en_primerek
 from . import browser, control_backend, control_window, os_backend_win, policy, vlc_player, webview2_media, zapiski
@@ -319,6 +319,8 @@ class SafeerOsWindow(QMainWindow):
         )
         self.browser_window.setWindowFlags(Qt.Widget)
         self.zapiski = zapiski.Zapiski(os.path.join(os_backend_win.CONFIG_DIR, "zapiski.json"))
+        # Sporocila: e-posta in Chatwoot v eni niti na osebo; gesla samo v Upravitelju poverilnic.
+        self.sporocila = os_sporocila.SporocilaOS(os.path.join(os_backend_win.CONFIG_DIR, "sporocila.sqlite3"))
         self.browser_window.na_zapisek = self._izrezek_iz_spleta
         self.browser_window.na_zapisek_ob_strani = self._preklopi_zapisek_ob_strani
         self._zapisek_dock = None
@@ -866,6 +868,8 @@ class SafeerOsWindow(QMainWindow):
         threading.Thread(target=delo, daemon=True).start()
 
     def _izvedi_metodo(self, metoda: str, a: list) -> Any:
+        if metoda.startswith("sporocila"):
+            return self._sporocila(metoda, a)
         if metoda == "zacetek":
             shramba = os_backend_win.nalozi_shrambo()
             return {
@@ -1385,9 +1389,36 @@ class SafeerOsWindow(QMainWindow):
         self.browser_window.set_safeer_os_web_mode(True)
         self.setWindowTitle("Safeer OS · Splet")
 
+    def _sporocila(self, metoda: str, a: list) -> Any:
+        s = self.sporocila
+        prvi = str(a[0]) if a else ""
+        if metoda == "sporocilaSeznam":
+            return s.seznam(prvi)
+        if metoda == "sporocilaPogovor":
+            return s.pogovor(str(a[0]), str(a[1]))
+        if metoda == "sporocilaDodaj":
+            return s.dodaj_kanal(a[0] if a and isinstance(a[0], dict) else {})
+        if metoda == "sporocilaPoslji":
+            return s.poslji(str(a[0]), str(a[1]), str(a[2]))
+        if metoda == "sporocilaSinhroniziraj":
+            return s.sinhroniziraj()
+        if metoda == "sporocilaIsci":
+            return s.isci(prvi)
+        if metoda == "sporocilaSkrivnost":
+            return s.nastavi_skrivnost(str(a[0]), str(a[1]))
+        if metoda == "sporocilaOdstrani":
+            return s.odstrani_kanal(prvi)
+        if metoda == "sporocilaStreznik":
+            return s.privzeta_streznika(prvi)
+        raise ValueError("neznano")
+
     def closeEvent(self, event) -> None:
         try:
             self.control_backend.koncaj()
+        except Exception:
+            pass
+        try:
+            self.sporocila.zapri()
         except Exception:
             pass
         try:

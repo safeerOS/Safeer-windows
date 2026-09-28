@@ -1,0 +1,160 @@
+"""Most med razdelkom Sporocila v Safeer OS in jedrom zdruzenih sporocil (core/sporocila)."""
+
+from __future__ import annotations
+
+import json
+import threading
+import uuid
+from typing import Optional
+
+from .sporocila.chatwoot import ChatwootAdapter
+from .sporocila.email import EmailAdapter
+from .sporocila.model import Kanal
+from .sporocila.storitev import StoritevSporocil
+
+# Znani ponudniki: IMAP/SMTP streznik in namig za prijavo (vecina zahteva "geslo za aplikacije").
+PONUDNIKI = {
+    "gmail.com": ("imap.gmail.com", "smtp.gmail.com", "aplikacije"),
+    "googlemail.com": ("imap.gmail.com", "smtp.gmail.com", "aplikacije"),
+    "yahoo.com": ("imap.mail.yahoo.com", "smtp.mail.yahoo.com", "aplikacije"),
+    "icloud.com": ("imap.mail.me.com", "smtp.mail.me.com", "aplikacije"),
+    "me.com": ("imap.mail.me.com", "smtp.mail.me.com", "aplikacije"),
+    "gmx.net": ("imap.gmx.net", "mail.gmx.net", ""),
+    "gmx.com": ("imap.gmx.com", "mail.gmx.com", ""),
+    "siol.net": ("imap.siol.net", "mail.siol.net", ""),
+    "t-2.net": ("imap.t-2.net", "smtp.t-2.net", ""),
+    "outlook.com": ("outlook.office365.com", "smtp.office365.com", "oauth"),
+    "hotmail.com": ("outlook.office365.com", "smtp.office365.com", "oauth"),
+    "live.com": ("outlook.office365.com", "smtp.office365.com", "oauth"),
+}
+INTERVAL_S = 120
+
+
+class SporocilaOS:
+    def __init__(self, pot=None, zazeni: bool = True):
+        self.storitev = StoritevSporocil(pot, interval=INTERVAL_S)
+        self._nalozi()
+        if zazeni and self.storitev.adapterji:
+            self.storitev.zazeni()
+
+    # ------------------------------------------------------------------ kanali
+    def _adapter(self, kid: str, vrsta: str, n: dict, skrivnost: str = ""):
+        if vrsta == "email":
+            return EmailAdapter(kid, n.get("naslov", ""), n.get("imap", ""), n.get("smtp", ""),
+                                int(n.get("imap_vrata") or 993), int(n.get("smtp_vrata") or 465),
+                                n.get("uporabnik", ""), skrivnost)
+        if vrsta == "chatwoot":
+            return ChatwootAdapter(kid, n.get("url", ""), int(n.get("account_id") or 0), skrivnost)
+        return None
+
+    def _nalozi(self):
+        for r in self.storitev.db.execute("SELECT * FROM kanali").fetchall():
+            try:
+                a = self._adapter(r["id"], r["vrsta"], json.loads(r["nastavitve"] or "{}"))
+            except Exception:
+                a = None
+            if a is not None:
+                self.storitev.adapterji[r["id"]] = a
+
+    @staticmethod
+    def privzeta_streznika(naslov: str) -> dict:
+        domena = naslov.rsplit("@", 1)[-1].lower().strip()
+        imap, smtp, namig = PONUDNIKI.get(domena, ("imap." + domena, "smtp." + domena, ""))
+        return {"imap": imap, "smtp": smtp, "imap_vrata": 993, "smtp_vrata": 465, "namig": namig}
+
+    def dodaj_kanal(self, podatki: dict) -> dict:
+        """Doda kanal SAMO, ce se prijava posreci - uporabnik takoj ve, ali je vse prav."""
+        vrsta = str(podatki.get("vrsta", ""))
+        kid = str(uuid.uuid4())
+        if vrsta == "email":
+            naslov = str(podatki.get("naslov", "")).strip()
+            if "@" not in naslov or "." not in naslov.rsplit("@", 1)[-1]:
+                raise ValueError("Vnesi veljaven e-poštni naslov.")
+            p = self.privzeta_streznika(naslov)
+            if p["namig"] == "oauth":
+                raise ValueError("Outlook in Hotmail ne dovolita več prijave z geslom (samo Microsoftova prijava). Ta vrsta prijave pride v naslednji različici.")
+            geslo = str(podatki.get("geslo") or "")
+            if not geslo:
+                raise ValueError("Vnesi geslo.")
+            nastavitve = {"naslov": naslov, "uporabnik": str(podatki.get("uporabnik") or naslov),
+                          "imap": str(podatki.get("imap") or p["imap"]), "smtp": str(podatki.get("smtp") or p["smtp"]),
+                          "imap_vrata": int(podatki.get("imap_vrata") or 993), "smtp_vrata": int(podatki.get("smtp_vrata") or 465)}
+            a = self._adapter(kid, "email", nastavitve, geslo)
+            try:
+                a.povezi()
+            except Exception as e:
+                ime = type(e).__name__
+                if ime == "NapakaPrijave":
+                    namig = " Pri tem ponudniku potrebuješ »geslo za aplikacije« (nastaviš ga v varnostnih nastavitvah računa)." if p["namig"] == "aplikacije" else ""
+                    raise ValueError("Prijava ni uspela - preveri naslov in geslo." + namig)
+                raise ValueError("Strežnika %s ni mogoče doseči." % nastavitve["imap"])
+            a.shrani_geslo(geslo)
+            ime = naslov
+        elif vrsta == "chatwoot":
+            nastavitve = {"url": str(podatki.get("url", "")).strip().rstrip("/"), "account_id": int(podatki.get("account_id") or 0)}
+            zeton = str(podatki.get("zeton") or "")
+            if not nastavitve["url"].startswith("https://") or not nastavitve["account_id"] or not zeton:
+                raise ValueError("Vnesi naslov https://, številko računa in žeton Chatwoot.")
+            a = self._adapter(kid, "chatwoot", nastavitve, zeton)
+            try:
+                a.povezi()
+            except Exception:
+                raise ValueError("Chatwoot ni sprejel povezave - preveri naslov, račun in žeton.")
+            a.shrani_zeton(zeton)
+            ime = str(podatki.get("ime") or "Chatwoot")
+        else:
+            raise ValueError("Nepodprta vrsta kanala")
+        self.storitev.registriraj(Kanal(kid, vrsta, ime, "povezan"), a, nastavitve)
+        threading.Thread(target=self._prvic, args=(kid,), daemon=True).start()
+        return {"id": kid, "vrsta": vrsta, "ime": ime, "stanje": "povezan"}
+
+    def _prvic(self, kid: str) -> None:
+        self.storitev.sinhroniziraj(kid)
+        self.storitev.zazeni()
+
+    def nastavi_skrivnost(self, kanal_id: str, skrivnost: str) -> dict:
+        """Ponovni vnos gesla/zetona (npr. brez zbirke skrivnosti po ponovnem zagonu)."""
+        a = self.storitev.adapterji.get(kanal_id)
+        if a is None or not skrivnost:
+            raise ValueError("Ni kanala")
+        (a.shrani_geslo if hasattr(a, "shrani_geslo") else a.shrani_zeton)(str(skrivnost))
+        self.storitev.sinhroniziraj(kanal_id)
+        return self.seznam()
+
+    def odstrani_kanal(self, kanal_id: str) -> dict:
+        self.storitev.odstrani_kanal(str(kanal_id))
+        return self.seznam()
+
+    # ------------------------------------------------------------------ branje/pisanje
+    def seznam(self, kanal: str = "") -> dict:
+        skupine = self.storitev.zdruzeni_pogovori(kanal)
+        kanali = {k.id: k.slovar() for k in self.storitev.kanali()}
+        for s in skupine:
+            for p in s["pogovori"]:
+                p["kanal"] = kanali.get(p["kanal_id"], {})
+        return {"kanali": list(kanali.values()), "skupine": skupine}
+
+    def pogovor(self, kanal_id: str, pogovor_id: str) -> list:
+        self.storitev.oznaci_prebrano(kanal_id, pogovor_id)
+        return [s.slovar() for s in self.storitev.sporocila(kanal_id, pogovor_id)]
+
+    def poslji(self, kanal_id: str, pogovor_id: str, besedilo: str) -> dict:
+        besedilo = str(besedilo).strip()
+        if not besedilo:
+            raise ValueError("Prazno sporočilo")
+        return self.storitev.poslji(kanal_id, pogovor_id, besedilo).slovar()
+
+    def isci(self, niz: str) -> list:
+        n = str(niz).casefold().strip()
+        if not n:
+            return []
+        return [s for s in self.storitev.zdruzeni_pogovori()
+                if n in (s["oseba"]["ime"] + " " + " ".join(p["zadnje_sporocilo"] + " " + p["zadeva"] + " " + p["id"]
+                                                            for p in s["pogovori"])).casefold()][:20]
+
+    def sinhroniziraj(self) -> dict:
+        self.storitev.sinhroniziraj()
+        return self.seznam()
+
+    def zapri(self) -> None:
+        self.storitev.zapri()
