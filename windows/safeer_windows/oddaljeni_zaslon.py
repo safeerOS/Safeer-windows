@@ -243,9 +243,13 @@ class _Slika(QOpenGLWidget):
 class OddaljeniZaslon(QWidget):
     """Samostojno okno gledalca z zagonom seje prek Safeer Linka."""
 
-    def __init__(self, backend, id_naprave: str, ime: str, naprava: Optional[dict] = None):
+    def __init__(self, backend, id_naprave: str, ime: str, naprava: Optional[dict] = None,
+                 zaslon: str = "desktop"):
         super().__init__(None)
         self.backend = backend
+        # "desktop" = celo namizje (Upravljaj ta racunalnik); "apps" = locen zaslon, kjer tecejo programi,
+        # odprti od tu (kot na televizorju) - uporabnik vidi program, ne svojega namizja.
+        self.zaslon_cilj = zaslon if zaslon in ("desktop", "apps") else "desktop"
         self.id_naprave = id_naprave
         self.ime = ime or id_naprave
         self.naprava = naprava or self._poisci_napravo()
@@ -290,7 +294,7 @@ class OddaljeniZaslon(QWidget):
         def zahteva() -> None:
             try:
                 odgovor = self.backend.ukaz_pocakaj(
-                    self.id_naprave, "screen.start", {"quality": "najvisja", "screen": "desktop"}, cas=15.0)
+                    self.id_naprave, "screen.start", {"quality": "najvisja", "screen": self.zaslon_cilj}, cas=15.0)
                 seja = razcleni_odgovor(odgovor, self.naprava or self._poisci_napravo())
                 if self._zapiram:
                     self.backend.ukaz_pocakaj(self.id_naprave, "screen.stop", {}, cas=5.0)
@@ -333,10 +337,10 @@ class OddaljeniZaslon(QWidget):
 _ODPRTA_OKNA: set[OddaljeniZaslon] = set()
 
 
-def odpri(backend, id_naprave: str, ime: str = "") -> OddaljeniZaslon:
+def odpri(backend, id_naprave: str, ime: str = "", zaslon: str = "desktop") -> OddaljeniZaslon:
     naprava = next((n for n in backend.naprave if n.get("id") == id_naprave), {})
     okno = OddaljeniZaslon(backend, id_naprave, ime or naprava.get("ime") or naprava.get("name") or id_naprave,
-                           naprava)
+                           naprava, zaslon=zaslon)
     _ODPRTA_OKNA.add(okno)
     okno.destroyed.connect(lambda: _ODPRTA_OKNA.discard(okno))
     okno.showMaximized()
