@@ -3463,31 +3463,19 @@
     $("mediaPrimerKodeGumb").addEventListener("click", function () {
       var primer = [
         {
-          "title": "Inception (Primer vdelanega filma)",
-          "url": "https://vidsrc.cc/v2/embed/movie/tt1375666",
-          "kind": "film",
-          "year": 2010,
-          "quality": "1080p",
-          "poster": "https://m.media-amazon.com/images/M/MV5BMjAxMzY3NjcxNF5BMl5BanBnXkFtZTcwNTI5OTM0Mw@@._V1_SX300.jpg",
-          "description": "Tat, ki krade skrivnosti skozi tehnologijo deljenja sanj, dobi obratno nalogo: vsaditev ideje."
-        },
-        {
-          "title": "Igra prestolov S01E05 (Primer vdelane serije)",
-          "url": "https://vidsrc.cc/v2/embed/tv/tt0944947/1/5",
-          "kind": "serija",
-          "season": 1,
-          "episode": 5,
-          "year": 2011,
-          "quality": "1080p",
-          "poster": "https://m.media-amazon.com/images/M/MV5BN2EyZjM3NzUtNWUzMi00MTgxLWI0NTctMzY4M2VlOTdjZWRiXkEyXkFqcGdeQXVyNDUzOTQ5MjY@._V1_SX300.jpg"
-        },
-        {
           "title": "Big Buck Bunny (Primer neposrednega MP4 videa)",
           "url": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
           "kind": "film",
           "year": 2008,
           "quality": "1080p",
           "poster": "https://upload.wikimedia.org/wikipedia/commons/c/c5/Big_buck_bunny_poster_big.jpg"
+        },
+        {
+          "title": "Sintel (Blender Foundation, CC BY 3.0)",
+          "url": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
+          "kind": "film",
+          "year": 2010,
+          "quality": "1080p"
         }
       ];
       $("mediaJsonKoda").value = JSON.stringify(primer, null, 2);

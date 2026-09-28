@@ -237,10 +237,9 @@ class ShieldInterceptor(QWebEngineUrlRequestInterceptor):
             info.block(True)
             self.browser.note_blocked(url, decision)
             return
-        # Video-embed ponudniki (vidlink.pro, vidsrc.to in njihovi CDN-ji) pogosto
-        # zavrnejo zahtevo z zasebnostnima glavama Sec-GPC/DNT (npr. HTTP 428) -
-        # anti-bot zascita. Med aktivnim predvajanjem teh glav ne posiljamo, sicer
-        # ostajata vkljuceni povsod drugje v brskalniku.
+        # Nekateri video predvajalniki zavrnejo zahtevo z zasebnostnima glavama Sec-GPC/DNT
+        # (npr. HTTP 428). Med aktivnim predvajanjem teh glav ne posiljamo, sicer ostajata
+        # vkljuceni povsod drugje v brskalniku.
         if (self.browser.settings.get("gpc_dnt_enabled") and url.startswith(("http://", "https://"))
                 and media_window is None):
             info.setHttpHeader(QByteArray(b"Sec-GPC"), QByteArray(b"1"))

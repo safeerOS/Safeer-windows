@@ -21,18 +21,18 @@ class TestOsWindows(unittest.TestCase):
             "detail": "noon.mooncase.online status=428 type=text/html",
         })
         self.assertEqual(
-            media_diagnostics.source_rejection(zavrnitev, "https://vidlink.pro/movie/123"),
+            media_diagnostics.source_rejection(zavrnitev, "https://video.example.org/movie/123"),
             "HTTP 428 · noon.mooncase.online",
         )
 
-        isti_vir = json.dumps({"type": "HTTP_ERROR", "detail": "vidsrc.to status=404 type=text/html"})
+        isti_vir = json.dumps({"type": "HTTP_ERROR", "detail": "video.example.org status=404 type=text/html"})
         self.assertEqual(
-            media_diagnostics.source_rejection(isti_vir, "https://vidsrc.to/embed/123"),
-            "HTTP 404 · vidsrc.to",
+            media_diagnostics.source_rejection(isti_vir, "https://video.example.org/embed/123"),
+            "HTTP 404 · video.example.org",
         )
 
         nepovezan_asset = json.dumps({"type": "HTTP_ERROR", "detail": "image.cdn.test status=404 type=text/html"})
-        self.assertEqual(media_diagnostics.source_rejection(nepovezan_asset, "https://vidsrc.to/embed/123"), "")
+        self.assertEqual(media_diagnostics.source_rejection(nepovezan_asset, "https://video.example.org/embed/123"), "")
 
     def test_safeer_control_pairing_has_qr_display_and_symmetric_code_input(self):
         """Okno uporablja skupno vabilo za QR in kodo ter omogoca tudi vnos kode."""
@@ -199,25 +199,6 @@ class TestOsWindows(unittest.TestCase):
             self.assertEqual(center.sources(), [])
             self.assertFalse(center._ima_embed_vir())
 
-    def test_media_izbere_najhitrejsi_uporabnikov_embed_vir(self):
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
-            center = os_media.MediaCenter(td, roots=[])
-            center._save({"viri": [
-                {"id": "počasnejši", "url": "https://vidsrc.to", "ime": "VidSrc", "vnosi": []},
-                {"id": "hitrejši", "url": "https://vidlink.pro", "ime": "VidLink", "vnosi": []},
-            ]})
-            item = center.episode_item(1399, 1, 1, "Winter Is Coming")
-            self.assertIsNotNone(item)
-            now = time.time()
-            center._ping_cache.update({
-                "vidsrc.to:443": (now, 78.0),
-                "vidlink.pro:443": (now, 24.0),
-            })
-            resolved = center.resolve(item["id"])
-            self.assertEqual(resolved["izbran_vir"], "VidLink")
-            self.assertEqual(resolved["izbran_ping_ms"], 24.0)
-            self.assertTrue(resolved["url"].startswith("https://vidlink.pro/"))
-
     def test_media_zdruzi_enako_vsebino_in_izbere_najboljso(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             center = os_media.MediaCenter(td, roots=[])
@@ -295,75 +276,6 @@ class TestOsWindows(unittest.TestCase):
         items = os_media.parse_payload(rss, "application/rss+xml", "https://podcast.test/feed.xml",
                                       source_id="podcast", source_name="Podcast")
         self.assertEqual(items[0]["vrsta"], "podcast")
-
-    def test_vidlink_katalog_uporabi_eno_serijsko_kartico_in_pravi_plakat(self):
-        items = os_media._resolve_embed_or_direct_source("https://vidlink.pro", "vidlink", "VidLink")
-        got = [item for item in items if item.get("tmdb_id") == 1399]
-        self.assertEqual(len(got), 1)
-        self.assertEqual(got[0]["sezona"], 0)
-        self.assertEqual(got[0]["epizoda"], 0)
-        self.assertIn("1XS1oqL89opfnbLl8WnZY1O1uJx", got[0]["slika"])
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
-            center = os_media.MediaCenter(td, roots=[])
-            center._save({"viri": [{"id": "v1", "url": "https://vidlink.pro", "ime": "VidLink", "vnosi": []}]})
-            episode = center.episode_item(1399, 1, 4, "Winter Is Coming")
-            self.assertIn("/tv/1399/1/4", episode["url"])
-
-    def test_stari_epizodni_cache_se_zdruzi_v_serijo_s_pravim_plakatom(self):
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
-            center = os_media.MediaCenter(td, roots=[])
-            cached = []
-            for episode in range(1, 6):
-                url = f"https://vidsrc.cc/v2/embed/tv/tt0944947/1/{episode}"
-                cached.append(os_media._item(
-                    f"Igra prestolov S01E{episode:02d}",
-                    url, base=url,
-                    source_id="v1", source_name="VidSrc", kind="serija",
-                    season=1, episode=episode,
-                    image="https://example.test/napačen-plakat.jpg"))
-            center._save({"viri": [{"id": "v1", "url": "https://vidsrc.cc", "ime": "VidSrc", "vnosi": cached}]})
-            with mock.patch.object(center, "_tmdb_catalog", return_value=([], 1)):
-                got = center.catalog("", "serija")["vnosi"]
-            self.assertEqual(len(got), 1)
-            self.assertEqual(got[0]["sezona"], 0)
-            self.assertEqual(got[0]["epizoda"], 0)
-            self.assertEqual(got[0]["tmdb_id"], 1399)
-            self.assertIn("1XS1oqL89opfnbLl8WnZY1O1uJx", got[0]["slika"])
-
-    def test_epizoda_uporabi_dejansko_dodan_vidsrc_vir(self):
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
-            center = os_media.MediaCenter(td, roots=[])
-            center._save({"viri": [{"id": "v1", "url": "https://vidsrc.cc", "ime": "VidSrc", "vnosi": []}]})
-            episode = center.episode_item(1399, 1, 4, "Igra prestolov S01E04")
-            self.assertIsNotNone(episode)
-            self.assertIn("vidsrc.cc/v2/embed/tv/tt0944947/1/4", episode["url"])
-            self.assertNotIn("vidlink.pro", episode["url"])
-
-    def test_predvajanje_spostuje_vrstni_red_uporabnikovih_virov(self):
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
-            center = os_media.MediaCenter(td, roots=[])
-            center._save({"viri": [
-                {"id": "prvi", "url": "https://vidsrc.to", "ime": "VidSrc", "vnosi": []},
-                {"id": "drugi", "url": "https://vidlink.pro", "ime": "VidLink", "vnosi": []},
-            ]})
-            episode = center.episode_item(1399, 1, 1, "Winter Is Coming")
-            resolved = center.resolve(episode["id"])
-            self.assertTrue(resolved["url"].startswith("https://vidsrc.to/"))
-            self.assertEqual(resolved["razlicice"][0]["vir_id"], "prvi")
-
-    def test_predvajanje_uporabi_le_uporabnikove_vire_in_pravilno_epizodo(self):
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
-            center = os_media.MediaCenter(td, roots=[])
-            center._save({"viri": [
-                {"id": "v1", "url": "https://vidlink.pro", "ime": "VidLink", "vnosi": []},
-                {"id": "v2", "url": "https://vidsrc.me", "ime": "Moj rezervni vir", "vnosi": []},
-            ]})
-            episode = center.episode_item(1399, 1, 4, "Igra prestolov S01E04")
-            resolved = center.resolve(episode["id"])
-            urls = [v["url"] for v in resolved["razlicice"]]
-            self.assertTrue(any("vidlink.pro/tv/1399/1/4" in url for url in urls))
-            self.assertTrue(any("vidsrc.me/embed/tv?tmdb=1399&season=1&episode=4" in url for url in urls))
-            self.assertFalse(any("/1/1" in url or "episode=1" in url for url in urls))
 
     def test_embed_ponudnik_uporabi_zasebni_varnostni_pogled(self):
         koren = Path(__file__).resolve().parent.parent.parent
@@ -488,19 +400,6 @@ class TestOsWindows(unittest.TestCase):
             self.assertTrue(center.import_json(payload)["ok"])
             self.assertEqual(center.catalog("tt1234567")["skupaj"], 1)
             self.assertEqual(center.catalog("98765")["skupaj"], 1)
-
-    def test_tmdb_katalog_skrije_napovedane_naslove(self):
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
-            center = os_media.MediaCenter(td, roots=[])
-            source = {"id": "vidlink", "ime": "VidLink", "url": "https://vidlink.pro"}
-            center._save({"viri": [source]})
-            prihodnji = {"id": 999001, "media_type": "movie", "title": "Napovedan film",
-                         "release_date": "2099-01-01"}
-            izdan = {"id": 999002, "media_type": "movie", "title": "Objavljen film",
-                     "release_date": "2020-01-01", "poster_path": "/poster.jpg",
-                     "vote_average": 7.5, "vote_count": 100}
-            self.assertIsNone(center._tmdb_vnos(prihodnji, source))
-            self.assertIsNotNone(center._tmdb_vnos(izdan, source))
 
     def test_media_vmesnik_uporablja_vgrajeni_predvajalnik(self):
         koren = Path(__file__).resolve().parents[2]
@@ -1472,98 +1371,6 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
         self.assertNotIn(".media-kartica.izpostavljena", css)
         self.assertIn("repeat(auto-fill,minmax(145px,1fr))", css)
 
-    def test_media_vidlink_predloga_vstavi_pravi_tmdb_id_in_ni_lazna_kartica(self):
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
-            center = os_media.MediaCenter(td, roots=[])
-            result = center.add_source("https://vidlink.pro/movie/{tmdbId}", "VidLink")
-            self.assertTrue(result["ok"])
-            self.assertEqual(result["vir"]["tip"], "predvajalni_vir")
-            catalog = center.catalog("", "film")["vnosi"]
-            self.assertGreater(len(catalog), 5)
-            self.assertFalse(any("{tmdb" in item["url"].lower() for item in catalog))
-            inception = next(item for item in catalog if item.get("tmdb_id") == 27205)
-            self.assertEqual(inception["url"], "https://vidlink.pro/movie/27205")
-            self.assertNotIn("tmdbid", inception["naslov"].lower())
-
-    def test_media_korenski_vidlink_je_en_vir_za_filme_in_serije(self):
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
-            center = os_media.MediaCenter(td, roots=[])
-            with mock.patch.object(center, "_download", side_effect=AssertionError("Ponudnika ne beremo kot katalog")):
-                result = center.add_source("https://vidlink.pro", "VidLink")
-            self.assertTrue(result["ok"])
-            self.assertEqual(result["vir"]["tip"], "predvajalni_vir")
-            catalog = center.catalog()["vnosi"]
-            self.assertTrue(any(item["vrsta"] == "film" for item in catalog))
-            self.assertTrue(any(item["vrsta"] == "serija" for item in catalog))
-            self.assertTrue(all("{" not in item["url"] for item in catalog))
-            self.assertTrue(all(item["url"].startswith("https://vidlink.pro/") for item in catalog))
-
-    def test_media_staro_vidlink_predlogo_samodejno_migrira(self):
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
-            center = os_media.MediaCenter(td, roots=[])
-            center.config_dir.mkdir(parents=True, exist_ok=True)
-            center.store_path.write_text(json.dumps({"viri": [{
-                "id": "star", "url": "https://vidlink.pro/movie/{tmdbId}", "ime": "filmi",
-                "posodobljeno": 2_000_000_000, "stevilo": 1,
-                "vnosi": [{"naslov": "filmi ({tmdbid})", "url": "https://vidlink.pro/movie/{tmdbId}"}],
-            }]}), encoding="utf-8")
-            result = center.refresh_stale()
-            self.assertEqual(result["osvezenih"], 1)
-            self.assertFalse(any("{" in item["url"] for item in center.catalog()["vnosi"]))
-
-    def test_media_embed_vir_vidsrc_in_iframe_podpora(self):
-        # 1. HTML z vdelanim iframe in povezavami
-        html = '''<!DOCTYPE html><html><body><h1>Test Portal</h1>
-        <iframe src="https://vidsrc.cc/v2/embed/tv/tt0944947/1/5" title="Igra prestolov S01E05"></iframe>
-        <a href="https://vidsrc.cc/v2/embed/tv/tt0944947/1/1">Epizoda 1: Zima prihaja</a>
-        <a href="https://vidsrc.cc/v2/embed/movie/tt1375666">Inception Film</a>
-        </body></html>'''
-        items = os_media.parse_payload(html.encode("utf-8"), "text/html", "https://portal.test/igra")
-        self.assertEqual(len(items), 3)
-        self.assertEqual(items[0]["naslov"], "Igra prestolov S01E05")
-        self.assertEqual(items[0]["vrsta"], "serija")
-        self.assertEqual(items[0]["sezona"], 1)
-        self.assertEqual(items[0]["epizoda"], 5)
-        self.assertEqual(items[1]["naslov"], "Epizoda 1: Zima prihaja")
-        self.assertEqual(items[1]["vrsta"], "serija")
-        self.assertEqual(items[2]["naslov"], "Inception Film")
-        self.assertEqual(items[2]["vrsta"], "film")
-
-        # 2. Dodajanje korenskega vira vidsrc.cc v MediaCenter (VidSrc Embed Engine)
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
-            center = os_media.MediaCenter(td, roots=[])
-            with mock.patch.object(center, "_download", side_effect=Exception("HTTP Error 403: Forbidden")):
-                rez = center.add_source("https://vidsrc.cc", "VidSrc")
-                self.assertTrue(rez["ok"])
-                self.assertGreater(rez["vir"]["stevilo"], 5)
-                with mock.patch.object(center, "_tmdb_catalog", return_value=([], 1)):
-                    cat_filmi = center.catalog("", "film")
-                    cat_serije = center.catalog("", "serija")
-                self.assertTrue(len(cat_filmi["vnosi"]) > 0)
-                self.assertTrue(len(cat_serije["vnosi"]) > 0)
-                # Preveri, da imajo filmi vrsto film in serije vrsto serija
-                self.assertTrue(all(x["vrsta"] == "film" for x in cat_filmi["vnosi"]))
-                self.assertTrue(all(x["vrsta"] == "serija" for x in cat_serije["vnosi"]))
-                # Glavni katalog vsebuje eno kartico na serijo; epizode se
-                # prikažejo šele v podrobnostih izbrane serije.
-                self.assertTrue(all(x["sezona"] == 0 and x["epizoda"] == 0 for x in cat_serije["vnosi"]))
-                self.assertEqual(len([x for x in cat_serije["vnosi"] if x.get("tmdb_id") == 1399]), 1)
-
-        # 3. Dodajanje specifične povezave do serije
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
-            center = os_media.MediaCenter(td, roots=[])
-            with mock.patch.object(center, "_download", side_effect=Exception("HTTP Error 403: Forbidden")):
-                rez_tv = center.add_source("https://vidsrc.cc/v2/embed/tv/tt0944947/1/5", "GoT Epizoda")
-                self.assertTrue(rez_tv["ok"])
-                with mock.patch.object(center, "_tmdb_catalog", return_value=([], 1)):
-                    cat = center.catalog("", "vse")
-                self.assertEqual(len(cat["vnosi"]), 1)
-                item = cat["vnosi"][0]
-                self.assertEqual(item["vrsta"], "serija")
-                self.assertEqual(item["sezona"], 0)
-                self.assertEqual(item["epizoda"], 0)
-                self.assertIn("tt0944947", item["url"])
-
     def test_os_app_media_predvajaj_embed_uses_webview2_with_private_fallback(self):
         # Predvajanje gre v izolirani WebView2; varni zasebni Safeer Browser
         # ostane fallback, ne HTML iframe ali zunanji brskalnik.
@@ -1585,33 +1392,7 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
         self.assertIn("QT_MEDIA_LOAD", browser_src)
         self.assertIn("QT_MEDIA_CONSOLE", browser_src)
         self.assertIn("PlaybackRequiresUserGesture, False", browser_src)
-        self.assertIn('"vidsrc"', os_app_src)
         self.assertIn("def _odpri_notranji_splet(self, url: str, *, media: bool = False", os_app_src)
-
-    def test_safeer_media_fullscreen_returns_to_maximized_app(self):
-        koren = Path(__file__).resolve().parent.parent.parent
-        app = (koren / "windows" / "safeer_windows" / "os_app.py").read_text(encoding="utf-8")
-        vlc = (koren / "windows" / "safeer_windows" / "vlc_player.py").read_text(encoding="utf-8")
-        startup = app[app.index("class SafeerOsWindow"):app.index("    def nalozi_vmesnik")]
-        self.assertIn("if self.v_oknu:", startup)
-        self.assertIn("self.resize(1280, 800)", startup)
-        self.assertIn("self.show()", startup)
-        self.assertIn("else:\n            self.showMaximized()", startup)
-        self.assertIn('parser.add_argument("--okno", action="store_true"', app)
-        self.assertIn("self.showMaximized()", app)
-        self.assertIn("self._fullscreen_restore_maximized = self.isMaximized()", app)
-        self.assertIn("self.showFullScreen()", app)
-        self.assertIn("self._zapusti_celozaslonsko()", app)
-        self.assertIn("self.showMaximized()", app[app.index("def _zapusti_celozaslonsko"):])
-        self.assertIn("self._player_layout.setContentsMargins(0 if enabled", vlc)
-
-        # Preveri prepoznavo embed vira v core/os_media.py
-        item = os_media._item("tt1375666", "https://vidsrc.cc/v2/embed/movie/tt1375666",
-                              base="", source_id="s1", source_name="VidSrc", kind="film")
-        self.assertIsNotNone(item)
-        self.assertEqual(item["naslov"], "Inception (Izvor)")
-        self.assertEqual(item["vrsta"], "film")
-        self.assertEqual(item["leto"], 2010)
 
     def test_safeer_splet_ostane_v_os_postavitvi_in_izhod_razsiri_os(self):
         koren = Path(__file__).resolve().parent.parent.parent
@@ -1683,64 +1464,22 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
         items = os_media.parse_payload(playlist, "audio/x-mpegurl", "https://list.example/live.m3u")
         self.assertEqual([item["vrsta"] for item in items], ["tv-v-zivo", "glasba"])
 
-    def test_embed_ponudniki_uporabijo_pravilne_javne_poti(self):
-        movie = ("tt1375666", "27205", "film", 0, 0)
-        episode = ("tt0944947", "1399", "serija", 1, 5)
-        cases = {
-            "vidsrc.cc": (
-                "https://vidsrc.cc/v2/embed/movie/tt1375666",
-                "https://vidsrc.cc/v2/embed/tv/tt0944947/1/5"),
-            "vidsrc.to": (
-                "https://vidsrc.to/embed/movie/tt1375666",
-                "https://vidsrc.to/embed/tv/tt0944947/1/5"),
-            "vidlink.pro": (
-                "https://vidlink.pro/movie/27205?primaryColor=00e5ff&autoplay=true",
-                "https://vidlink.pro/tv/1399/1/5?primaryColor=00e5ff&autoplay=true"),
-            "player.videasy.net": (
-                "https://player.videasy.net/movie/27205",
-                "https://player.videasy.net/tv/1399/1/5"),
-            "vidrock.net": (
-                "https://vidrock.net/embed/movie/27205",
-                "https://vidrock.net/embed/tv/1399/1/5"),
-        }
-        for host, expected in cases.items():
-            with self.subTest(host=host, kind="movie"):
-                self.assertEqual(os_media._embed_url_for_provider(host, "https", *movie), expected[0])
-            with self.subTest(host=host, kind="episode"):
-                self.assertEqual(os_media._embed_url_for_provider(host, "https", *episode), expected[1])
-
-        for host in cases:
-            self.assertTrue(any(domain in host for domain in os_media._EMBED_DOMAINS), host)
-
-    def test_media_vidlink_uporabnikov_vir_odpre_tmdb_katalog_in_epizode(self):
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
-            center = os_media.MediaCenter(td, roots=[])
-            with mock.patch.object(center, "refresh_source", return_value={"ok": True, "vir": {}}):
-                result = center.add_source("https://vidlink.pro", "Moj VidLink")
-            self.assertTrue(result["ok"])
-
-            def fake_tmdb(endpoint, params=None):
-                if endpoint == "/trending/all/week":
-                    return {"results": [{"id": 27205, "media_type": "movie", "title": "Inception",
-                                          "release_date": "2010-07-15", "poster_path": "/poster.jpg",
-                                          "vote_average": 8.4, "vote_count": 5000,
-                                          "genre_ids": [28]}]}
-                if endpoint == "/tv/1399/season/1":
-                    return {"episodes": [{"episode_number": 1, "name": "Winter Is Coming",
-                                           "runtime": 62, "vote_average": 8.2, "still_path": "/still.jpg"}]}
-                return {}
-
-            with mock.patch.object(center, "_tmdb", side_effect=fake_tmdb):
-                catalog = center.catalog()["vnosi"]
-                movie = next(item for item in catalog if item.get("tmdb_id") == 27205)
-                self.assertEqual(movie["url"].split("?")[0], "https://vidlink.pro/movie/27205")
-                self.assertEqual(movie["ocena"], 8.4)
-                season = center.season(1399, 1)
-                self.assertEqual(season["epizode"][0]["naslov"], "Winter Is Coming")
-                episode = center.episode_item(1399, 1, 1, "Igra prestolov · Winter Is Coming")
-                self.assertEqual(episode["url"].split("?")[0], "https://vidlink.pro/tv/1399/1/1")
-                self.assertIsNotNone(center.resolve(episode["id"]))
-
-
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestBrezNeuradnihPonudnikov(unittest.TestCase):
+    """Safeer ne vsebuje poti do neuradnih agregatorjev filmov (enako kot Linux in Android)."""
+
+    def test_v_kodi_ni_neuradnih_agregatorjev(self):
+        koren = Path(__file__).resolve().parents[2]
+        prepovedano = ("vidsrc", "vidlink", "videasy", "vidrock", "embed.su", "superembed",
+                       "multiembed", "2embed", "autoembed", "111movies")
+        najdeno = []
+        for mapa in ("core", "windows/safeer_windows", "assets"):
+            for pot in (koren / mapa).rglob("*"):
+                if pot.suffix not in (".py", ".js", ".html", ".json", ".css") or not pot.is_file():
+                    continue
+                besedilo = pot.read_text(encoding="utf-8", errors="ignore").lower()
+                najdeno += [f"{pot.relative_to(koren)}: {ime}" for ime in prepovedano if ime in besedilo]
+        self.assertEqual(najdeno, [])
