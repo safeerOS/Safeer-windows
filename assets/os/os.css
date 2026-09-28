@@ -849,3 +849,6 @@ div.vrstica { cursor: default; }
 #slojKanal h3, #slojKanalUredi h3, #slojPisi h3 { margin: 4px 0 6px; font-size: 22px; }
 .sporocila-glava .gumbi-glave { display:flex; gap:10px; margin-bottom:20px; }
 .pisi-naprave { display:flex; flex-direction:column; gap:6px; max-height:50vh; overflow:auto; margin:10px 0; }
+
+/* Medijski center: gumbi cakalne vrste */
+.media-predvajalnik-akcije .gumb-ikona.vklopljen { color: #57D6AD; background: rgba(87,214,173,.14); }

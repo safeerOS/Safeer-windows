@@ -3057,7 +3057,11 @@
       card.onclick = function () {
         if (x.tmdb_id || x.vrsta === "serija" || (x.vrsta === "film" && !x.peertube_uuid)) {
           odpriMediaPodrobnosti(x.id);
+        } else if (x.vrsta === "glasba" || x.vrsta === "podcast") {
+          nastaviVrsto(x);
+          odpriMedia(x.id);
         } else {
+          media.vrsta = []; narisiVrsto();
           odpriMedia(x.id);
         }
       };
@@ -3146,6 +3150,7 @@
           media.timer = 0;
           if (!poskusiNaslednjo()) $("mediaNapaka").hidden = false;
         };
+        player.onended = audio ? function () { predvajajIzVrste(1); } : null;
         player.play().catch(function () {});
         if (navigator.mediaSession) {
           try { navigator.mediaSession.metadata = new MediaMetadata({title: item.naslov || "Medijski center", artist: item.izvajalec || item.vir || "Safeer OS", artwork: item.slika ? [{src: item.slika}] : []}); } catch (e) {}
@@ -3190,6 +3195,59 @@
     };
     return sporocila[jezik] || sporocila.sl;
   }
+  // ------------------------------------------------------------------ glasba: cakalna vrsta
+  // Ideja po Tauonu (koda je nasa): po koncu skladbe samodejno naslednja, premesaj, ponovi.
+  function vrstaNastavitev(kljuc, privzeto) {
+    try { var v = localStorage.getItem("safeer_glasba_" + kljuc); return v == null ? privzeto : v; } catch (e) { return privzeto; }
+  }
+  function vrstaShrani(kljuc, vrednost) { try { localStorage.setItem("safeer_glasba_" + kljuc, String(vrednost)); } catch (e) {} }
+  function nastaviVrsto(zacetni) {
+    var seznam = (media.katalog || []).filter(function (x) { return x.vrsta === zacetni.vrsta && !x.stran; });
+    media.vrsta = seznam.map(function (x) { return x.id; });
+    media.vrstaMesto = Math.max(0, media.vrsta.indexOf(zacetni.id));
+    media.vrstaZgodovina = [];
+    narisiVrsto();
+  }
+  function naslednjiVVrsti(smer) {
+    var n = (media.vrsta || []).length;
+    if (!n) return null;
+    if (smer < 0) {
+      if (media.vrstaZgodovina && media.vrstaZgodovina.length) return media.vrstaZgodovina.pop();
+      return (media.vrstaMesto - 1 + n) % n;
+    }
+    if (vrstaNastavitev("ponovi", "0") === "1") return media.vrstaMesto;          // ponovi skladbo
+    if (vrstaNastavitev("premesaj", "0") === "1" && n > 1) {
+      var r; do { r = Math.floor(Math.random() * n); } while (r === media.vrstaMesto);
+      return r;
+    }
+    var naslednji = media.vrstaMesto + 1;
+    return naslednji < n ? naslednji : (vrstaNastavitev("ponoviVse", "1") === "1" ? 0 : null);
+  }
+  function predvajajIzVrste(smer) {
+    var mesto = naslednjiVVrsti(smer);
+    if (mesto == null) return false;
+    if (smer > 0) (media.vrstaZgodovina = media.vrstaZgodovina || []).push(media.vrstaMesto);
+    media.vrstaMesto = mesto;
+    narisiVrsto();
+    odpriMedia(media.vrsta[mesto]);
+    return true;
+  }
+  function narisiVrsto() {
+    var ima = (media.vrsta || []).length > 1;
+    ["mediaPrejsnja", "mediaNaslednja", "mediaPremesaj", "mediaPonovi"].forEach(function (id) {
+      var g = $(id); if (g) g.hidden = !ima;
+    });
+    var pm = $("mediaPremesaj"), po = $("mediaPonovi");
+    if (pm) pm.classList.toggle("vklopljen", vrstaNastavitev("premesaj", "0") === "1");
+    if (po) po.classList.toggle("vklopljen", vrstaNastavitev("ponovi", "0") === "1");
+    if (navigator.mediaSession) {
+      try {
+        navigator.mediaSession.setActionHandler("nexttrack", ima ? function () { predvajajIzVrste(1); } : null);
+        navigator.mediaSession.setActionHandler("previoustrack", ima ? function () { predvajajIzVrste(-1); } : null);
+      } catch (e) {}
+    }
+  }
+
   function odpriMedia(id) {
     // Prenos, ki ga izdajatelj ponuja samo na svoji strani (npr. RTV SLO): odpremo ga v Spletu.
     var znan = (media.katalog || []).find(function (x) { return x.id === id; });
@@ -3204,6 +3262,17 @@
       if (!item.native) predvajajHtml(item, 0);
     }, function () { obvesti(t("mediaVirNapaka")); });
   }
+  function vezaVrste() {
+    var g = function (id, fn) { var e = $(id); if (e) e.addEventListener("click", fn); };
+    g("mediaPrejsnja", function () { predvajajIzVrste(-1); });
+    g("mediaNaslednja", function () { predvajajIzVrste(1); });
+    g("mediaPremesaj", function () { vrstaShrani("premesaj", vrstaNastavitev("premesaj", "0") === "1" ? "0" : "1"); narisiVrsto(); });
+    g("mediaPonovi", function () { vrstaShrani("ponovi", vrstaNastavitev("ponovi", "0") === "1" ? "0" : "1"); narisiVrsto(); });
+    narisiVrsto();
+  }
+  document.addEventListener("DOMContentLoaded", vezaVrste);
+  if (document.readyState !== "loading") setTimeout(vezaVrste, 0);
+
   function zapriMediaHtml() {
     if (media.timer) { window.clearTimeout(media.timer); media.timer = 0; }
     [$("mediaVideo"), $("mediaAudio")].forEach(function (player) {
