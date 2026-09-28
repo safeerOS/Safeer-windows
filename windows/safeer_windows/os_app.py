@@ -1318,7 +1318,7 @@ class SafeerOsWindow(QMainWindow):
             is_embed = (
                 item.get("vrsta") == "embed" or
                 "/embed/" in url.lower() or
-                any(x in url.lower() for x in ("vidsrc", "vidlink", "videasy", "vidrock", "superembed", "embed.su", "multiembed", "youtube", "vimeo", "dailymotion", "streamtape", "vidbox"))
+                any(x in url.lower() for x in ("youtube", "vimeo", "dailymotion", "peertube"))
             )
             parsed_path = urllib.parse.urlsplit(url).path.lower()
             _, ext = os.path.splitext(parsed_path)

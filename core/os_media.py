@@ -248,150 +248,12 @@ def _quality_label(resolution: int) -> str:
     return f"{resolution}p" if resolution else "Samodejno"
 
 
-KNOWN_IMDB = {
-    "tt1375666": {
-        "title": "Inception (Izvor)",
-        "kind": "film",
-        "year": 2010,
-        "image": "https://m.media-amazon.com/images/M/MV5BMjAxMzY3NjcxNF5BMl5BanBnXkFtZTcwNTI5OTM0Mw@@._V1_SX300.jpg",
-        "description": "Tat, ki krade skrivnosti skozi tehnologijo deljenja sanj, dobi obratno nalogo: vsaditev ideje.",
-    },
-    "tt0816692": {
-        "title": "Interstellar (Medzvezdno)",
-        "kind": "film",
-        "year": 2014,
-        "image": "https://m.media-amazon.com/images/M/MV5BZjdkOTU3MDktN2IxOS00OGEyLWFmMjktY2FiMmZkNWIyODZiXkEyXkFqcGdeQXVyMTMxODk2OTU@._V1_SX300.jpg",
-        "description": "Skupina raziskovalcev potuje skozi črvino v vesolju v poskusu zagotovitve preživetja človeštva.",
-    },
-    "tt0468569": {
-        "title": "The Dark Knight (Vitez teme)",
-        "kind": "film",
-        "year": 2008,
-        "image": "https://m.media-amazon.com/images/M/MV5BMTMxNTMwODM0NF5BMl5BanBnXkFtZTcwODAyMTk2Mw@@._V1_SX300.jpg",
-        "description": "Batman se spopade s psihopatskim Jokerjem, ki v Gotham prinaša kaos.",
-    },
-    "tt0111161": {
-        "title": "Kaznilnica odrešitve (The Shawshank Redemption)",
-        "kind": "film",
-        "year": 1994,
-        "image": "https://m.media-amazon.com/images/M/MV5BNDE3ODcxNzMtY2YzZC00NmNlLWJiNDMtZDViZWM2MzIxZDYwXkEyXkFqcGdeQXVyNjAwNDUxODI@._V1_SX300.jpg",
-        "description": "Zgodba o upanju in prijateljstvu med zapornikoma v zaporu Shawshank.",
-    },
-    "tt0110912": {
-        "title": "Šund (Pulp Fiction)",
-        "kind": "film",
-        "year": 1994,
-        "image": "https://m.media-amazon.com/images/M/MV5BNGNhMDIzZTUtNTBlZi00MTRlLWFjM2ItYzViMjE3YzI5MjljXkEyXkFqcGdeQXVyNzkwMjQ5NzEt._V1_SX300.jpg",
-        "description": "Prepletene zgodbe dveh plačanih morilcev, boksarja in mafijskega šefa.",
-    },
-    "tt0133093": {
-        "title": "Matrica (The Matrix)",
-        "kind": "film",
-        "year": 1999,
-        "image": "https://m.media-amazon.com/images/M/MV5BNzQzOTk3OTAtNDQ0Zi00ZTVkLWI0MTEtMDllZjNkYzNjNTc4L2ltYWdlXkEyXkFqcGdeQXVyNjU0OTQ0OTY@._V1_SX300.jpg",
-        "description": "Programer odkrije resnico o svoji navidezni resničnosti in vojni proti strojem.",
-    },
-    "tt0172495": {
-        "title": "Gladiator",
-        "kind": "film",
-        "year": 2000,
-        "image": "https://m.media-amazon.com/images/M/MV5BMDliMmNhNDEtODUyOS00MjNlLTgxODEtN2U3NzIxMGVkZTA1L2ltYWdlXkEyXkFqcGdeQXVyNjU0OTQ0OTY@._V1_SX300.jpg",
-        "description": "Nekdanji rimski general se maščuje pokvarjenemu cesarju, ki je umoril njegovo družino.",
-    },
-    "tt15239678": {
-        "title": "Dune: Part Two (Dune: Peščeni planet 2)",
-        "kind": "film",
-        "year": 2024,
-        "image": "https://m.media-amazon.com/images/M/MV5BN2QyZGUgkUtYTY5MS00ZTM0LWI0NDktZjBkNjVjYzJkZTI4XkEyXkFqcGdeQXVyMTkxNjUyNQ@@._V1_SX300.jpg",
-        "description": "Paul Atreides se združi s Chani in Fremeni na poti maščevanja.",
-    },
-    "tt15398776": {
-        "title": "Oppenheimer",
-        "kind": "film",
-        "year": 2023,
-        "image": "https://m.media-amazon.com/images/M/MV5BMDBmYTZjNjMtNjc5Yi00Nzc5LODExOWUtODEzNTYRmMjVhNDhkXkEyXkFqcGdeQXVyNzAwMjU2MTY@._V1_SX300.jpg",
-        "description": "Zgodba o očetu atomske bombe J. Robertu Oppenheimerju in projektu Manhattan.",
-    },
-    "tt1630029": {
-        "title": "Avatar: Pot vode (The Way of Water)",
-        "kind": "film",
-        "year": 2022,
-        "image": "https://m.media-amazon.com/images/M/MV5BYjhiNjBlODctY2ZiOC00YjVlLWFlNzAtNTVhNzM1YjI1NzMxXkEyXkFqcGdeQXVyMjkwOTAyMDU@._V1_SX300.jpg",
-        "description": "Jake Sully in Neytiri ščitita svojo družino na oceanih Pandore.",
-    },
-    "tt0944947": {
-        "title": "Igra prestolov (Game of Thrones)",
-        "kind": "serija",
-        "year": 2011,
-        "image": "https://image.tmdb.org/t/p/w500/1XS1oqL89opfnbLl8WnZY1O1uJx.jpg",
-        "description": "Plemiške družine se borijo za nadzor nad Deželami Westerosa.",
-        "episodes": [
-            (1, 1, "Zima prihaja (Winter Is Coming)"),
-            (1, 2, "Kraljeva cesta (The Kingsroad)"),
-            (1, 3, "Lord Snow"),
-            (1, 4, "Pohabljenci, pankrti in zlomljene reči"),
-            (1, 5, "Volk in lev (The Wolf and the Lion)"),
-        ],
-    },
-    "tt0903747": {
-        "title": "Kriva pota (Breaking Bad)",
-        "kind": "serija",
-        "year": 2008,
-        "image": "https://image.tmdb.org/t/p/w500/3xnWaLQjelJDDF7LT1WBo6f4oIK.jpg",
-        "description": "Učitelj kemije z rakom začne kuhati metamfetamin s svojim nekdanjim dijakom.",
-        "episodes": [
-            (1, 1, "Pilot"),
-            (1, 2, "Mačka v žaklju (Cat's in the Bag...)"),
-            (1, 3, "...in vreča v reki (...And the Bag's in the River)"),
-            (1, 4, "Mož z rakom (Cancer Man)"),
-            (1, 5, "Siva snov (Gray Matter)"),
-        ],
-    },
-    "tt4574334": {
-        "title": "Stranger Things (Nenavadne stvari)",
-        "kind": "serija",
-        "year": 2016,
-        "image": "https://image.tmdb.org/t/p/w500/49WJfeN0moxb9IPfGn8AIqMGskD.jpg",
-        "description": "Ko deček izgine v majhnem mestu, prijatelji in mati odkrijejo skrivne poskuse in deklico z nadnaravnimi močmi.",
-        "episodes": [
-            (1, 1, "Izginotje Willa Byersa"),
-            (1, 2, "Čudakinja na ulici Maple"),
-            (1, 3, "Božične lučke"),
-        ],
-    },
-    "tt3581920": {
-        "title": "The Last of Us",
-        "kind": "serija",
-        "year": 2023,
-        "image": "https://image.tmdb.org/t/p/w500/uKvVjHNqB5VmOrdxqAt2F7J78ED.jpg",
-        "description": "Joel in Ellie potujeta skozi post-apokaliptične Združene države.",
-        "episodes": [
-            (1, 1, "Ko si izgubljen v temi"),
-            (1, 2, "Okuženi"),
-            (1, 3, "Dolg, dolg čas"),
-        ],
-    },
-    "tt8462636": {
-        "title": "Černobil (Chernobyl)",
-        "kind": "serija",
-        "year": 2019,
-        "image": "https://image.tmdb.org/t/p/w500/hlLXt2tOPT6RRnjiUmoxyG1LTFi.jpg",
-        "description": "Kronika jedrske nesreče v Černobilu leta 1986 in neprimerljivega poguma reševalcev.",
-        "episodes": [
-            (1, 1, "1:23:45"),
-            (1, 2, "Prosim, ostanite mirni"),
-            (1, 3, "Odpri se, zemlja"),
-        ],
-    },
-}
+# Safeer nima vgrajenega kataloga komercialnih filmov in serij: naslove, plakate in ID-je da samo TMDb
+# (metapodatki in uradni "Kje gledati") ali uporabnikov lasten vir. Prazna slovarja ostaneta zaradi
+# zdruzljivosti klicev.
+KNOWN_IMDB: dict = {}
 
-ID_PAIRS = [
-    ("tt0944947", "1399"), ("tt0903747", "1396"), ("tt4574334", "66732"),
-    ("tt3581920", "100088"), ("tt8462636", "87108"), ("tt1375666", "27205"),
-    ("tt0816692", "157336"), ("tt0468569", "155"), ("tt0111161", "278"),
-    ("tt0110912", "680"), ("tt0133093", "603"), ("tt0172495", "98"),
-    ("tt15239678", "693134"), ("tt15398776", "872585"), ("tt1630029", "76600")
-]
+ID_PAIRS: list = []
 IMDB_TO_TMDB = dict(ID_PAIRS)
 TMDB_TO_IMDB = {tmdb: imdb for imdb, tmdb in ID_PAIRS}
 
@@ -719,7 +581,7 @@ class _MediaHTMLParser(HTMLParser):
                 self.items.append(found)
         if tag == "iframe" and values.get("src"):
             src = values["src"]
-            if any(x in src.lower() for x in ("embed", "player", "vidsrc", "vidlink", "youtube", "vimeo", "dailymotion", "stream")) or Path(urllib.parse.urlsplit(src).path).suffix.lower() in MEDIA_EXT:
+            if any(x in src.lower() for x in ("embed", "player", "youtube", "vimeo", "dailymotion", "stream")) or Path(urllib.parse.urlsplit(src).path).suffix.lower() in MEDIA_EXT:
                 title = values.get("title") or values.get("aria-label") or self.meta.get("og:title") or self.title or self.source_name
                 kind = _kind(values.get("kind"), src, title)
                 poster = self.meta.get("og:image") or self.meta.get("twitter:image", "")
@@ -752,7 +614,7 @@ class _MediaHTMLParser(HTMLParser):
             is_media = (
                 Path(path).suffix in MEDIA_EXT or
                 "/embed/" in href.lower() or
-                any(x in href.lower() for x in ("vidsrc", "vidlink", "superembed", "embed.su", "watch", "stream", "video", "movie", "tv", "series", "epizoda", "sezona"))
+                any(x in href.lower() for x in ("watch", "stream", "video", "movie", "tv", "series", "epizoda", "sezona"))
             )
             if is_media:
                 title = inner_text or values.get("title") or values.get("aria-label") or Path(path).stem
@@ -793,86 +655,12 @@ class _MediaHTMLParser(HTMLParser):
 def _embed_url_for_provider(netloc: str, scheme: str, imdb_id: str,
                             tmdb_id: str, media_type: str,
                             season: int = 0, episode: int = 0) -> str:
-    """Sestavi embed URL za danega ponudnika glede na tip vsebine."""
-    s, e = max(1, season), max(1, episode)
-    is_tv = (media_type == "serija")
-    # Ponudniki ne uporabljajo iste vrste identifikatorja. Izberemo ID, ki ga
-    # njihov javni embed sprejme, brez ugibanja ali razčlenjevanja zasebnih API-jev.
-    imdb_or_tmdb = imdb_id or tmdb_id
-    tmdb_or_imdb = tmdb_id or imdb_id
-
-    if "vidlink" in netloc:
-        if is_tv:
-            return f"https://vidlink.pro/tv/{tmdb_or_imdb}/{s}/{e}?primaryColor=00e5ff&autoplay=true"
-        return f"https://vidlink.pro/movie/{tmdb_or_imdb}?primaryColor=00e5ff&autoplay=true"
-
-    if "videasy" in netloc:
-        if is_tv:
-            return f"https://player.videasy.net/tv/{tmdb_or_imdb}/{s}/{e}"
-        return f"https://player.videasy.net/movie/{tmdb_or_imdb}"
-
-    if "vidrock" in netloc:
-        if is_tv:
-            return f"https://vidrock.net/embed/tv/{tmdb_or_imdb}/{s}/{e}"
-        return f"https://vidrock.net/embed/movie/{tmdb_or_imdb}"
-
-    if "vidsrc.to" in netloc:
-        if is_tv:
-            return f"https://vidsrc.to/embed/tv/{imdb_or_tmdb}/{s}/{e}"
-        return f"https://vidsrc.to/embed/movie/{imdb_or_tmdb}"
-
-    if "vidsrc.cc" in netloc:
-        if is_tv:
-            return f"https://vidsrc.cc/v2/embed/tv/{imdb_or_tmdb}/{s}/{e}"
-        return f"https://vidsrc.cc/v2/embed/movie/{imdb_or_tmdb}"
-
-    if "vidsrc.me" in netloc:
-        if is_tv:
-            return f"https://vidsrc.me/embed/tv?tmdb={tmdb_id}&season={s}&episode={e}"
-        return f"https://vidsrc.me/embed/movie?tmdb={tmdb_id}"
-
-    if "vidsrc.in" in netloc:
-        if is_tv:
-            return f"https://vidsrc.in/embed/tv/{tmdb_id}/{s}/{e}"
-        return f"https://vidsrc.in/embed/movie/{tmdb_id}"
-
-    if "vidsrc.pm" in netloc:
-        if is_tv:
-            return f"https://vidsrc.pm/embed/tv/{tmdb_id}/{s}/{e}"
-        return f"https://vidsrc.pm/embed/movie/{tmdb_id}"
-
-    if "autoembed" in netloc:
-        if is_tv:
-            return f"https://player.autoembed.cc/embed/tv/{tmdb_id}/{s}/{e}"
-        return f"https://player.autoembed.cc/embed/movie/{tmdb_id}"
-
-    if "multiembed" in netloc:
-        if is_tv:
-            return f"https://multiembed.mov/?video_id={tmdb_id}&tmdb=1&s={s}&e={e}"
-        return f"https://multiembed.mov/?video_id={tmdb_id}&tmdb=1"
-
-    if "2embed" in netloc:
-        if is_tv:
-            return f"https://www.2embed.cc/embedtv/{tmdb_id}&s={s}&e={e}"
-        return f"https://www.2embed.cc/embed/{tmdb_id}"
-
-    if "111movies" in netloc:
-        if is_tv:
-            return f"https://111movies.com/tv/{tmdb_id}/{s}/{e}"
-        return f"https://111movies.com/movie/{tmdb_id}"
-
-    # Privzeto: vidsrc.cc format
-    if is_tv:
-        return f"{scheme}://{netloc}/v2/embed/tv/{imdb_or_tmdb}/{s}/{e}"
-    return f"{scheme}://{netloc}/v2/embed/movie/{imdb_or_tmdb}"
+    """Safeer ne sestavlja naslovov predvajalnikov neuradnih ponudnikov iz IMDb/TMDb ID-jev."""
+    return ""
 
 
-# Vse prepoznane embed domene (razširjeno)
-_EMBED_DOMAINS = (
-    "vidlink.pro", "vidsrc.to", "vidsrc.cc", "vidsrc.me", "vidsrc.in", "vidsrc.pm",
-    "videasy.net", "vidrock.net", "embed.su", "superembed.stream", "multiembed.mov",
-    "2embed.cc", "autoembed.cc", "111movies.com",
-)
+# Neuradni agregatorji filmov niso podprti (samo uradne vdelave: YouTube, Vimeo, PeerTube ...).
+_EMBED_DOMAINS: tuple = ()
 
 _PREDLOGA_TOKEN = re.compile(r"\{\s*(tmdb_?id|imdb_?id|season|episode|sezona|epizoda)\s*\}", re.I)
 
@@ -944,7 +732,7 @@ def _katalog_iz_predloge(url: str, source_id: str, source_name: str) -> list[dic
 
 
 def _resolve_embed_or_direct_source(url: str, source_id: str, source_name: str) -> list[dict]:
-    """Prepozna embed ponudnike, specifične epizode/filme ali splošne vdelane toke."""
+    """Neposreden tok, uradna vdelava (YouTube) ali splosna vdelana stran uporabnikovega vira."""
     if _je_predloga_predvajalnika(url):
         return _katalog_iz_predloge(url, source_id, source_name)
     parsed = urllib.parse.urlsplit(url)
@@ -983,98 +771,7 @@ def _resolve_embed_or_direct_source(url: str, source_id: str, source_name: str) 
                          source_id=source_id, source_name=source_name or "YouTube Music",
                          kind="glasba", description="Izberi glasbo v vgrajeni aplikaciji Safeer Media.")
             return [item] if item else []
-    is_embed_domain = any(dom in netloc for dom in _EMBED_DOMAINS)
-
-    # 1. Specifična povezava do TV serije ali epizode (/tv/ ali /series/ ali SxxExx)
-    match_tv = re.search(r"/(?:tv|series|embed/tv)/([^/]+)/(\d+)/(\d+)", url)
-    if match_tv:
-        imdb_id = match_tv.group(1).lower()
-        season = int(match_tv.group(2))
-        episode = int(match_tv.group(3))
-        info = KNOWN_IMDB.get(imdb_id, {})
-        title_base = info.get("title", source_name or "Serija")
-        ep_name = ""
-        for s, e, n in info.get("episodes", []):
-            if s == season and e == episode:
-                ep_name = f" - {n}"
-                break
-        clean_title = f"{title_base} S{season:02d}E{episode:02d}{ep_name}"
-        item = _item(clean_title, url, base=url, source_id=source_id, source_name=source_name or "VidSrc",
-                     kind="serija", year=info.get("year", 0), image=info.get("image", ""),
-                     season=season, episode=episode, description=info.get("description", ""))
-        return [item] if item else []
-
-    # 1b. Povezava do celotne TV serije brez sezone/epizode (npr. /embed/tv/1399 ali /tv/tt0944947)
-    match_tv_show = re.search(r"/(?:tv|series|embed/tv)/([^/?#]+)/?$", url)
-    if match_tv_show:
-        imdb_id = match_tv_show.group(1).lower()
-        info = KNOWN_IMDB.get(imdb_id, {})
-        title_base = info.get("title", source_name or "Serija")
-        embed_host = parsed.netloc or "vidsrc.cc"
-        scheme = parsed.scheme or "https"
-        effective_name = source_name if source_name and source_name != embed_host else "VidSrc"
-        # Glavni katalog vedno vsebuje eno kartico na serijo. Posamezne
-        # epizode sodijo v podrobnosti/sezone in ne v glavno mrežo.
-        tv_url = _embed_url_for_provider(embed_host, scheme, imdb_id, imdb_id, "serija", 1, 1)
-        it = _item(title_base, tv_url, base=tv_url, source_id=source_id,
-                   source_name=effective_name, kind="serija", year=info.get("year", 0),
-                   image=info.get("image", ""), description=info.get("description", ""),
-                   imdb_id=imdb_id, tmdb_id=_tmdb_id(imdb_id))
-        return [it] if it else []
-
-    # 2. Specifična povezava do filma (/movie/ ali /embed/movie/)
-    match_movie = re.search(r"/(?:movie|embed/movie)/([^/]+)", url)
-    if match_movie:
-        imdb_id = match_movie.group(1).lower()
-        info = KNOWN_IMDB.get(imdb_id, {})
-        clean_title = info.get("title") or f"{source_name or 'Film'} ({imdb_id})"
-        item = _item(clean_title, url, base=url, source_id=source_id, source_name=source_name or "VidSrc",
-                     kind="film", year=info.get("year", 0), image=info.get("image", ""),
-                     description=info.get("description", ""))
-        return [item] if item else []
-
-    # 3. Korenska domena embed ponudnika — generiraj katalog prepoznanih filmov/serij
-    if is_embed_domain and (not path or path in ("/", "/index.html", "/v2", "/v2/")):
-        items = []
-        embed_host = parsed.netloc or "vidsrc.cc"
-        scheme = parsed.scheme or "https"
-        effective_name = source_name if source_name and source_name != embed_host else embed_host.split(".")[0].capitalize()
-
-        # Zgradimo obratno preslikavo: IMDb ID → TMDB ID
-        imdb_to_tmdb: dict[str, str] = {}
-        for tmdb_k, info_v in KNOWN_IMDB.items():
-            if not tmdb_k.startswith("tt"):
-                # To je TMDB alias — poišči original IMDb ključ
-                for imdb_k2, info2 in KNOWN_IMDB.items():
-                    if imdb_k2.startswith("tt") and info2.get("title") == info_v.get("title"):
-                        imdb_to_tmdb[imdb_k2] = tmdb_k
-                        break
-
-        for imdb_id, meta in KNOWN_IMDB.items():
-            if not imdb_id.startswith("tt"):
-                continue  # preskoči TMDB aliase, obdelamo le IMDb ključe
-            tmdb_id = imdb_to_tmdb.get(imdb_id, imdb_id)
-
-            if meta.get("kind") == "film":
-                movie_url = _embed_url_for_provider(embed_host, scheme, imdb_id, tmdb_id, "film")
-                it = _item(meta["title"], movie_url, base=movie_url, source_id=source_id,
-                           source_name=effective_name, kind="film",
-                           year=meta.get("year", 0), image=meta.get("image", ""),
-                           description=meta.get("description", ""))
-                if it:
-                    items.append(it)
-            elif meta.get("kind") == "serija":
-                tv_url = _embed_url_for_provider(embed_host, scheme, imdb_id, tmdb_id, "serija", 1, 1)
-                it = _item(meta["title"], tv_url, base=tv_url, source_id=source_id,
-                           source_name=effective_name, kind="serija", year=meta.get("year", 0),
-                           image=meta.get("image", ""), description=meta.get("description", ""),
-                           imdb_id=imdb_id, tmdb_id=int(tmdb_id))
-                if it:
-                    it["sezona"], it["epizoda"] = 0, 0
-                    items.append(it)
-        return items
-
-    # 4. Splošen neposredni tok ali vdelana stran
+    # Splošen neposredni tok ali vdelana stran
     kind = _kind("", url, source_name)
     title = source_name if source_name and source_name != parsed.netloc else (parsed.netloc or "Vdelana vsebina")
     it = _item(title, url, base=url, source_id=source_id, source_name=source_name, kind=kind)
