@@ -18,6 +18,7 @@
       <button data-razdelek="domov" class="izbran"><svg data-ikona="domov"></svg><span data-t="domov">Domov</span></button>
       <button data-razdelek="media"><svg data-ikona="glasba"></svg><span>Medijski center</span></button>
       <button data-razdelek="naprave"><svg data-ikona="povezava"></svg><span data-t="safeerLink">Safeer Link</span></button>
+      <button data-razdelek="sporocila"><svg data-ikona="sporocila"></svg><span data-t="sporocila"></span></button>
       <button data-razdelek="programi"><svg data-ikona="programi"></svg><span data-t="programi">Programi</span></button>
       <button data-razdelek="datoteke"><svg data-ikona="mapa"></svg><span data-t="datoteke">Datoteke</span></button>
       <button data-razdelek="splet"><svg data-ikona="splet"></svg><span>Splet</span></button>
@@ -271,6 +272,31 @@
       </section>
 
       <!-- PROGRAMI -->
+      <!-- SPOROCILA -->
+      <section class="razdelek" id="r-sporocila">
+        <div class="sporocila-glava">
+          <div><h1 data-t="sporocila"></h1><p data-t="sporocilaOpis"></p></div>
+          <button class="gumb glavni" id="sporocilaDodaj"><svg data-ikona="plus"></svg><span data-t="dodajKanal"></span></button>
+        </div>
+        <div class="filtri" id="sporocilaFiltri">
+          <button class="izbran" data-kanal="" data-t="vsiKanali"></button>
+          <button data-kanal-vrsta="email" data-t="eposta"></button>
+          <button data-kanal-vrsta="chatwoot">Chatwoot</button>
+        </div>
+        <div class="kanali-seznam" id="sporocilaKanali"></div>
+        <div class="sporocila-postavitev">
+          <div class="pogovori-seznam" id="sporocilaSeznam"><p class="prazno" data-t="niPogovorov"></p></div>
+          <div class="pogovor-okno">
+            <div class="pogovor-naslov" id="sporocilaNaslov" data-t="izberiPogovor"></div>
+            <div class="pogovor-vsebina" id="sporocilaVsebina"></div>
+            <form class="sporocila-vnos" id="sporocilaVnos">
+              <textarea id="sporocilaBesedilo" rows="2" data-ph="napisiSporocilo" disabled></textarea>
+              <button class="gumb glavni" type="submit" disabled><svg data-ikona="poslji"></svg><span data-t="posljiSporocilo"></span></button>
+            </form>
+          </div>
+        </div>
+      </section>
+
       <section class="razdelek" id="r-programi">
         <h1 data-t="programi"></h1>
         <p id="programiPod"></p>
@@ -482,6 +508,39 @@
 </div>
 
 <!-- Iskanje -->
+<!-- Kanal: ponovni vnos gesla ali odstranitev -->
+<div class="sloj" id="slojKanalUredi"><div class="tancica"></div>
+  <form class="plosca kanal-carovnik" id="obrazecKanalUredi">
+    <h3 id="kanalUrediNaslov"></h3>
+    <p class="drobno" id="kanalUrediOpis"></p>
+    <input id="kanalUrediGeslo" type="password" autocomplete="current-password" data-ph="gesloAplikacije">
+    <div class="gumbi"><button type="button" class="gumb" id="kanalOdstrani" data-t="odstraniKanal"></button><button type="button" class="gumb" id="kanalUrediPreklici" data-t="preklici"></button><button class="gumb glavni" type="submit" data-t="povezi"></button></div>
+  </form>
+</div>
+
+<!-- Dodaj komunikacijski kanal -->
+<div class="sloj" id="slojKanal"><div class="tancica"></div>
+  <form class="plosca kanal-carovnik" id="obrazecKanal">
+    <h3 data-t="dodajKanal"></h3>
+    <div class="filtri" id="kanalVrstaIzbira"><button type="button" class="izbran" data-vrsta="email" data-t="eposta"></button><button type="button" data-vrsta="chatwoot">Chatwoot</button></div>
+    <input type="hidden" id="kanalVrsta" value="email">
+    <div id="kanalEmail">
+      <input id="kanalNaslov" type="email" autocomplete="username" data-ph="epostniNaslov">
+      <div class="dva"><input id="kanalImap" placeholder="IMAP"><input id="kanalSmtp" placeholder="SMTP"></div>
+      <input id="kanalGeslo" type="password" autocomplete="current-password" data-ph="gesloAplikacije">
+      <p class="drobno" id="kanalNamig" hidden></p>
+    </div>
+    <div id="kanalChatwoot" hidden>
+      <input id="kanalUrl" type="url" placeholder="https://chatwoot.example">
+      <input id="kanalRacun" type="number" min="1" data-ph="stevilkaRacuna">
+      <input id="kanalZeton" type="password" autocomplete="off" data-ph="apiZeton">
+    </div>
+    <p class="kanal-napaka" id="kanalNapaka" role="alert" hidden></p>
+    <p class="drobno" data-t="skrivnostOpis"></p>
+    <div class="gumbi"><button type="button" class="gumb" id="kanalPreklici" data-t="preklici"></button><button class="gumb glavni" type="submit" id="kanalPovezi" data-t="povezi"></button></div>
+  </form>
+</div>
+
 <div class="sloj" id="slojIskanje"><div class="tancica"></div><div class="plosca zadetki" id="zadetki"></div></div>
 <!-- Hitre nastavitve -->
 <div class="sloj" id="slojHitro"><div class="tancica"></div><div class="plosca" id="hitro"></div></div>
