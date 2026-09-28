@@ -385,6 +385,7 @@
       cilj.appendChild(b);
     });
   }
+  window.safeerOsRazdelek = function () { return S.razdelek || ""; };
   window.safeerOsPojdi = function (kam) {
     kam = String(kam || "");
     if (kam.indexOf("iskanje:") === 0) {
@@ -409,15 +410,17 @@
   function osveziUro() {
     var zdaj = new Date();
     var lok = LOKALE[jezik] || "en-GB";
-    if ($("ura")) $("ura").textContent = zdaj.toLocaleTimeString(lok, { hour: "2-digit", minute: "2-digit" });
-    if ($("datum")) $("datum").textContent = zdaj.toLocaleDateString(lok, { weekday: "short", day: "numeric", month: "short" });
+    // Samo ob spremembi: vsako pisanje (tudi enakega besedila) sprozi izris strani (1x na sekundo).
+    nastaviBesedilo($("ura"), zdaj.toLocaleTimeString(lok, { hour: "2-digit", minute: "2-digit" }));
+    nastaviBesedilo($("datum"), zdaj.toLocaleDateString(lok, { weekday: "short", day: "numeric", month: "short" }));
     var h = zdaj.getHours();
     var ime = S.zacetek ? String(S.zacetek.ime || "").split(" ")[0] : "";
     var kljuc = h < 11 ? "jutro" : (h < 18 ? "dan" : "vecer");
     var pozdrav = t(kljuc, { ime: ime });
     if (!ime) pozdrav = pozdrav.replace(/,\s*!/, "!");
-    if ($("pozdrav")) $("pozdrav").textContent = pozdrav;
+    nastaviBesedilo($("pozdrav"), pozdrav);
   }
+  function nastaviBesedilo(e, besedilo) { if (e && e.textContent !== besedilo) e.textContent = besedilo; }
 
   // ------------------------------------------------------------------ programi
   function nalozPrograme() {
@@ -3017,7 +3020,7 @@
       return [x.naslov, x.izvajalec, x.opis].join(" ").toLocaleLowerCase().indexOf(iskano) >= 0;
     });
     $("mediaPrazno").hidden = !!list.length;
-    $("mediaPovzetek").textContent = t("mediaZadetkov", { n: list.length }) + (media.skupaj_strani > 1 ? " · Stran " + media.page + " od " + media.skupaj_strani : "");
+    $("mediaPovzetek").textContent = t("mediaZadetkov", { n: media.skupaj != null ? media.skupaj : list.length }) + (media.skupaj_strani > 1 ? " · Stran " + media.page + " od " + media.skupaj_strani : "");
     var zdruzi = !media.razvrsti && (media.filter === "radio" || media.filter === "video" || media.filter === "glasba");
     if (zdruzi) list.sort(function (a, b) {
       return (a.skupina || a.izvajalec || "").localeCompare(b.skupina || b.izvajalec || "");
@@ -3398,6 +3401,7 @@
     media.katalog = (response && response.vnosi) || [];
     if (response && response.viri) media.viri = response.viri;
     media.skupaj_strani = (response && response.skupaj_strani) || 1;
+    media.skupaj = (response && typeof response.skupaj === "number") ? response.skupaj : null;
     var drsnik = $("vsebina") || document.documentElement;
     var odmik = drsnik.scrollTop;
     narisiMedia();

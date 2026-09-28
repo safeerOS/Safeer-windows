@@ -682,11 +682,13 @@ def usmeri(vmesnik: str, vrata: int, rezerva: Optional[List[str]] = None) -> boo
             dns_ps = ", ".join(f"'{d}'" for d in dns_list)
             cmd = ["powershell", "-NoProfile", "-NonInteractive", "-Command",
                    f"Set-DnsClientServerAddress -InterfaceAlias '{vmesnik}' -ServerAddresses @({dns_ps})"]
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=8)
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=8,
+                               creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             if r.returncode != 0:
-                subprocess.run(["netsh", "interface", "ip", "set", "dns", f"name={vmesnik}", "static", "127.0.0.1"],
-                               capture_output=True, text=True, timeout=5)
-            return True
+                r = subprocess.run(["netsh", "interface", "ip", "set", "dns", f"name={vmesnik}", "static", "127.0.0.1"],
+                                   capture_output=True, text=True, timeout=5,
+                                   creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            return r.returncode == 0
         except Exception as e:
             print(f"[SafeerOS] usmeri napaka na Windows ({vmesnik}): {e}")
             return False
@@ -718,6 +720,9 @@ class Scit:
         self.seznami: Optional[Seznami] = None
         self.razresevalnik: Optional[Razresevalnik] = None
         self.vmesniki: List[str] = []
+        # Neuspela preusmeritev DNS (npr. brez skrbniskih pravic): ne poskusamo vsakih 20 s znova.
+        self._neuspehi: dict = {}
+        self._naslednji_poskus: dict = {}
         self.strezniki: List[str] = []
         self.napaka = ""
         self._straza: Optional[threading.Thread] = None
@@ -794,8 +799,14 @@ class Scit:
             strezniki = upstream_strezniki_windows()
             for v in povezani:
                 d = dns_vmesnika(v)
-                if "127.0.0.1" not in d:
-                    usmeri(v, r.vrata, strezniki)
+                if "127.0.0.1" not in d and time.monotonic() >= self._naslednji_poskus.get(v, 0.0):
+                    if usmeri(v, r.vrata, strezniki):
+                        self._neuspehi.pop(v, None)
+                    else:
+                        n = self._neuspehi.get(v, 0) + 1
+                        self._neuspehi[v] = n
+                        self._naslednji_poskus[v] = time.monotonic() + min(1800.0, 20.0 * (2 ** n))
+                        self.napaka = "pravice"
                 if v not in self.vmesniki:
                     self.vmesniki.append(v)
             self.vmesniki = [v for v in self.vmesniki if v in povezani]
