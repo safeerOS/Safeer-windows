@@ -41,7 +41,7 @@ body { overflow-x: hidden; }
   stroke-linecap: round; stroke-linejoin: round; }
 
 /* Bližnjice */
-.bliznjice { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 12px;
+.bliznjice { display: grid; grid-template-columns: repeat(auto-fill, 112px); justify-content: center; gap: 12px;
   max-width: 1080px; margin: clamp(30px, 6vh, 52px) auto 0; }
 .bliznjica { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 10px; min-height: 104px; padding: 16px 10px 14px; border-radius: 16px; cursor: pointer;
