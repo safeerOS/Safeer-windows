@@ -45,3 +45,12 @@ def test_yt_ujame_youtube_in_ne_spletnega_iskanja(podatki):
     rezultat = _odloci("yt", podatki)
     assert rezultat["spletna"]["ime"] == "YouTube"
     assert "iskanje" not in rezultat
+
+
+def test_sporocila_ime_in_naslov_osebe(podatki):
+    podatki["sporocila"] = [{"oseba": {"ime": "Ana Novak", "identitete": [["email", "ana@primer.si"]]},
+                             "pogovori": [{"id": "ana@primer.si", "kanal_id": "k1"}]}]
+    assert _odloci("Ana", podatki)["vrsta"] == "sporocila"
+    assert _odloci("ana@primer.si", podatki)["vrsta"] == "sporocila"
+    assert _odloci("neznan@primer.si", podatki)["vrsta"] == "splet"
+    assert _odloci("Kalkulator", podatki)["vrsta"] == "programi"

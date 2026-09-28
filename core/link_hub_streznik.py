@@ -60,6 +60,11 @@ NAJVEC_ZETONOV = 32
 NACIN_SPAKE2 = "spake2"
 
 
+#: Safeer Chat: najvec cakajocih sporocil na napravo in koliko casa pocakajo.
+KLEPET_NA_NAPRAVO = 100
+KLEPET_ZIVLJENJE_S = 7 * 24 * 3600.0
+
+
 def _zdaj() -> float:
     return time.time()
 
@@ -126,6 +131,9 @@ class Hub:
         self.ura = ura
         self._zaklep = threading.RLock()
         self._naprave: Dict[str, Naprava] = {}
+        #: Safeer Chat za nepovezane naprave: cilj -> [(cas, surovo sporocilo)]
+        self._klepet_cakajoci: Dict[str, list] = {}
+        self._klepet_zaklep = threading.Lock()
         self._izzivi: Dict[str, tuple] = {}        # nonce -> (device_id, cas)
         self._vstopnice: Dict[str, tuple] = {}     # vstopnica -> (device_id, cas)
         self._prijave: Dict[str, dict] = {}        # pair_id -> seznanitev s kodo
@@ -511,6 +519,64 @@ class Hub:
             except Exception:
                 pass
 
+    def _ime_naprave(self, device_id: str) -> str:
+        n = self.najdi(device_id)
+        return n.ime if n is not None and n.ime else device_id
+
+    def steviloCakajocihKlepetov(self, cilj: str) -> int:  # noqa: N802 (enako ime kot na Androidu)
+        with self._klepet_zaklep:
+            return len(self._klepet_cakajoci.get(cilj, []))
+
+    def _usmeri_klepet(self, sporocilo: dict, id_sporocila: str, cilj: str, moj_id: str) -> str:
+        """Safeer Chat. Cilj je fizicna naprava (kljuc iz kroga) ali posamezen id; nepovezani pocaka."""
+        tovor = sporocilo.get("payload") if isinstance(sporocilo.get("payload"), dict) else {}
+        besedilo_kl = str(tovor.get("text") or "")
+        if not besedilo_kl or len(besedilo_kl.encode("utf-8")) > 16 * 1024:
+            return self._potrditev(id_sporocila, "chat", "rejected", "Sporočilo je prazno ali preveliko.", "meja")
+        with self._zaklep:
+            vse = list(self._naprave.values())
+        kandidati = [n for n in vse if "chat" in (n.zmoznosti or []) and self.naprava_iz_kljuca(n.id) == cilj]
+        naprava = self.najdi(cilj)
+        if naprava is None and not kandidati:
+            return self._potrditev(id_sporocila, "chat", "rejected", "Naprave ni na Safeer Linku.", "ni_naprave")
+        moj_kljuc = self.naprava_iz_kljuca(moj_id)
+        if moj_kljuc and moj_kljuc == cilj:
+            return self._potrditev(id_sporocila, "chat", "rejected", "Ista naprava.", "isti_naprava")
+        sporocilo["sender"] = moj_id
+        sporocilo["sender_name"] = self._ime_naprave(moj_id)
+        if moj_kljuc:
+            sporocilo["sender_device"] = moj_kljuc
+        besedilo = json.dumps(sporocilo, ensure_ascii=False)
+        prejemnik = naprava.povezava if naprava is not None and naprava.povezava is not None else next(
+            (n.povezava for n in kandidati if n.povezava is not None), None)
+        if prejemnik is not None:
+            try:
+                prejemnik.poslji(besedilo)
+                self._osvezi(moj_id)
+                return self._potrditev(id_sporocila, "chat", "accepted")
+            except Exception:
+                pass
+        with self._klepet_zaklep:
+            vrsta = self._klepet_cakajoci.setdefault(cilj, [])
+            vrsta.append((self.ura(), besedilo))
+            del vrsta[:-KLEPET_NA_NAPRAVO]
+        return self._potrditev(id_sporocila, "chat", "queued")
+
+    def _dostavi_klepet(self, cilj: str, povezava) -> None:
+        with self._klepet_zaklep:
+            cakajoci = self._klepet_cakajoci.pop(cilj, [])
+        zdaj, ostanek = self.ura(), []
+        for cas, sporocilo in cakajoci:
+            if zdaj - cas > KLEPET_ZIVLJENJE_S:
+                continue
+            try:
+                povezava.poslji(sporocilo)
+            except Exception:
+                ostanek.append((cas, sporocilo))
+        if ostanek:
+            with self._klepet_zaklep:
+                self._klepet_cakajoci[cilj] = ostanek + self._klepet_cakajoci.get(cilj, [])
+
     def registriraj(self, povezava, tovor: dict, dovoljeni_id: str) -> tuple:
         """(status, koda_napake). Vstopnica je vezana na en id: druge naprave z njo ni mogoce vpisati."""
         device_id = str(tovor.get("device_id") or "").strip()[:NAJVEC_IMENA]
@@ -608,6 +674,11 @@ class Hub:
                                         ensure_ascii=False))
                 except Exception:
                     pass
+                prijavljen = str(tovor.get("device_id") or "")
+                self._dostavi_klepet(prijavljen, povezava)
+                kljuc = self.naprava_iz_kljuca(prijavljen)
+                if kljuc and "chat" in (tovor.get("capabilities") or []):
+                    self._dostavi_klepet(kljuc, povezava)
             return self._potrditev(id_sporocila, "cast", status, "" if status == "accepted" else "Prijava zavrnjena.", koda)
 
         if tip == "cast.ping":
@@ -623,6 +694,8 @@ class Hub:
             if cilj == moj_id:
                 return self._potrditev(id_sporocila, prostor, "rejected", "Ista naprava.", "isti_naprava")
             naprava = self.najdi(cilj)
+            if tip == "chat.send":
+                return self._usmeri_klepet(sporocilo, id_sporocila, cilj, moj_id)
             if naprava is None or naprava.povezava is None:
                 return self._potrditev(id_sporocila, prostor, "rejected", "Naprave ni na Safeer Linku.", "ni_naprave")
             sporocilo["sender"] = moj_id

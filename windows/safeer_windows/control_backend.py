@@ -75,6 +75,9 @@ class SafeerControlBackend:
         self._vabilo: Optional[dict] = None
         self._vabilo_rod = 0
         self._cakajoci: Dict[str, list] = {}
+        #: Safeer Chat: potrditve sredisca in prejem sporocil (os_app nastavi ob_klepetu).
+        self._klepet_cakajoci: Dict[str, list] = {}
+        self.ob_klepetu: Optional[Callable[[dict], None]] = None
         self._poslusavci: List[Callable[[str, Any], None]] = []
         self._povezovanje = False
         self._zadnji_hubi: List[dict] = []
@@ -752,7 +755,7 @@ class SafeerControlBackend:
                 ime=self.device_ime,
                 sinhronizira=False,
                 odtis=odtis or None,
-                dodatne_zmoznosti=["files", "remote", "desktop", "screen", "apps"],
+                dodatne_zmoznosti=["files", "remote", "desktop", "screen", "apps", "chat"],
                 katalog=self.navidezni_zaslon.katalog_aplikacij,
                 v_krog=bool(self.nastavitve.get("zaupana", True)),
             )
@@ -794,6 +797,7 @@ class SafeerControlBackend:
                     "zasedenaOdIme": d.get("busy_by_name") or d.get("zasedenaOdIme") or "",
                     "aplikacije": d.get("apps") if isinstance(d.get("apps"), dict) else {},
                     "ta": d.get("id") == self.device_id,
+                    "naprava": d.get("device") or "",
                 })
                 id_n = str(d.get("id") or "")
                 if id_n and id_n != self.device_id and id_n not in dovoljenja:
@@ -841,6 +845,20 @@ class SafeerControlBackend:
 
         elif vrsta == "share.text":
             self._oddaj_dogodek("besedilo", sporocilo.get("payload"))
+
+        elif vrsta == "chat.send":
+            if self.ob_klepetu is not None:
+                try:
+                    self.ob_klepetu(sporocilo)
+                except Exception as e:  # noqa: BLE001
+                    print(f"[ControlBackend] Klepet: {e}")
+
+        elif vrsta == "chat.ack":
+            vnos = self._klepet_cakajoci.get(str(sporocilo.get("ref_id") or ""))
+            if vnos is not None:
+                stanje = str(sporocilo.get("status") or "")
+                vnos[1] = stanje if stanje in ("accepted", "queued") else str(sporocilo.get("error_code") or stanje or "zavrnjeno")
+                vnos[0].set()
 
         elif vrsta in ("share.screen", "share.file"):
             self._prejmi_deljenje(vrsta, sporocilo)
@@ -1072,6 +1090,35 @@ class SafeerControlBackend:
         })
 
     # ------------------------------------------------------------------ RPC ukazi napravam
+    # ------------------------------------------------------------------ Safeer Chat
+    def naprave_za_klepet(self) -> List[dict]:
+        """Druge naprave v Linku, ki znajo klepet (ena vrstica na napravo)."""
+        moja = next((n.get("naprava") for n in self.naprave if n.get("ta")), "") or ""
+        izhod, videno = [], set()
+        for n in self.naprave:
+            naslov = n.get("naprava") or n.get("id", "")
+            if n.get("ta") or (moja and naslov == moja) or "chat" not in (n.get("zmoznosti") or []) or naslov in videno:
+                continue
+            videno.add(naslov)
+            izhod.append({"id": naslov, "ime": n.get("ime", ""), "platforma": n.get("platforma", "")})
+        return izhod
+
+    def poslji_klepet(self, id_naprave: str, besedilo: str, cas: str, cakaj: float = 10.0) -> str:
+        """chat.send napravi v Linku; vrne "accepted", "queued" ali kodo napake."""
+        if not self.je_povezan():
+            return "ni_povezave"
+        ref = "klepet-" + secrets.token_urlsafe(9)
+        vnos = [threading.Event(), "potek"]
+        self._klepet_cakajoci[ref] = vnos
+        try:
+            if not self.povezava.poslji({"id": ref, "type": "chat.send", "target": str(id_naprave),
+                                         "payload": {"text": str(besedilo), "created_at": str(cas)}}):
+                return "ni_povezave"
+            vnos[0].wait(cakaj)
+            return vnos[1]
+        finally:
+            self._klepet_cakajoci.pop(ref, None)
+
     def ukaz_pocakaj(self, id_naprave: str, dejanje: str, parametri: Optional[dict] = None, cas: float = 12.0) -> dict:
         if not self.je_povezan():
             return {"ok": False, "message": "Ni povezave s Safeer Linkom.", "koda": "ni_povezave"}
