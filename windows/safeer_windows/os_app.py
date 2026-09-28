@@ -65,6 +65,33 @@ _POVEZAVA = {"sl": ("Povezano", "Ni povezano"), "en": ("Connected", "Not connect
              "fr": ("Connecté", "Non connecté"), "it": ("Connesso", "Non connesso")}
 
 
+
+def zasebni_pomnilnik_mb(pid: int) -> int:
+    """Zasebni pomnilnik procesa v MB (Windows, brez psutil); 0, ce ga ni mogoce prebrati."""
+    if not pid or sys.platform != "win32":
+        return 0
+    import ctypes
+    from ctypes import wintypes
+
+    class _Stevci(ctypes.Structure):
+        _fields_ = [("cb", wintypes.DWORD), ("PageFaultCount", wintypes.DWORD),
+                    ("PeakWorkingSetSize", ctypes.c_size_t), ("WorkingSetSize", ctypes.c_size_t),
+                    ("QuotaPeakPagedPoolUsage", ctypes.c_size_t), ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t), ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                    ("PagefileUsage", ctypes.c_size_t), ("PeakPagefileUsage", ctypes.c_size_t),
+                    ("PrivateUsage", ctypes.c_size_t)]
+    k = ctypes.windll.kernel32
+    h = k.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not h:
+        return 0
+    try:
+        st = _Stevci(); st.cb = ctypes.sizeof(st)
+        if not ctypes.windll.psapi.GetProcessMemoryInfo(h, ctypes.byref(st), st.cb):
+            return 0
+        return int(st.PrivateUsage // (1024 * 1024))
+    finally:
+        k.CloseHandle(h)
+
 class ShrambaWrapper:
     def get(self, key: str, default: Any = None) -> Any:
         return os_backend_win.nalozi_shrambo().get(key, default)
@@ -322,10 +349,14 @@ class SafeerOsWindow(QMainWindow):
         # Pogled
         self.view = QWebEngineView(self)
         self.page_obj = SafeerOsPage(self.profile, self)
-        self.page_obj.renderProcessTerminated.connect(
-            lambda status, code: print(f"[SafeerOS] RenderProcessTerminated: status={status}, code={code}", flush=True)
-        )
+        self.page_obj.renderProcessTerminated.connect(self._izris_koncan)
         self.view.setPage(self.page_obj)
+        # Straza pomnilnika izrisa: ce proces strani zraste cez mejo (puscanje v QtWebEngine), stran
+        # tiho nalozimo znova v istem razdelku, preden Windows zacne menjati pomnilnik na disk.
+        self._straza_izrisa = QTimer(self)
+        self._straza_izrisa.setInterval(60_000)
+        self._straza_izrisa.timeout.connect(self._preveri_pomnilnik_izrisa)
+        self._straza_izrisa.start()
 
         self.zaslon = QStackedWidget(self)
         # Glavni OS pogled in vgrajeni brskalnik sta na isti strani sklada. V
@@ -892,6 +923,38 @@ class SafeerOsWindow(QMainWindow):
         if vrsta == "deljenje" and isinstance(podatki, dict) and not podatki.get("tece"):
             # Konec posiljanja datoteke (ali napaka): uporabniku povemo izid.
             self.poslji_dogodek("posiljanjeKoncano", {k: podatki.get(k) for k in ("ime", "cilj", "uspeh", "napaka")})
+
+    MEJA_IZRISA_MB = 1500
+
+    def _izris_koncan(self, status, koda) -> None:
+        print(f"[SafeerOS] RenderProcessTerminated: status={status}, code={koda}", flush=True)
+        if status != QWebEnginePage.RenderProcessTerminationStatus.NormalTerminationStatus:
+            # Sesut ali ubit proces strani: brez tega ostane okno prazno do ponovnega zagona.
+            QTimer.singleShot(1000, lambda: self._nalozi_znova_v_razdelku(""))
+
+    def _preveri_pomnilnik_izrisa(self) -> None:
+        try:
+            pid = int(self.page_obj.renderProcessPid() or 0)
+        except Exception:
+            return
+        mb = zasebni_pomnilnik_mb(pid)
+        if mb >= self.MEJA_IZRISA_MB:
+            print(f"[SafeerOS] Proces strani porablja {mb} MB (meja {self.MEJA_IZRISA_MB}) - nalagam znova", flush=True)
+            self.page_obj.runJavaScript("window.safeerOsRazdelek ? window.safeerOsRazdelek() : ''",
+                                        lambda r: self._nalozi_znova_v_razdelku(str(r or "")))
+
+    def _nalozi_znova_v_razdelku(self, razdelek: str) -> None:
+        razdelek = re.sub(r"[^a-zA-Z_-]", "", razdelek)[:40]
+        if razdelek:
+            def _vrni(ok, r=razdelek):
+                try:
+                    self.page_obj.loadFinished.disconnect(_vrni)
+                except Exception:
+                    pass
+                QTimer.singleShot(600, lambda: self.page_obj.runJavaScript(
+                    f"window.safeerOsPojdi && window.safeerOsPojdi('{r}');"))
+            self.page_obj.loadFinished.connect(_vrni)
+        self.page_obj.triggerAction(QWebEnginePage.WebAction.Reload)
 
     def odpri_control(self, razdelek: str = "", id_naprave: str = "", prijava_ob_zagonu: bool = False) -> bool:
         def _odpri():

@@ -548,6 +548,9 @@ def _items_from_json(data: Any, base: str, source_id: str, source_name: str,
     return out[:MAX_SOURCE_ITEMS]
 
 
+
+NA_STRAN = 24  # kartic na stran v Medijskem centru
+
 class _MediaHTMLParser(HTMLParser):
     def __init__(self, base: str, source_id: str, source_name: str):
         super().__init__(convert_charrefs=True)
@@ -2143,9 +2146,9 @@ class MediaCenter:
             merged = [item for item in merged if zadetek(item)]
         merged = self._filtriraj_jezike(merged, izklopljeni_jeziki)
         merged = self._razvrsti_vnose(merged, razvrsti)
-        total_pages = (tmdb_pages if (self._ima_embed_vir(data) and not tmdb_izklopljen and tmdb_pages > 1
-                                      and kind in ("", "vse", "film", "serija"))
-                       else max(1, math.ceil(len(merged) / 24)))
+        tmdb_strani = (self._ima_embed_vir(data) and not tmdb_izklopljen and tmdb_pages > 1
+                       and kind in ("", "vse", "film", "serija"))
+        total_pages = tmdb_pages if tmdb_strani else max(1, math.ceil(len(merged) / NA_STRAN))
         # Zapomni si vse prikazane vnose (tudi zadetke iskanja in zdruzene kartice),
         # da jih resolve() najde, ko uporabnik klikne - sicer se klik na zadetek
         # iskanja tiho ne zgodi, ker katalog brez iskanja tega vnosa nima.
@@ -2155,8 +2158,15 @@ class MediaCenter:
         if len(self._dynamic_items) > 5000:
             for old_key in list(self._dynamic_items)[:len(self._dynamic_items) - 4000]:
                 self._dynamic_items.pop(old_key, None)
+        # Lokalni seznami: vrnemo samo izbrano stran. Prej je sel ves katalog (npr. 501 kartica,
+        # 43 000 px visoka mreza) in vsak izris strani je v QtWebEngine (programsko risanje) puscal
+        # pomnilnik - po eni uri 21 GB in neodziven Safeer OS (28. 9. 2026).
+        stran_vnosi = merged
+        if not tmdb_strani:
+            trenutna = min(max(1, int(page_num or 1)), total_pages)
+            stran_vnosi = merged[(trenutna - 1) * NA_STRAN:trenutna * NA_STRAN]
         return {
-            "vnosi": merged,
+            "vnosi": stran_vnosi,
             "viri": self.vidni_viri(),
             "skupaj": len(merged),
             "stran": page_num,
