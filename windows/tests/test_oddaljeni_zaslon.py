@@ -58,3 +58,16 @@ def test_tipke_vkljucujejo_posebne_modifikatorje_in_sumnike():
         "vrsta": "tipka_dol", "tipka": "s"}
     assert preslikaj_tipko_ime("", "š", True) == {
         "vrsta": "besedilo", "besedilo": "š"}
+
+
+def test_tipke_s_pravimi_qt_modifikatorji():
+    """PySide6 6.11: KeyboardModifier ni int - preslikava ne sme pasti (prej je bila tipkovnica mrtva)."""
+    import pytest
+    QtCore = pytest.importorskip("PySide6.QtCore")
+    from safeer_windows.oddaljeni_zaslon import preslikaj_tipko
+    Qt = QtCore.Qt
+    assert preslikaj_tipko(Qt.Key.Key_Right, "", True, Qt.KeyboardModifier.NoModifier) == \
+        {"vrsta": "tipka_dol", "tipka": "desno"}
+    assert preslikaj_tipko(Qt.Key.Key_Space, " ", False, Qt.KeyboardModifier.NoModifier)["vrsta"] == "tipka_gor"
+    assert preslikaj_tipko(Qt.Key.Key_C, "c", True, Qt.KeyboardModifier.ControlModifier) == \
+        {"vrsta": "tipka_dol", "tipka": "c"}

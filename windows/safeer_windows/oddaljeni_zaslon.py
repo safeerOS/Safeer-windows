@@ -35,17 +35,26 @@ _QT_IMENA = {
 }
 
 
+def _stevilo(vrednost) -> int:
+    """Qt enum/flag v int. PySide6 6.11 ne dovoli int() na KeyboardModifier (TypeError) - zato je bila
+    tipkovnica v oddaljenem zaslonu mrtva: vsak pritisk je padel, preden je bil poslan."""
+    try:
+        return int(vrednost)
+    except TypeError:
+        return int(getattr(vrednost, "value", 0) or 0)
+
+
 def preslikaj_tipko(koda: int, besedilo: str = "", dol: bool = True,
                     modifikatorji: int = 0) -> Optional[dict]:
     """Prevede Qt tipko v strogo omejen dogodek povratnega vnosa."""
-    koda = int(koda)
+    koda = _stevilo(koda)
     ime = _QT_IMENA.get(koda, "")
     if int(Qt.Key.Key_A) <= koda <= int(Qt.Key.Key_Z):
         ime = chr(ord("a") + koda - int(Qt.Key.Key_A))
     elif int(Qt.Key.Key_0) <= koda <= int(Qt.Key.Key_9):
         ime = chr(ord("0") + koda - int(Qt.Key.Key_0))
-    ctrl_alt = int(Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier)
-    return preslikaj_tipko_ime(ime, besedilo, dol, bool(int(modifikatorji) & ctrl_alt))
+    ctrl_alt = _stevilo(Qt.KeyboardModifier.ControlModifier) | _stevilo(Qt.KeyboardModifier.AltModifier)
+    return preslikaj_tipko_ime(ime, besedilo, dol, bool(_stevilo(modifikatorji) & ctrl_alt))
 
 
 class _TokSignali(QObject):
@@ -228,14 +237,14 @@ class _Slika(QOpenGLWidget):
     def keyPressEvent(self, dogodek: QKeyEvent) -> None:
         if dogodek.isAutoRepeat():
             return
-        vnos = preslikaj_tipko(dogodek.key(), dogodek.text(), True, int(dogodek.modifiers()))
+        vnos = preslikaj_tipko(dogodek.key(), dogodek.text(), True, _stevilo(dogodek.modifiers()))
         if vnos:
             self._poslji(vnos)
 
     def keyReleaseEvent(self, dogodek: QKeyEvent) -> None:
         if dogodek.isAutoRepeat():
             return
-        vnos = preslikaj_tipko(dogodek.key(), dogodek.text(), False, int(dogodek.modifiers()))
+        vnos = preslikaj_tipko(dogodek.key(), dogodek.text(), False, _stevilo(dogodek.modifiers()))
         if vnos:
             self._poslji(vnos)
 
