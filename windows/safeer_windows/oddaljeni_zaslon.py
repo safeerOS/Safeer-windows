@@ -12,7 +12,7 @@ from typing import Optional
 from PySide6.QtCore import QObject, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QImage, QKeyEvent, QMouseEvent, QPainter, QWheelEvent
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
-from PySide6.QtWidgets import (QHBoxLayout, QLabel, QPushButton, QSizePolicy,
+from PySide6.QtWidgets import (QApplication, QHBoxLayout, QLabel, QPushButton, QSizePolicy,
                                QVBoxLayout, QWidget)
 
 from .oddaljeni_zaslon_protokol import (
@@ -328,16 +328,32 @@ class OddaljeniZaslon(QWidget):
         if stanje == "tece":
             self.slika.setFocus()
             # Igra na drugem racunalniku: takoj cez cel zaslon, kot na televizorju (gumb "V okno" vrne okno).
-            if getattr(self, "_igra", False) and not self.isFullScreen():
+            if getattr(self, "_igra", False) and not self._je_celozaslonsko():
                 self._preklopi_celozaslonsko()
 
+    def _je_celozaslonsko(self) -> bool:
+        return bool(getattr(self, "_celozaslonsko", False))
+
     def _preklopi_celozaslonsko(self) -> None:
-        if self.isFullScreen():
+        """Celozaslonsko brez showFullScreen(): okno z OpenGL ploscico, ki natanko pokrije zaslon, Windows
+        (DWM) preklopi v izkljucni celozaslonski nacin - okno je zmrznilo na "Povezujem se ..." z belimi
+        robovi. Brezrobno okno, eno slikovno piko visje od zaslona, ostane v obicajnem sestavljanju."""
+        if self._je_celozaslonsko():
+            self._celozaslonsko = False
+            self.setWindowFlag(Qt.WindowType.FramelessWindowHint, False)
+            self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, False)
             self.showMaximized()
             self.cel.setText("Celozaslonsko")
-        else:
-            self.showFullScreen()
-            self.cel.setText("V okno")
+            return
+        zaslon = self.screen() or QApplication.primaryScreen()
+        g = zaslon.geometry()
+        self._celozaslonsko = True
+        self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
+        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
+        self.showNormal()
+        self.setGeometry(g.x(), g.y(), g.width(), g.height() + 1)
+        self.show()
+        self.cel.setText("V okno")
 
     def closeEvent(self, dogodek) -> None:
         self._zapiram = True
