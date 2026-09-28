@@ -1013,6 +1013,7 @@ class BrowserWindow(QMainWindow):
             self.update_shield()
             for view in self.views():   # naslovi zavihkov v jeziku vmesnika Safeer OS
                 self.on_title_changed(view, view.title())
+            self.refresh_home_tabs()     # zacetna stran v jeziku vmesnika (jezik se nastavi po nalaganju)
         else:
             self.setStyleSheet("")
             self._naslov_kljucavnica.setVisible(False)
