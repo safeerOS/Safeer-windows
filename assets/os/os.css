@@ -41,6 +41,12 @@ svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width:
 
 #aplikacija { position: relative; display: grid; grid-template-columns: 300px 1fr; height: 100vh; }
 
+/* Vdelani odsek Splet uporablja QWebEngineView samo za stalno stransko vrstico;
+   dejanska spletna stran je v Safeer Browserju desno od nje. */
+body.nacin-splet #aplikacija { grid-template-columns: 100% 0; }
+body.nacin-splet #glavno { display: none; }
+body.nacin-splet #stranska { width: 100%; }
+
 /* ------------------------------------------------------------------ levi meni */
 #stranska {
   display: flex; flex-direction: column; padding: 34px 22px 22px;

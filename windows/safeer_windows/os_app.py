@@ -22,7 +22,7 @@ from PySide6.QtGui import QIcon, QKeySequence, QShortcut
 from PySide6.QtWebEngineCore import (QWebEnginePage, QWebEngineProfile, QWebEngineScript,
                                      QWebEngineSettings)
 from PySide6.QtWebEngineWidgets import QWebEngineView
-from PySide6.QtWidgets import QApplication, QMainWindow, QStackedWidget
+from PySide6.QtWidgets import QApplication, QHBoxLayout, QMainWindow, QStackedWidget, QWidget
 
 from core import os_media, os_scit
 
@@ -292,7 +292,15 @@ class SafeerOsWindow(QMainWindow):
         self.view.setPage(self.page_obj)
 
         self.zaslon = QStackedWidget(self)
-        self.zaslon.addWidget(self.view)
+        # Glavni OS pogled in vgrajeni brskalnik sta na isti strani sklada. V
+        # nacinu Splet ostane levi del QWebEngineViewa (stranska vrstica) viden,
+        # brskalnik pa zapolni preostanek okna.
+        self.os_vsebnik = QWidget(self)
+        self.os_postavitev = QHBoxLayout(self.os_vsebnik)
+        self.os_postavitev.setContentsMargins(0, 0, 0, 0)
+        self.os_postavitev.setSpacing(0)
+        self.os_postavitev.addWidget(self.view, 1)
+        self.zaslon.addWidget(self.os_vsebnik)
         self.media_player = vlc_player.VlcPlayerWidget(self)
         self.media_player.nazaj.connect(self._zapri_media)
         self.media_player.ozadje.connect(self._media_v_ozadju)
@@ -305,7 +313,9 @@ class SafeerOsWindow(QMainWindow):
             QApplication.instance(), browser_settings or policy.SettingsStore(), "embedded"
         )
         self.browser_window = browser.BrowserWindow(
-            self.browser_app, private=True, embedded=True, on_safeer_home=self._zapri_browser
+            self.browser_app, private=True, embedded=True,
+            on_safeer_home=lambda: self._zapri_browser("splet"),
+            on_fullscreen_changed=self._na_browser_celozaslonsko,
         )
         self.browser_window.setWindowFlags(Qt.Widget)
         self.zapiski = zapiski.Zapiski(os.path.join(os_backend_win.CONFIG_DIR, "zapiski.json"))
@@ -314,11 +324,15 @@ class SafeerOsWindow(QMainWindow):
         self._zapisek_dock = None
         self.browser_app.windows.append(self.browser_window)
         self.browser_window.new_tab(policy.HOME_URL)
-        self.zaslon.addWidget(self.browser_window)
+        self.os_postavitev.addWidget(self.browser_window, 1)
+        self.browser_window.hide()
+        self.browser_window.set_embedded_content_visible(False)
         self.webview2_media = webview2_media.WebView2MediaWidget(self._zapri_webview2_media, self)
         self.zaslon.addWidget(self.webview2_media)
         print("[SafeerOS] DIAG media_views_ready", flush=True)
         self._browser_media_active = False
+        self._spletni_nacin = False
+        self._spletna_stran_odprta = False
         self.setCentralWidget(self.zaslon)
 
         # Tipke za celozaslonski nacin
@@ -478,6 +492,7 @@ class SafeerOsWindow(QMainWindow):
         else:
             self._fullscreen_restore_maximized = self.isMaximized()
             self._nastavi_predvajalnik_celozaslonsko(True)
+            self._na_browser_celozaslonsko(True)
             self.showFullScreen()
 
     def _nastavi_predvajalnik_celozaslonsko(self, enabled: bool) -> None:
@@ -488,6 +503,7 @@ class SafeerOsWindow(QMainWindow):
 
     def _zapusti_celozaslonsko(self) -> None:
         self._nastavi_predvajalnik_celozaslonsko(False)
+        self._na_browser_celozaslonsko(False)
         self.showNormal()
         if self._fullscreen_restore_maximized:
             self.showMaximized()
@@ -499,8 +515,8 @@ class SafeerOsWindow(QMainWindow):
         if self.zaslon.currentWidget() is self.media_player:
             self._zapri_media()
             return
-        if self.zaslon.currentWidget() is self.browser_window:
-            self._zapri_browser()
+        if self._spletni_nacin or self._browser_media_active:
+            self._zapri_browser("domov")
             return
         if self.zaslon.currentWidget() is self.webview2_media:
             self._zapri_webview2_media()
@@ -515,12 +531,12 @@ class SafeerOsWindow(QMainWindow):
 
     def _zapri_media(self) -> None:
         self.media_player.stop()
-        self.zaslon.setCurrentWidget(self.view)
+        self.zaslon.setCurrentWidget(self.os_vsebnik)
         self.setWindowTitle("Safeer OS")
 
     def _media_v_ozadju(self) -> None:
         """Skrije predvajalnik, vendar pusti zvok teči; Ctrl+Shift+M vrne kontrole."""
-        self.zaslon.setCurrentWidget(self.view)
+        self.zaslon.setCurrentWidget(self.os_vsebnik)
         self.setWindowTitle("Safeer OS · Media · predvajanje v ozadju")
 
     def _pokazi_media_predvajalnik(self) -> None:
@@ -551,33 +567,104 @@ class SafeerOsWindow(QMainWindow):
             # zasebnem, vgrajenem Safeer Browserju. HTML iframe v os.js ga
             # je zamenjal v 9f79709 in ponudniki lahko zavrnejo tak embed.
             self.browser_window.load_media(url)
+            self._skrij_os_za_browser_media()
         else:
             self.browser_window.set_media_mode(False)
             self.browser_window.set_safeer_os_web_mode(True)
             self.browser_window.load_in_current(url)
-        self.zaslon.setCurrentWidget(self.browser_window)
+            self._spletna_stran_odprta = True
+            self._pokazi_spletni_nacin()
+        self.zaslon.setCurrentWidget(self.os_vsebnik)
         if not media:
             # QMainWindow lahko ob prvem prikazu znova pokaže svoje toolbar
             # akcije; način odseka Splet zato uveljavi tudi po preklopu widgeta.
             self.browser_window.set_safeer_os_web_mode(True)
         self.setWindowTitle("Safeer OS · Media" if media else "Safeer OS · Splet")
 
-    def _zapri_browser(self) -> None:
+    def _izmeri_stransko_in_pokazi_splet(self) -> None:
+        js = (
+            "(function(){var s=document.getElementById('stranska');"
+            "var w=s?s.getBoundingClientRect().width:0;"
+            "document.body.classList.add('nacin-splet');"
+            "if(window.safeerOsPojdi)window.safeerOsPojdi('splet');return w;})()"
+        )
+        self.view.page().runJavaScript(js, self._dokoncaj_spletni_nacin)
+
+    def _dokoncaj_spletni_nacin(self, css_sirina: Any = 0) -> None:
+        if not self._spletni_nacin:
+            return
+        try:
+            sirina = round(float(css_sirina) * float(self.view.zoomFactor()))
+        except (TypeError, ValueError):
+            sirina = 0
+        if sirina < 160:
+            sirina = 300 if self.width() > 1500 else 250
+        self.view.setFixedWidth(sirina)
+        self.view.show()
+        self.browser_window.show()
+        self.browser_window.set_embedded_content_visible(True)
+        self.os_postavitev.setStretch(0, 0)
+        self.os_postavitev.setStretch(1, 1)
+
+    def _pokazi_spletni_nacin(self) -> None:
+        self._browser_media_active = False
+        self._spletni_nacin = True
+        self.zaslon.setCurrentWidget(self.os_vsebnik)
+        self._izmeri_stransko_in_pokazi_splet()
+
+    def _skrij_os_za_browser_media(self) -> None:
+        self._spletni_nacin = False
+        self.view.page().runJavaScript("document.body.classList.remove('nacin-splet');")
+        self.view.hide()
+        self.browser_window.show()
+        self.browser_window.set_embedded_content_visible(True)
+        self.os_postavitev.setStretch(0, 0)
+        self.os_postavitev.setStretch(1, 1)
+
+    def _na_browser_celozaslonsko(self, enabled: bool) -> None:
+        """Video/F11 začasno skrije meni; ob izhodu ga vrne brez ponovnega nalaganja."""
+        if not self._spletni_nacin:
+            return
+        self.view.setVisible(not enabled)
+
+    def _vrni_spletni_nacin(self) -> None:
+        if not self._spletna_stran_odprta:
+            return
+        self.browser_window.set_media_mode(False)
+        self.browser_window.set_safeer_os_web_mode(True)
+        self._pokazi_spletni_nacin()
+        self.setWindowTitle("Safeer OS · Splet")
+
+    def _zapri_browser(self, razdelek: str = "domov") -> None:
         if self._browser_media_active:
             view = self.browser_window.current_view()
             if view is not None:
                 view.setUrl(QUrl("about:blank"))
         self._browser_media_active = False
+        self._spletni_nacin = False
         self.browser_window.set_media_mode(False)
         self.browser_window.set_safeer_os_web_mode(False)
-        self.zaslon.setCurrentWidget(self.view)
+        self.browser_window.set_embedded_content_visible(False)
+        self.browser_window.hide()
+        self.view.setMinimumWidth(0)
+        self.view.setMaximumWidth(16777215)
+        self.view.show()
+        self.os_postavitev.setStretch(0, 1)
+        self.os_postavitev.setStretch(1, 0)
+        self.zaslon.setCurrentWidget(self.os_vsebnik)
+        razdelek = razdelek if re.fullmatch(r"[A-Za-z0-9_-]{1,40}", razdelek or "") else "domov"
+        js = (
+            "document.body.classList.remove('nacin-splet');"
+            f"window.safeerOsPojdi && window.safeerOsPojdi({json.dumps(razdelek)});"
+        )
+        self.view.page().runJavaScript(js)
         self.setWindowTitle("Safeer OS")
         self.poslji_dogodek("fokus", None)
 
     def _zapri_webview2_media(self) -> None:
         self.webview2_media.stop()
         self._browser_media_active = False
-        self.zaslon.setCurrentWidget(self.view)
+        self.zaslon.setCurrentWidget(self.os_vsebnik)
         self.setWindowTitle("Safeer OS")
         self.poslji_dogodek("fokus", None)
 
@@ -749,7 +836,7 @@ class SafeerOsWindow(QMainWindow):
     def _na_skritje_controla(self) -> None:
         """Prijava/Control je koncan (zapri, uspesna povezava ali "nadaljuj brez") - nazaj na Safeer OS."""
         def _preklopi():
-            self.zaslon.setCurrentWidget(self.view)
+            self.zaslon.setCurrentWidget(self.os_vsebnik)
             self.setWindowTitle("Safeer OS")
             self.poslji_dogodek("fokus", None)
         self.dispatcher.dispatch(_preklopi)
@@ -868,6 +955,15 @@ class SafeerOsWindow(QMainWindow):
         if metoda == "iskanjeSplet":
             poizvedba = str(a[0]) if a else ""
             return self.odpri_spletno_iskanje(poizvedba)
+
+        if metoda == "zapriSplet":
+            razdelek = str(a[0]) if a else "domov"
+            self.dispatcher.dispatch(lambda: self._zapri_browser(razdelek))
+            return True
+
+        if metoda == "vrniSplet":
+            self.dispatcher.dispatch(self._vrni_spletni_nacin)
+            return self._spletna_stran_odprta
 
         if metoda == "browserSettingsGet":
             settings = self.browser_app.settings
@@ -1263,7 +1359,8 @@ class SafeerOsWindow(QMainWindow):
         self.browser_window.set_media_mode(False)
         self.browser_window.set_safeer_os_web_mode(True)
         self.browser_window.open_input(poizvedba)
-        self.zaslon.setCurrentWidget(self.browser_window)
+        self._spletna_stran_odprta = True
+        self._pokazi_spletni_nacin()
         self.browser_window.set_safeer_os_web_mode(True)
         self.setWindowTitle("Safeer OS · Splet")
 
