@@ -9,7 +9,7 @@ ROOT = os.path.abspath(".")
 ZIP_POT = os.path.join(ROOT, "windows", "launcher_go", "safeer-os-windows.zip")
 BACKUP = ZIP_POT + ".pred-polno-obnovo.bak"
 
-VKLJUCI = ["core", "windows", "assets"]
+VKLJUCI = ["core", "windows", "assets", "ui"]
 IZKLJUCI_MAPE = {"__pycache__", "launcher_go", "build", "dist", ".mypy_cache", ".pytest_cache"}
 IZKLJUCI_PRIPONE = {".pyc", ".pyo", ".exe", ".zip", ".bak"}
 VKJUCI_BINARNE = {"windows/SafeerMediaWebView.exe"}

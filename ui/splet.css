@@ -1,0 +1,99 @@
+/* Safeer OS · Splet – začetna stran vdelanega Safeer Browserja (enaka na vseh različicah Safeer OS). */
+:root {
+  --bg: #071019;
+  --z: #57d6ad;
+  --z2: #3fbf97;
+  --b: #f2f7f5;
+  --d: #a6b8b5;
+  --rob: rgba(181, 220, 209, .18);
+  --plosca: rgba(10, 22, 30, .72);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--b);
+  font-family: "Segoe UI", "Manrope", "Noto Sans", system-ui, sans-serif; }
+body { overflow-x: hidden; }
+.ozadje { position: fixed; inset: 0; z-index: 0;
+  background:
+    linear-gradient(180deg, rgba(4, 10, 16, .25) 0%, rgba(4, 10, 16, .35) 38%, rgba(5, 12, 18, .88) 72%, var(--bg) 100%),
+    url("splet-gore.webp") center 35% / cover no-repeat, var(--bg); }
+.stran { position: relative; z-index: 1; max-width: 1180px; margin: 0 auto;
+  padding: clamp(28px, 8vh, 110px) clamp(16px, 4vw, 48px) 40px; }
+
+/* Uvod in iskanje */
+.uvod { text-align: center; }
+.uvod h1 { margin: 0; font-size: clamp(2.6rem, 6vw, 4.4rem); font-weight: 800; letter-spacing: -.035em;
+  line-height: 1.05; text-shadow: 0 6px 30px rgba(0, 0, 0, .55); }
+.uvod p { margin: 14px 0 0; font-size: clamp(1rem, 1.6vw, 1.15rem); color: #e3ece9;
+  text-shadow: 0 2px 14px rgba(0, 0, 0, .6); }
+.iskanje { position: relative; display: flex; align-items: center; gap: 12px; max-width: 700px;
+  margin: clamp(26px, 5vh, 46px) auto 0; padding: 8px 8px 8px 22px; border-radius: 22px;
+  background: rgba(8, 18, 26, .82); border: 2px solid rgba(87, 214, 173, .55);
+  box-shadow: 0 0 0 6px rgba(87, 214, 173, .07), 0 18px 50px rgba(0, 0, 0, .45); backdrop-filter: blur(10px); }
+.iskanje:focus-within { border-color: var(--z); box-shadow: 0 0 0 6px rgba(87, 214, 173, .14), 0 18px 50px rgba(0, 0, 0, .45); }
+.iskanje .lupa { width: 22px; height: 22px; flex: none; fill: none; stroke: #cfdcd8; stroke-width: 2; stroke-linecap: round; }
+.iskanje input { flex: 1; min-width: 0; height: 44px; border: 0; outline: 0; background: transparent;
+  color: var(--b); font-size: 1.06rem; font-family: inherit; }
+.iskanje input::placeholder { color: #9fb2ad; }
+.iskanje button { flex: none; width: 54px; height: 44px; border: 0; border-radius: 14px; cursor: pointer;
+  background: var(--z); display: grid; place-items: center; transition: background .15s; }
+.iskanje button:hover, .iskanje button:focus-visible { background: #6fe3bd; outline: none; }
+.iskanje button svg { width: 24px; height: 24px; fill: none; stroke: #04261b; stroke-width: 2.4;
+  stroke-linecap: round; stroke-linejoin: round; }
+
+/* Bližnjice */
+.bliznjice { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 14px;
+  max-width: 980px; margin: clamp(30px, 6vh, 52px) auto 0; }
+.bliznjica { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 10px; min-height: 104px; padding: 16px 10px 14px; border-radius: 16px; cursor: pointer;
+  background: var(--plosca); border: 1px solid var(--rob); color: var(--b); text-decoration: none;
+  font: inherit; font-size: .95rem; font-weight: 600; backdrop-filter: blur(8px);
+  transition: transform .15s, border-color .15s, background .15s; }
+.bliznjica:hover, .bliznjica:focus-visible { transform: translateY(-2px); border-color: rgba(87, 214, 173, .6);
+  background: rgba(14, 30, 38, .85); outline: none; }
+.bliznjica .znak { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; overflow: hidden;
+  font-size: 1.25rem; font-weight: 800; color: #fff; }
+.bliznjica .znak img { width: 36px; height: 36px; object-fit: contain; }
+.bliznjica .ime { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bliznjica.dodaj .znak { color: #e6efec; font-size: 2rem; font-weight: 300; }
+.bliznjica .odstrani { position: absolute; top: 6px; right: 6px; width: 22px; height: 22px; border-radius: 50%;
+  border: 0; background: rgba(0, 0, 0, .45); color: #dfe8e5; font-size: 14px; line-height: 22px; cursor: pointer;
+  opacity: 0; transition: opacity .15s; }
+.bliznjica:hover .odstrani, .bliznjica:focus-within .odstrani { opacity: 1; }
+
+/* Predlogi */
+.predlogi { max-width: 1080px; margin: clamp(30px, 6vh, 56px) auto 0; }
+.predlogi-glava { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.predlogi-naslov { display: inline-flex; align-items: center; gap: 8px; padding: 0; border: 0; background: none;
+  color: var(--b); font: inherit; font-size: 1.2rem; font-weight: 700; cursor: pointer; }
+.predlogi-naslov svg { width: 20px; height: 20px; fill: none; stroke: var(--b); stroke-width: 2.2; stroke-linecap: round; }
+.cipi { display: flex; gap: 8px; flex-wrap: wrap; }
+.cip { padding: 6px 14px; border-radius: 999px; border: 1px solid var(--rob); background: rgba(10, 22, 30, .7);
+  color: #d9e4e1; font: inherit; font-size: .88rem; cursor: pointer; }
+.cip:hover, .cip:focus-visible { border-color: rgba(87, 214, 173, .6); outline: none; }
+.cip[aria-selected="true"] { background: var(--z); border-color: var(--z); color: #04261b; font-weight: 700; }
+.kartice { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 16px; }
+.kartica { position: relative; min-height: 170px; border-radius: 16px; overflow: hidden; cursor: pointer;
+  border: 1px solid var(--rob); background: #0b1620; color: #fff; text-align: left; padding: 0; font: inherit;
+  transition: transform .15s, border-color .15s; }
+.kartica:hover, .kartica:focus-visible { transform: translateY(-2px); border-color: rgba(87, 214, 173, .6); outline: none; }
+.kartica svg.slika { position: absolute; inset: 0; width: 100%; height: 100%; }
+.kartica .napis { position: absolute; left: 0; right: 0; bottom: 0; padding: 40px 18px 16px;
+  background: linear-gradient(180deg, transparent, rgba(3, 8, 12, .85)); display: flex; align-items: flex-end;
+  justify-content: space-between; gap: 10px; }
+.kartica b { display: block; font-size: 1.05rem; }
+.kartica small { display: block; margin-top: 2px; color: #d4dfdc; font-size: .86rem; }
+.kartica .puscica { width: 22px; height: 22px; fill: none; stroke: #fff; stroke-width: 2.4; stroke-linecap: round; flex: none; }
+
+@media (max-width: 820px) {
+  .kartice { grid-template-columns: 1fr 1fr; }
+  .kartice .kartica:nth-child(3) { display: none; }
+}
+@media (max-width: 520px) {
+  .kartice { grid-template-columns: 1fr; }
+  .kartice .kartica:nth-child(3) { display: block; }
+  .bliznjice { grid-template-columns: repeat(3, 1fr); }
+  .predlogi-glava { flex-direction: column; align-items: flex-start; }
+}
+/* TV: velike tarče in jasen fokus za daljinec */
+body.tv .bliznjica:focus, body.tv .kartica:focus, body.tv .cip:focus, body.tv .iskanje button:focus {
+  outline: 3px solid var(--z); outline-offset: 3px; }

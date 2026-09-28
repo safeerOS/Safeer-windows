@@ -291,7 +291,11 @@
     if (razdelek === "omrezje") nalozOmrezje(false);
     if (razdelek === "zvok") { nalozZvok(); zvokZanka(); if (!jblStanje) nalozJbl(); }
     if (razdelek === "media") naloziMedia();
-    if (razdelek === "splet") narisiSpletnoZacetno();
+    if (razdelek === "splet") {
+      narisiSpletnoZacetno();
+      // Splet je vdelan Safeer Browser (zacetna stran Splet) - enako na vseh razlicicah Safeer OS.
+      if (!document.body.classList.contains("nacin-splet")) klic("vrniSplet");
+    }
   }
   function odpriSpletnoIskanje(niz) {
     if ($("spletVnos")) $("spletVnos").value = String(niz || "").trim();
