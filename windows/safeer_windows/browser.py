@@ -664,7 +664,8 @@ class SafeerBrowserApp(QObject):
 
 class BrowserWindow(QMainWindow):
     def __init__(self, app: SafeerBrowserApp, private: bool = False, *, embedded: bool = False,
-                 on_safeer_home: Optional[Callable[[], None]] = None):
+                 on_safeer_home: Optional[Callable[[], None]] = None,
+                 on_fullscreen_changed: Optional[Callable[[bool], None]] = None):
         super().__init__()
         self.app = app
         self.private = private
@@ -673,6 +674,8 @@ class BrowserWindow(QMainWindow):
         self.safeer_os_web_mode = False
         self.media_allowed_host = ""
         self.on_safeer_home = on_safeer_home
+        self.on_fullscreen_changed = on_fullscreen_changed
+        self._embedded_content_visible = not embedded
         self.profile = app.get_private_profile() if private else app.profile
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, not embedded)
         self.devtools: Optional[QWebEngineView] = None
@@ -1240,9 +1243,19 @@ class BrowserWindow(QMainWindow):
     ZAMRZNI_PO_S = 60          # neaktiven zavihek: brez JS casovnikov in izrisovanja
     ZAVRZI_PO_S = 10 * 60      # dolgo neaktiven zavihek: renderer se sprosti, ostane poceni stanje
 
+    def set_embedded_content_visible(self, visible: bool) -> None:
+        """Vdelan aktiven zavihek je lahko v ozadju, ce je odsek Splet skrit."""
+        self._embedded_content_visible = bool(visible)
+        view = self.current_view()
+        if view is None:
+            return
+        view.setProperty("safeer_zadnjic", time.monotonic())
+        if visible and view.page().lifecycleState() != QWebEnginePage.LifecycleState.Active:
+            view.page().setLifecycleState(QWebEnginePage.LifecycleState.Active)
+
     def uskladi_zivljenje_zavihkov(self) -> None:
         zdaj = time.monotonic()
-        aktivni = self.current_view()
+        aktivni = self.current_view() if (not self.embedded or self._embedded_content_visible) else None
         stanja = QWebEnginePage.LifecycleState
         for view in self.views():
             page = view.page()
@@ -1302,6 +1315,8 @@ class BrowserWindow(QMainWindow):
     def on_fullscreen_request(self, request) -> None:
         request.accept()
         on = request.toggleOn()
+        if self.embedded and self.on_fullscreen_changed is not None:
+            self.on_fullscreen_changed(on)
         self.toolbar.setVisible(not on)
         self.tabs.tabBar().setVisible(not on)
         self.statusBar().setVisible(not on)
@@ -1310,6 +1325,8 @@ class BrowserWindow(QMainWindow):
             target.showFullScreen()
         else:
             target.showNormal()
+            if self.safeer_os_web_mode:
+                self.set_safeer_os_web_mode(True)
 
     def toggle_fullscreen(self) -> None:
         target = self.window() if self.embedded else self
@@ -1320,8 +1337,14 @@ class BrowserWindow(QMainWindow):
             self.toolbar.setVisible(True)
             self.tabs.tabBar().setVisible(True)
             self.statusBar().setVisible(True)
+            if self.embedded and self.on_fullscreen_changed is not None:
+                self.on_fullscreen_changed(False)
             target.showNormal()
+            if self.safeer_os_web_mode:
+                self.set_safeer_os_web_mode(True)
         else:
+            if self.embedded and self.on_fullscreen_changed is not None:
+                self.on_fullscreen_changed(True)
             target.showFullScreen()
 
     # -- permissions ----------------------------------------------------------

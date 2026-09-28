@@ -1613,6 +1613,32 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
         self.assertEqual(item["vrsta"], "film")
         self.assertEqual(item["leto"], 2010)
 
+    def test_safeer_splet_ostane_v_os_postavitvi_in_izhod_razsiri_os(self):
+        koren = Path(__file__).resolve().parent.parent.parent
+        app = (koren / "windows" / "safeer_windows" / "os_app.py").read_text(encoding="utf-8")
+        css = (koren / "assets" / "os" / "os.css").read_text(encoding="utf-8")
+        js = (koren / "assets" / "os" / "os.js").read_text(encoding="utf-8")
+
+        init = app[app.index("        self.zaslon = QStackedWidget"):app.index("        # Tipke za celozaslonski nacin")]
+        odpri = app[app.index("    def _odpri_notranji_splet"):app.index("    def _izmeri_stransko_in_pokazi_splet")]
+        zapri = app[app.index("    def _zapri_browser"):app.index("    def _zapri_webview2_media")]
+
+        # OS pogled in brskalnik sta otroka iste strani sklada; odpiranje spleta
+        # zato ne more zamenjati celotnega pogleda in odstraniti stranske vrstice.
+        self.assertIn("self.os_postavitev.addWidget(self.view, 1)", init)
+        self.assertIn("self.os_postavitev.addWidget(self.browser_window, 1)", init)
+        self.assertIn("self._pokazi_spletni_nacin()", odpri)
+        self.assertNotIn("setCurrentWidget(self.browser_window)", odpri)
+
+        # Izhod skrije le brskalnik ter odstrani omejitev sirine; isti self.view
+        # ponovno zavzame ves vsebnik OS.
+        self.assertIn("self.browser_window.hide()", zapri)
+        self.assertIn("self.view.setMinimumWidth(0)", zapri)
+        self.assertIn("self.view.setMaximumWidth(16777215)", zapri)
+        self.assertIn("self.os_postavitev.setStretch(0, 1)", zapri)
+        self.assertIn("body.nacin-splet #glavno { display: none; }", css)
+        self.assertIn('klic("zapriSplet", [razdelek])', js)
+
     def test_m3u_razvrsti_live_tv_in_neposredno_glasbo(self):
         playlist = (
             '#EXTM3U\n'

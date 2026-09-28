@@ -254,6 +254,9 @@
 
   // ------------------------------------------------------------------ navigacija
   function pojdi(razdelek) {
+    if (document.body.classList.contains("nacin-splet") && razdelek !== "splet") {
+      klic("zapriSplet", [razdelek]);
+    }
     S.razdelek = razdelek;
     document.querySelectorAll("#meni button").forEach(function (b) {
       b.classList.toggle("izbran", b.getAttribute("data-razdelek") === razdelek);
@@ -2362,7 +2365,11 @@
   // ------------------------------------------------------------------ zacetek
   function poveziDogodke() {
     document.querySelectorAll("#meni button").forEach(function (b) {
-      b.addEventListener("click", function () { pojdi(b.getAttribute("data-razdelek")); });
+      b.addEventListener("click", function () {
+        var razdelek = b.getAttribute("data-razdelek");
+        if (razdelek === "splet" && !document.body.classList.contains("nacin-splet")) klic("vrniSplet");
+        pojdi(razdelek);
+      });
     });
     document.querySelectorAll("[data-pojdi]").forEach(function (b) {
       b.addEventListener("click", function () { pojdi(b.getAttribute("data-pojdi")); });
