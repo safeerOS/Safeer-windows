@@ -547,8 +547,34 @@ HOME_ADAPTER_JS = r"""
         Object.keys(homeI18n).forEach(function (lang) {
             homeI18n[lang].shield_subtitle = lang === 'sl' ? 'Brskalnik za Windows' : 'Made for Windows';
             homeI18n[lang].quick_default = defaultBrowser[lang] || defaultBrowser.en;
+            homeI18n[lang].search_placeholder = {
+                sl: 'Išči po spletu ali vnesi spletni naslov', en: 'Search the web or enter an address',
+                de: 'Im Web suchen oder Adresse eingeben', es: 'Busca en la web o introduce una dirección',
+                fr: 'Rechercher sur le Web ou saisir une adresse', it: 'Cerca sul Web o inserisci un indirizzo'
+            }[lang] || 'Search the web or enter an address';
+            homeI18n[lang].intro_subtitle = {
+                sl: 'Varno, hitro in zasebno brskanje znotraj Safeer OS.',
+                en: 'Safe, fast and private browsing inside Safeer OS.',
+                de: 'Sicheres, schnelles und privates Surfen in Safeer OS.',
+                es: 'Navegación segura, rápida y privada dentro de Safeer OS.',
+                fr: 'Navigation sûre, rapide et privée dans Safeer OS.',
+                it: 'Navigazione sicura, veloce e privata in Safeer OS.'
+            }[lang] || 'Safe, fast and private browsing inside Safeer OS.';
         });
     } catch (e) {}
+    function prepareWindowsHome() {
+        document.body.classList.add('windows-home');
+        var hero = document.querySelector('.clock-display');
+        if (hero) hero.innerHTML = '<h1 class="browser-home-title" data-i18n="app_title">Safeer Browser</h1>' +
+            '<p class="browser-home-subtitle" data-i18n="intro_subtitle"></p>';
+        var submit = document.querySelector('.search-submit');
+        if (submit) {
+            submit.removeAttribute('data-i18n');
+            submit.textContent = '→';
+            submit.setAttribute('aria-label', 'Search');
+        }
+    }
+    prepareWindowsHome();
     var windowsPortals = null;
     try {
         var sharedActivePortals = getActivePortals;
@@ -562,9 +588,36 @@ HOME_ADAPTER_JS = r"""
         try { setShieldMetrics(state.ads || 0, state.threats || 0); } catch (e) {}
         try { renderPortals(); } catch (e) {}
         try { changeHomeLanguage(state.language || 'sl', false); } catch (e) {}
+        prepareWindowsHome();
+        try { changeHomeLanguage(state.language || 'sl', false); } catch (e) {}
         document.documentElement.setAttribute('data-safeer-ready', '1');
     };
 })();
+"""
+
+WINDOWS_HOME_CSS = r"""
+body.windows-home { align-items: flex-start; padding: clamp(34px, 7vh, 78px) 24px; }
+.windows-home .desktop-container { max-width: 980px; gap: 30px; }
+.windows-home .shield-header,
+.windows-home .engine-pills,
+.windows-home .shortcut-hints,
+.windows-home .integrations-quick-bar,
+.windows-home .security-disclaimer-bar { display: none; }
+.windows-home .center-stage { gap: 26px; padding-top: clamp(20px, 7vh, 70px); }
+.windows-home .browser-home-title {
+  color: #f8fafc; font-size: clamp(2.8rem, 6vw, 4.8rem); font-weight: 800;
+  letter-spacing: -.045em; line-height: 1;
+}
+.windows-home .browser-home-subtitle { color: #adbbb2; font-size: 1.08rem; margin-top: 14px; }
+.windows-home .search-form { max-width: 760px; }
+.windows-home .search-bar { border-color: rgba(87,214,173,.28); padding: 10px 12px 10px 22px; }
+.windows-home .search-bar:focus-within { border-color: #57D6AD; box-shadow: 0 0 24px rgba(87,214,173,.18); }
+.windows-home .search-submit {
+  align-items: center; background: #57D6AD; border-radius: 999px; display: inline-flex;
+  font-size: 1.5rem; height: 42px; justify-content: center; padding: 0; width: 42px;
+}
+.windows-home .portals-section { background: rgba(25,36,30,.72); border-radius: 18px; padding: 22px; }
+.windows-home .portal-card:hover { border-color: #57D6AD; }
 """
 
 STORAGE_GUARD_JS = r"""
@@ -622,6 +675,8 @@ def home_html() -> str:
     page = page.replace('<script src="home.js"></script>',
                         '<script src="storage-guard.js"></script>\n  <script src="home.js"></script>\n'
                         '  <script src="windows-adapter.js"></script>')
+    page = page.replace('<link rel="stylesheet" href="home.css">',
+                        '<link rel="stylesheet" href="home.css">\n  <link rel="stylesheet" href="windows-home.css">')
     return page
 
 
@@ -753,6 +808,8 @@ def scheme_resource(host: str, path: str, query: str, lang: str = "sl") -> Optio
                              f'<a href="{safe}">{safe}</a>').encode("utf-8")
     if name == "windows-adapter.js":
         return "application/javascript", HOME_ADAPTER_JS.encode("utf-8")
+    if name == "windows-home.css":
+        return "text/css", WINDOWS_HOME_CSS.encode("utf-8")
     if name == "storage-guard.js":
         return "application/javascript", STORAGE_GUARD_JS.encode("utf-8")
     if name in _HOME_FILES:
@@ -770,6 +827,7 @@ ICON_SHAPES = {
     "home": '<path d="M4 11.5 12 4.5l8 7"/><path d="M6.5 10v9.5h11V10"/>',
     "star": '<polygon points="12 3.5 14.6 9 20.5 9.6 16 13.6 17.3 19.5 12 16.5 6.7 19.5 8 13.6 3.5 9.6 9.4 9"/>',
     "download": '<path d="M12 4v11"/><polyline points="7 10.5 12 15.5 17 10.5"/><path d="M5 19.5h14"/>',
+    "extensions": '<path d="M9 3h6v4h4v6h-4v4H9v4H3v-6h4V9H3V3z"/>',
     "menu": '<line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/>',
     "plus": '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
     "up": '<polyline points="6 15 12 9 18 15"/>',

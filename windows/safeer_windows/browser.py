@@ -22,18 +22,19 @@ from PySide6.QtWebEngineCore import (QWebEngineDownloadRequest, QWebEnginePage, 
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout,
                                QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
-                               QMainWindow, QMenu, QMessageBox, QPushButton, QTabBar, QTabWidget, QToolBar,
+                               QMainWindow, QMenu, QMessageBox, QPushButton, QStackedWidget, QTabBar, QToolBar,
                                QToolButton, QVBoxLayout, QWidget)
 
 from . import policy
 
 TEXT: Dict[str, Dict[str, str]] = {
     "sl": {
-        "address": "Išči ali vpiši spletni naslov",
+        "address": "Išči ali vnesi spletni naslov …",
         "new_tab": "Nov zavihek", "new_window": "Novo okno", "private_window": "Novo zasebno okno",
         "private": "Zasebno", "back": "Nazaj", "forward": "Naprej", "reload": "Osveži", "stop": "Ustavi",
         "home": "Domača stran", "add_home": "Dodaj stran na domačo stran", "added_home": "Stran je dodana na domačo stran.",
-        "menu": "Meni", "downloads": "Prenosi", "find": "Najdi na strani", "reader": "Bralni način",
+        "menu": "Meni", "downloads": "Prenosi", "extensions": "Razširitve", "secure_address": "Varna naslovna vrstica",
+        "find": "Najdi na strani", "reader": "Bralni način",
         "zoom_in": "Povečaj", "zoom_out": "Pomanjšaj", "zoom_reset": "Običajna velikost", "fullscreen": "Celozaslonski način",
         "settings": "Nastavitve", "default_browser": "Nastavi kot privzeti brskalnik", "import": "Uvozi zaznamke",
         "clear_data": "Počisti podatke brskanja", "devtools": "Orodja za razvijalce", "about": "O brskalniku",
@@ -61,11 +62,12 @@ TEXT: Dict[str, Dict[str, str]] = {
         "default_help": "Windows odpre nastavitve privzetih aplikacij. Izberi Safeer Browser za HTTP, HTTPS in datoteke .html.",
     },
     "en": {
-        "address": "Search or enter web address",
+        "address": "Search or enter web address …",
         "new_tab": "New tab", "new_window": "New window", "private_window": "New private window",
         "private": "Private", "back": "Back", "forward": "Forward", "reload": "Reload", "stop": "Stop",
         "home": "Home", "add_home": "Add page to the start page", "added_home": "Page added to the start page.",
-        "menu": "Menu", "downloads": "Downloads", "find": "Find on page", "reader": "Reader mode",
+        "menu": "Menu", "downloads": "Downloads", "extensions": "Extensions", "secure_address": "Secure address bar",
+        "find": "Find on page", "reader": "Reader mode",
         "zoom_in": "Zoom in", "zoom_out": "Zoom out", "zoom_reset": "Actual size", "fullscreen": "Full screen",
         "settings": "Settings", "default_browser": "Make default browser", "import": "Import bookmarks",
         "clear_data": "Clear browsing data", "devtools": "Developer tools", "about": "About",
@@ -96,7 +98,7 @@ TEXT: Dict[str, Dict[str, str]] = {
 
 STYLE = """
 QMainWindow, QWidget#chrome { background: #101814; color: #f1f5f9; }
-QToolBar { background: #101814; border: 0; padding: 4px 6px; spacing: 4px; }
+QToolBar { background: #101814; border: 0; padding: 5px 8px; spacing: 4px; }
 QToolButton { color: #e2e8f0; background: transparent; border: 1px solid transparent; border-radius: 8px;
               padding: 3px 8px; font-size: 16px; min-width: 22px; }
 QToolButton:hover { background: #1f2d26; border-color: #2f4238; }
@@ -104,12 +106,13 @@ QToolButton:disabled { color: #4b5b52; }
 QToolButton::menu-indicator { image: none; }
 QLineEdit#address { background: #19241e; color: #f8fafc; border: 1px solid #2f4238; border-radius: 16px;
                     padding: 6px 14px; font-size: 14px; selection-background-color: #4b7d2a; }
-QLineEdit#address:focus { border-color: #87cf3e; }
-QLabel#shield { color: #9bd478; padding: 0 8px; font-weight: 600; }
+QLineEdit#address:focus { border-color: #57D6AD; }
+QLabel#addressLock { color: #57D6AD; padding: 0 2px 0 7px; font-size: 14px; }
+QLabel#shield { color: #57D6AD; padding: 0 8px; font-weight: 600; }
 QTabWidget::pane { border: 0; }
 QTabBar { background: #0b120e; }
 QTabBar::tab { background: #0b120e; color: #adbbb2; padding: 7px 12px; border: 0; min-width: 110px; max-width: 220px; }
-QTabBar::tab:selected { background: #19241e; color: #f8fafc; border-top: 2px solid #87cf3e; }
+QTabBar::tab:selected { background: #19241e; color: #f8fafc; border-top: 2px solid #57D6AD; }
 QTabBar::tab:hover:!selected { background: #141e18; }
 QTabBar::close-button { subcontrol-position: right; padding: 2px; border-radius: 4px; }
 QTabBar::close-button:hover { background: #2f4238; }
@@ -123,7 +126,7 @@ QDialog QLabel, QDialog QCheckBox { color: #f1f5f9; }
 QComboBox, QListWidget, QDialog QLineEdit { background: #19241e; color: #f1f5f9; border: 1px solid #2f4238; border-radius: 6px; padding: 4px; }
 QPushButton { background: #19241e; color: #f1f5f9; border: 1px solid #50616b; border-radius: 8px; padding: 6px 14px; }
 QPushButton:hover { background: #20312d; border-color: #6b7c86; }
-QPushButton:default { background: #9bd478; color: #0b120e; border-color: #9bd478; }
+QPushButton:default { background: #57D6AD; color: #0b120e; border-color: #57D6AD; }
 """
 
 
@@ -327,10 +330,99 @@ class SafeerPage(QWebEnginePage):
                 print(f"QT_MEDIA_CONSOLE level={level} {safe_message[:400]}", flush=True)
 
 
-class Tabs(QTabWidget):
+class Tabs(QWidget):
+    """Zavihki z orodno vrstico med vrstico zavihkov in spletno vsebino."""
+
     def __init__(self, parent: QWidget):
         super().__init__(parent)
-        self.setTabBar(TabBar(self))
+        self._bar = TabBar(self)
+        self._stack = QStackedWidget(self)
+        self._tab_row = QHBoxLayout()
+        self._tab_row.setContentsMargins(0, 0, 0, 0)
+        self._tab_row.setSpacing(0)
+        self._tab_row.addWidget(self._bar, 1)
+        self._corner: Optional[QWidget] = None
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self._layout.setSpacing(0)
+        self._layout.addLayout(self._tab_row)
+        self._layout.addWidget(self._stack, 1)
+        self.tabCloseRequested = self._bar.tabCloseRequested
+        self.currentChanged = self._bar.currentChanged
+        self._bar.currentChanged.connect(self._sync_current)
+        self._bar.tabMoved.connect(self._tab_moved)
+
+    def _sync_current(self, index: int) -> None:
+        self._stack.setCurrentIndex(index)
+
+    def _tab_moved(self, old: int, new: int) -> None:
+        widget = self._stack.widget(old)
+        if widget is not None:
+            self._stack.insertWidget(new, widget)
+            self._stack.setCurrentIndex(self._bar.currentIndex())
+
+    def setNavigationWidget(self, widget: QWidget) -> None:
+        self._layout.insertWidget(1, widget)
+
+    def setDocumentMode(self, enabled: bool) -> None:
+        self._bar.setDocumentMode(enabled)
+
+    def setTabsClosable(self, enabled: bool) -> None:
+        self._bar.setTabsClosable(enabled)
+
+    def setMovable(self, enabled: bool) -> None:
+        self._bar.setMovable(enabled)
+
+    def setElideMode(self, mode: Qt.TextElideMode) -> None:
+        self._bar.setElideMode(mode)
+
+    def setCornerWidget(self, widget: QWidget, _corner: Qt.Corner) -> None:
+        if self._corner is not None:
+            self._tab_row.removeWidget(self._corner)
+        self._corner = widget
+        self._tab_row.addWidget(widget)
+
+    def tabBar(self) -> QTabBar:
+        return self._bar
+
+    def count(self) -> int:
+        return self._bar.count()
+
+    def currentIndex(self) -> int:
+        return self._bar.currentIndex()
+
+    def setCurrentIndex(self, index: int) -> None:
+        self._bar.setCurrentIndex(index)
+
+    def currentWidget(self) -> Optional[QWidget]:
+        return self._stack.currentWidget()
+
+    def widget(self, index: int) -> Optional[QWidget]:
+        return self._stack.widget(index)
+
+    def indexOf(self, widget: QWidget) -> int:
+        return self._stack.indexOf(widget)
+
+    def insertTab(self, index: int, widget: QWidget, label: str) -> int:
+        self._stack.insertWidget(index, widget)
+        return self._bar.insertTab(index, label)
+
+    def removeTab(self, index: int) -> None:
+        widget = self._stack.widget(index)
+        if widget is not None:
+            self._stack.removeWidget(widget)
+        self._bar.removeTab(index)
+        self._sync_current(self._bar.currentIndex())
+
+    def setTabIcon(self, index: int, icon: QIcon) -> None:
+        if index >= 0:
+            self._bar.setTabIcon(index, icon)
+
+    def setTabText(self, index: int, text: str) -> None:
+        self._bar.setTabText(index, text)
+
+    def setTabToolTip(self, index: int, text: str) -> None:
+        self._bar.setTabToolTip(index, text)
 
 
 class TabBar(QTabBar):
@@ -387,7 +479,7 @@ class SafeerBrowserApp(QObject):
         self.save_timer.start()
         qt_app.setStyleSheet(STYLE + tab_close_style())
         self.icons = {name: make_icon(name) for name in policy.ICON_SHAPES}
-        self.icons["star_filled"] = make_icon("star", "#9bd478", "#9bd478")
+        self.icons["star_filled"] = make_icon("star", "#57D6AD", "#57D6AD")
         icon_path = self.icon_path()
         if icon_path:
             qt_app.setWindowIcon(QIcon(icon_path))
@@ -701,7 +793,7 @@ class BrowserWindow(QMainWindow):
 
         self.toolbar = QToolBar(self)
         self.toolbar.setMovable(False)
-        self.addToolBar(self.toolbar)
+        self.tabs.setNavigationWidget(self.toolbar)
         self.safeer_home_button: Optional[QToolButton] = None
         if embedded:
             self.safeer_home_button = self._tool("home", on_safeer_home or (lambda: None))
@@ -711,6 +803,9 @@ class BrowserWindow(QMainWindow):
         self.forward_button = self._tool("forward", lambda: self.current_view() and self.current_view().forward())
         self.reload_button = self._tool("reload", self.reload_or_stop)
         self.home_button = self._tool("home", lambda: self.load_in_current(policy.HOME_URL))
+        self.address_lock = QLabel("🔒", self)
+        self.address_lock.setObjectName("addressLock")
+        self.toolbar.addWidget(self.address_lock)
         self.address = QLineEdit(self)
         self.address.setObjectName("address")
         self.address.setClearButtonEnabled(True)
@@ -737,6 +832,7 @@ class BrowserWindow(QMainWindow):
             self.ob_strani_button.hide()
         self.star_button = self._tool("star", self.add_current_to_home)
         self.downloads_button = self._tool("download", self.show_downloads)
+        self.extensions_button = self._tool("extensions", self.open_settings)
         self.menu_button = QToolButton(self)
         self.menu_button.setIcon(app.icons["menu"])
         self.menu_button.setIconSize(QSize(18, 18))
@@ -772,8 +868,8 @@ class BrowserWindow(QMainWindow):
         self.tabs.tabBar().setVisible(not enabled)
         self.new_tab_button.setVisible(not enabled)
         self.statusBar().setVisible(not enabled)
-        for widget in (self.forward_button, self.home_button, self.address, self.shield_label,
-                       self.star_button, self.downloads_button, self.menu_button):
+        for widget in (self.forward_button, self.home_button, self.address_lock, self.address, self.shield_label,
+                       self.star_button, self.downloads_button, self.extensions_button, self.menu_button):
             self._set_toolbar_widget_visible(widget, not enabled)
         # Nazaj, osveži in »Safeer OS« ostanejo vidni ter so resnične akcije.
         self.back_button.setVisible(True)
@@ -784,30 +880,29 @@ class BrowserWindow(QMainWindow):
         enabled = bool(enabled and self.embedded and not self.media_mode)
         self.safeer_os_web_mode = enabled
         if enabled:
-            self.tabs.tabBar().hide()
-            self.new_tab_button.hide()
+            self.tabs.tabBar().show()
+            self.new_tab_button.show()
             self.statusBar().hide()
-            for widget in (self.home_button, self.star_button, self.downloads_button, self.menu_button):
-                self._set_toolbar_widget_visible(widget, False)
-            for widget in (self.back_button, self.forward_button, self.reload_button,
-                           self.address, self.shield_label):
+            for widget in (self.back_button, self.forward_button, self.reload_button, self.home_button,
+                           self.address_lock, self.address, self.star_button, self.shield_label,
+                           self.downloads_button, self.extensions_button, self.menu_button):
                 self._set_toolbar_widget_visible(widget, True)
             if self.safeer_home_button is not None:
-                self.safeer_home_button.show()
+                self._set_toolbar_widget_visible(self.safeer_home_button, False)
             if self.zapisek_button is not None:
                 self._set_toolbar_widget_visible(self.zapisek_button, True)
             if self.ob_strani_button is not None:
                 self._set_toolbar_widget_visible(self.ob_strani_button, True)
-            self.address.setPlaceholderText("Išči ali vnesi spletni naslov")
+            self.address.setPlaceholderText("Išči ali vnesi spletni naslov …")
         else:
             self.tabs.tabBar().show()
             self.new_tab_button.show()
             self.statusBar().show()
-            for widget in (self.home_button, self.star_button, self.downloads_button, self.menu_button,
-                           self.forward_button, self.address, self.shield_label):
+            for widget in (self.home_button, self.star_button, self.downloads_button, self.extensions_button,
+                           self.menu_button, self.forward_button, self.address_lock, self.address, self.shield_label):
                 self._set_toolbar_widget_visible(widget, True)
             if self.safeer_home_button is not None:
-                self.safeer_home_button.show()
+                self._set_toolbar_widget_visible(self.safeer_home_button, True)
             if self.zapisek_button is not None:
                 self._set_toolbar_widget_visible(self.zapisek_button, False)
             if self.ob_strani_button is not None:
@@ -915,6 +1010,8 @@ class BrowserWindow(QMainWindow):
                             (self.downloads_button, "downloads"), (self.menu_button, "menu"), (self.new_tab_button, "new_tab")):
             button.setToolTip(tr(app, key))
         self.shield_label.setToolTip(tr(app, "shield"))
+        self.address_lock.setToolTip(tr(app, "secure_address"))
+        self.extensions_button.setToolTip(tr(app, "extensions"))
         self.find_input.setPlaceholderText(tr(app, "find_placeholder"))
         self.menu.clear()
         entries = [

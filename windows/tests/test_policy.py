@@ -182,10 +182,22 @@ class StartPageTests(unittest.TestCase):
         self.assertIn('data-i18n="quick_default"', page)
         self.assertLess(page.index("storage-guard.js"), page.index('src="home.js"'))
         self.assertLess(page.index('src="home.js"'), page.index("windows-adapter.js"))
-        for path in ("/home.css", "/home.js", "/assets/safeer-mark.svg", "/windows-adapter.js"):
+        for path in ("/home.css", "/home.js", "/assets/safeer-mark.svg", "/windows-adapter.js", "/windows-home.css"):
             self.assertIsNotNone(policy.scheme_resource("home", path, ""), path)
         self.assertIsNone(policy.scheme_resource("home", "/../../core/config.py", ""))
         self.assertIsNone(policy.scheme_resource("evil", "/", ""))
+
+    def test_windows_home_has_safeer_os_intro_search_and_user_portals(self):
+        adapter = policy.HOME_ADAPTER_JS
+        css = policy.WINDOWS_HOME_CSS
+        self.assertIn("Varno, hitro in zasebno brskanje znotraj Safeer OS.", adapter)
+        self.assertIn("Išči po spletu ali vnesi spletni naslov", adapter)
+        self.assertIn("renderPortals()", adapter)
+        self.assertIn("windowsPortals = state.portals", adapter)
+        self.assertIn("browser-home-title", adapter)
+        self.assertIn("#57D6AD", css)
+        home_js = policy.scheme_resource("home", "/home.js", "")[1].decode("utf-8")
+        self.assertNotIn("icons.duckduckgo.com/ip3/", home_js)
 
     def test_icons_are_valid_svg(self):
         from xml.dom import minidom
