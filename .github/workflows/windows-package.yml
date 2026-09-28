@@ -12,6 +12,7 @@ on:
       - 'core/signed_feed.py'
       - 'core/threat_intel.py'
       - 'ui/home.*'
+      - 'ui/splet.*'
       - 'assets/icon.png'
       - 'assets/safeer-mark.svg'
       - '.github/workflows/windows-package.yml'
@@ -20,6 +21,7 @@ on:
       - 'windows/**'
       - 'core/**'
       - 'ui/home.*'
+      - 'ui/splet.*'
       - '.github/workflows/windows-package.yml'
   release:
     types: [published]

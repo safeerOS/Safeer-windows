@@ -91,7 +91,7 @@ body { overflow-x: hidden; }
 @media (max-width: 520px) {
   .kartice { grid-template-columns: 1fr; }
   .kartice .kartica:nth-child(3) { display: block; }
-  .bliznjice { grid-template-columns: repeat(3, 1fr); }
+  .bliznjice { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .predlogi-glava { flex-direction: column; align-items: flex-start; }
 }
 /* TV: velike tarče in jasen fokus za daljinec */
