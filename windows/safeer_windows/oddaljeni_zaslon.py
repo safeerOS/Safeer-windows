@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (QHBoxLayout, QLabel, QPushButton, QSizePolicy,
 from .oddaljeni_zaslon_protokol import (
     NAJVECJI_OKVIR, OKVIR_OBVESTILO, OKVIR_SLIKA, OKVIR_ZVOK,
     RazclenjevalnikOkvirjev, Seja, ZavrnjenaSeja, preslikaj_tipko_ime,
+    je_igra,
     razcleni_odgovor,
 )
 
@@ -305,6 +306,7 @@ class OddaljeniZaslon(QWidget):
                 odgovor = self.backend.ukaz_pocakaj(
                     self.id_naprave, "screen.start", {"quality": "najvisja", "screen": self.zaslon_cilj}, cas=15.0)
                 seja = razcleni_odgovor(odgovor, self.naprava or self._poisci_napravo())
+                self._igra = je_igra(odgovor)
                 if self._zapiram:
                     self.backend.ukaz_pocakaj(self.id_naprave, "screen.stop", {}, cas=5.0)
                     return
@@ -325,6 +327,9 @@ class OddaljeniZaslon(QWidget):
         self.znova.setVisible(stanje == "napaka")
         if stanje == "tece":
             self.slika.setFocus()
+            # Igra na drugem racunalniku: takoj cez cel zaslon, kot na televizorju (gumb "V okno" vrne okno).
+            if getattr(self, "_igra", False) and not self.isFullScreen():
+                self._preklopi_celozaslonsko()
 
     def _preklopi_celozaslonsko(self) -> None:
         if self.isFullScreen():

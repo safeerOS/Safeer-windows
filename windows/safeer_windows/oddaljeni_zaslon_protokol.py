@@ -104,6 +104,19 @@ def preslikaj_tipko_ime(ime: str, besedilo: str = "", dol: bool = True,
     return None
 
 
-__all__ = ["MODIFIKATORJI", "NAJVECJI_OKVIR", "OKVIR_OBVESTILO", "OKVIR_SLIKA",
+__all__ = ["MODIFIKATORJI", "je_igra", "NAJVECJI_OKVIR", "OKVIR_OBVESTILO", "OKVIR_SLIKA",
            "OKVIR_ZVOK", "POSEBNE_TIPKE", "RazclenjevalnikOkvirjev", "Seja",
            "ZavrnjenaSeja", "preslikaj_tipko_ime", "razcleni_odgovor"]
+
+
+def je_igra(odgovor) -> bool:
+    """Ali gostitelj pravi, da je spredaj igra (screen.start vrne "game": true)."""
+    if not isinstance(odgovor, dict):
+        return False
+    for kljuc in ("game",):
+        if odgovor.get(kljuc) is True:
+            return True
+    for gnezdo in ("result", "data", "odgovor"):
+        if isinstance(odgovor.get(gnezdo), dict) and odgovor[gnezdo].get("game") is True:
+            return True
+    return False
