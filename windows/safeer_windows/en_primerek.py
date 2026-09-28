@@ -24,6 +24,19 @@ def ime() -> str:
     return "SafeerOS-" + re.sub(r"[^A-Za-z0-9_.-]", "_", uporabnik)
 
 
+def razlicica_kode() -> str:
+    """Odtis namescene kode (zaganjalnik ob vsaki novi razlicici zapise .version); prazen, ce ga ni."""
+    from pathlib import Path
+    try:
+        return (Path(__file__).resolve().parents[2] / ".version").read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+# Odtis kode, s katero je ta proces zagnan (datoteko zaganjalnik ob posodobitvi prepise).
+ZAGNANA_KODA = razlicica_kode()
+
+
 def zakleni() -> Optional[QLockFile]:
     """Vrne zaklep, ce je ta proces prva kopija; sicer None. Zapusceni zaklep (mrtev proces) prevzame."""
     zaklep = QLockFile(os.path.join(QDir.tempPath(), ime() + ".lock"))
@@ -36,20 +49,40 @@ def zakleni() -> Optional[QLockFile]:
 
 
 def predaj_prvemu(razdelek: str, ozadje: bool, cakaj_ms: int = 4000) -> bool:
-    """Tece ze druga kopija: ji predamo razdelek (prva se lahko se zaganja, zato nekaj casa poskusamo)."""
+    """Tece ze druga kopija: ji predamo razdelek (prva se lahko se zaganja, zato nekaj casa poskusamo).
+
+    Vrne True, ce je prva kopija prevzela zagon. False pomeni, da se ne odziva ALI da je bila zagnana
+    s starejso kodo in se je zato umaknila - v tem primeru pokliči prevzemi_zaklep().
+    """
     import time
     konec = time.monotonic() + cakaj_ms / 1000.0
     while True:
         vticnica = QLocalSocket()
         vticnica.connectToServer(ime())
         if vticnica.waitForConnected(300):
-            vticnica.write(json.dumps({"razdelek": razdelek, "ozadje": ozadje}).encode("utf-8") + b"\n")
+            vticnica.write(json.dumps({"razdelek": razdelek, "ozadje": ozadje,
+                                       "koda": ZAGNANA_KODA}).encode("utf-8") + b"\n")
             vticnica.waitForBytesWritten(1000)
+            odgovor = b""
+            if vticnica.waitForReadyRead(1500):
+                odgovor = bytes(vticnica.readAll())
             vticnica.disconnectFromServer()
-            return True
+            return not odgovor.startswith(b"umikam")
         if time.monotonic() >= konec:
             return False
         time.sleep(0.2)
+
+
+def prevzemi_zaklep(cakaj_ms: int = 15000) -> Optional[QLockFile]:
+    """Po posodobitvi se stara kopija zapre; pocakamo, da sprosti zaklep, in ga prevzamemo."""
+    import time
+    konec = time.monotonic() + cakaj_ms / 1000.0
+    while time.monotonic() < konec:
+        zaklep = zakleni()
+        if zaklep is not None:
+            return zaklep
+        time.sleep(0.3)
+    return None
 
 
 def streznik(okno) -> QLocalServer:
@@ -67,6 +100,19 @@ def streznik(okno) -> QLocalServer:
             sporocilo = json.loads(bytes(v.readAll()).decode("utf-8", "replace").strip().splitlines()[0])
         except (ValueError, IndexError):
             sporocilo = {}
+        nova = str(sporocilo.get("koda") or "")
+        if nova and ZAGNANA_KODA and nova != ZAGNANA_KODA:
+            # Namescena je nova razlicica: umaknemo se, da uporabnik dobi posodobljen Safeer OS
+            # (prej je zagon predal staremu procesu in posodobitev je obvelja sele po ponovnem zagonu).
+            v.write(b"umikam\n")
+            v.waitForBytesWritten(1000)
+            v.disconnectFromServer()
+            print("[SafeerOS] Namescena je nova razlicica; ta kopija se zapira.", flush=True)
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(0, okno.koncaj_za_posodobitev)
+            return
+        v.write(b"ok\n")          # odgovor, da nova kopija ne caka po nepotrebnem
+        v.waitForBytesWritten(500)
         v.disconnectFromServer()
         if sporocilo.get("ozadje"):
             return  # samodejni zagon v ozadju: prva kopija ze tece, okna ne vsiljujemo

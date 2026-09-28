@@ -2488,7 +2488,7 @@
     if (!most) { narisiSporocila(); return; }
     klic("sporocilaSeznam").then(function (p) {
       S.sporocilaSkupine = p.skupine || []; S.sporocilaKanali = p.kanali || [];
-      narisiSporocila();
+      narisiSporocila(); uskladiOdprtPogovor();
     }).catch(function () { narisiSporocila(); });
   }
   function kanalIkona(vrsta) { return vrsta === "email" ? "sporocila" : vrsta === "safeer" ? "povezava" : "sporocila"; }
@@ -2548,7 +2548,11 @@
     $("sporocilaNaslov").textContent = oseba.ime + " · " + ((pogovor.kanal || {}).ime || "");
     var vnos = $("sporocilaBesedilo"), gumb = $("sporocilaVnos").querySelector("button");
     vnos.disabled = false; gumb.disabled = false;
+    naloziVsebinoPogovora(pogovor);
+  }
+  function naloziVsebinoPogovora(pogovor) {
     klic("sporocilaPogovor", [pogovor.kanal_id, pogovor.id]).then(function (seznam) {
+      if (S.sporocilaAktivni !== pogovor) return;   // uporabnik je medtem odprl drug pogovor
       var cilj = $("sporocilaVsebina"); cilj.innerHTML = "";
       (seznam || []).forEach(function (s) {
         var m = el("div", "mehurcek " + (s.smer === "ven" ? "ven" : "noter"));
@@ -2556,6 +2560,26 @@
       }); cilj.scrollTop = cilj.scrollHeight;
       if (pogovor.neprebrano) { pogovor.neprebrano = 0; naloziSporocila(); }
     });
+  }
+  /* Po osvezitvi seznama: odprt pogovor dobi nova sporocila, izginul (odstranjen kanal) se zapre.
+     Prej je desna stran ostala na starem stanju, dokler pogovora nisi znova odprl. */
+  function uskladiOdprtPogovor() {
+    var a = S.sporocilaAktivni; if (!a) return;
+    var nov = null;
+    S.sporocilaSkupine.forEach(function (s) {
+      (s.pogovori || []).forEach(function (p) { if (p.id === a.id && p.kanal_id === a.kanal_id) nov = p; });
+    });
+    if (!nov) {
+      S.sporocilaAktivni = null;
+      $("sporocilaNaslov").textContent = t("izberiPogovor");
+      $("sporocilaVsebina").innerHTML = "";
+      $("sporocilaBesedilo").disabled = true; $("sporocilaVnos").querySelector("button").disabled = true;
+      narisiSporocila();
+      return;
+    }
+    if (nov.cas !== a.cas || nov.zadnje_sporocilo !== a.zadnje_sporocilo) {
+      S.sporocilaAktivni = nov; narisiSporocila(); naloziVsebinoPogovora(nov);
+    }
   }
   var sporocilaCasovnik = 0;
   function sporocilaZanka() {

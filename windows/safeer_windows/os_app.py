@@ -321,6 +321,8 @@ class SafeerOsWindow(QMainWindow):
         self.zapiski = zapiski.Zapiski(os.path.join(os_backend_win.CONFIG_DIR, "zapiski.json"))
         # Sporocila: e-posta in Chatwoot v eni niti na osebo; gesla samo v Upravitelju poverilnic.
         self.sporocila = os_sporocila.SporocilaOS(os.path.join(os_backend_win.CONFIG_DIR, "sporocila.sqlite3"))
+        # Zacasni profili predvajalnika iz prejsnjih zagonov; v ozadju, da zagon ni pocasnejsi.
+        threading.Thread(target=webview2_media.pocisti_seje, kwargs={"starejse_od_s": 120}, daemon=True).start()
         self.browser_window.na_zapisek = self._izrezek_iz_spleta
         self.browser_window.na_zapisek_ob_strani = self._preklopi_zapisek_ob_strani
         self._zapisek_dock = None
@@ -1412,6 +1414,18 @@ class SafeerOsWindow(QMainWindow):
             return s.privzeta_streznika(prvi)
         raise ValueError("neznano")
 
+    def koncaj_za_posodobitev(self) -> None:
+        """Nova razlicica se zaganja: zapremo vse (Link, zaslon, predvajalnik), sprostimo zaklep in koncamo."""
+        self.close()
+        try:
+            if getattr(self, "_streznik_primerka", None) is not None:
+                self._streznik_primerka.close()
+            if getattr(self, "_zaklep_primerka", None) is not None:
+                self._zaklep_primerka.unlock()
+        except Exception:
+            pass
+        QApplication.quit()
+
     def closeEvent(self, event) -> None:
         try:
             self.control_backend.koncaj()
@@ -1468,9 +1482,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         if en_primerek.predaj_prvemu(zacetni, bool(args.ozadje)):
             print("[SafeerOS] Ze tece; razdelek predan prvi kopiji.", flush=True)
             return 0
-        # Prva kopija se ne odziva (visi ali se zapira): ne zaganjamo druge, da ne podvojimo Linka.
-        print("[SafeerOS] Ze tece druga kopija, ki se ne odziva.", flush=True)
-        return 1
+        # Prva kopija se umika (tece starejsa koda) ali se ne odziva: pocakamo, da sprosti zaklep.
+        # Ce ga ne sprosti, ne zaganjamo druge kopije, da ne podvojimo Linka.
+        zaklep = en_primerek.prevzemi_zaklep()
+        if zaklep is None:
+            print("[SafeerOS] Ze tece druga kopija, ki se ne odziva.", flush=True)
+            return 1
+        print("[SafeerOS] Stara kopija se je umaknila; zaganjam novo razlicico.", flush=True)
     app.setApplicationName("SafeerOS")
     app.setOrganizationName("Safeer")
     browser.apply_dns_mode(browser_settings)
