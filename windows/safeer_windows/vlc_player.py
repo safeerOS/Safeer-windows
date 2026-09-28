@@ -83,7 +83,7 @@ class VlcPlayerWidget(QWidget):
         labels = QVBoxLayout()
         brand = QLabel("SAFEER OS · MEDIA")
         brand.setObjectName("brand")
-        self.title = QLabel("Safeer Media")
+        self.title = QLabel("Medijski center")
         self.title.setObjectName("title")
         self.meta = QLabel("")
         self.meta.setObjectName("meta")
@@ -193,7 +193,7 @@ class VlcPlayerWidget(QWidget):
             return False
         variant_index = min(max(0, variant_index), len(variants) - 1)
         self.current_item = dict(item)
-        self.title.setText(str(item.get("naslov") or "Safeer Media"))
+        self.title.setText(str(item.get("naslov") or "Medijski center"))
         self.meta.setText(" · ".join(filter(None, (str(item.get("izvajalec") or ""),
                                                     str(item.get("leto") or ""),
                                                     str(variants[variant_index].get("vir") or "")))))

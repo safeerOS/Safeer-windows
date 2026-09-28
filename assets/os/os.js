@@ -2615,7 +2615,7 @@
         mreza.appendChild(el("h3", "media-skupina", ubezi(mediaZadnjaSkupina)));
       }
       var card = el("button", "media-kartica");
-      card.setAttribute("aria-label", (x.naslov || "Safeer Media") + " — " + mediaOznaka(x.vrsta));
+      card.setAttribute("aria-label", (x.naslov || "Medijski center") + " — " + mediaOznaka(x.vrsta));
     if (x.slika) {
         var image = document.createElement("img"); image.alt = ""; image.loading = "lazy"; image.src = x.slika;
         image.onerror = function () { image.replaceWith(el("span", "media-brez-slike", svg(mediaIkona(x.vrsta)))); };
@@ -2690,7 +2690,7 @@
     napakaEl.hidden = true;
     napakaEl.classList.remove("media-opozorilo");
     napakaEl.textContent = t("mediaNapaka");
-    $("mediaPredvajalnikNaslov").textContent = item.naslov || "Safeer Media";
+    $("mediaPredvajalnikNaslov").textContent = item.naslov || "Medijski center";
 
     var metaSeznam = [item.izvajalec];
     if (item.vrsta === "serija" && (item.sezona || item.epizoda)) {
@@ -2732,7 +2732,7 @@
         };
         player.play().catch(function () {});
         if (navigator.mediaSession) {
-          try { navigator.mediaSession.metadata = new MediaMetadata({title: item.naslov || "Safeer Media", artist: item.izvajalec || item.vir || "Safeer OS", artwork: item.slika ? [{src: item.slika}] : []}); } catch (e) {}
+          try { navigator.mediaSession.metadata = new MediaMetadata({title: item.naslov || "Medijski center", artist: item.izvajalec || item.vir || "Safeer OS", artwork: item.slika ? [{src: item.slika}] : []}); } catch (e) {}
         }
         media.timer = window.setTimeout(function () {
           media.timer = 0;
