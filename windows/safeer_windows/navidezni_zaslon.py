@@ -458,7 +458,17 @@ class NavidezniZaslon:
                 "comment": p["opis"],
             })
 
-        kos = vsi[od:od + meja]
+        # Kos omejimo tudi po velikosti: sporocilo v Safeer Linku sme imeti najvec 256 kB, ikone pa so
+        # velike - prevelik odgovor se izgubi in druge naprave pokazejo crke namesto ikon.
+        od = max(0, int(od or 0))
+        kos, velikost = [], 0
+        for element in vsi[od:od + meja]:
+            teza = len(str(element.get("icon") or "")) + len(str(element.get("name") or "")) * 2 + \
+                len(str(element.get("comment") or "")) + 160
+            if kos and velikost + teza > 190_000:
+                break
+            velikost += teza
+            kos.append(element)
         return {
             "apps": kos,
             "items": kos,
