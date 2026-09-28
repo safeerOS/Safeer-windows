@@ -429,9 +429,13 @@ function renderPortals() {
       } catch (e) {}
     }
 
-    if (domain && domain.includes('.')) {
+    // Ikona bližnjice ne sme sprožiti zahteve k zunanjemu ponudniku faviconov.
+    // Lokalni/data URL lahko prikažemo; sicer uporabimo že shranjeno oznako.
+    const favicon = typeof portal.favicon === 'string' ? portal.favicon.trim() : '';
+    const localFavicon = /^(data:|blob:|file:|safeer:)/i.test(favicon) ? favicon : '';
+    if (localFavicon) {
       const img = document.createElement('img');
-      img.src = portal.favicon || `https://icons.duckduckgo.com/ip3/${domain}.ico`;
+      img.src = localFavicon;
       img.alt = '';
       img.className = 'portal-favicon';
       img.style.width = '24px';

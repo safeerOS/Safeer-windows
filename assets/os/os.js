@@ -88,6 +88,11 @@
     return b;
   }
   var LOKALE = { sl: "sl-SI", en: "en-GB", de: "de-DE", es: "es-ES", fr: "fr-FR", it: "it-IT" };
+  // Ime izdelka je enako v vseh jezikih; razdelek sam še vedno uporablja
+  // lokalizirani naslov »Naprave / Devices / Geräte …«.
+  Object.keys(BESEDILA_OS).forEach(function (koda) {
+    BESEDILA_OS[koda].safeerLink = "Safeer Link";
+  });
   var BESEDILA_WINDOWS = {
     sl: {
       naprednoPod: "IP, DNS, VPN in druge nastavitve sistema Windows.",

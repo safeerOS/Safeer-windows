@@ -1639,6 +1639,41 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
         self.assertIn("body.nacin-splet #glavno { display: none; }", css)
         self.assertIn('klic("zapriSplet", [razdelek])', js)
 
+    def test_safeer_os_splet_ne_skriva_zavihkov_in_glavnih_kontrol(self):
+        koren = Path(__file__).resolve().parent.parent.parent
+        browser = (koren / "windows" / "safeer_windows" / "browser.py").read_text(encoding="utf-8")
+        zacetek = browser.index("    def set_safeer_os_web_mode")
+        konec = browser.index("    def _set_toolbar_widget_visible", zacetek)
+        metoda = browser[zacetek:konec]
+        vklop = metoda[metoda.index("        if enabled:"):metoda.index("        else:")]
+
+        self.assertIn("self.tabs.tabBar().show()", vklop)
+        self.assertIn("self.new_tab_button.show()", vklop)
+        self.assertNotIn("self.tabs.tabBar().hide()", vklop)
+        self.assertNotIn("self.new_tab_button.hide()", vklop)
+        for kontrola in ("self.back_button", "self.forward_button", "self.home_button", "self.star_button",
+                         "self.address_lock", "self.address", "self.shield_label", "self.extensions_button",
+                         "self.menu_button"):
+            self.assertIn(kontrola, vklop)
+        self.assertIn("self._set_toolbar_widget_visible(widget, True)", vklop)
+
+        # Vrstica zavihkov je nad navigacijo, bližnjice pa ostanejo del okna.
+        self.assertIn("self._layout.insertWidget(1, widget)", browser)
+        for bliznjica in ('("Ctrl+T"', '("Ctrl+W"', '("Ctrl+Tab"'):
+            self.assertIn(bliznjica, browser)
+
+    def test_stranska_vrstica_ima_safeer_link_in_zahtevani_vrstni_red(self):
+        koren = Path(__file__).resolve().parent.parent.parent
+        html = (koren / "assets" / "os" / "index.html").read_text(encoding="utf-8")
+        besedila = (koren / "assets" / "os" / "besedila.js").read_text(encoding="utf-8")
+        js = (koren / "assets" / "os" / "os.js").read_text(encoding="utf-8")
+        vrstni_red = ["domov", "media", "naprave", "programi", "datoteke", "splet", "zapiski", "nastavitve"]
+        mesta = [html.index(f'data-razdelek="{ime}"') for ime in vrstni_red]
+        self.assertEqual(mesta, sorted(mesta))
+        self.assertIn('data-t="safeerLink">Safeer Link</span>', html)
+        self.assertEqual(besedila.count('safeerLink: "Safeer Link"'), 6)
+        self.assertIn('BESEDILA_OS[koda].safeerLink = "Safeer Link"', js)
+
     def test_m3u_razvrsti_live_tv_in_neposredno_glasbo(self):
         playlist = (
             '#EXTM3U\n'
