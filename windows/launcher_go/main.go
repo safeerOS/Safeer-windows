@@ -182,6 +182,28 @@ func checkAndInstallPySide6(py *PythonInfo) error {
 	return nil
 }
 
+// installPython namesti uradni Python 3.12 (python.org) prek winget, ce uporabnik to potrdi.
+// Brez winget ali ob zavrnitvi vrne nil in main ponudi rocni prenos.
+func installPython() *PythonInfo {
+	winget, err := exec.LookPath("winget.exe")
+	if err != nil {
+		return nil
+	}
+	res := showMessage(
+		"Safeer OS - potreben je Python",
+		"Safeer OS za delovanje potrebuje Python 3 (brezplačen, python.org).\n\nAli ga Safeer OS namesti zdaj? Namestitev prek Windows upravitelja paketov (winget) traja nekaj minut, samo za tega uporabnika.",
+		MB_ICONINFORMATION|MB_YESNO,
+	)
+	if res != IDYES {
+		return nil
+	}
+	cmd := exec.Command(winget, "install", "--exact", "--id", "Python.Python.3.12", "--scope", "user",
+		"--silent", "--accept-package-agreements", "--accept-source-agreements")
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000}
+	_ = cmd.Run()
+	return findPython()
+}
+
 func createDesktopShortcut(selfExe string) {
 	desktop := filepath.Join(os.Getenv("USERPROFILE"), "Desktop")
 	if _, err := os.Stat(desktop); err != nil {
@@ -211,6 +233,9 @@ func main() {
 	}
 
 	py := findPython()
+	if py == nil {
+		py = installPython()
+	}
 	if py == nil {
 		res := showMessage(
 			"Safeer OS - Python ni najden",
