@@ -92,6 +92,8 @@ body { overflow-x: hidden; }
   .kartice { grid-template-columns: 1fr; }
   .kartice .kartica:nth-child(3) { display: block; }
   .bliznjice { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .bliznjica { padding-inline: 4px; font-size: .82rem; }
+  .bliznjica .ime { white-space: normal; text-align: center; line-height: 1.15; overflow-wrap: anywhere; }
   .predlogi-glava { flex-direction: column; align-items: flex-start; }
 }
 /* TV: velike tarče in jasen fokus za daljinec */
