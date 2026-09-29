@@ -617,6 +617,22 @@ class SafeerOsWindow(QMainWindow):
             self._zapri_webview2_media()
             return
 
+    def _nastavi_celozaslonsko(self, vklopi: bool) -> None:
+        """Izhod iz celega zaslona vrne prejšnje stanje (razpeto okno ostane razpeto, ne pomanjša se).
+
+        Zapiranje predvajalnika vedno pošlje »izklopi«; če okno ni bilo celozaslonsko, se ne zgodi nič."""
+        if vklopi:
+            if not self.isFullScreen():
+                self._bilo_razpeto = self.isMaximized()
+                self.showFullScreen()
+            return
+        if not self.isFullScreen():
+            return
+        if getattr(self, "_bilo_razpeto", True):
+            self.showMaximized()
+        else:
+            self.showNormal()
+
     def _odpri_media(self, item: dict) -> None:
         if self.media_player.play_item(item):
             self.zaslon.setCurrentWidget(self.media_player)
@@ -1209,7 +1225,7 @@ class SafeerOsWindow(QMainWindow):
 
         if metoda == "celozaslonsko":
             novo = bool(a[0]) if a else not self.isFullScreen()
-            self.dispatcher.dispatch(lambda: self.showFullScreen() if novo else self.showNormal())
+            self.dispatcher.dispatch(lambda: self._nastavi_celozaslonsko(novo))
             return novo
 
         if metoda == "samozagon":
