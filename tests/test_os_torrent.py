@@ -36,7 +36,17 @@ class Magnet(unittest.TestCase):
         z = ot.z_sledilniki(MAGNET)
         self.assertEqual(len(ot.razcleni_magnet(z)["sledilniki"]), len(ot.SLEDILNIKI))
         s_svojim = MAGNET + "&tr=udp%3A%2F%2Fmoj.si%3A1%2Fannounce"
-        self.assertEqual(ot.z_sledilniki(s_svojim), s_svojim)
+        self.assertEqual(ot.razcleni_magnet(ot.z_sledilniki(s_svojim))["sledilniki"], ["udp://moj.si:1/announce"])
+
+    def test_tuja_povezava_ne_usmerja_v_domace_omrezje(self):
+        zla = (MAGNET + "&tr=http%3A%2F%2F192.168.1.1%2Fcgi-bin%2Freboot&tr=http%3A%2F%2Flocalhost%3A8080%2Fx"
+               "&tr=udp%3A%2F%2F10.0.0.1%3A6969&tr=http%3A%2F%2Frouter.lan%2F&tr=udp%3A%2F%2F%5B%3A%3A1%5D%3A1"
+               "&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&x.pe=192.168.1.5%3A445&ws=http%3A%2F%2F10.0.0.2%2F")
+        m = ot.razcleni_magnet(zla)
+        self.assertEqual(m["sledilniki"], ["udp://tracker.opentrackr.org:1337/announce"])
+        self.assertNotIn("x.pe", m["uri"])
+        self.assertNotIn("ws=", m["uri"])
+        self.assertNotIn("192.168", ot.z_sledilniki(zla))
 
     def test_nevarne_datoteke(self):
         d = ot.razvrsti_datoteke([
@@ -174,7 +184,7 @@ class Motor(unittest.TestCase):
         tid = self.t.dodaj(MAGNET, [1, 2])
         self.assertEqual(tid, 0)
         dodaj = [z for z in LazniRqbit.zahteve if z[0] == "POST" and "only_files=" in z[1]]
-        self.assertIn("only_files=1&", dodaj[-1][1] + "&")
+        self.assertIn("only_files=0,1&", dodaj[-1][1] + "&")       # video + njegovi podnapisi, program ne
         self.assertIn(b"tr=", dodaj[-1][2])              # dodani sledilniki za hitrejše iskanje
         # Ponovno dodajanje istega magneta ne naredi novega torrenta, ampak doda datoteke.
         self.assertEqual(self.t.dodaj(MAGNET, [0]), 0)
@@ -202,7 +212,7 @@ class Motor(unittest.TestCase):
         # predvajamo pa je nikoli.
         self.assertEqual(self.t.dodaj(MAGNET, [1, 2], potrjene_nevarne=[2]), 0)
         dodaj = [z for z in LazniRqbit.zahteve if z[0] == "POST" and "only_files=" in z[1]]
-        self.assertIn("only_files=1,2&", dodaj[-1][1] + "&")
+        self.assertIn("only_files=0,1,2&", dodaj[-1][1] + "&")   # 0 = podnapisi k videu
         with self.assertRaises(ot.NapakaTorrenta):
             self.t.tok(0, 2)
 

@@ -1148,7 +1148,7 @@
     g.addEventListener("click", function (e) { e.stopPropagation(); dejanje(g); });
     return g;
   }
-  function odpriMagnet(uri) {
+  function odpriMagnet(uri, samodejno) {
     if (window.safeerOsPojdi && S.razdelek !== "media") window.safeerOsPojdi("media");
     $("slojMagnet").classList.add("viden");
     magnetSporocilo("");
@@ -1159,7 +1159,10 @@
       if (!$("slojMagnet").classList.contains("viden")) { clearInterval(S.magnet.casovnik); S.magnet.casovnik = 0; return; }
       magnetOsveziPrenose();
     }, 2000);
-    if (uri) preberiMagnet(uri, true); else $("magnetPolje").focus();
+    // Samo povezava z naprave v krogu se prebere in predvaja sama; iz brskalnika čaka na uporabnika.
+    if (uri && samodejno) preberiMagnet(uri, true);
+    else if (uri) { magnetSporocilo(t("magnetPritisniOdpri")); $("magnetOdpri").focus(); }
+    else $("magnetPolje").focus();
   }
   function zagotoviProgram() {
     return klic("magnetProgram").then(function (p) {
@@ -2876,8 +2879,10 @@
     if (vrsta === "mediaFallback" && podatki) predvajajHtml(podatki, 0);
     if (vrsta === "magnet") {
       // Vzamemo tudi čakajočo povezavo, da je stran ob naslednjem nalaganju ne odpre znova.
-      klic("cakajociMagnet").then(function (uri) { odpriMagnet(uri || (podatki && podatki.uri) || ""); })
-        .catch(function () { odpriMagnet((podatki && podatki.uri) || ""); });
+      var samo = !!(podatki && podatki.samodejno === true);
+      klic("cakajociMagnet").then(function (c) {
+        if (c && c.uri) odpriMagnet(c.uri, c.samodejno === true); else odpriMagnet((podatki && podatki.uri) || "", samo);
+      }).catch(function () { odpriMagnet((podatki && podatki.uri) || "", samo); });
     }
     if (vrsta === "magnetProgram" && S.magnet.gumbPrograma && podatki)
       S.magnet.gumbPrograma.textContent = t("magnetProgramPrenasam", { odstotek: Math.floor(100 * podatki.n / (podatki.vse || 1)) });
@@ -4155,7 +4160,7 @@
       obvesti(je ? t("magnetPrivzetoOk") : t("magnetPrivzetoNastavitve"));
     });
   });
-  if (most) klic("cakajociMagnet").then(function (uri) { if (uri) odpriMagnet(uri); }).catch(function () {});
+  if (most) klic("cakajociMagnet").then(function (c) { if (c && c.uri) odpriMagnet(c.uri, c.samodejno === true); }).catch(function () {});
   on("mediaDodajVir", "submit", function (event) {
     event.preventDefault(); var url = $("mediaVirUrl").value.trim(), name = $("mediaVirIme").value.trim();
     if (!url) return;

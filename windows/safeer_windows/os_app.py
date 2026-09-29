@@ -332,8 +332,10 @@ class SafeerOsWindow(QMainWindow):
         print("[SafeerOS] DIAG window_init_started", flush=True)
         self.v_oknu = v_oknu
         #: Magnet povezava, ki caka, da jo stran prevzame (zagon z --magnet; cakajociMagnet).
-        razclenjen = os_torrent.razcleni_magnet(magnet) if magnet else None
-        self._cakajoci_magnet = razclenjen["uri"] if razclenjen else ""
+        # "naprava:" = ukaz z naprave v krogu (--magnet-naprava): sme se prebrati in predvajati sam.
+        samodejno = magnet.startswith("naprava:")
+        razclenjen = os_torrent.razcleni_magnet(magnet[len("naprava:"):] if samodejno else magnet) if magnet else None
+        self._cakajoci_magnet = {"uri": razclenjen["uri"], "samodejno": samodejno} if razclenjen else {}
         #: Podnapisi za predvajalnik v strani (brez LibVLC): oznaka -> ("pot"|"url", vir, ime datoteke).
         self._podnapisi_strani: dict = {}
         self.zacetni_razdelek = zacetni_razdelek
@@ -444,7 +446,7 @@ class SafeerOsWindow(QMainWindow):
         self.sporocila.naprave_klepeta = lambda: self.control_backend.naprave_za_klepet()
         self.control_backend.ob_klepetu = self._prejmi_klepet
         # Magnet z druge naprave v Linku (magnet.open) se odpre tukaj, v Medijskem centru.
-        self.control_backend.ob_magnetu = self.odpri_magnet
+        self.control_backend.ob_magnetu = lambda uri: self.odpri_magnet("naprava:" + uri)
         # Zacasni profili predvajalnika iz prejsnjih zagonov; v ozadju, da zagon ni pocasnejsi.
         threading.Thread(target=webview2_media.pocisti_seje, kwargs={"starejse_od_s": 120}, daemon=True).start()
         self.browser_window.na_zapisek = self._izrezek_iz_spleta
@@ -1079,12 +1081,15 @@ class SafeerOsWindow(QMainWindow):
     def odpri_magnet(self, uri: str) -> bool:
         """Magnet iz brskalnika, druge kopije (--magnet) ali z druge naprave: Medijski center pokaze vsebino.
 
-        Klic je varen iz katerekoli niti; povezavo najprej preverimo (samo BitTorrent magnet)."""
-        m = os_torrent.razcleni_magnet(uri)
+        Klic je varen iz katerekoli niti; povezavo najprej preverimo (samo BitTorrent magnet).
+        Samo ukaz z naprave v krogu ("naprava:") se prebere in predvaja sam; povezava iz brskalnika ali
+        druge aplikacije se ne dotakne omrezja, dokler uporabnik ne pritisne Odpri."""
+        samodejno = uri.startswith("naprava:")
+        m = os_torrent.razcleni_magnet(uri[len("naprava:"):] if samodejno else uri)
         if m is None:
             return False
         # Ce se stran se nalaga, jo prevzame ob nalaganju (cakajociMagnet); sicer jo odpre dogodek.
-        self._cakajoci_magnet = m["uri"]
+        self._cakajoci_magnet = {"uri": m["uri"], "samodejno": samodejno}
 
         def _pokazi() -> None:
             self.prebudi("")
@@ -1096,13 +1101,13 @@ class SafeerOsWindow(QMainWindow):
                 # Predvajalnik VLC (glasba igra naprej v ozadju, Ctrl+Shift+M ga vrne) ali Naprave.
                 self.zaslon.setCurrentWidget(self.os_vsebnik)
                 self.setWindowTitle("Safeer OS")
-            self.poslji_dogodek("magnet", {"uri": m["uri"]})
+            self.poslji_dogodek("magnet", {"uri": m["uri"], "samodejno": samodejno})
         self.dispatcher.dispatch(_pokazi)
         return True
 
-    def _vzemi_cakajoci_magnet(self) -> str:
-        uri, self._cakajoci_magnet = self._cakajoci_magnet, ""
-        return uri
+    def _vzemi_cakajoci_magnet(self) -> dict:
+        cakajoci, self._cakajoci_magnet = self._cakajoci_magnet, {}
+        return cakajoci or {}
 
     def _ustavi_torrente(self) -> None:
         """rqbit ne ostane teci brez Safeer OS (novega motorja ob tem ne zazenemo)."""
@@ -1262,7 +1267,7 @@ class SafeerOsWindow(QMainWindow):
             return {"ok": False, "koda": "dvd"}
         if not self.media_player.available:
             return {"ok": False, "koda": "dvdVlc"}
-        if os_dvd.je_zasciten(naprava):
+        if os_dvd.je_zasciten(naprava) is not False:
             # Uradni VLC za Windows vsebuje libdvdcss; zaščitenih diskov Safeer kljub temu ne predvaja.
             return {"ok": False, "koda": "dvd"}
         item = {"id": "dvd:" + naprava, "naslov": pogon.get("ime") or "DVD", "vrsta": "film",
@@ -1891,7 +1896,7 @@ class SafeerOsWindow(QMainWindow):
                 # DVD brez zascite (ISO, mapa VIDEO_TS): zna ga samo LibVLC; zascitenih Safeer ne odklepa.
                 if not self.media_player.available:
                     return dict(item, native=False, napaka_koda="dvdVlc")
-                if os_dvd.je_zasciten(url):
+                if os_dvd.je_zasciten(url) is not False:
                     return dict(item, native=False, napaka_koda="dvd")
                 self.dispatcher.dispatch(lambda: self._odpri_media(item))
                 return dict(item, native=True)
@@ -2053,15 +2058,17 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--ozadje", action="store_true", help="Zazeni le v ozadju")
     parser.add_argument("--magnet", type=str, default="",
                         help="Odpri magnet povezavo v Medijskem centru (brskalnik, druga naprava v Linku)")
+    parser.add_argument("--magnet-naprava", type=str, default="",
+                        help="Magnet z naprave v krogu (Safeer Control): prebere in predvaja se sam")
     args = parser.parse_args(argv)
     magnet = ""
-    if args.magnet:
+    if args.magnet or args.magnet_naprava:
         # Magnet iz registra (klik v brskalniku) ali z druge naprave: samo veljavna BitTorrent povezava.
-        razclenjen = os_torrent.razcleni_magnet(args.magnet)
+        razclenjen = os_torrent.razcleni_magnet(args.magnet_naprava or args.magnet)
         if razclenjen is None:
             print("To ni veljavna magnet povezava.", flush=True)
             return 2
-        magnet = razclenjen["uri"]
+        magnet = ("naprava:" if args.magnet_naprava else "") + razclenjen["uri"]
 
     # Browser settings are the single shared store for Safeer OS and the
     # embedded Safeer Browser. Apply restart-only Chromium/DNS options before

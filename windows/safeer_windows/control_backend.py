@@ -1198,7 +1198,7 @@ class SafeerControlBackend:
             dodatno["creationflags"] = 0x00000008  # DETACHED_PROCESS: brez okna ukazne vrstice
         else:
             dodatno["start_new_session"] = True
-        subprocess.Popen(program + ["--magnet", m["uri"]], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+        subprocess.Popen(program + ["--magnet-naprava", m["uri"]], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                          stderr=subprocess.DEVNULL, **dodatno)
         return {"ok": True, "message": "Odpiram v Safeer OS: " + ime}
 
