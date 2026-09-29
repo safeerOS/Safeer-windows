@@ -1420,6 +1420,11 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
         self.assertIn("self.showMaximized()", metoda)
         self.assertIn("if not self.isFullScreen():\n            return", metoda)
 
+    def test_tipke_ne_tecejo_v_iskanje_za_obrazcem_in_esc_v_predvajalniku_ne_gre_domov(self):
+        js = (Path(__file__).resolve().parent.parent.parent / "assets" / "os" / "os.js").read_text(encoding="utf-8")
+        self.assertIn("if (predvajalnikOdprt || pogovor) return;", js)
+        self.assertIn('if ((sloj && sloj.id !== "slojIskanje") || pogovor || predvajalnikOdprt) return;', js)
+
     def test_safeer_splet_ostane_v_os_postavitvi_in_izhod_razsiri_os(self):
         koren = Path(__file__).resolve().parent.parent.parent
         app = (koren / "windows" / "safeer_windows" / "os_app.py").read_text(encoding="utf-8")
