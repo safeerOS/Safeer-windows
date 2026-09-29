@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import os
 import sqlite3
 import threading
 import uuid
@@ -12,6 +13,21 @@ from typing import Iterable, Optional, Tuple
 from .model import Oseba
 
 PRIVZETA_POT = Path.home() / ".local/share/safeer/sporocila/sporocila.sqlite3"
+
+
+def zasebna_baza(pot: Path) -> None:
+    """Sporocila so zasebna: mapa 0700, baza (in njene -wal/-shm datoteke) 0600 - drugi uporabniki
+    racunalnika jih ne morejo brati."""
+    pot.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    try:
+        os.chmod(pot.parent, 0o700)
+        if not pot.exists():
+            os.close(os.open(str(pot), os.O_CREAT | os.O_WRONLY, 0o600))
+        for d in (pot, Path(str(pot) + "-wal"), Path(str(pot) + "-shm"), Path(str(pot) + "-journal")):
+            if d.exists():
+                os.chmod(d, 0o600)
+    except OSError:
+        pass
 
 
 def normaliziraj(vrsta: str, naslov: str) -> str:
@@ -30,7 +46,7 @@ def normaliziraj(vrsta: str, naslov: str) -> str:
 class IdentitetniGraf:
     def __init__(self, pot: Optional[Path] = None):
         self.pot = Path(pot or PRIVZETA_POT)
-        self.pot.parent.mkdir(parents=True, exist_ok=True)
+        zasebna_baza(self.pot)
         self._db = sqlite3.connect(str(self.pot), check_same_thread=False)
         self._db.row_factory = sqlite3.Row
         self._zaklep = threading.RLock()
