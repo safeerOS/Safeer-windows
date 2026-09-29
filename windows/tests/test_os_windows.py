@@ -1396,6 +1396,17 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
         self.assertIn("PlaybackRequiresUserGesture, False", browser_src)
         self.assertIn("def _odpri_notranji_splet(self, url: str, *, media: bool = False", os_app_src)
 
+    def test_zvok_brez_koncnice_predvaja_stran_sama(self):
+        # Jamendo/Icecast tok nima koncnice .mp3: prej se je odprl kot prazna spletna stran cez celo okno.
+        koren = Path(__file__).resolve().parent.parent.parent
+        app = (koren / "windows" / "safeer_windows" / "os_app.py").read_text(encoding="utf-8")
+        js = (koren / "assets" / "os" / "os.js").read_text(encoding="utf-8")
+        pot = app[app.index('        if metoda == "mediaPredvajaj":'):app.index('        if metoda == "mediaStanje":')]
+        self.assertLess(pot.index("je_zvok = "), pot.index("native = self.media_player.available"))
+        self.assertIn("return dict(item, native=False)", pot)
+        self.assertIn('not parsed_path.endswith((".m3u8", ".mpd"))', pot)
+        self.assertIn("(audio && /^https?:/i.test(url)", js)
+
     def test_safeer_splet_ostane_v_os_postavitvi_in_izhod_razsiri_os(self):
         koren = Path(__file__).resolve().parent.parent.parent
         app = (koren / "windows" / "safeer_windows" / "os_app.py").read_text(encoding="utf-8")

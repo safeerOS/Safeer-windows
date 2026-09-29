@@ -1512,6 +1512,15 @@ class SafeerOsWindow(QMainWindow):
                 parsed_path.endswith((".m3u8", ".mpd", ".ts")) or
                 bool(item.get("glave"))
             )
+            # Zvok (glasba, radio, podkast) po http(s) predvaja stran sama v vgrajenem predvajalniku z vrsto:
+            # uporabnik ostane v Medijskem centru in brska naprej. Tokovi kot Jamendo nimajo končnice (.mp3),
+            # zato jih prej nismo prepoznali in so se odprli kot prazna spletna stran čez celo okno.
+            je_zvok = str(item.get("vrsta") or "") in ("glasba", "radio", "podcast", "podkast")
+            if (je_zvok and not is_embed and url.startswith(("http://", "https://"))
+                    and not parsed_path.endswith((".m3u8", ".mpd"))):
+                print(f"[SafeerMedia] MEDIA_ROUTE engine=html host={urllib.parse.urlsplit(url).hostname or ''} "
+                      f"zvok=True", flush=True)
+                return dict(item, native=False)
             native = self.media_player.available and is_direct_stream and not is_embed
             host = urllib.parse.urlsplit(url).hostname or ""
             print(f"[SafeerMedia] MEDIA_ROUTE engine={self.media_engine} host={host} "
