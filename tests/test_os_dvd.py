@@ -58,6 +58,23 @@ class Dvd(unittest.TestCase):
         with self.assertRaises(ValueError):
             os_dvd.uri(self.d)                               # mapa brez VIDEO_TS ni DVD
 
+    def test_zascito_css_prepoznamo(self):
+        def disk(ime, zastavica):
+            mapa = os.path.join(self.d, ime, "VIDEO_TS")
+            os.makedirs(mapa)
+            open(os.path.join(mapa, "VIDEO_TS.IFO"), "wb").close()
+            sektor = bytearray(2048)
+            sektor[0:4] = b"\x00\x00\x01\xba"
+            sektor[14:18] = b"\x00\x00\x01\xe0"
+            sektor[0x14] = zastavica
+            with open(os.path.join(mapa, "VTS_01_1.VOB"), "wb") as d:
+                d.write(bytes(sektor) * 64)
+            return os.path.join(self.d, ime)
+        self.assertFalse(os_dvd.je_zasciten(disk("prost", 0x80)))
+        self.assertTrue(os_dvd.je_zasciten(disk("zasciten", 0x90)))
+        self.assertTrue(os_dvd.je_zasciten("dvd://" + os.path.join(self.d, "zasciten")))
+        self.assertIsNone(os_dvd.je_zasciten(self.d))
+
     def test_mapa_video_ts(self):
         disk = os.path.join(self.d, "Počitnice 2003")
         os.makedirs(os.path.join(disk, "VIDEO_TS"))
