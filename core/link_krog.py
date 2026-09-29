@@ -180,6 +180,24 @@ class Krog:
                     return dict(c)
         return None
 
+    def je_umaknjen(self, device_id: str) -> bool:
+        """Ali je naprava izrecno umaknjena iz kroga (nadgrobnik je novejsi od vpisa).
+
+        Id iz kljuca (n-...) se ujema tudi s clanom pod starim id-jem z istim kljucem. Naprava, ki je
+        krog sploh ne pozna, NI umaknjena - o njej odloca kdo drug (npr. seznanitev s hubom)."""
+        if not device_id:
+            return False
+        with self._zaklep:
+            u = self.umiki.get(device_id)
+            c = self.clani.get(device_id)
+            if u and (not c or u["umaknjeno"] > c["dodano"]):
+                return True
+            if c or not je_id_iz_kljuca(device_id):
+                return False
+            jedro = device_id[:DOLZINA_ID_IZ_KLJUCA]
+            ujemanja = [c for c in self.clani.values() if id_iz_kljuca(c["kljuc"]) == jedro]
+            return bool(ujemanja) and not any(self._veljaven(c) for c in ujemanja)
+
     def stevilo(self) -> int:
         with self._zaklep:
             return sum(1 for c in self.clani.values() if self._veljaven(c))
@@ -433,6 +451,14 @@ def znan_id_za_nas_kljuc(razen: str = "") -> Optional[str]:
             if i != razen and k._veljaven(c) and c["kljuc"] == kljuc:
                 return i
     return None
+
+
+def je_umaknjen(device_id: str) -> bool:
+    """Ali je naprava umaknjena iz kroga zaupanja te naprave (glej Krog.je_umaknjen)."""
+    try:
+        return krog().je_umaknjen(device_id)
+    except Exception:
+        return False
 
 
 def lahko_s_podpisom(device_id: str) -> bool:

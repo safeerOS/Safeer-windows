@@ -327,6 +327,28 @@ class AgentHuba:
 
 # ------------------------------------------------------------------ odjemalec: lokalna vrata do oddaljenega huba
 
+def _uid_lokalne_povezave(vrata_odjemalca: int, nasa_vrata: int, tabela: str = "/proc/net/tcp") -> Optional[int]:
+    """Uporabnik (uid) procesa, ki se je na 127.0.0.1 povezal z nasimi vrati; None, ce se ne da ugotoviti.
+
+    TCP nima SO_PEERCRED (ta velja le za Unix vticnice), zato na Linuxu pogledamo tabelo jedra: vrstica, kjer
+    je lokalni konec odjemalceva vrata in oddaljeni konec nasa vrata, ima v 8. stolpcu uid lastnika."""
+    try:
+        with open(tabela, "r", encoding="ascii") as d:
+            vrstice = d.read().splitlines()[1:]
+    except OSError:
+        return None
+    for v in vrstice:
+        polja = v.split()
+        if len(polja) < 8:
+            continue
+        try:
+            if int(polja[1].rsplit(":", 1)[1], 16) == vrata_odjemalca and int(polja[2].rsplit(":", 1)[1], 16) == nasa_vrata:
+                return int(polja[7])
+        except ValueError:
+            continue
+    return None
+
+
 class LokalniRele:
     """127.0.0.1:vrata, ki vodijo do huba `cilj` prek link.safeer.si (za naprave zunaj domacega omrezja).
 
@@ -344,10 +366,26 @@ class LokalniRele:
     def _sprejemaj(self) -> None:
         while True:
             try:
-                tcp, _ = self.streznik.accept()
+                tcp, naslov = self.streznik.accept()
             except OSError:
                 return
+            if not self._nas_proces(naslov):
+                # Drug uporabnik tega racunalnika ne sme uporabljati kanala, podpisanega z nasim kljucem.
+                self.zadnja_napaka = "tuj_uporabnik"
+                try:
+                    tcp.close()
+                except Exception:
+                    pass
+                continue
             threading.Thread(target=self._kanal, args=(tcp,), daemon=True).start()
+
+    def _nas_proces(self, naslov) -> bool:
+        """Na Linuxu sprejmemo samo povezave procesov istega uporabnika (uid). Drugje (Windows) ali kadar
+        tabele ni, velja kot prej: vrata so le na 127.0.0.1, hub pa zahteva TLS s pripetim odtisom."""
+        if not hasattr(os, "getuid") or not isinstance(naslov, tuple) or len(naslov) < 2:
+            return True
+        uid = _uid_lokalne_povezave(int(naslov[1]), self.vrata)
+        return uid is None or uid == os.getuid()
 
     def _kanal(self, tcp: socket.socket) -> None:
         kanal = os.urandom(16).hex()

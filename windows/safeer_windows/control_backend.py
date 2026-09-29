@@ -243,14 +243,31 @@ class SafeerControlBackend:
             return "vprasaj"
         return "polno"
 
+    def _sme_na_streznik(self, id_naprave: str, ves_disk: bool) -> bool:
+        """Ali sme naprava na streznik datotek: cel disk samo s profilom `polno`, izbrane mape tudi z `izbrano`."""
+        profil = self.dovoljenje_za(id_naprave)
+        return profil == "polno" if ves_disk else profil in ("polno", "izbrano")
+
+    def _preklici_zetone(self, id_naprave: str) -> None:
+        """Takoj preklice zetone naprave na obeh streznikih datotek (znizanje pravic ali odstranitev)."""
+        for d in list((getattr(self, "_datoteke", None) or {}).values()):
+            try:
+                d.streznik.preklici(id_naprave)
+            except Exception:
+                pass
+
     def nastavi_dovoljenje(self, id_naprave: str, profil: str) -> bool:
         id_naprave, profil = str(id_naprave or "").strip(), str(profil or "").strip().lower()
         if not id_naprave or profil not in ("polno", "izbrano", "zaslon"):
             return False
         dovoljenja = dict(self.nastavitve.get("dovoljenja_naprav") or {})
+        prej = self.dovoljenje_za(id_naprave)
         dovoljenja[id_naprave] = profil
         self.nastavitve["dovoljenja_naprav"] = dovoljenja
         ok = self.shrani_nastavitve()
+        if ok and profil != prej and profil != "polno":
+            # Manj pravic kot prej: stari zetoni ne smejo veljati se do 12 h (pregled 29. 9. 2026, tocka 12).
+            self._preklici_zetone(id_naprave)
         if ok:
             self._opozorjena_dovoljenja.discard(id_naprave)
             self._oddaj_dogodek("dovoljenja", dovoljenja)
@@ -418,6 +435,10 @@ class SafeerControlBackend:
         d = shramba.get(polno)
         if d is None:
             d = link_datoteke.Datoteke(poti=self.deljene_mape(), tls_mapa=self.navidezni_zaslon.tls_mapa, ves_disk=polno)
+            # Zeton velja le, dokler ima naprava se pravico do tega streznika in je v krogu - preveri se ob
+            # vsaki zahtevi (tudi med predvajanjem), ne sele ob naslednjem seznamu ali po 12 urah.
+            privzeto = d.streznik.umaknjena
+            d.streznik.umaknjena = lambda n, _p=polno, _u=privzeto: _u(n) or not self._sme_na_streznik(n, _p)
             shramba[polno] = d
         else:
             d.mape.nastavi(self.deljene_mape())
