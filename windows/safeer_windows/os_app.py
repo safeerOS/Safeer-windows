@@ -1382,6 +1382,18 @@ class SafeerOsWindow(QMainWindow):
         if metoda == "mediaNaKodi":
             return self.media_center.predvajaj_na_kodi(str(a[0]) if a else "")
 
+        if metoda in ("mediaZvocniki", "mediaNaZvocnik", "mediaZvocnikDejanje"):
+            if getattr(self, "_media_zvocniki", None) is None:
+                from core import media_zvocnik
+                self._media_zvocniki = media_zvocnik.MediaZvocniki()
+            mz = self._media_zvocniki
+            if metoda == "mediaZvocniki":
+                return {"zvocniki": mz.seznam(), "aktiven": getattr(mz.aktivni, "ime", "") if mz.aktivni else ""}
+            if metoda == "mediaNaZvocnik":
+                item = self.media_center.resolve(str(a[0]) if a else "") or {}
+                return mz.predvajaj(item, str(a[1]) if len(a) > 1 else "", bool(a[2]) if len(a) > 2 else False)
+            return mz.dejanje(str(a[0]) if a else "")
+
         if metoda == "mediaOdkrijDlna":
             from core import media_servers
             return media_servers.odkrij_dlna()
