@@ -257,10 +257,12 @@ class MeshPovezovalec:
             povezava.zapri()
             return
         print("[SafeerLink] mesh: sosed %s (%s)" % (hid, naslov))
-        self._zavrnjeni.pop(hid, None)
+        # Premor po zavrnitvi pobrisemo sele, ko nas sosed res sprejme (prvo sporocilo, ki ni zavrnitev);
+        # zavrnitev pride sele po odprtju, zato bi ga brisanje tu vedno vrnilo na 30 s.
         self._beri(hid, povezava)
 
     def _beri(self, hid: str, povezava: OdhodnaSosednja) -> None:
+        sprejet = False
         try:
             while not povezava.zaprta:
                 try:
@@ -283,6 +285,9 @@ class MeshPovezovalec:
                     self._zavrnjeni[hid] = (time.time() + premor, premor)
                     # Sosed nas ne sprejme (npr. ze ima povezavo, ki jo je odprl on).
                     break
+                if not sprejet:
+                    sprejet = True
+                    self._zavrnjeni.pop(hid, None)
                 odgovor = self.hub.obdelaj(povezava, surovo)
                 if odgovor:
                     povezava.poslji(odgovor)

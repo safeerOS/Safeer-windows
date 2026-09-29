@@ -606,6 +606,8 @@ class SafeerOsWindow(QMainWindow):
     def na_escape(self) -> None:
         if self.isFullScreen():
             self._zapusti_celozaslonsko()
+            # Tudi stran izve za Esc (kino način predvajalnika odstrani svoj razred).
+            self._esc_strani()
             return
         if self.zaslon.currentWidget() is self.media_player:
             self._zapri_media()
@@ -616,6 +618,9 @@ class SafeerOsWindow(QMainWindow):
         if self.zaslon.currentWidget() is self.webview2_media:
             self._zapri_webview2_media()
             return
+        self._esc_strani()
+
+    def _esc_strani(self) -> None:
         # Bližnjica Qt pojé Esc, preden ga dobi stran: predvajalnik na strani, iskanje, obrazci in
         # vprašanja se brez tega z Esc niso zapirali. Tipko zato posredujemo strani.
         try:
@@ -626,20 +631,19 @@ class SafeerOsWindow(QMainWindow):
             pass
 
     def _nastavi_celozaslonsko(self, vklopi: bool) -> None:
-        """Izhod iz celega zaslona vrne prejšnje stanje (razpeto okno ostane razpeto, ne pomanjša se).
+        """Cel zaslon na zahtevo strani (kino način predvajalnika).
 
-        Zapiranje predvajalnika vedno pošlje »izklopi«; če okno ni bilo celozaslonsko, se ne zgodi nič."""
+        Isti zapis prejšnjega stanja kot F11/Esc (_fullscreen_restore_maximized), da se razpeto okno
+        vedno vrne razpeto. Zapiranje predvajalnika vedno pošlje »izklopi«; če okno ni celozaslonsko,
+        se ne zgodi nič (prej je showNormal() pomanjšal razpeto okno)."""
         if vklopi:
             if not self.isFullScreen():
-                self._bilo_razpeto = self.isMaximized()
+                self._fullscreen_restore_maximized = self.isMaximized()
                 self.showFullScreen()
             return
         if not self.isFullScreen():
             return
-        if getattr(self, "_bilo_razpeto", True):
-            self.showMaximized()
-        else:
-            self.showNormal()
+        self._zapusti_celozaslonsko()
 
     def _odpri_media(self, item: dict) -> None:
         if self.media_player.play_item(item):
@@ -1540,11 +1544,10 @@ class SafeerOsWindow(QMainWindow):
             # uporabnik ostane v Medijskem centru in brska naprej. Tokovi kot Jamendo nimajo končnice (.mp3),
             # zato jih prej nismo prepoznali in so se odprli kot prazna spletna stran čez celo okno.
             je_zvok = str(item.get("vrsta") or "") in ("glasba", "radio", "podcast", "podkast")
-            if (je_zvok and not is_embed and url.startswith(("http://", "https://"))
-                    and not parsed_path.endswith((".m3u8", ".mpd"))):
+            if je_zvok and not is_embed and os_media.je_neposredni_zvok(url):
                 print(f"[SafeerMedia] MEDIA_ROUTE engine=html host={urllib.parse.urlsplit(url).hostname or ''} "
                       f"zvok=True", flush=True)
-                return dict(item, native=False)
+                return dict(item, native=False, neposredni_zvok=True)
             native = self.media_player.available and is_direct_stream and not is_embed
             host = urllib.parse.urlsplit(url).hostname or ""
             print(f"[SafeerMedia] MEDIA_ROUTE engine={self.media_engine} host={host} "

@@ -1403,9 +1403,34 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
         js = (koren / "assets" / "os" / "os.js").read_text(encoding="utf-8")
         pot = app[app.index('        if metoda == "mediaPredvajaj":'):app.index('        if metoda == "mediaStanje":')]
         self.assertLess(pot.index("je_zvok = "), pot.index("native = self.media_player.available"))
-        self.assertIn("return dict(item, native=False)", pot)
-        self.assertIn('not parsed_path.endswith((".m3u8", ".mpd"))', pot)
-        self.assertIn("(audio && /^https?:/i.test(url)", js)
+        self.assertIn("os_media.je_neposredni_zvok(url)", pot)
+        self.assertIn("neposredni_zvok=True", pot)
+        self.assertIn("item.neposredni_zvok === true", js)
+
+    def test_neposredni_zvok_samo_ob_potrjenem_zvoku(self):
+        import sys
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+        from core import os_media
+
+        class Odgovor:
+            def __init__(self, vrsta): self.headers = {"Content-Type": vrsta}
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+
+        def odpri_z(vrsta):
+            return lambda zahteva, timeout=0: Odgovor(vrsta)
+        self.assertTrue(os_media.je_neposredni_zvok("https://prod-1.storage.jamendo.com/?trackid=1&format=mp31",
+                                                    odpri=odpri_z("audio/mpeg")))
+        self.assertTrue(os_media.je_neposredni_zvok("https://mp3.rtvslo.si/val202", odpri=odpri_z("audio/aac")))
+        self.assertFalse(os_media.je_neposredni_zvok("https://example.org/radio", odpri=odpri_z("text/html; charset=utf-8")))
+        self.assertFalse(os_media.je_neposredni_zvok("https://w.soundcloud.com/player/?url=x", odpri=odpri_z("audio/mpeg")))
+        self.assertFalse(os_media.je_neposredni_zvok("https://bandcamp.com/EmbeddedPlayer/album=1", odpri=odpri_z("audio/mpeg")))
+        self.assertFalse(os_media.je_neposredni_zvok("https://x.org/live.m3u8", odpri=odpri_z("audio/mpeg")))
+        self.assertTrue(os_media.je_neposredni_zvok("https://x.org/a.mp3", odpri=None))
+
+        def pade(zahteva, timeout=0):
+            raise OSError("brez povezave")
+        self.assertFalse(os_media.je_neposredni_zvok("https://x.org/tok", odpri=pade))
 
     def test_glasba_igra_v_ozadju_in_nazaj_ne_pomanjsa_okna(self):
         koren = Path(__file__).resolve().parent.parent.parent
@@ -1417,15 +1442,19 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
         # Naslednja skladba v ozadju ne odpre plosce sredi brskanja.
         self.assertIn("pl.hidden = !!media.ozadje;", js)
         metoda = app[app.index("    def _nastavi_celozaslonsko"):app.index("    def _odpri_media(self, item: dict)")]
-        self.assertIn("self.showMaximized()", metoda)
+        self.assertIn("self._fullscreen_restore_maximized = self.isMaximized()", metoda)
+        self.assertIn("self._zapusti_celozaslonsko()", metoda)
         self.assertIn("if not self.isFullScreen():\n            return", metoda)
+        self.assertIn("if (!media.izVrste) media.ozadje = false;", js)
 
     def test_tipke_ne_tecejo_v_iskanje_za_obrazcem_in_esc_v_predvajalniku_ne_gre_domov(self):
         js = (Path(__file__).resolve().parent.parent.parent / "assets" / "os" / "os.js").read_text(encoding="utf-8")
-        self.assertIn("if (predvajalnikOdprt || pogovor) return;", js)
+        self.assertIn("if (predvajalnikOdprt) return;", js)
+        self.assertIn('var zapri = pogovor.querySelector(".koda-prijave-gumb"); if (zapri) zapri.click();', js)
         self.assertIn('if ((sloj && sloj.id !== "slojIskanje") || pogovor || predvajalnikOdprt) return;', js)
         app = (Path(__file__).resolve().parent.parent.parent / "windows" / "safeer_windows" / "os_app.py").read_text(encoding="utf-8")
         esc = app[app.index("    def na_escape"):app.index("    def _nastavi_celozaslonsko")]
+        self.assertIn("self._esc_strani()", esc)
         self.assertIn("dispatchEvent(new KeyboardEvent('keydown'", esc)
 
     def test_safeer_splet_ostane_v_os_postavitvi_in_izhod_razsiri_os(self):
