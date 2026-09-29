@@ -2284,7 +2284,19 @@
   // Nova naprava v Safeer Linku: kaj sme na tem racunalniku. Brez izbire nima dostopa (varno privzeto),
   // zato vprasamo takoj, ko se pojavi - ne sele v Safeer Control, kamor uporabnik morda nikoli ne gre.
   var cakajocaDovoljenja = [];
+  // »Ne zdaj« velja 24 ur za to napravo: mreža naprave ob vsaki ponovni povezavi javi znova in
+  // brez tega bi se vprašanje vračalo vsakih nekaj sekund (ni ga bilo mogoče zapreti).
+  var ODLOG_DOVOLJENJA_MS = 24 * 3600 * 1000;
+  function odlozenoDovoljenje(id) {
+    try { return Date.now() - Number(localStorage.getItem("safeer.odlozeno." + id) || 0) < ODLOG_DOVOLJENJA_MS; }
+    catch (e) { return !!(S.odlozenaDovoljenja && S.odlozenaDovoljenja[id]); }
+  }
+  function odloziDovoljenje(id) {
+    try { localStorage.setItem("safeer.odlozeno." + id, String(Date.now())); }
+    catch (e) { (S.odlozenaDovoljenja = S.odlozenaDovoljenja || {})[id] = true; }
+  }
   function vprasajZaDovoljenje(n) {
+    if (odlozenoDovoljenje(n.id)) return;
     if (cakajocaDovoljenja.some(function (x) { return x.id === n.id; })) return;
     cakajocaDovoljenja.push(n);
     if (cakajocaDovoljenja.length === 1) pokaziDovoljenje();
@@ -2313,7 +2325,7 @@
       okno.appendChild(g);
     });
     var z = el("button", "koda-prijave-gumb"); z.textContent = "Ne zdaj";
-    z.addEventListener("click", naprej);
+    z.addEventListener("click", function () { odloziDovoljenje(n.id); naprej(); });
     okno.appendChild(z);
     sloj.appendChild(okno);
     document.body.appendChild(sloj);
