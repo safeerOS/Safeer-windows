@@ -12,6 +12,10 @@ import sys
 KOREN_WIN = os.path.dirname(os.path.abspath(__file__))
 if KOREN_WIN not in sys.path:
     sys.path.insert(0, KOREN_WIN)
+# Tudi koren repozitorija (paket core/): zagon iz registra (magnet povezava) nima PYTHONPATH zaganjalnika.
+KOREN = os.path.dirname(KOREN_WIN)
+if KOREN not in sys.path:
+    sys.path.append(KOREN)
 
 from safeer_windows import tls_koreni
 tls_koreni.namesti()

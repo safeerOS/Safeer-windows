@@ -303,6 +303,10 @@ func main() {
 		"PYTHONUNBUFFERED=1",
 		"QTWEBENGINE_CHROMIUM_FLAGS=--autoplay-policy=no-user-gesture-required",
 	)
+	if selfExe != "" {
+		// Safeer OS z njim registrira protokol magnet: (samo na uporabnikovo zahtevo): "<SafeerOS.exe>" --magnet "%1".
+		cmd.Env = append(cmd.Env, "SAFEER_OS_EXE="+selfExe)
+	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000}
 
 	logFilePath := filepath.Join(targetDir, "safeer_os.log")

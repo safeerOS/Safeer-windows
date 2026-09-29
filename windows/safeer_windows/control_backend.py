@@ -26,6 +26,8 @@ from safeer_windows.navidezni_zaslon import NavidezniZaslon
 
 CONFIG_DIR = os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~/.config"), "SafeerControl")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "link.json")
+#: Magnet povezava z druge naprave v krogu: odpre jo Safeer OS (Medijski center), kot na Linuxu.
+DEJANJA_MAGNET = ["magnet.open"]
 
 
 class _WindowsDeljenjeZaslona(link_deljenje.DeljenjeZaslona):
@@ -78,6 +80,8 @@ class SafeerControlBackend:
         #: Safeer Chat: potrditve sredisca in prejem sporocil (os_app nastavi ob_klepetu).
         self._klepet_cakajoci: Dict[str, list] = {}
         self.ob_klepetu: Optional[Callable[[dict], None]] = None
+        #: Magnet povezava z druge naprave (magnet.open): os_app jo odpre v Medijskem centru istega procesa.
+        self.ob_magnetu: Optional[Callable[[str], None]] = None
         self._poslusavci: List[Callable[[str, Any], None]] = []
         self._povezovanje = False
         self._zadnji_hubi: List[dict] = []
@@ -830,7 +834,9 @@ class SafeerControlBackend:
                 ime=self.device_ime,
                 sinhronizira=False,
                 odtis=odtis or None,
-                dodatne_zmoznosti=["files", "remote", "desktop", "screen", "apps", "chat"],
+                dodatne_zmoznosti=["files", "remote", "desktop", "screen", "apps", "chat"]
+                # Magnet povezave z drugih naprav odpre Safeer OS na tem racunalniku.
+                + (["magnet"] if self.magnet_na_voljo() else []),
                 katalog=self.navidezni_zaslon.katalog_aplikacij,
                 v_krog=bool(self.nastavitve.get("zaupana", True)),
             )
@@ -996,11 +1002,17 @@ class SafeerControlBackend:
                 self._oddaj_dogodek("dovoljenjeZahtevano", {"id": posiljatelj, "ime": ime_n or posiljatelj})
 
             elif akcija == "status":
+                stanje_naprave = dict(self.navidezni_zaslon.stanje_naprave())
+                if self.magnet_na_voljo():
+                    stanje_naprave["actions"] = list(stanje_naprave.get("actions") or []) + DEJANJA_MAGNET
                 izid = {
                     "ok": True,
                     "message": "Stanje",
-                    "data": self.navidezni_zaslon.stanje_naprave(),
+                    "data": stanje_naprave,
                 }
+
+            elif akcija in DEJANJA_MAGNET:
+                izid = self.odpri_magnet(str(params.get("uri") or ""))
 
             elif akcija in ("key", "key_down", "key_up"):
                 k = str(params.get("key") or "")
@@ -1154,6 +1166,62 @@ class SafeerControlBackend:
             "akcija": akcija,
             "izid": izid,
         })
+
+    # ------------------------------------------------------------------ Magnet povezave
+    def magnet_na_voljo(self) -> bool:
+        """Ali ta racunalnik zna odpreti magnet povezavo z druge naprave (Safeer OS tece ali je namescen)."""
+        if self.ob_magnetu is not None:
+            return True
+        try:
+            from safeer_windows import magnet_win
+            return bool(magnet_win.zaganjalnik())
+        except Exception:  # noqa: BLE001
+            return False
+
+    def odpri_magnet(self, uri: str) -> Dict[str, Any]:
+        """magnet.open z naprave v Linku: odpre jo Safeer OS; ukazov ali poti od naprave ne izvajamo."""
+        from core import os_torrent
+        m = os_torrent.razcleni_magnet(uri)
+        if m is None:
+            return {"ok": False, "message": "To ni veljavna magnet povezava", "code": "ni_magnet"}
+        ime = m["ime"] or m["hash"][:12]
+        if self.ob_magnetu is not None:
+            self.ob_magnetu(m["uri"])
+            return {"ok": True, "message": "Odpiram v Safeer OS: " + ime}
+        from safeer_windows import magnet_win
+        program = magnet_win.zaganjalnik()
+        if not program:
+            return {"ok": False, "message": "Safeer OS na tem računalniku ni nameščen", "code": "ni_safeer_os"}
+        import subprocess
+        dodatno: Dict[str, Any] = {}
+        if sys.platform == "win32":
+            dodatno["creationflags"] = 0x00000008  # DETACHED_PROCESS: brez okna ukazne vrstice
+        else:
+            dodatno["start_new_session"] = True
+        subprocess.Popen(program + ["--magnet", m["uri"]], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, **dodatno)
+        return {"ok": True, "message": "Odpiram v Safeer OS: " + ime}
+
+    def poslji_magnet(self, id_naprave: str, uri: str) -> Dict[str, Any]:
+        """Magnet povezava na drugo napravo v Linku: tam se odpre v predvajalniku (magnet.open)."""
+        from core import os_torrent
+        m = os_torrent.razcleni_magnet(uri)
+        if m is None:
+            return {"ok": False, "koda": "ni_magnet"}
+        return self.ukaz_pocakaj(str(id_naprave or ""), "magnet.open", {"uri": m["uri"]}, cas=15.0)
+
+    def naprave_za_magnet(self) -> List[dict]:
+        """Druge naprave v Linku, ki znajo odpreti magnet (zmoznost "magnet"): tja lahko posljemo povezavo."""
+        izhod, videno = [], set()
+        for n in self.naprave:
+            id_n = str(n.get("id") or "")
+            if not id_n or n.get("ta") or id_n == self.device_id or id_n in videno:
+                continue
+            if "magnet" not in (n.get("zmoznosti") or n.get("capabilities") or []):
+                continue
+            videno.add(id_n)
+            izhod.append({"id": id_n, "ime": n.get("ime", ""), "platforma": n.get("platforma", "")})
+        return izhod
 
     # ------------------------------------------------------------------ RPC ukazi napravam
     # ------------------------------------------------------------------ Safeer Chat

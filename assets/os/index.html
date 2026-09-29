@@ -156,6 +156,8 @@
             <p data-t="mediaOpisWin">Filmi, serije, glasba, radio, TV v živo in tvoje datoteke. Vse na enem mestu.</p>
           </div>
           <div class="media-glava-akcije">
+            <button class="gumb" id="medijiDisk" hidden><svg data-ikona="video"></svg><span id="medijiDiskIme" data-t="predvajajDisk">Predvajaj disk</span></button>
+            <button class="gumb" id="medijiMagnet"><svg data-ikona="povezava"></svg><span data-t="magnet">Magnet povezava</span></button>
             <button class="gumb-ikona" id="mediaOsvezi" data-naslov="mediaOsvezi" title="Osveži vire"><svg data-ikona="ponovno"></svg></button>
           </div>
         </div>
@@ -210,6 +212,7 @@
               <button class="gumb-ikona" id="mediaPonovi" data-naslov="mediaPonovi" hidden><svg viewBox="0 0 24 24"><path d="M17 2l3 3-3 3M4 11V9a4 4 0 0 1 4-4h12M7 22l-3-3 3-3M20 13v2a4 4 0 0 1-4 4H4"/></svg></button>
               <button class="gumb" id="mediaNaKodi" title="Predvajaj na napravi s Kodijem" hidden>Na Kodi</button>
               <button class="gumb" id="mediaNaZvocnik" data-t="zvocnikNa" hidden>Na zvočnik</button>
+              <button class="gumb" id="mediaPodnapisi" hidden>CC</button>
               <button class="gumb-ikona" id="mediaKino" title="Kino način (celozaslonsko)"><svg data-ikona="celozaslonsko"></svg></button>
               <button class="gumb-ikona" id="mediaZapri" data-naslov="zapri" title="Zapri"><svg data-ikona="x"></svg></button>
             </div>
@@ -522,6 +525,20 @@
       <button class="gumb-ikona" id="mediaMiniZapri" type="button" title="Ustavi"><svg data-ikona="x"></svg></button>
     </div>
   </main>
+</div>
+
+<!-- Safeer Media: magnet povezave (BitTorrent) - prikaz vsebine, predvajanje med prenosom, prenosi, deljenje -->
+<div class="sloj" id="slojMagnet"><div class="tancica"></div>
+  <div class="plosca magnet-plosca" role="dialog" aria-modal="true" aria-labelledby="magnetNaslov">
+    <span class="magnet-kicker">SAFEER MEDIA · MAGNET</span>
+    <h3 id="magnetNaslov" data-t="magnetNaslov"></h3>
+    <form class="magnet-vnos" id="magnetObrazec"><input id="magnetPolje" type="text" autocomplete="off" spellcheck="false" placeholder="magnet:?xt=urn:btih:…"><button type="submit" class="gumb glavni" id="magnetOdpri" data-t="magnetOdpri"></button></form>
+    <div class="magnet-vsebina" id="magnetVsebina" aria-live="polite"></div>
+    <h4 class="magnet-podnaslov" data-t="magnetPrenosi"></h4>
+    <div class="magnet-seznam magnet-prenosi" id="magnetPrenosi"></div>
+    <p class="drobno magnet-opomba" data-t="magnetOpomba"></p>
+    <div class="gumbi"><button type="button" class="gumb" id="magnetDeliDatoteko" data-t="magnetDeliDatoteko"></button><button type="button" class="gumb" id="magnetDeliMapo" data-t="magnetDeliMapo"></button><button type="button" class="gumb" id="magnetPrivzeto" data-t="magnetPrivzeto" hidden></button><button type="button" class="gumb" id="magnetZapri" data-t="zapri"></button></div>
+  </div>
 </div>
 
 <!-- Iskanje -->

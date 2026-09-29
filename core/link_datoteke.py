@@ -179,6 +179,31 @@ class DeljeneMape:
                 return f"share:{i}:" + os.path.relpath(pot, koren).replace(os.sep, "/")
         return "disk:" + pot if self.ves_disk else ""
 
+    def podnapisi(self, oznaka_videa: str) -> List[dict]:
+        """Podnapisi ob videu (ista mapa ali podmapa Subs), vsak s svojo oznako znotraj deljene mape."""
+        from core import podnapisi as pn
+        r = self.razresi(oznaka_videa)
+        if r is None or not os.path.isfile(r[1]):
+            return []
+        izid = []
+        for pot in pn.podnapisi_mape(r[1]):
+            oz = self.oznaka_poti(pot)
+            if oz and self.razresi(oz) is not None:
+                izid.append(pn.opis(r[1], pot, oz))
+        return izid
+
+    def dodaj_podnapise(self, vnosi: List[dict]) -> List[dict]:
+        """Videom v seznamu pripne `subtitles` (starejše naprave polje preprosto prezrejo)."""
+        for v in vnosi:
+            if v.get("type") == "video":
+                try:
+                    p = self.podnapisi(v["id"])
+                except OSError:
+                    p = []
+                if p:
+                    v["subtitles"] = p
+        return vnosi
+
     def seznam(self, oznaka: str) -> Optional[List[dict]]:
         if oznaka in ("", "root"):
             return self.koren()
@@ -676,6 +701,7 @@ class Datoteke:
         vnosi = self.mape.seznam(oznaka)
         if vnosi is None:
             raise FileNotFoundError("Te mape ni (vec) med deljenimi")
+        self.mape.dodaj_podnapise(vnosi)
         # `edit`: naprava sme datoteke te mape brisati (v Smeti), preimenovati, premakniti in vrteti slike (POST /d/<id>).
         o: dict = {"items": vnosi, "folder": oznaka if oznaka != "root" else "", "shared": True, "edit": oznaka not in ("", "root")}
         if any(v.get("type") != "folder" for v in vnosi):
