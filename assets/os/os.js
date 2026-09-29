@@ -1053,6 +1053,7 @@
     var imeDat = d.name || d.ime || "";
     var idDat = d.id || "";
     var b = el("button", "vrstica");
+    if (!jeMapa) b._linkDatoteka = d;
     b.innerHTML = svg(IKONA_VRSTE[vrsta] || "datoteka") + '<span class="ime">' + ubezi(imeDat) + '</span>' +
       '<span class="pod">' + (jeMapa ? "" : ubezi(velikost(d.size || d.velikost || 0)) + " · ") + ubezi(datum(d.mtime || d.spremenjeno || 0)) + '</span>';
 
@@ -1063,6 +1064,11 @@
       });
     } else {
       b.addEventListener("click", function () {
+        if (server && server.base_url && (vrsta === "zvok" || vrsta === "video")) {
+          // Glasba in video: predvajanje takoj, sproti z naprave (brez prenosa); zvok z vrsto cele mape.
+          predvajajZNaprave(idNaprave, d, server);
+          return;
+        }
         if (server && server.base_url) {
           obvesti(t("prenasamDatoteko", { ime: imeDat }));
           klic("prenesiDatotekoNaprave", [idNaprave, idDat, imeDat, server]).then(function (r) {
@@ -1087,6 +1093,34 @@
       b.appendChild(gOdpri);
     }
     return b;
+  }
+
+  // Datoteke druge naprave, ki jih predvajamo sproti: id "link:<naprava>:<datoteka>" -> podatki za klic.
+  S.linkMediji = S.linkMediji || {};
+  function predvajajZNaprave(idNaprave, d, server, izVrste) {
+    var idDat = d.id || "";
+    var vrsta = normalizirajVrsto(d.type || d.vrsta, false) === "zvok" ? "audio" : "video";
+    var kljuc = "link:" + idNaprave + ":" + idDat;
+    S.linkMediji[kljuc] = { naprava: idNaprave, d: d, server: server };
+    if (!izVrste && vrsta === "audio") {
+      // Vrsta = vse skladbe te mape (album): po koncu samodejno naslednja, kot pri lokalni glasbi.
+      var skladbe = Array.prototype.slice.call(document.querySelectorAll("#vsebinaMape .vrstica"))
+        .map(function (el) { return el._linkDatoteka; }).filter(function (x) { return x && normalizirajVrsto(x.type || x.vrsta, false) === "zvok"; });
+      skladbe.forEach(function (x) { S.linkMediji["link:" + idNaprave + ":" + x.id] = { naprava: idNaprave, d: x, server: server }; });
+      media.vrsta = skladbe.map(function (x) { return "link:" + idNaprave + ":" + x.id; });
+      media.vrstaMesto = Math.max(0, media.vrsta.indexOf(kljuc));
+      media.vrstaZgodovina = [];
+      narisiVrsto();
+    }
+    klic("predvajajDatotekoNaprave", [idNaprave, idDat, d.name || d.ime || "", server, vrsta, d.mime || ""]).then(function (item) {
+      if (!item || !item.ok) { obvesti((item && item.napaka) || t("mediaVirNapaka")); return; }
+      media.aktivni = item;
+      if (!izVrste && window.safeerOsPojdi) window.safeerOsPojdi("media");
+      if (!item.native) { predvajajHtml(item, 0); return; }
+      // Predvaja VLC (npr. M4A/AAC, video): zvok v strani utihne, da ne igrata dva hkrati.
+      var a = $("mediaAudio"); if (a) { a.pause(); a.removeAttribute("src"); }
+      osveziMini();
+    }, function () { obvesti(t("mediaVirNapaka")); });
   }
 
   function nalozNapraveSDatoteki() {
@@ -3144,7 +3178,9 @@
     var url = variant.url || "";
     var isDirectMedia = /\.(mp4|mkv|webm|avi|mov|m4v|mp3|flac|ogg|opus|m4a|aac|wav|m3u8)($|\?)/i.test(url) || url.startsWith("file:") || /mpegurl/i.test(variant.mime || item.mime || "") ||
       // Zvočni tok brez končnice (Jamendo, Icecast radio): strežnik je potrdil zvok (audio/*), ni spletna stran.
-      (audio && item.neposredni_zvok === true && (index || 0) === 0);
+      (audio && item.neposredni_zvok === true && (index || 0) === 0) ||
+      // Tok z druge naprave v Linku (lokalni varni tok 127.0.0.1): neposreden medij brez končnice.
+      (item.neposredni === true && /^http:\/\/127\.0\.0\.1:\d+\/m\/[0-9a-f]{32}$/.test(url));
     var video = $("mediaVideo"), playerAudio = $("mediaAudio"), iframe = $("mediaIframe"), playerImage = $("mediaSlika");
 
     if (media.timer) { window.clearTimeout(media.timer); media.timer = 0; }
@@ -3191,11 +3227,17 @@
         player.src = url;
         player.load();
         try {
-          var shranjenCas = Number(localStorage.getItem("safeer_media_progress_" + (item.id || url)) || 0);
-          if (shranjenCas > 3) player.currentTime = shranjenCas;
-          player.ontimeupdate = function () {
-            if (player.currentTime > 3) localStorage.setItem("safeer_media_progress_" + (item.id || url), String(Math.floor(player.currentTime)));
-          };
+          // Nadaljevanje samo za video (film, epizoda). Skladba se vedno začne od začetka – sicer bi se
+          // ob ponovnem krogu albuma začela tik pred koncem in vrsta bi se vrtela v prazno.
+          var kljucNapredka = "safeer_media_progress_" + (item.id || url);
+          if (audio) { player.ontimeupdate = null; localStorage.removeItem(kljucNapredka); }
+          else {
+            var shranjenCas = Number(localStorage.getItem(kljucNapredka) || 0);
+            if (shranjenCas > 3) player.currentTime = shranjenCas;
+            player.ontimeupdate = function () {
+              if (player.currentTime > 3) localStorage.setItem(kljucNapredka, String(Math.floor(player.currentTime)));
+            };
+          }
         } catch (e) {}
         player.onerror = function () {
           if (media.timer) window.clearTimeout(media.timer);
@@ -3206,7 +3248,8 @@
             if (media.ozadje && $("mediaMiniMeta")) { $("mediaMiniMeta").textContent = $("mediaNapaka").textContent; obvesti($("mediaNapaka").textContent); }
           }
         };
-        player.onended = audio ? function () { if (!predvajajIzVrste(1)) osveziMini(); } : null;
+        player.onended = audio ? function () { if (!predvajajIzVrste(1)) osveziMini(); } :
+          function () { try { localStorage.removeItem("safeer_media_progress_" + (item.id || url)); } catch (e) {} };
         if (audio) { player.onplay = osveziMini; player.onpause = osveziMini; }
         player.play().catch(function () {});
         osveziMini();
@@ -3310,7 +3353,11 @@
   function odpriMedia(id) {
     // Uporabnik je sam izbral vsebino: pokaži predvajalnik (tudi, če je prej glasba igrala v ozadju).
     if (!media.izVrste) media.ozadje = false;
+    var izVrste = media.izVrste;
     media.izVrste = false;
+    // Skladba z druge naprave (vrsta albuma iz Datotek): naslednja gre po istem varnem toku.
+    var link = String(id || "").indexOf("link:") === 0 && S.linkMediji && S.linkMediji[id];
+    if (link) { predvajajZNaprave(link.naprava, link.d, link.server, izVrste); return; }
     // Prenos, ki ga izdajatelj ponuja samo na svoji strani (npr. RTV SLO): odpremo ga v Spletu.
     var znan = (media.katalog || []).find(function (x) { return x.id === id; });
     if (znan && znan.stran) { otvoriSpletnoStran(znan.stran, znan.naslov); return; }

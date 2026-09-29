@@ -30,13 +30,22 @@ import unicodedata
 import urllib.parse
 from typing import Dict, List, Optional, Tuple
 
-from core import link_urejanje
+from core import link_tls, link_urejanje
 
 NAJVEC_VNOSOV = 500
 NAJVEC_TELESA = 64 * 1024
 #: Kaj naprava sme narediti z datoteko racunalnika (POST /d/<id>, telo JSON {"op": ...}).
 UKAZI = ("delete", "rename", "move", "rotate")
 VELIKOST_KOSA = 256 * 1024
+#: Zeton za prenos velja 12 ur od zadnje rabe; nato mora naprava znova po seznam.
+ZETON_VELJA_S = 12 * 3600.0
+NAJVEC_ZETONOV = 64
+#: Zgornja meja zivljenja zetona, tudi ce ga naprava ves cas rabi.
+NAJDLJE_S = 7 * 24 * 3600.0
+
+
+def _zeton_zivi(izdan: float, rabljen: float, zdaj: float) -> bool:
+    return zdaj - rabljen < ZETON_VELJA_S and zdaj - izdan < NAJDLJE_S
 TLS_MAPA = os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")), "safeer-control", "tls")
 
 # Kaj televizor zna predvajati ali pokazati; drugo se kaze kot navadna datoteka.
@@ -387,65 +396,86 @@ class _Obravnava(http.server.BaseHTTPRequestHandler):
         if not u.path.startswith("/d/"):
             self._napaka(404, "ni take poti")
             return
-        if not streznik.zeton_velja(self._zeton()):
-            self._napaka(401, "manjka ali napacen zeton")
-            return
-        oznaka = urllib.parse.unquote(u.path[3:])
-        r = streznik.mape.razresi(oznaka)
-        if r is None or not os.path.isfile(r[1]):
-            self._napaka(404, "datoteke ni")
-            return
-        pot = r[1]
-        velikost = os.path.getsize(pot)
-        vrsta = mimetypes.guess_type(pot)[0] or "application/octet-stream"
-        zacetek, konec = 0, velikost - 1
-        obseg = self.headers.get("Range")
-        delni = False
-        if obseg and obseg.startswith("bytes="):
-            try:
-                a, b = obseg[6:].split("-", 1)
-                if a == "" and b:
-                    zacetek = max(0, velikost - int(b))
-                else:
-                    zacetek = int(a)
-                    if b:
-                        konec = min(velikost - 1, int(b))
-                delni = True
-            except ValueError:
-                delni = False
-            if delni and (zacetek > konec or zacetek >= velikost):
-                self.send_response(416)
-                self.send_header("Content-Range", f"bytes */{velikost}")
-                self.send_header("Content-Length", "0")
-                self.end_headers()
-                return
-        dolzina = konec - zacetek + 1
-        self.send_response(206 if delni else 200)
-        self.send_header("Content-Type", vrsta)
-        self.send_header("Accept-Ranges", "bytes")
-        self.send_header("Content-Length", str(dolzina))
-        if delni:
-            self.send_header("Content-Range", f"bytes {zacetek}-{konec}/{velikost}")
-        self.send_header("Cache-Control", "private, max-age=0")
-        self.end_headers()
-        if samo_glava:
-            return
+        postrezi_datoteko(self, streznik, urllib.parse.unquote(u.path[3:]), samo_glava)
+
+
+def _napaka_http(obravnava, koda: int, besedilo: str) -> None:
+    telo = json.dumps({"napaka": besedilo}).encode("utf-8")
+    obravnava.send_response(koda)
+    obravnava.send_header("Content-Type", "application/json")
+    obravnava.send_header("Content-Length", str(len(telo)))
+    obravnava.send_header("Connection", "close")
+    obravnava.end_headers()
+    if getattr(obravnava, "command", "") != "HEAD":
+        obravnava.wfile.write(telo)
+
+
+def postrezi_datoteko(obravnava, streznik: "StreznikDatotek", oznaka: str, samo_glava: bool) -> None:
+    """Datoteka deljene mape z zetonom v glavi in podporo za `Range` (previjanje v predvajalniku).
+
+    Isto za lastni streznik datotek (/d/<id>) in za Hub (/cast/d/<id>), prek katerega gre tok tudi
+    po Global Linku: rele prinese samo povezavo do vrat Huba."""
+    z = obravnava.headers.get("X-Safeer-Token")
+    if not streznik.zeton_velja(z.strip() if z else None):
+        _napaka_http(obravnava, 401, "manjka ali napacen zeton")
+        return
+    r = streznik.mape.razresi(oznaka)
+    if r is None or not os.path.isfile(r[1]):
+        _napaka_http(obravnava, 404, "datoteke ni")
+        return
+    pot = r[1]
+    velikost = os.path.getsize(pot)
+    vrsta = mimetypes.guess_type(pot)[0] or "application/octet-stream"
+    zacetek, konec = 0, velikost - 1
+    obseg = obravnava.headers.get("Range")
+    delni = False
+    if obseg and obseg.startswith("bytes="):
         try:
-            with open(pot, "rb") as d:
-                d.seek(zacetek)
-                ostane = dolzina
-                while ostane > 0:
-                    kos = d.read(min(VELIKOST_KOSA, ostane))
-                    if not kos:
-                        break
-                    self.wfile.write(kos)
-                    ostane -= len(kos)
-        except (BrokenPipeError, ConnectionResetError):
-            pass
+            a, b = obseg[6:].split(",", 1)[0].split("-", 1)
+            if a == "" and b:
+                zacetek = max(0, velikost - int(b))
+            else:
+                zacetek = int(a)
+                if b:
+                    konec = min(velikost - 1, int(b))
+            delni = True
+        except ValueError:
+            delni = False
+        if delni and (zacetek > konec or zacetek >= velikost):
+            obravnava.send_response(416)
+            obravnava.send_header("Content-Range", f"bytes */{velikost}")
+            obravnava.send_header("Content-Length", "0")
+            obravnava.end_headers()
+            return
+    dolzina = konec - zacetek + 1
+    obravnava.send_response(206 if delni else 200)
+    obravnava.send_header("Content-Type", vrsta)
+    obravnava.send_header("Accept-Ranges", "bytes")
+    obravnava.send_header("Content-Length", str(dolzina))
+    if delni:
+        obravnava.send_header("Content-Range", f"bytes {zacetek}-{konec}/{velikost}")
+    obravnava.send_header("Cache-Control", "private, max-age=0")
+    obravnava.end_headers()
+    if samo_glava:
+        return
+    try:
+        with open(pot, "rb") as d:
+            d.seek(zacetek)
+            ostane = dolzina
+            while ostane > 0:
+                kos = d.read(min(VELIKOST_KOSA, ostane))
+                if not kos:
+                    break
+                obravnava.wfile.write(kos)
+                ostane -= len(kos)
+    except (BrokenPipeError, ConnectionResetError):
+        pass
 
 
-class _Streznik(http.server.ThreadingHTTPServer):
+class _Streznik(link_tls.RokovanjeVNiti, http.server.ThreadingHTTPServer):
     daemon_threads = True
+    #: Predvajalnik, ki obstane (pavza), ne drzi niti v nedogled.
+    rok_po_rokovanju = 120.0
     allow_reuse_address = True
 
 
@@ -457,7 +487,7 @@ class StreznikDatotek:
         self.tls_mapa = tls_mapa
         self.odtis = ""
         self.vrata = 0
-        self._zetoni: Dict[str, str] = {}   # zeton -> id naprave
+        self._zetoni: Dict[str, Tuple[str, float, float]] = {}   # zeton -> (id naprave, izdan, zadnja raba)
         self._streznik: Optional[_Streznik] = None
         self._nit: Optional[threading.Thread] = None
         self._kljucavnica = threading.Lock()
@@ -474,7 +504,7 @@ class StreznikDatotek:
             ctx.minimum_version = ssl.TLSVersion.TLSv1_2
             ctx.load_cert_chain(potrdilo, kljuc)
             s = _Streznik(("0.0.0.0", 0), _Obravnava)
-            s.socket = ctx.wrap_socket(s.socket, server_side=True)
+            s.socket = ctx.wrap_socket(s.socket, server_side=True, do_handshake_on_connect=False)
             s.streznik = self  # type: ignore[attr-defined]
             self.vrata = s.server_address[1]
             self._streznik = s
@@ -494,18 +524,44 @@ class StreznikDatotek:
         self._zetoni.clear()
         self.vrata = 0
 
-    def zeton_za(self, id_naprave: str) -> str:
-        """Isti zeton za isto napravo, dokler Control tece; nov Control = novi zetoni."""
-        for z, n in self._zetoni.items():
-            if n == id_naprave:
-                return z
-        z = secrets.token_urlsafe(24)
-        self._zetoni[z] = id_naprave
-        return z
+    def zeton_za(self, id_naprave: str, zdaj: Optional[float] = None) -> str:
+        """Zeton naprave za prenos in predvajanje.
 
-    def zeton_velja(self, zeton: Optional[str]) -> bool:
+        Velja ZETON_VELJA_S od zadnje rabe (tok, ki tece, ga drzi pri zivljenju - album s ponavljanjem ali
+        dolga pavza ne padeta), a najvec NAJDLJE_S od izdaje. Naprava, ki znova vpraša za seznam, po polovici
+        roka dobi novega; prejsnji velja naprej do svojega roka."""
+        zdaj = time.monotonic() if zdaj is None else zdaj
+        with self._kljucavnica:
+            for z, (n, izdan, rabljen) in list(self._zetoni.items()):
+                if not _zeton_zivi(izdan, rabljen, zdaj):
+                    self._zetoni.pop(z, None)
+                elif n == id_naprave and zdaj - izdan < ZETON_VELJA_S / 2:
+                    return z
+            z = secrets.token_urlsafe(24)
+            self._zetoni[z] = (id_naprave, zdaj, zdaj)
+            while len(self._zetoni) > NAJVEC_ZETONOV:
+                self._zetoni.pop(min(self._zetoni, key=lambda k: self._zetoni[k][2]), None)
+            return z
+
+    def zeton_velja(self, zeton: Optional[str], zdaj: Optional[float] = None) -> bool:
         # Primerjava v stalnem casu: iz casa odgovora se ne da uganiti, koliko znakov se ujema.
-        return bool(zeton) and any(hmac.compare_digest(zeton.encode(), z.encode()) for z in list(self._zetoni))
+        if not zeton:
+            return False
+        zdaj = time.monotonic() if zdaj is None else zdaj
+        with self._kljucavnica:
+            for z, (n, izdan, rabljen) in list(self._zetoni.items()):
+                if hmac.compare_digest(zeton.encode(), z.encode()) and _zeton_zivi(izdan, rabljen, zdaj):
+                    self._zetoni[z] = (n, izdan, zdaj)
+                    return True
+        return False
+
+    def preklici(self, id_naprave: str) -> int:
+        """Preklice vse zetone naprave (npr. ko ji vzamemo dostop do celega diska). Vrne stevilo."""
+        with self._kljucavnica:
+            stari = [z for z, v in self._zetoni.items() if v[0] == id_naprave]
+            for z in stari:
+                self._zetoni.pop(z, None)
+        return len(stari)
 
     def osnova(self, naslov_racunalnika: str) -> str:
         return f"https://{naslov_racunalnika}:{self.vrata}"

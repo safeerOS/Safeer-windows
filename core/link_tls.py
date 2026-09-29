@@ -136,6 +136,29 @@ def _isti(a: str, b: str) -> bool:
     return hmac.compare_digest(a.lower().encode(), b.lower().encode())
 
 
+class RokovanjeVNiti:
+    """Za http.server.ThreadingHTTPServer z ovitim TLS vticnikom (do_handshake_on_connect=False).
+
+    TLS rokovanje tece v delovni niti zahteve, ne v `accept()`: sicer ena tiha povezava (naprava v
+    omrezju, obtican kanal releja) ustavi sprejemanje vseh drugih - Hub in tok bi zamrznila."""
+    ROK_ROKOVANJA_S = 15.0
+    #: Rok branja po rokovanju (None = brez; WebSocket Huba ima svoj utrip).
+    rok_po_rokovanju: Optional[float] = None
+
+    def finish_request(self, request, client_address):  # noqa: D401 - socketserver API
+        try:
+            request.settimeout(self.ROK_ROKOVANJA_S)
+            request.do_handshake()
+            request.settimeout(self.rok_po_rokovanju)
+        except Exception:
+            try:
+                request.close()
+            except Exception:
+                pass
+            return
+        super().finish_request(request, client_address)  # type: ignore[misc]
+
+
 class _PripetaHttps(http.client.HTTPSConnection):
     """HTTPS povezava, ki po rokovanju preveri odtis Hubovega potrdila."""
 

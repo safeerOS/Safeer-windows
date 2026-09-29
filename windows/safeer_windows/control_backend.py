@@ -397,6 +397,28 @@ class SafeerControlBackend:
         self._oddaj_dogodek("hub", {"najden": False, "naslov": "", "isce_naprej": False})
         return None
 
+    def _datoteke_za(self, posiljatelj: str):
+        """Deljene mape za napravo: en streznik za omejen dostop in en za cel disk (dovoljenje "polno").
+
+        Prej je vsak `files.list` naredil nov streznik na novih vratih (ostajali so odprti), zeton
+        prejsnjega pa je s tem nehal veljati sredi predvajanja. Zdaj oba ostaneta in ju streze tudi Hub
+        (/cast/d/), da tok tece tudi prek Global Linka."""
+        from core import link_datoteke
+        polno = self.dovoljenje_za(posiljatelj) == "polno"
+        shramba = getattr(self, "_datoteke", None)
+        if shramba is None:
+            shramba = self._datoteke = {}
+        if not polno and True in shramba:
+            # Naprava nima (vec) dostopa do celega diska: njen zeton za ta streznik takoj preklicemo.
+            shramba[True].streznik.preklici(posiljatelj)
+        d = shramba.get(polno)
+        if d is None:
+            d = link_datoteke.Datoteke(poti=self.deljene_mape(), tls_mapa=self.navidezni_zaslon.tls_mapa, ves_disk=polno)
+            shramba[polno] = d
+        else:
+            d.mape.nastavi(self.deljene_mape())
+        return d
+
     def zagotovi_lokalni_hub(self) -> Optional[dict]:
         """Če v hiši ni Huba, ga ta računalnik varno prevzame in se nanj vpiše.
 
@@ -406,6 +428,8 @@ class SafeerControlBackend:
         if self._lokalni_hub is not None and self._lokalni_hub.tece():
             return {"naslov": self.hub_url(), "fp": self._lokalni_hub.odtis, "lokalni": True}
         streznik = link_hub_streznik.HubStreznik()
+        # Deljene mape tudi prek Huba (/cast/d/): po Global Linku pride samo povezava do vrat Huba.
+        streznik.datoteke = lambda: [x.streznik for x in list((getattr(self, "_datoteke", None) or {}).values())]
         if not streznik.zazeni() or streznik.hub is None:
             return None
         self._lokalni_hub = streznik
@@ -693,6 +717,12 @@ class SafeerControlBackend:
         if self._lokalni_hub is not None:
             self._lokalni_hub.ustavi()
             self._lokalni_hub = None
+        for d in list((getattr(self, "_datoteke", None) or {}).values()):
+            try:
+                d.ustavi()
+            except Exception:
+                pass
+        self._datoteke = {}
 
     def pozabi_napravo(self) -> bool:
         hub = self.hub_url()
@@ -1071,11 +1101,7 @@ class SafeerControlBackend:
             elif akcija == "files.list":
                 mapa = str(params.get("folder") or "")
                 try:
-                    from core import link_datoteke
-                    d = link_datoteke.Datoteke(
-                        poti=self.deljene_mape(), tls_mapa=self.navidezni_zaslon.tls_mapa,
-                        ves_disk=self.dovoljenje_za(posiljatelj) == "polno",
-                    )
+                    d = self._datoteke_za(posiljatelj)
                     podatki = d.seznam(mapa, posiljatelj, self.hub_url())
                     izid = {"ok": True, "message": f"{len(podatki.get('items', []))} vnosov", "data": podatki}
                 except Exception as e:
@@ -1084,11 +1110,7 @@ class SafeerControlBackend:
             elif akcija == "files.open":
                 dat_id = str(params.get("id") or "")
                 try:
-                    from core import link_datoteke
-                    d = link_datoteke.Datoteke(
-                        poti=self.deljene_mape(), tls_mapa=self.navidezni_zaslon.tls_mapa,
-                        ves_disk=self.dovoljenje_za(posiljatelj) == "polno",
-                    )
+                    d = self._datoteke_za(posiljatelj)
                     if d.odpri(dat_id):
                         izid = {"ok": True, "message": "Datoteka se odpira na ločenem navideznem zaslonu"}
                     else:
@@ -1099,11 +1121,7 @@ class SafeerControlBackend:
             elif akcija == "files.search":
                 poizvedba = str(params.get("q") or "")
                 try:
-                    from core import link_datoteke
-                    d = link_datoteke.Datoteke(
-                        poti=self.deljene_mape(), tls_mapa=self.navidezni_zaslon.tls_mapa,
-                        ves_disk=self.dovoljenje_za(posiljatelj) == "polno",
-                    )
+                    d = self._datoteke_za(posiljatelj)
                     podatki = d.isci(poizvedba, posiljatelj, self.hub_url())
                     izid = {"ok": True, "message": f"{len(podatki.get('items', []))} zadetkov", "data": podatki}
                 except Exception as e:
