@@ -314,7 +314,7 @@
     });
     if (razdelek === "omrezje") nalozOmrezje(false);
     if (razdelek === "zvok") { nalozZvok(); zvokZanka(); if (!jblStanje) nalozJbl(); }
-    if (razdelek === "media") naloziMedia();
+    if (razdelek === "media") { naloziMedia(); osveziDvdPogon(); }
     if (razdelek === "splet") {
       narisiSpletnoZacetno();
       // Splet je vdelan Safeer Browser (zacetna stran Splet) - enako na vseh razlicicah Safeer OS.
@@ -1112,7 +1112,9 @@
       media.vrstaZgodovina = [];
       narisiVrsto();
     }
-    klic("predvajajDatotekoNaprave", [idNaprave, idDat, d.name || d.ime || "", server, vrsta, d.mime || ""]).then(function (item) {
+    // 7. argument: podnapisi ob videu na napravi (polje subtitles seznama datotek).
+    klic("predvajajDatotekoNaprave", [idNaprave, idDat, d.name || d.ime || "", server, vrsta, d.mime || "",
+                                      Array.isArray(d.subtitles) ? d.subtitles : []]).then(function (item) {
       if (!item || !item.ok) { obvesti((item && item.napaka) || t("mediaVirNapaka")); return; }
       media.aktivni = item;
       if (!izVrste && window.safeerOsPojdi) window.safeerOsPojdi("media");
@@ -1121,6 +1123,299 @@
       var a = $("mediaAudio"); if (a) { a.pause(); a.removeAttribute("src"); }
       osveziMini();
     }, function () { obvesti(t("mediaVirNapaka")); });
+  }
+
+  // ------------------------------------------------------------------ Safeer Media: magnet povezave
+  // Magnet (BitTorrent): prikaz vsebine, predvajanje že med prenosom, prenos, pošiljanje na napravo in
+  // deljenje lastnih datotek. Motor je rqbit na 127.0.0.1 z geslom (core/os_torrent.py), enako kot na Linuxu.
+  S.magnet = { opis: null, casovnik: 0 };
+  function magnetVelikost(b) {
+    b = Number(b) || 0;
+    if (b >= 1073741824) return (b / 1073741824).toFixed(1) + " GB";
+    if (b >= 1048576) return Math.round(b / 1048576) + " MB";
+    return Math.max(1, Math.round(b / 1024)) + " kB";
+  }
+  function magnetNapaka(koda) {
+    var k = "magnetNapaka_" + (koda || "napaka"), s = t(k);
+    return s === k ? t("magnetNapaka_napaka") : s;
+  }
+  function magnetSporocilo(besedilo, razred) {
+    var v = $("magnetVsebina"); v.innerHTML = "";
+    if (besedilo) v.appendChild(el("p", razred || "drobno", ubezi(besedilo)));
+  }
+  function magnetGumb(besedilo, dejanje, razred) {
+    var g = el("button", razred || "", ubezi(besedilo)); g.type = "button";
+    g.addEventListener("click", function (e) { e.stopPropagation(); dejanje(g); });
+    return g;
+  }
+  function odpriMagnet(uri) {
+    if (window.safeerOsPojdi && S.razdelek !== "media") window.safeerOsPojdi("media");
+    $("slojMagnet").classList.add("viden");
+    magnetSporocilo("");
+    if (uri) $("magnetPolje").value = uri;
+    klic("magnetPrivzeto", [false]).then(function (je) { $("magnetPrivzeto").hidden = !!je; }).catch(function () {});
+    magnetOsveziPrenose();
+    if (!S.magnet.casovnik) S.magnet.casovnik = setInterval(function () {
+      if (!$("slojMagnet").classList.contains("viden")) { clearInterval(S.magnet.casovnik); S.magnet.casovnik = 0; return; }
+      magnetOsveziPrenose();
+    }, 2000);
+    if (uri) preberiMagnet(uri, true); else $("magnetPolje").focus();
+  }
+  function zagotoviProgram() {
+    return klic("magnetProgram").then(function (p) {
+      if (!p || !p.podprto) { magnetSporocilo(t("magnetNiPodprto")); return false; }
+      if (p.na_voljo) return true;
+      // Enkratni prenos odprtokodnega motorja: uporabnik ve, kaj in od kod se prenaša.
+      return new Promise(function (koncano) {
+        var v = $("magnetVsebina"); v.innerHTML = "";
+        v.appendChild(el("p", "drobno", ubezi(t("magnetProgramOpis", { mb: p.mb }))));
+        v.appendChild(magnetGumb(t("magnetProgramPrenesi"), function (g) {
+          g.disabled = true; g.textContent = t("magnetProgramPrenasam", { odstotek: 0 });
+          S.magnet.gumbPrograma = g;
+          klic("magnetPrenesiProgram").then(function (r) {
+            S.magnet.gumbPrograma = null;
+            if (r && r.ok) koncano(true); else { magnetSporocilo(magnetNapaka(r && r.koda)); koncano(false); }
+          }).catch(function () { magnetSporocilo(magnetNapaka("prenos_programa")); koncano(false); });
+        }, "gumb glavni"));
+      });
+    });
+  }
+  function preberiMagnet(uri, samodejno) {
+    zagotoviProgram().then(function (ok) {
+      if (!ok) return;
+      magnetSporocilo(t("magnetBerem"));
+      klic("magnetPreberi", [uri]).then(function (r) {
+        if (!r || !r.ok) { magnetSporocilo(magnetNapaka(r && r.koda)); return; }
+        S.magnet.opis = r;
+        narisiMagnetOpis(r, samodejno);
+      }).catch(function () { magnetSporocilo(magnetNapaka("napaka")); });
+    });
+  }
+  function magnetIkona(vrsta) {
+    return vrsta === "video" ? "video" : vrsta === "audio" ? "glasba" : vrsta === "slika" ? "slika" : vrsta === "nevarno" ? "scit" : "datoteka";
+  }
+  function narisiMagnetOpis(r, samodejno) {
+    var v = $("magnetVsebina"); v.innerHTML = "";
+    v.appendChild(el("p", "", "<b>" + ubezi(r.ime || r.hash) + "</b>"));
+    if (r.sumljiv) v.appendChild(el("div", "magnet-opozorilo", ubezi(t("magnetSumljiv"))));
+    var seznam = el("div", "magnet-seznam");
+    var izbire = [];
+    r.datoteke.forEach(function (f) {
+      var vrstica = el("div", "magnet-vrstica");
+      var izbira = el("input"); izbira.type = "checkbox"; izbira.checked = !!f.izbrana;
+      izbira.setAttribute("aria-label", f.ime);
+      var zapis = { f: f, el: izbira, potrjena: false };
+      izbire.push(zapis);
+      // Morda program: privzeto ne. Prepoznava se lahko zmoti, zato uporabnik po opozorilu vseeno izbere.
+      if (f.vrsta === "nevarno") izbira.addEventListener("change", function () {
+        var staro = vrstica.nextSibling && vrstica.nextSibling.classList && vrstica.nextSibling.classList.contains("magnet-opozorilo") ? vrstica.nextSibling : null;
+        if (staro) staro.remove();
+        if (!izbira.checked) { zapis.potrjena = false; return; }
+        if (zapis.potrjena) return;
+        izbira.checked = false;
+        var o = el("div", "magnet-opozorilo", ubezi(t("magnetNevarnoOpis", { ime: f.ime.split("/").pop() })));
+        var d = el("div", "magnet-dejanja");
+        d.appendChild(magnetGumb(t("magnetVseeno"), function () { zapis.potrjena = true; izbira.checked = true; o.remove(); izbira.focus(); }));
+        d.appendChild(magnetGumb(t("preklici"), function () { o.remove(); izbira.focus(); }));
+        o.appendChild(d);
+        vrstica.parentNode.insertBefore(o, vrstica.nextSibling);
+      });
+      vrstica.appendChild(izbira);
+      vrstica.insertAdjacentHTML("beforeend", svg(magnetIkona(f.vrsta)) + '<div><b title="' + ubezi(f.ime) + '">' + ubezi(f.ime) +
+        '</b><small>' + ubezi(magnetVelikost(f.velikost)) + '</small></div>');
+      vrstica.appendChild(el("span", "magnet-oznaka" + (f.vrsta === "nevarno" ? " nevarno" : ""), ubezi(t("magnetVrsta_" + f.vrsta))));
+      if (f.predvajljivo) vrstica.appendChild(magnetGumb("▶ " + t("magnetPredvajaj"), function () { predvajajMagnet(r.uri, f); }));
+      seznam.appendChild(vrstica);
+    });
+    v.appendChild(seznam);
+    var dejanja = el("div", "magnet-dejanja");
+    dejanja.appendChild(magnetGumb(t("magnetPrenesiIzbrane"), function (g) {
+      var izbrane = izbire.filter(function (x) { return x.el.checked && (x.f.vrsta !== "nevarno" || x.potrjena); }).map(function (x) { return x.f.i; });
+      var potrjene = izbire.filter(function (x) { return x.potrjena && x.el.checked; }).map(function (x) { return x.f.i; });
+      if (!izbrane.length) { obvesti(magnetNapaka("ni_izbranih")); return; }
+      g.disabled = true;
+      klic("magnetDodaj", [r.uri, izbrane, potrjene]).then(function (d) {
+        g.disabled = false;
+        obvesti(d && d.ok ? t("magnetPrenasam") : magnetNapaka(d && d.koda));
+        magnetOsveziPrenose();
+      }).catch(function () { g.disabled = false; obvesti(magnetNapaka("napaka")); });
+    }));
+    magnetPosiljanje(dejanja, function () { return r.uri; });
+    v.appendChild(dejanja);
+    if (samodejno) {
+      // Z druge naprave ali iz brskalnika: en sam posnetek (ali ena skladba) se začne predvajati takoj.
+      var predvajljive = r.datoteke.filter(function (f) { return f.predvajljivo; });
+      var videi = predvajljive.filter(function (f) { return f.vrsta === "video"; });
+      if (predvajljive.length === 1) predvajajMagnet(r.uri, predvajljive[0]);
+      else if (videi.length === 1) predvajajMagnet(r.uri, videi[0]);
+    }
+  }
+  function magnetPosiljanje(dejanja, uri) {
+    // Pošlji na drugo napravo v Linku (tam se odpre v predvajalniku) ali kopiraj za deljenje z drugimi.
+    var izbor = el("select"); izbor.setAttribute("aria-label", t("magnetPoslji"));
+    izbor.appendChild(el("option", "", ubezi(t("magnetPosljiNa"))));
+    klic("magnetNaprave").then(function (naprave) {
+      (naprave || []).forEach(function (n) { var o = el("option", "", ubezi(n.ime || n.id)); o.value = n.id; izbor.appendChild(o); });
+      if (!(naprave || []).length) izbor.disabled = true;
+    }).catch(function () { izbor.disabled = true; });
+    izbor.addEventListener("change", function () {
+      var id = izbor.value, ime = izbor.options[izbor.selectedIndex].textContent;
+      if (!id) return;
+      klic("magnetNaNapravo", [id, uri()]).then(function (r) {
+        obvesti(r && r.ok ? t("magnetPoslano", { naprava: ime }) : t("magnetNiPoslano"));
+      }).catch(function () { obvesti(t("magnetNiPoslano")); });
+      izbor.selectedIndex = 0;
+    });
+    dejanja.appendChild(izbor);
+    dejanja.appendChild(magnetGumb(t("magnetKopiraj"), function () {
+      klic("kopiraj", [uri()]).then(function () { obvesti(t("magnetKopirano")); });
+    }));
+  }
+  function poMagnetPredvajanju(p, video) {
+    // Windows: video predvaja VLC (LibVLC), brez njega predvajalnik strani; zvok kot pri napravah v Linku.
+    if (!p || !p.ok) { obvesti(magnetNapaka(p && p.koda)); return; }
+    if (!p.native) {
+      if (video) zapriSloje();
+      media.aktivni = p;
+      predvajajHtml(p, 0);
+    } else {
+      if (video) zapriSloje();
+      else { var a = $("mediaAudio"); if (a) { a.pause(); a.removeAttribute("src"); } media.aktivni = p; osveziMini(); }
+    }
+    magnetOsveziPrenose();
+  }
+  function predvajajMagnet(uri, f) {
+    obvesti(t("magnetZaganjam"));
+    klic("magnetDodaj", [uri, [f.i]]).then(function (d) {
+      if (!d || !d.ok) { obvesti(magnetNapaka(d && d.koda)); return; }
+      klic("magnetPredvajaj", [d.id, f.i, f.ime]).then(function (p) { poMagnetPredvajanju(p, f.vrsta === "video"); })
+        .catch(function () { obvesti(magnetNapaka("napaka")); });
+    }).catch(function () { obvesti(magnetNapaka("napaka")); });
+  }
+  function magnetOsveziPrenose() {
+    klic("magnetSeznam").then(narisiMagnetPrenose).catch(function () {});
+  }
+  function narisiMagnetPrenose(seznam) {
+    var v = $("magnetPrenosi");
+    seznam = Array.isArray(seznam) ? seznam : [];
+    var podpis = JSON.stringify(seznam.map(function (x) { return [x.id, x.stanje, x.deli_naprej, x.koncano]; }));
+    if (!seznam.length) { v.innerHTML = ""; v.appendChild(el("p", "drobno", ubezi(t("magnetNiPrenosov")))); S.magnet.podpis = ""; return; }
+    if (podpis !== S.magnet.podpis) {
+      S.magnet.podpis = podpis; v.innerHTML = "";
+      seznam.forEach(function (x) { v.appendChild(magnetVrsticaPrenosa(x)); });
+    }
+    seznam.forEach(function (x) {
+      var vr = v.querySelector('[data-prenos="' + Number(x.id) + '"]'); if (!vr) return;
+      var odst = x.skupaj ? Math.floor(100 * x.preneseno / x.skupaj) : 0;
+      vr.querySelector("i").style.width = odst + "%";
+      vr.querySelector("small").textContent = x.koncano ? t("magnetKoncano") + " · " + magnetVelikost(x.skupaj) :
+        odst + " % · " + Number(x.hitrost_mibs || 0).toFixed(1) + " MiB/s · " + t("magnetPovezav", { n: x.povezave }) +
+        (x.stanje === "paused" ? " · " + t("magnetPremor") : "");
+    });
+  }
+  function magnetVrsticaPrenosa(x) {
+    var vr = el("div", "magnet-vrstica"); vr.setAttribute("data-prenos", Number(x.id));
+    vr.innerHTML = svg("povezava") + '<div><b title="' + ubezi(x.ime) + '">' + ubezi(x.ime) + '</b><small></small></div>';
+    vr.appendChild(el("div", "magnet-merilo", "<i></i>"));
+    var d = el("div", "magnet-dejanja");
+    var prva = (x.datoteke || []).filter(function (f) { return f.predvajljivo && f.vkljucena; })[0];
+    if (prva) d.appendChild(magnetGumb("▶ " + t("magnetPredvajaj"), function () {
+      klic("magnetPredvajaj", [x.id, prva.i, prva.ime]).then(function (p) { poMagnetPredvajanju(p, prva.vrsta === "video"); });
+    }));
+    d.appendChild(magnetGumb(x.stanje === "paused" ? t("magnetNadaljuj") : t("magnetPremor"), function () {
+      klic(x.stanje === "paused" ? "magnetNadaljuj" : "magnetPremor", [x.id]).then(magnetOsveziPrenose);
+    }));
+    d.appendChild(magnetGumb(t("magnetDeliNaprej"), function () {
+      klic("magnetDeliNaprej", [x.hash, !x.deli_naprej]).then(function () {
+        if (!x.deli_naprej) klic("magnetNadaljuj", [x.id]);
+        magnetOsveziPrenose();
+      });
+    }, x.deli_naprej ? "vklopljen" : ""));
+    magnetPosiljanje(d, function () { return "magnet:?xt=urn:btih:" + x.hash + "&dn=" + encodeURIComponent(x.ime); });
+    d.appendChild(magnetGumb(t("magnetMapa"), function () { klic("magnetMapa", [x.mapa]); }));
+    d.appendChild(magnetGumb(t("magnetOdstrani"), function () { klic("magnetOdstrani", [x.id, false]).then(magnetOsveziPrenose); }));
+    if (!x.lastna) d.appendChild(magnetGumb(t("magnetIzbrisi"), function (g) {
+      // Dva koraka: brisanje prenesenih datotek je nepovratno.
+      if (!g.dataset.potrdi) { g.dataset.potrdi = "1"; g.textContent = t("magnetIzbrisiRes"); return; }
+      klic("magnetOdstrani", [x.id, true]).then(magnetOsveziPrenose);
+    }));
+    vr.appendChild(d);
+    return vr;
+  }
+  function magnetDeljen(podatki) {
+    if (!podatki || !podatki.ok) { magnetSporocilo(magnetNapaka(podatki && podatki.koda)); return; }
+    var v = $("magnetVsebina"); v.innerHTML = "";
+    v.appendChild(el("p", "", ubezi(t("magnetDeljeno", { ime: podatki.ime }))));
+    v.appendChild(el("p", "magnet-povezava", ubezi(podatki.uri)));
+    var d = el("div", "magnet-dejanja"); magnetPosiljanje(d, function () { return podatki.uri; }); v.appendChild(d);
+    magnetOsveziPrenose();
+  }
+
+  // ------------------------------------------------------------------ DVD brez zaščite
+  // Gumb »Predvajaj disk« se pokaže samo, kadar je v pogonu DVD (core/os_dvd.py; predvaja LibVLC).
+  function osveziDvdPogon() {
+    if (!most) return;
+    klic("dvdPogoni").then(function (pogoni) {
+      var disk = (Array.isArray(pogoni) ? pogoni : []).filter(function (p) { return p.vstavljen; })[0];
+      $("medijiDisk").hidden = !disk;
+      S.dvdPogon = disk ? disk.naprava : "";
+      if (disk) $("medijiDiskIme").textContent = t("predvajajDisk") + (disk.ime && disk.ime !== "DVD" ? " · " + disk.ime : "");
+    }).catch(function () {});
+  }
+
+  // ------------------------------------------------------------------ podnapisi v predvajalniku strani
+  // Brez LibVLC predvaja stran (HTML5): podnapise dobi kot WebVTT (podnapisVtt) in <track>. Samodejno kot
+  // VLC: izbrani jezik, jezik vmesnika ali edini podnapis; »izklop« ostane izklopljen tudi za naslednje videe.
+  var podnapisiZahteva = 0;
+  function pocistiPodnapiseStrani(video) {
+    podnapisiZahteva++;
+    if (video) Array.prototype.slice.call(video.querySelectorAll("track")).forEach(function (tr) {
+      try { URL.revokeObjectURL(tr.src); } catch (e) {}
+      tr.remove();
+    });
+    var g = $("mediaPodnapisi"); if (g) { g.hidden = true; g.onclick = null; }
+  }
+  function podnapisiStrani(video, item) {
+    var seznam = (item.podnapisi || []).filter(function (p) { return p && p.id; }).slice(0, 24);
+    if (!video || !seznam.length) return;
+    var zahteva = podnapisiZahteva, izbira = "";
+    try { izbira = localStorage.getItem("safeer_podnapisi") || ""; } catch (e) {}
+    var privzeti = -1;
+    if (izbira !== "izklop") {
+      [izbira, jezik].forEach(function (j) {
+        if (privzeti < 0 && j) privzeti = seznam.findIndex(function (p) { return p.jezik === j; });
+      });
+      if (privzeti < 0 && (seznam.length === 1 || izbira === "vklop")) privzeti = 0;
+    }
+    var sledi = [];
+    function izberi(i) {
+      sledi.forEach(function (tr, j) { if (tr && tr.track) tr.track.mode = j === i ? "showing" : "disabled"; });
+      var g = $("mediaPodnapisi"), p = seznam[i];
+      if (g) g.textContent = "CC · " + (p ? (p.napis || p.ime) : t("podnapisiIzklop"));
+      privzeti = i;
+    }
+    seznam.forEach(function (p, i) {
+      klic("podnapisVtt", [p.id]).then(function (vtt) {
+        if (zahteva !== podnapisiZahteva || !vtt) return;
+        var tr = document.createElement("track");
+        tr.kind = "subtitles"; tr.label = p.napis || p.ime || ("CC " + (i + 1));
+        if (p.jezik) tr.srclang = p.jezik;
+        tr.src = URL.createObjectURL(new Blob([vtt], { type: "text/vtt" }));
+        video.appendChild(tr);
+        sledi[i] = tr;
+        izberi(privzeti);
+      }).catch(function () {});
+    });
+    var g = $("mediaPodnapisi");
+    if (!g) return;
+    g.hidden = false; g.title = t("podnapisi");
+    g.textContent = "CC · " + t("podnapisiIzklop");
+    g.onclick = function () {
+      // Kot tipka V v VLC: izklop -> prvi -> drugi ... -> izklop; izbira velja za naslednje videe.
+      var nov = privzeti + 1 >= seznam.length ? -1 : privzeti + 1;
+      izberi(nov);
+      try { localStorage.setItem("safeer_podnapisi", nov < 0 ? "izklop" : (seznam[nov].jezik || "vklop")); } catch (e) {}
+    };
   }
 
   function nalozNapraveSDatoteki() {
@@ -2579,6 +2874,14 @@
     if (vrsta === "okna") narisiOkna(podatki);
     if (vrsta === "pojdi") window.safeerOsPojdi(podatki);
     if (vrsta === "mediaFallback" && podatki) predvajajHtml(podatki, 0);
+    if (vrsta === "magnet") {
+      // Vzamemo tudi čakajočo povezavo, da je stran ob naslednjem nalaganju ne odpre znova.
+      klic("cakajociMagnet").then(function (uri) { odpriMagnet(uri || (podatki && podatki.uri) || ""); })
+        .catch(function () { odpriMagnet((podatki && podatki.uri) || ""); });
+    }
+    if (vrsta === "magnetProgram" && S.magnet.gumbPrograma && podatki)
+      S.magnet.gumbPrograma.textContent = t("magnetProgramPrenasam", { odstotek: Math.floor(100 * podatki.n / (podatki.vse || 1)) });
+    if (vrsta === "magnetDeljen") magnetDeljen(podatki);
     if (vrsta === "mediaOsvezen" && S.razdelek === "media") naloziMedia();
     if (vrsta === "mediaKatalogOsvezen" && podatki && S.razdelek === "media" && podatki.kljuc && podatki.kljuc === media.kljuc) {
       prevzemiMediaKatalog(podatki, true);
@@ -3180,12 +3483,15 @@
       // Zvočni tok brez končnice (Jamendo, Icecast radio): strežnik je potrdil zvok (audio/*), ni spletna stran.
       (audio && item.neposredni_zvok === true && (index || 0) === 0) ||
       // Tok z druge naprave v Linku (lokalni varni tok 127.0.0.1): neposreden medij brez končnice.
-      (item.neposredni === true && /^http:\/\/127\.0\.0\.1:\d+\/m\/[0-9a-f]{32}$/.test(url));
+      (item.neposredni === true && /^http:\/\/127\.0\.0\.1:\d+\/m\/[0-9a-f]{32}$/.test(url)) ||
+      // Datoteka iz magnet povezave (lokalni tok rqbita z geslom na 127.0.0.1): predvaja se že med prenosom.
+      (item.neposredni === true && /^http:\/\/127\.0\.0\.1:\d+\/t\/[0-9a-f]{32}\//.test(url));
     var video = $("mediaVideo"), playerAudio = $("mediaAudio"), iframe = $("mediaIframe"), playerImage = $("mediaSlika");
 
     if (media.timer) { window.clearTimeout(media.timer); media.timer = 0; }
 
     if (video) { video.pause(); video.removeAttribute("src"); video.hidden = true; video.style.display = "none"; }
+    pocistiPodnapiseStrani(video);
     if (playerAudio) { playerAudio.pause(); playerAudio.removeAttribute("src"); playerAudio.hidden = true; playerAudio.style.display = "none"; }
     if (iframe) { iframe.src = "about:blank"; iframe.hidden = true; }
     if (playerImage) { playerImage.removeAttribute("src"); playerImage.hidden = true; }
@@ -3226,6 +3532,7 @@
         player.style.display = "block";
         player.src = url;
         player.load();
+        if (!audio) podnapisiStrani(player, item);
         try {
           // Nadaljevanje samo za video (film, epizoda). Skladba se vedno začne od začetka – sicer bi se
           // ob ponovnem krogu albuma začela tik pred koncem in vrsta bi se vrtela v prazno.
@@ -3363,6 +3670,7 @@
     if (znan && znan.stran) { otvoriSpletnoStran(znan.stran, znan.naslov); return; }
     klic("mediaPredvajaj", [id]).then(function (item) {
       if (!item) { obvesti(t("mediaVirNapaka")); return; }
+      if (item.napaka_koda) { obvesti(t("mediaNapaka_" + item.napaka_koda)); return; }
       if (item.napaka) { obvesti(item.napaka); return; }
       if (item.sporocilo) { obvesti(item.sporocilo); return; }
       if (item.stran) { otvoriSpletnoStran(item.stran, item.naslov); return; }
@@ -3824,6 +4132,30 @@
     klic("celozaslonsko", [jeKino]);
   });
   on("mediaOsvezi", "click", function () { osveziMediaVir(""); });
+  // Magnet povezave in DVD (Safeer Media).
+  on("medijiMagnet", "click", function () { odpriMagnet(""); });
+  on("medijiDisk", "click", function () {
+    if (S.dvdPogon) klic("dvdPredvajaj", [S.dvdPogon]).then(function (r) {
+      if (!r || !r.ok) obvesti(t("mediaNapaka_" + ((r && r.koda) || "dvd")));
+    }).catch(function () { obvesti(t("mediaNapaka_dvd")); });
+  });
+  on("magnetZapri", "click", zapriSloje);
+  on("magnetObrazec", "submit", function (e) {
+    e.preventDefault();
+    var uri = $("magnetPolje").value.trim();
+    if (uri.indexOf("magnet:?") !== 0) { magnetSporocilo(magnetNapaka("ni_magnet")); return; }
+    preberiMagnet(uri, false);
+  });
+  on("magnetDeliDatoteko", "click", function () { zagotoviProgram().then(function (ok) { if (ok) klic("magnetIzDatoteke", [false]); }); });
+  on("magnetDeliMapo", "click", function () { zagotoviProgram().then(function (ok) { if (ok) klic("magnetIzDatoteke", [true]); }); });
+  on("magnetPrivzeto", "click", function () {
+    // Protokol magnet: registriramo samo na ta izrecni pritisk uporabnika (HKCU, brez skrbniških pravic).
+    klic("magnetPrivzeto", [true]).then(function (je) {
+      $("magnetPrivzeto").hidden = !!je;
+      obvesti(je ? t("magnetPrivzetoOk") : t("magnetPrivzetoNastavitve"));
+    });
+  });
+  if (most) klic("cakajociMagnet").then(function (uri) { if (uri) odpriMagnet(uri); }).catch(function () {});
   on("mediaDodajVir", "submit", function (event) {
     event.preventDefault(); var url = $("mediaVirUrl").value.trim(), name = $("mediaVirIme").value.trim();
     if (!url) return;

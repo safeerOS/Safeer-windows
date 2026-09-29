@@ -48,8 +48,10 @@ def zakleni() -> Optional[QLockFile]:
     return None
 
 
-def predaj_prvemu(razdelek: str, ozadje: bool, cakaj_ms: int = 4000) -> bool:
+def predaj_prvemu(razdelek: str, ozadje: bool, cakaj_ms: int = 4000, magnet: str = "") -> bool:
     """Tece ze druga kopija: ji predamo razdelek (prva se lahko se zaganja, zato nekaj casa poskusamo).
+
+    `magnet`: magnet povezava (brskalnik, druga naprava v Linku), ki jo prva kopija odpre v Medijskem centru.
 
     Vrne True, ce je prva kopija prevzela zagon. False pomeni, da se ne odziva ALI da je bila zagnana
     s starejso kodo in se je zato umaknila - v tem primeru pokliči prevzemi_zaklep().
@@ -60,8 +62,10 @@ def predaj_prvemu(razdelek: str, ozadje: bool, cakaj_ms: int = 4000) -> bool:
         vticnica = QLocalSocket()
         vticnica.connectToServer(ime())
         if vticnica.waitForConnected(300):
-            vticnica.write(json.dumps({"razdelek": razdelek, "ozadje": ozadje,
-                                       "koda": ZAGNANA_KODA}).encode("utf-8") + b"\n")
+            sporocilo = {"razdelek": razdelek, "ozadje": ozadje, "koda": ZAGNANA_KODA}
+            if magnet:
+                sporocilo["magnet"] = magnet
+            vticnica.write(json.dumps(sporocilo).encode("utf-8") + b"\n")
             vticnica.waitForBytesWritten(1000)
             odgovor = b""
             if vticnica.waitForReadyRead(1500):
@@ -90,15 +94,26 @@ def streznik(okno) -> QLocalServer:
     streznik = QLocalServer(okno)
     streznik.setSocketOptions(QLocalServer.SocketOption.UserAccessOption)
 
+    medpomnilniki: dict = {}
+
     def ob_povezavi() -> None:
         while streznik.hasPendingConnections():
             v = streznik.nextPendingConnection()
             v.readyRead.connect(lambda v=v: ob_podatkih(v))
+            v.disconnected.connect(lambda v=v: medpomnilniki.pop(id(v), None))
 
     def ob_podatkih(v: QLocalSocket) -> None:
+        # Sporocilo je ena vrstica JSON; magnet povezava (do 8 kB) lahko pride v vec kosih.
+        podatki = medpomnilniki.get(id(v), b"") + bytes(v.readAll())
+        if b"\n" not in podatki and len(podatki) < 64 * 1024:
+            medpomnilniki[id(v)] = podatki
+            return
+        medpomnilniki.pop(id(v), None)
         try:
-            sporocilo = json.loads(bytes(v.readAll()).decode("utf-8", "replace").strip().splitlines()[0])
+            sporocilo = json.loads(podatki.decode("utf-8", "replace").strip().splitlines()[0])
         except (ValueError, IndexError):
+            sporocilo = {}
+        if not isinstance(sporocilo, dict):
             sporocilo = {}
         nova = str(sporocilo.get("koda") or "")
         if nova and ZAGNANA_KODA and nova != ZAGNANA_KODA:
@@ -116,6 +131,10 @@ def streznik(okno) -> QLocalServer:
         v.disconnectFromServer()
         if sporocilo.get("ozadje"):
             return  # samodejni zagon v ozadju: prva kopija ze tece, okna ne vsiljujemo
+        magnet = str(sporocilo.get("magnet") or "")
+        if magnet and hasattr(okno, "odpri_magnet"):
+            okno.odpri_magnet(magnet)      # preveri jo sam (os_torrent.razcleni_magnet)
+            return
         okno.prebudi(str(sporocilo.get("razdelek") or ""))
 
     streznik.newConnection.connect(ob_povezavi)

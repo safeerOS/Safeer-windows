@@ -213,6 +213,21 @@ def odpri_datoteko(pot: str) -> bool:
         return False
 
 
+def odpri_mapo(pot: str) -> bool:
+    """Odpre MAPO v Raziskovalcu; datoteke s tem nikoli ne odpremo (lahko bi bila program)."""
+    if not pot or not os.path.isdir(pot):
+        return False
+    try:
+        if sys.platform == "win32":
+            subprocess.Popen(["explorer.exe", os.path.abspath(pot)])
+        else:
+            subprocess.Popen(["xdg-open", pot], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True
+    except Exception as e:
+        print(f"[SafeerOS] Napaka pri odpiranju mape {pot}: {e}")
+        return False
+
+
 def pokazi_v_mapi(pot: str) -> bool:
     try:
         if sys.platform == "win32":

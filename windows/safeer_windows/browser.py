@@ -904,6 +904,8 @@ class BrowserWindow(QMainWindow):
         self.toolbar.addWidget(self.shield_label)
         # Safeer OS: izbrano besedilo (ali stran) z virom v zapisek. Nastavi ga okno Safeer OS.
         self.na_zapisek = None
+        # Safeer OS: magnet povezavo odpre Medijski center (samostojni brskalnik je se naprej zavrne).
+        self.na_magnet = None
         self.zapisek_button: Optional[QToolButton] = None
         if embedded:
             self.zapisek_button = self._tool("plus", lambda: self.na_zapisek and self.na_zapisek())
@@ -1308,6 +1310,12 @@ class BrowserWindow(QMainWindow):
             if allowed and host != allowed and not host.endswith("." + allowed):
                 self.app.note_blocked(text, "block-media-navigation")
                 return False
+        if url.scheme().lower() == "magnet" and self.na_magnet is not None:
+            # Samo pravi BitTorrent magnet (os_app.odpri_magnet ga preveri); strani ne zapustimo.
+            # toEncoded: brez dekodiranja (%20 bi postal presledek in povezava ne bi bila vec veljavna).
+            kodiran = bytes(url.toEncoded()).decode("utf-8", "replace")
+            QTimer.singleShot(0, lambda: self.na_magnet(kodiran))
+            return False
         allowed = policy.navigation_scheme_allowed(text)
         if allowed == "external":
             QTimer.singleShot(0, lambda: self.confirm_external(url))

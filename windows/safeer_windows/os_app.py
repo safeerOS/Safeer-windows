@@ -25,10 +25,11 @@ from PySide6.QtWebEngineCore import (QWebEnginePage, QWebEngineProfile, QWebEngi
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QMainWindow, QStackedWidget, QWidget
 
-from core import os_media, os_scit, os_sporocila
+from core import os_dvd, os_media, os_scit, os_sporocila, os_torrent, podnapisi
 
 from . import en_primerek
-from . import browser, control_backend, control_window, os_backend_win, policy, vlc_player, webview2_media, zapiski
+from . import (browser, control_backend, control_window, magnet_win, os_backend_win, policy, vlc_player,
+               webview2_media, zapiski)
 
 
 JEZIKI_VMESNIKA = ("sl", "en", "de", "es", "fr", "it")
@@ -59,6 +60,32 @@ def _nastavi_jezik_oken(jezik: str) -> str:
 def _jezik_oken() -> str:
     from . import oddaljeni_zaslon
     return oddaljeni_zaslon._JEZIK
+
+
+#: Naslova izbirnikov za »Deli datoteko/mapo« (magnet) v jeziku vmesnika.
+_DELI_NASLOV = {
+    "sl": ("Izberi datoteko za deljenje", "Izberi mapo za deljenje"),
+    "en": ("Choose a file to share", "Choose a folder to share"),
+    "de": ("Datei zum Teilen wählen", "Ordner zum Teilen wählen"),
+    "es": ("Elige un archivo para compartir", "Elige una carpeta para compartir"),
+    "fr": ("Choisir un fichier à partager", "Choisir un dossier à partager"),
+    "it": ("Scegli un file da condividere", "Scegli una cartella da condividere"),
+}
+
+#: Zvok, ki ga zna predvajati stran (Qt WebEngine brez patentiranih kodekov); drugo predvaja VLC.
+ZVOK_V_STRANI = (".mp3", ".flac", ".ogg", ".oga", ".opus", ".wav", ".weba", ".webm")
+
+
+def _magnet_klic(delo) -> dict:
+    """Klic motorja za magnet: napaka gre strani kot kratka koda (prevede jo stran)."""
+    try:
+        izid = delo()
+        return dict(izid, ok=True) if isinstance(izid, dict) else {"ok": bool(izid)}
+    except os_torrent.NapakaTorrenta as e:
+        return {"ok": False, "koda": str(e)}
+    except Exception as e:  # noqa: BLE001
+        print("[SafeerOS] magnet:", e, flush=True)
+        return {"ok": False, "koda": "napaka"}
 
 
 _POVEZAVA = {"sl": ("Povezano", "Ni povezano"), "en": ("Connected", "Not connected"),
@@ -300,10 +327,15 @@ class SafeerOsPage(QWebEnginePage):
 
 class SafeerOsWindow(QMainWindow):
     def __init__(self, v_oknu: bool = False, zacetni_razdelek: str = "", media_engine: str = "auto",
-                 browser_settings: Optional[policy.SettingsStore] = None):
+                 browser_settings: Optional[policy.SettingsStore] = None, magnet: str = ""):
         super().__init__()
         print("[SafeerOS] DIAG window_init_started", flush=True)
         self.v_oknu = v_oknu
+        #: Magnet povezava, ki caka, da jo stran prevzame (zagon z --magnet; cakajociMagnet).
+        razclenjen = os_torrent.razcleni_magnet(magnet) if magnet else None
+        self._cakajoci_magnet = razclenjen["uri"] if razclenjen else ""
+        #: Podnapisi za predvajalnik v strani (brez LibVLC): oznaka -> ("pot"|"url", vir, ime datoteke).
+        self._podnapisi_strani: dict = {}
         self.zacetni_razdelek = zacetni_razdelek
         self.media_engine = media_engine if media_engine in ("auto", "qt") else "auto"
         self._fullscreen_restore_maximized = not v_oknu
@@ -387,6 +419,7 @@ class SafeerOsWindow(QMainWindow):
         self.os_postavitev.addWidget(self.view, 1)
         self.zaslon.addWidget(self.os_vsebnik)
         self.media_player = vlc_player.VlcPlayerWidget(self)
+        self.media_player.jezik_vmesnika = _jezik_oken
         self.media_player.nazaj.connect(self._zapri_media)
         self.media_player.ozadje.connect(self._media_v_ozadju)
         self.zaslon.addWidget(self.media_player)
@@ -410,9 +443,13 @@ class SafeerOsWindow(QMainWindow):
         self.sporocila.poslji_klepet = lambda n, b, c: self.control_backend.poslji_klepet(n, b, c)
         self.sporocila.naprave_klepeta = lambda: self.control_backend.naprave_za_klepet()
         self.control_backend.ob_klepetu = self._prejmi_klepet
+        # Magnet z druge naprave v Linku (magnet.open) se odpre tukaj, v Medijskem centru.
+        self.control_backend.ob_magnetu = self.odpri_magnet
         # Zacasni profili predvajalnika iz prejsnjih zagonov; v ozadju, da zagon ni pocasnejsi.
         threading.Thread(target=webview2_media.pocisti_seje, kwargs={"starejse_od_s": 120}, daemon=True).start()
         self.browser_window.na_zapisek = self._izrezek_iz_spleta
+        # Magnet povezava, kliknjena v Spletu, se odpre v Medijskem centru (ne v drugem programu).
+        self.browser_window.na_magnet = self.odpri_magnet
         self.browser_window.na_zapisek_ob_strani = self._preklopi_zapisek_ob_strani
         self._zapisek_dock = None
         self.browser_app.windows.append(self.browser_window)
@@ -445,6 +482,12 @@ class SafeerOsWindow(QMainWindow):
         self.media_refresh_timer.setInterval(6 * 60 * 60 * 1000)
         self.media_refresh_timer.timeout.connect(self._osvezi_media_v_ozadju)
         self.media_refresh_timer.start()
+
+        # rqbit (magnet) ne ostane teci brez Safeer OS, tudi ce se program konca brez zapiranja okna.
+        try:
+            QApplication.instance().aboutToQuit.connect(self._ustavi_torrente)
+        except Exception:  # noqa: BLE001
+            pass
 
         # Nalozi domaco stran
         self.nalozi_vmesnik()
@@ -646,13 +689,14 @@ class SafeerOsWindow(QMainWindow):
         self._zapusti_celozaslonsko()
 
     def _predvajaj_z_naprave(self, id_n: str, id_dat: str, ime: str, streznik: Optional[dict],
-                             vrsta: str, mime: str) -> dict:
+                             vrsta: str, mime: str, podnapisi_naprave: Optional[list] = None) -> dict:
         from core import link_krog, link_pretok
         try:
             clan = link_krog.krog().clan_za_id(id_n) or {}
         except Exception:
             clan = {}
-        vir = link_pretok.vir_iz_streznika(streznik or {}, id_dat, str(clan.get("kljuc") or ""), mime)
+        kljuc = str(clan.get("kljuc") or "")
+        vir = link_pretok.vir_iz_streznika(streznik or {}, id_dat, kljuc, mime)
         if vir is None:
             return {"ok": False, "napaka": "Naprava ni poslala varnega naslova za predvajanje."}
         url = link_pretok.pretok().dodaj(vir)
@@ -661,19 +705,84 @@ class SafeerOsWindow(QMainWindow):
             naprava = next((n for n in self.control_backend.naprave_s_datotekami() if n.get("id") == id_n), {})
         except Exception:
             naprava = {}
+        # Podnapisi ob videu na napravi (polje `subtitles` seznama datotek): vsak dobi svoj lokalni tok,
+        # enako varen kot video (HTTPS s pripetim potrdilom in zetonom naprave).
+        seznam_podnapisov = []
+        for p in (podnapisi_naprave or [])[:24] if not zvok else []:
+            if not isinstance(p, dict):
+                continue
+            vp = link_pretok.vir_iz_streznika(streznik or {}, str(p.get("id") or ""), kljuc, "text/plain")
+            if vp is not None:
+                seznam_podnapisov.append(self._podnapis("url", link_pretok.pretok().dodaj(vp), str(p.get("name") or ""),
+                                                        str(p.get("lang") or ""), str(p.get("label") or "")))
         item = {"ok": True, "id": "link:%s:%s" % (id_n, id_dat), "naslov": os.path.splitext(ime)[0] or ime,
                 "vrsta": "glasba" if zvok else "video", "url": url, "mime": mime,
-                "vir": str(naprava.get("ime") or ""), "neposredni": True}
+                "vir": str(naprava.get("ime") or ""), "neposredni": True, "podnapisi": seznam_podnapisov}
+        return self._predvajaj_neposredno(item, ime, zvok)
+
+    def _predvajaj_neposredno(self, item: dict, ime: str, zvok: bool) -> dict:
+        """Neposreden tok (naprava v Linku, magnet): VLC, kadar je na voljo, sicer predvajalnik v strani."""
         # Vgrajeni brskalnik (Qt WebEngine) nima patentiranih kodekov (AAC/M4A, WMA ...): tak zvok predvaja
         # VLC, ki zna vse; MP3, FLAC, OGG/Opus in WAV ostanejo v strani z vrsto in glasbo v ozadju.
         koncnica = os.path.splitext(ime.lower())[1]
-        v_strani = koncnica in (".mp3", ".flac", ".ogg", ".oga", ".opus", ".wav", ".weba", ".webm")
+        v_strani = koncnica in ZVOK_V_STRANI
         if zvok and (v_strani or not self.media_player.available):
             return dict(item, native=False, neposredni_zvok=True)
         if not zvok and not self.media_player.available:
             return dict(item, native=False, neposredni_zvok=False)
         self.dispatcher.dispatch(lambda: self._odpri_media(item))
         return dict(item, native=True)
+
+    # ------------------------------------------------------------------ podnapisi
+    def _podnapis(self, vrsta: str, vir: str, ime: str, jezik: str = "", oznaka: str = "") -> dict:
+        """Podnapis za predvajalnik: VLC dobi naslov (uri), stran pa oznako za podnapisVtt (WebVTT).
+
+        Stran nikoli ne pove poti ali naslova, ki bi ga brali: bere samo, kar smo tu sami zabelezili."""
+        import secrets
+        oznaka_strani = secrets.token_hex(12)
+        self._podnapisi_strani[oznaka_strani] = (vrsta, vir, ime)
+        while len(self._podnapisi_strani) > 300:
+            self._podnapisi_strani.pop(next(iter(self._podnapisi_strani)))
+        uri = Path(vir).as_uri() if vrsta == "pot" else vir
+        return {"uri": uri, "ime": ime[:120], "jezik": jezik[:8], "oznaka": oznaka[:40], "id": oznaka_strani,
+                "napis": self._napis_podnapisa(jezik, oznaka, ime)}
+
+    @staticmethod
+    def _napis_podnapisa(jezik: str, oznaka: str, ime: str) -> str:
+        ime_jezika = podnapisi.ime_jezika(jezik, _jezik_oken()) if jezik else ""
+        return " · ".join(x for x in (ime_jezika, oznaka) if x) or ime
+
+    def _podnapisi_datoteke(self, pot: str) -> list:
+        """Datoteke podnapisov ob lokalnem videu (ista mapa ali podmapa Subs), kot pri VLC."""
+        try:
+            return [self._podnapis("pot", p, os.path.basename(p), *podnapisi.jezik(pot, p))
+                    for p in podnapisi.podnapisi_mape(pot)]
+        except OSError:
+            return []
+
+    def _podnapis_vtt(self, oznaka: str) -> str:
+        """WebVTT za <track> v predvajalniku strani (brez LibVLC); samo podnapisi, ki smo jih zabelezili."""
+        vnos = self._podnapisi_strani.get(str(oznaka or ""))
+        if vnos is None:
+            return ""
+        vrsta, vir, ime = vnos
+        if vrsta == "pot":
+            if os.path.getsize(vir) > podnapisi.NAJVEC_BAJTOV:
+                return ""
+            with open(vir, "rb") as d:
+                podatki = d.read()
+        else:
+            deli = urllib.parse.urlsplit(vir)
+            if deli.scheme != "http" or deli.hostname != "127.0.0.1":
+                return ""
+            import urllib.request
+            # Lokalni tok na 127.0.0.1: nikoli prek sistemskega posredniskega streznika.
+            odpiralnik = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            with odpiralnik.open(vir, timeout=60) as odgovor:
+                podatki = odgovor.read(podnapisi.NAJVEC_BAJTOV + 1)
+            if len(podatki) > podnapisi.NAJVEC_BAJTOV:
+                return ""
+        return podnapisi.v_vtt(ime, podatki)
 
     def _odpri_media(self, item: dict) -> None:
         if self.media_player.play_item(item):
@@ -966,6 +1075,198 @@ class SafeerOsWindow(QMainWindow):
                 pass
         self.dispatcher.dispatch(pokazi)
 
+    # ------------------------------------------------------------------ magnet povezave
+    def odpri_magnet(self, uri: str) -> bool:
+        """Magnet iz brskalnika, druge kopije (--magnet) ali z druge naprave: Medijski center pokaze vsebino.
+
+        Klic je varen iz katerekoli niti; povezavo najprej preverimo (samo BitTorrent magnet)."""
+        m = os_torrent.razcleni_magnet(uri)
+        if m is None:
+            return False
+        # Ce se stran se nalaga, jo prevzame ob nalaganju (cakajociMagnet); sicer jo odpre dogodek.
+        self._cakajoci_magnet = m["uri"]
+
+        def _pokazi() -> None:
+            self.prebudi("")
+            if self._spletni_nacin or self._browser_media_active:
+                self._zapri_browser("media")
+            elif self.zaslon.currentWidget() is self.webview2_media:
+                self._zapri_webview2_media()
+            elif self.zaslon.currentWidget() is not self.os_vsebnik:
+                # Predvajalnik VLC (glasba igra naprej v ozadju, Ctrl+Shift+M ga vrne) ali Naprave.
+                self.zaslon.setCurrentWidget(self.os_vsebnik)
+                self.setWindowTitle("Safeer OS")
+            self.poslji_dogodek("magnet", {"uri": m["uri"]})
+        self.dispatcher.dispatch(_pokazi)
+        return True
+
+    def _vzemi_cakajoci_magnet(self) -> str:
+        uri, self._cakajoci_magnet = self._cakajoci_magnet, ""
+        return uri
+
+    def _ustavi_torrente(self) -> None:
+        """rqbit ne ostane teci brez Safeer OS (novega motorja ob tem ne zazenemo)."""
+        try:
+            if os_torrent._TORRENTI is not None:
+                os_torrent._TORRENTI.ustavi()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _kopiraj(self, besedilo: str) -> bool:
+        """Besedilo v odlozisce (npr. magnet povezava za deljenje z drugimi)."""
+        besedilo = str(besedilo or "")[:8192]
+        self.dispatcher.dispatch(lambda: QApplication.clipboard().setText(besedilo))
+        return True
+
+    def _magnet_prenesi_program(self) -> dict:
+        """Enkratni prenos odprtokodnega rqbita (preverjen SHA-256); napredek gre na stran."""
+        if os_torrent.program_na_voljo():
+            return {"ok": True}
+        try:
+            os_torrent.prenesi_program(lambda n, vse: self.poslji_dogodek("magnetProgram", {"n": n, "vse": vse}))
+            return {"ok": True}
+        except Exception as e:  # noqa: BLE001
+            print("[SafeerOS] rqbit:", e, flush=True)
+            return {"ok": False, "koda": "prenos_programa"}
+
+    def _predvajaj_magnet(self, tid: int, i: int) -> dict:
+        """Datoteka torrenta v nasem predvajalniku ze med prenosom (lokalni tok z geslom na 127.0.0.1).
+
+        Predvajamo samo video in glasbo; vrsto doloci ime datoteke v torrentu (ne ime, ki ga poslje stran)."""
+        t = os_torrent.torrenti()
+        try:
+            url = t.tok(tid, i)
+        except os_torrent.NapakaTorrenta as e:
+            return {"ok": False, "koda": str(e)}
+        except Exception as e:  # noqa: BLE001
+            print("[SafeerOS] magnet tok:", e, flush=True)
+            return {"ok": False, "koda": "napaka"}
+        ime = urllib.parse.unquote(url.rsplit("/", 1)[-1])
+        vrsta = os_torrent.vrsta_datoteke(ime)
+        if vrsta not in ("video", "audio"):
+            return {"ok": False, "koda": "ni_predvajljivo"}
+        video = vrsta == "video"
+        seznam_podnapisov = []
+        if video:
+            try:
+                for j, pot_p in t.podnapisi_za(tid, i):
+                    seznam_podnapisov.append(self._podnapis("url", t.tok(tid, j), os.path.basename(pot_p),
+                                                            *podnapisi.jezik(ime, pot_p)))
+            except Exception as e:  # noqa: BLE001 - podnapisi niso nujni za predvajanje
+                print("[SafeerOS] magnet podnapisi:", e, flush=True)
+        item = {"ok": True, "id": "magnet:%d:%d" % (int(tid), int(i)),
+                "naslov": os.path.splitext(ime)[0] or ime, "vrsta": "video" if video else "glasba",
+                "url": url, "mime": "", "vir": "Magnet", "neposredni": True, "podnapisi": seznam_podnapisov}
+        return self._predvajaj_neposredno(item, ime, not video)
+
+    def _magnet_iz_datoteke(self, mapa: bool) -> bool:
+        """Uporabnik izbere svojo datoteko ali mapo; iz nje nastane magnet, ki ga lahko poslje ali deli."""
+        izbrano = {"pot": ""}
+        gotovo = threading.Event()
+
+        def _izberi() -> None:
+            try:
+                from PySide6.QtWidgets import QFileDialog
+                naslov = _DELI_NASLOV.get(_jezik_oken(), _DELI_NASLOV["en"])[1 if mapa else 0]
+                doma = os.path.expanduser("~")
+                if mapa:
+                    izbrano["pot"] = QFileDialog.getExistingDirectory(self, naslov, doma) or ""
+                else:
+                    izbrano["pot"] = QFileDialog.getOpenFileName(self, naslov, doma)[0] or ""
+            except Exception as e:  # noqa: BLE001
+                print("[SafeerOS] izbira za deljenje:", e, flush=True)
+            finally:
+                gotovo.set()
+        self.dispatcher.dispatch(_izberi)
+        gotovo.wait()
+        pot = izbrano["pot"]
+        if not pot:
+            return False
+
+        def _deli() -> None:
+            izid = _magnet_klic(lambda: {"uri": os_torrent.torrenti().deli_datoteko(pot),
+                                         "ime": os.path.basename(os.path.normpath(pot))})
+            self.poslji_dogodek("magnetDeljen", izid)
+        threading.Thread(target=_deli, name="safeer-magnet-deli", daemon=True).start()
+        return True
+
+    @staticmethod
+    def _odpri_mapo_prenosov(pot: str) -> bool:
+        """Odpre MAPO prenosa v Raziskovalcu; datotek nikoli ne odpremo (lahko bi bile programi)."""
+        koren = os_torrent.torrenti().mapa_prenosov
+        pot = str(pot or "") or koren
+        if not os.path.isabs(pot):
+            pot = os.path.join(koren, pot)
+        pot = os.path.realpath(pot)
+        if not os.path.isdir(pot):
+            if os.path.realpath(koren) != pot:
+                return False
+            os.makedirs(pot, exist_ok=True)
+        return os_backend_win.odpri_mapo(pot)
+
+    def _magnet_metoda(self, metoda: str, a: list) -> Any:
+        """Mostovi za magnet povezave (enako kot safeer_os.py na Linuxu); vsi tecejo zunaj niti vmesnika."""
+        def niz(i: int) -> str:
+            return str(a[i]) if len(a) > i and a[i] is not None else ""
+
+        def stevila(i: int) -> list:
+            return [int(x) for x in a[i]][:5000] if len(a) > i and isinstance(a[i], list) else []
+
+        t = os_torrent.torrenti
+        if metoda == "magnetProgram":
+            paket = os_torrent.RQBIT_PAKETI.get(os_torrent.platforma()) or ("", "", 0)
+            return {"na_voljo": os_torrent.program_na_voljo(), "podprto": bool(os_torrent.platforma()),
+                    "mb": round(paket[2] / 1e6)}
+        if metoda == "magnetPrenesiProgram":
+            return self._magnet_prenesi_program()
+        if metoda == "magnetPreberi":
+            return _magnet_klic(lambda: t().preberi(niz(0)))
+        if metoda == "magnetDodaj":
+            # 3. argument: datoteke, ki so videti kot program in jih je uporabnik po opozorilu izrecno potrdil.
+            return _magnet_klic(lambda: {"id": t().dodaj(niz(0), stevila(1), stevila(2))})
+        if metoda == "magnetSeznam":
+            try:
+                return t().seznam()
+            except os_torrent.NapakaTorrenta:
+                return []
+        if metoda == "magnetPremor":
+            return t().premor(int(a[0]))
+        if metoda == "magnetNadaljuj":
+            return _magnet_klic(lambda: t().nadaljuj(int(a[0])))
+        if metoda == "magnetOdstrani":
+            return t().odstrani(int(a[0]), bool(a[1]) if len(a) > 1 else False)
+        if metoda == "magnetDeliNaprej":
+            return t().deli_naprej(niz(0), bool(a[1]) if len(a) > 1 else False) or True
+        if metoda == "magnetPovezava":
+            return _magnet_klic(lambda: {"uri": t().magnet(int(a[0]))})
+        if metoda == "magnetNaNapravo":
+            return self.control_backend.poslji_magnet(niz(0), niz(1))
+        if metoda == "magnetNaprave":
+            return self.control_backend.naprave_za_magnet()
+        if metoda == "magnetMapa":
+            return self._odpri_mapo_prenosov(niz(0))
+        if metoda == "magnetPrivzeto":
+            # Samo na izrecen pritisk uporabnika (argument true); sicer le preverimo stanje.
+            return magnet_win.nastavi_privzeto() if (bool(a[0]) if a else False) else magnet_win.je_privzeto()
+        if metoda == "magnetPredvajaj":
+            return self._predvajaj_magnet(int(a[0]) if a else -1, int(a[1]) if len(a) > 1 else -1)
+        if metoda == "magnetIzDatoteke":
+            return self._magnet_iz_datoteke(bool(a[0]) if a else False)
+        raise ValueError("neznano")
+
+    # ------------------------------------------------------------------ DVD brez zascite
+    def _predvajaj_disk(self, naprava: str) -> dict:
+        """DVD v opticnem pogonu (samo pogoni, ki jih javi core/os_dvd.pogoni); predvaja LibVLC."""
+        pogon = next((p for p in os_dvd.pogoni() if p.get("naprava") == naprava and p.get("vstavljen")), None)
+        if pogon is None:
+            return {"ok": False, "koda": "dvd"}
+        if not self.media_player.available:
+            return {"ok": False, "koda": "dvdVlc"}
+        item = {"id": "dvd:" + naprava, "naslov": pogon.get("ime") or "DVD", "vrsta": "film",
+                "url": os_dvd.uri(naprava), "vir": "DVD", "dvd": True}
+        self.dispatcher.dispatch(lambda: self._odpri_media(item))
+        return {"ok": True}
+
     def poslji_dogodek(self, vrsta: str, podatki: Any) -> None:
         payload_js = json.dumps(podatki, ensure_ascii=False)
         cmd = f"window.safeerOsDogodek && window.safeerOsDogodek({json.dumps(vrsta)}, {payload_js});"
@@ -1096,6 +1397,18 @@ class SafeerOsWindow(QMainWindow):
     def _izvedi_metodo(self, metoda: str, a: list) -> Any:
         if metoda.startswith("sporocila"):
             return self._sporocila(metoda, a)
+        if metoda.startswith("magnet"):
+            return self._magnet_metoda(metoda, a)
+        if metoda == "cakajociMagnet":
+            return self._vzemi_cakajoci_magnet()
+        if metoda == "kopiraj":
+            return self._kopiraj(str(a[0]) if a else "")
+        if metoda == "dvdPogoni":
+            return os_dvd.pogoni()
+        if metoda == "dvdPredvajaj":
+            return self._predvajaj_disk(str(a[0]) if a else "")
+        if metoda == "podnapisVtt":
+            return self._podnapis_vtt(str(a[0]) if a else "")
         if metoda == "zacetek":
             shramba = os_backend_win.nalozi_shrambo()
             return {
@@ -1404,7 +1717,9 @@ class SafeerOsWindow(QMainWindow):
             streznik = a[3] if len(a) > 3 and isinstance(a[3], dict) else None
             vrsta = str(a[4]) if len(a) > 4 else ""
             mime = str(a[5]) if len(a) > 5 else ""
-            return self._predvajaj_z_naprave(id_n, id_dat, ime_dat, streznik, vrsta, mime)
+            # Podnapisi ob videu na napravi (polje `subtitles` iz files.list); starejse naprave jih nimajo.
+            podnapisi_naprave = a[6] if len(a) > 6 and isinstance(a[6], list) else []
+            return self._predvajaj_z_naprave(id_n, id_dat, ime_dat, streznik, vrsta, mime, podnapisi_naprave)
 
         if metoda == "zazeniNaNapravi":
             id_n = str(a[0]) if a else ""
@@ -1569,6 +1884,17 @@ class SafeerOsWindow(QMainWindow):
                 print("[SafeerMedia] MEDIA_ROUTE missing_item", flush=True)
                 return None
             url = str(item.get("url") or "")
+            if url.startswith("dvd:"):
+                # DVD brez zascite (ISO, mapa VIDEO_TS): zna ga samo LibVLC; zascitenih Safeer ne odklepa.
+                if not self.media_player.available:
+                    return dict(item, native=False, napaka_koda="dvdVlc")
+                self.dispatcher.dispatch(lambda: self._odpri_media(item))
+                return dict(item, native=True)
+            pot = str(item.get("pot") or "")
+            if pot and url.startswith("file:") and os.path.splitext(pot)[1].lower() in os_media.VIDEO \
+                    and os.path.isfile(pot):
+                # Lokalni video: datoteke podnapisov ob njem (ista mapa ali podmapa Subs), kot pri VLC.
+                item = dict(item, podnapisi=self._podnapisi_datoteke(pot))
             is_embed = (
                 item.get("vrsta") == "embed" or
                 "/embed/" in url.lower() or
@@ -1691,6 +2017,7 @@ class SafeerOsWindow(QMainWindow):
             self.control_backend.koncaj()
         except Exception:
             pass
+        self._ustavi_torrente()
         try:
             self.sporocila.zapri()
         except Exception:
@@ -1719,7 +2046,17 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--media-engine", choices=("auto", "qt"), default="auto",
                         help=argparse.SUPPRESS)
     parser.add_argument("--ozadje", action="store_true", help="Zazeni le v ozadju")
+    parser.add_argument("--magnet", type=str, default="",
+                        help="Odpri magnet povezavo v Medijskem centru (brskalnik, druga naprava v Linku)")
     args = parser.parse_args(argv)
+    magnet = ""
+    if args.magnet:
+        # Magnet iz registra (klik v brskalniku) ali z druge naprave: samo veljavna BitTorrent povezava.
+        razclenjen = os_torrent.razcleni_magnet(args.magnet)
+        if razclenjen is None:
+            print("To ni veljavna magnet povezava.", flush=True)
+            return 2
+        magnet = razclenjen["uri"]
 
     # Browser settings are the single shared store for Safeer OS and the
     # embedded Safeer Browser. Apply restart-only Chromium/DNS options before
@@ -1739,7 +2076,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     app = QApplication.instance() or QApplication(sys.argv)
     zaklep = en_primerek.zakleni()
     if zaklep is None:
-        if en_primerek.predaj_prvemu(zacetni, bool(args.ozadje)):
+        if en_primerek.predaj_prvemu(zacetni, bool(args.ozadje) and not magnet, magnet=magnet):
             print("[SafeerOS] Ze tece; razdelek predan prvi kopiji.", flush=True)
             return 0
         # Prva kopija se umika (tece starejsa koda) ali se ne odziva: pocakamo, da sprosti zaklep.
@@ -1758,12 +2095,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     v_oknu = True if (args.control or args.razdelek or args.okno) else False
 
     window = SafeerOsWindow(v_oknu=v_oknu, zacetni_razdelek=zacetni, media_engine=args.media_engine,
-                            browser_settings=browser_settings)
+                            browser_settings=browser_settings, magnet=magnet)
     print("[SafeerOS] DIAG event_loop_start", flush=True)
     window._streznik_primerka = en_primerek.streznik(window)
     window._zaklep_primerka = zaklep
 
-    if args.ozadje:
+    if args.ozadje and not magnet:
         window.control_backend.povezi_se()
         window.hide()
 

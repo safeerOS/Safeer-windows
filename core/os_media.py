@@ -514,6 +514,28 @@ def _item(title: Any, url: Any, *, base: str, source_id: str, source_name: str,
     return result
 
 
+def _dvd_item(path: Path) -> Optional[dict]:
+    """Vnos knjižnice za DVD brez zaščite: slika ISO z VIDEO_TS ali mapa diska (core/os_dvd.py).
+
+    Naslov je ``dvd:///C:/...`` za LibVLC. _item sprejme le naslove http(s)/file in zavrne .iso (spletni viri
+    ga ne smejo ponujati kot medij), zato vnos zgradimo na mapi diska in naslov nato zamenjamo."""
+    from . import os_dvd
+    try:
+        if not os_dvd.je_dvd(str(path)):
+            return None
+        naslov = os_dvd.uri(str(path))
+        modified = int(path.stat().st_mtime)
+    except (OSError, ValueError):
+        return None
+    found = _item(os_dvd.naslov(str(path)), path.parent.as_uri() + "/", base=path.parent.as_uri() + "/",
+                  source_id="lokalno", source_name="Ta računalnik", kind="film", description=str(path))
+    if not found:
+        return None
+    found.update({"url": naslov, "pot": str(path), "cas": modified, "mime": "", "dvd": True,
+                  "album": "", "skupina": ""})
+    return found
+
+
 def _first(mapping: dict, names: Iterable[str]) -> Any:
     for name in names:
         if mapping.get(name) not in (None, "", []):
@@ -1684,6 +1706,14 @@ class MediaCenter:
                 dirs[:] = [name for name in dirs if not name.startswith(".")][:80]
                 for filename in files:
                     path = Path(base) / filename
+                    if path.suffix.lower() == ".iso" or filename.upper() == "VIDEO_TS.IFO":
+                        # DVD brez zaščite (slika ISO z VIDEO_TS ali mapa diska) je film; predvaja LibVLC.
+                        dvd = _dvd_item(path)
+                        if dvd:
+                            items.append(dvd)
+                        if len(items) >= MAX_FILES:
+                            return items
+                        continue
                     if path.suffix.lower() not in MEDIA_EXT:
                         continue
                     try:
