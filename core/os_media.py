@@ -176,6 +176,36 @@ def _absolute(base: str, value: Any) -> str:
     return url if urllib.parse.urlsplit(url).scheme in ("http", "https", "file") else ""
 
 
+_VDELANI_PREDVAJALNIKI = ("w.soundcloud.com", "bandcamp.com")
+_ZVOCNE_VRSTE = ("audio/", "application/ogg", "application/x-ogg")
+
+
+def je_neposredni_zvok(url: str, odpri=urllib.request.urlopen, cas: float = 4.0) -> bool:
+    """Ali je http(s) naslov res zvočni tok (Jamendo, Icecast radio), ne spletna stran ali vdelava.
+
+    Končnica .mp3/.ogg ... zadostuje. Brez nje vprašamo strežnik le za glavo (Range 0-0, telo se
+    ne bere): Content-Type audio/* ali ogg pomeni tok. Uradne vdelave (SoundCloud, Bandcamp) in
+    spletne strani (text/html) ostanejo strani - nikoli jih ne predstavljamo kot neposredni tok."""
+    parsed = urllib.parse.urlsplit(url or "")
+    if parsed.scheme not in ("http", "https"):
+        return False
+    host, pot = (parsed.hostname or "").casefold(), parsed.path.casefold()
+    if any(host == h or host.endswith("." + h) for h in _VDELANI_PREDVAJALNIKI) or "/embed" in pot:
+        return False
+    if pot.endswith((".m3u8", ".mpd")):
+        return False
+    if Path(pot).suffix in AUDIO:
+        return True
+    try:
+        zahteva = urllib.request.Request(url, headers={"User-Agent": "SafeerOS/1.0", "Range": "bytes=0-0",
+                                                       "Icy-MetaData": "0"})
+        with odpri(zahteva, timeout=cas) as odgovor:
+            vrsta = str(odgovor.headers.get("Content-Type") or "").split(";")[0].strip().casefold()
+    except Exception:  # noqa: BLE001
+        return False
+    return vrsta.startswith(_ZVOCNE_VRSTE)
+
+
 def _official_music_embed(url: str, source_id: str, source_name: str) -> tuple[list[dict] | None, str]:
     """Prepozna samo SoundCloud in Bandcamp uradne vdelave; nikoli ne bere njihovih strani."""
     parsed = urllib.parse.urlsplit(url)

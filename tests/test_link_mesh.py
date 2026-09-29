@@ -411,6 +411,30 @@ class Klicanje(unittest.TestCase):
         self.assertEqual(m.kandidati([self.oglas("n-z")], zdaj=999.0), [])
         self.assertEqual([h["id"] for h in m.kandidati([self.oglas("n-z")], zdaj=1001.0)], ["n-z"])
 
+    def test_premor_se_podvoji_in_izbrise_sele_ob_sprejemu(self):
+        import json as _json
+        m = self.link_mesh.MeshPovezovalec(self.hub, "n-m")
+
+        class Ws:
+            def __init__(self, sporocila): self.sporocila = list(sporocila)
+            def prejmi(self): return self.sporocila.pop(0) if self.sporocila else None
+
+        class Pov:
+            def __init__(self, sporocila): self.ws, self.zaprta = Ws(sporocila), False
+            def zapri(self): self.zaprta = True
+            def poslji(self, _s): pass
+
+        zavrnitev = _json.dumps({"type": "cast.ack", "status": "rejected", "error_code": "podvojeno"})
+        self.hub.odklopi = lambda _p: None
+        m._beri("n-z", Pov([zavrnitev]))
+        self.assertEqual(m._zavrnjeni["n-z"][1], 30.0)
+        m._beri("n-z", Pov([zavrnitev]))
+        self.assertEqual(m._zavrnjeni["n-z"][1], 60.0)
+        # Sosed nas sprejme (prvo sporocilo ni zavrnitev): premor izgine.
+        self.hub.obdelaj = lambda _p, _s: None
+        m._beri("n-z", Pov([_json.dumps({"type": "mesh.devices", "payload": {}})]))
+        self.assertNotIn("n-z", m._zavrnjeni)
+
 
 if __name__ == "__main__":
     unittest.main()

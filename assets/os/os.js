@@ -2951,8 +2951,9 @@
       var predvajalnikOdprt = !!(predvajalnik && !predvajalnik.hidden);
       var pogovor = document.querySelector(".sloj-koda-prijave");
       if (e.key === "Escape") {
-        // Esc v predvajalniku ali v vprašanju ga zapre sam (poslušalec na oknu), ne skoči na Domov.
-        if (predvajalnikOdprt || pogovor) return;
+        // Esc v vprašanju = »Ne zdaj« / »V redu«; predvajalnik zapre poslušalec na oknu. Ne skoči na Domov.
+        if (pogovor) { var zapri = pogovor.querySelector(".koda-prijave-gumb"); if (zapri) zapri.click(); return; }
+        if (predvajalnikOdprt) return;
         var odprt = document.querySelector(".sloj.viden");
         if (odprt || iskanje.value) { iskanje.value = ""; zapriSloje(); iskanje.blur(); }
         else pojdi("domov");
@@ -3142,8 +3143,8 @@
     var variant = variants[index || 0] || variants[0], audio = item.vrsta === "glasba" || item.vrsta === "radio" || item.vrsta === "podcast";
     var url = variant.url || "";
     var isDirectMedia = /\.(mp4|mkv|webm|avi|mov|m4v|mp3|flac|ogg|opus|m4a|aac|wav|m3u8)($|\?)/i.test(url) || url.startsWith("file:") || /mpegurl/i.test(variant.mime || item.mime || "") ||
-      // Zvočni tok brez končnice (Jamendo, Icecast radio) je še vedno neposreden zvok, ne spletna stran.
-      (audio && /^https?:/i.test(url) && !/\.(m3u8|mpd)($|\?)/i.test(url) && variant.vrsta !== "embed");
+      // Zvočni tok brez končnice (Jamendo, Icecast radio): strežnik je potrdil zvok (audio/*), ni spletna stran.
+      (audio && item.neposredni_zvok === true && (index || 0) === 0);
     var video = $("mediaVideo"), playerAudio = $("mediaAudio"), iframe = $("mediaIframe"), playerImage = $("mediaSlika");
 
     if (media.timer) { window.clearTimeout(media.timer); media.timer = 0; }
@@ -3199,7 +3200,11 @@
         player.onerror = function () {
           if (media.timer) window.clearTimeout(media.timer);
           media.timer = 0;
-          if (!poskusiNaslednjo()) $("mediaNapaka").hidden = false;
+          if (!poskusiNaslednjo()) {
+            $("mediaNapaka").hidden = false;
+            // Glasba v ozadju: plošča je skrita, zato napako pokažemo v mali vrstici.
+            if (media.ozadje && $("mediaMiniMeta")) { $("mediaMiniMeta").textContent = $("mediaNapaka").textContent; obvesti($("mediaNapaka").textContent); }
+          }
         };
         player.onended = audio ? function () { if (!predvajajIzVrste(1)) osveziMini(); } : null;
         if (audio) { player.onplay = osveziMini; player.onpause = osveziMini; }
@@ -3282,6 +3287,7 @@
     if (smer > 0) (media.vrstaZgodovina = media.vrstaZgodovina || []).push(media.vrstaMesto);
     media.vrstaMesto = mesto;
     narisiVrsto();
+    media.izVrste = true;       // naslednja/prejšnja iz vrste: ostani v ozadju, če je glasba v ozadju
     odpriMedia(media.vrsta[mesto]);
     return true;
   }
@@ -3302,6 +3308,9 @@
   }
 
   function odpriMedia(id) {
+    // Uporabnik je sam izbral vsebino: pokaži predvajalnik (tudi, če je prej glasba igrala v ozadju).
+    if (!media.izVrste) media.ozadje = false;
+    media.izVrste = false;
     // Prenos, ki ga izdajatelj ponuja samo na svoji strani (npr. RTV SLO): odpremo ga v Spletu.
     var znan = (media.katalog || []).find(function (x) { return x.id === id; });
     if (znan && znan.stran) { otvoriSpletnoStran(znan.stran, znan.naslov); return; }
