@@ -1262,6 +1262,9 @@ class SafeerOsWindow(QMainWindow):
             return {"ok": False, "koda": "dvd"}
         if not self.media_player.available:
             return {"ok": False, "koda": "dvdVlc"}
+        if os_dvd.je_zasciten(naprava):
+            # Uradni VLC za Windows vsebuje libdvdcss; zaščitenih diskov Safeer kljub temu ne predvaja.
+            return {"ok": False, "koda": "dvd"}
         item = {"id": "dvd:" + naprava, "naslov": pogon.get("ime") or "DVD", "vrsta": "film",
                 "url": os_dvd.uri(naprava), "vir": "DVD", "dvd": True}
         self.dispatcher.dispatch(lambda: self._odpri_media(item))
@@ -1888,6 +1891,8 @@ class SafeerOsWindow(QMainWindow):
                 # DVD brez zascite (ISO, mapa VIDEO_TS): zna ga samo LibVLC; zascitenih Safeer ne odklepa.
                 if not self.media_player.available:
                     return dict(item, native=False, napaka_koda="dvdVlc")
+                if os_dvd.je_zasciten(url):
+                    return dict(item, native=False, napaka_koda="dvd")
                 self.dispatcher.dispatch(lambda: self._odpri_media(item))
                 return dict(item, native=True)
             pot = str(item.get("pot") or "")

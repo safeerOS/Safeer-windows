@@ -77,6 +77,87 @@ def je_dvd_iso(pot: str) -> bool:
     return False
 
 
+def _iso_vnosi(d, sektor: int, dolzina: int) -> List[tuple]:
+    """Zapisi mape ISO9660: (ime, začetni sektor, velikost, je_mapa)."""
+    d.seek(sektor * SEKTOR)
+    podatki = d.read(min(dolzina, 64 * SEKTOR))
+    izid, i = [], 0
+    while i + 33 < len(podatki):
+        n = podatki[i]
+        if n == 0:
+            i = (i // SEKTOR + 1) * SEKTOR
+            continue
+        ime = podatki[i + 33:i + 33 + podatki[i + 32]].split(b";")[0].decode("latin-1").upper()
+        izid.append((ime, int.from_bytes(podatki[i + 2:i + 6], "little"),
+                     int.from_bytes(podatki[i + 10:i + 14], "little"), bool(podatki[i + 25] & 2)))
+        i += n
+    return izid
+
+
+def _vobi(pot: str) -> List[tuple]:
+    """Največji naslovi diska (VTS_xx_1.VOB): [(datoteka, odmik, velikost)] iz ISO, naprave ali mape."""
+    kandidati = []
+    try:
+        if os.path.isdir(pot):
+            mapa = _mapa_video_ts(pot)
+            vts = next((os.path.join(mapa, i) for i in os.listdir(mapa) if i.upper() == "VIDEO_TS"), "") if mapa else ""
+            for ime in os.listdir(vts) if vts else []:
+                if ime.upper().startswith("VTS_") and ime.upper().endswith(".VOB") and not ime.upper().endswith("_0.VOB"):
+                    cela = os.path.join(vts, ime)
+                    kandidati.append((cela, 0, os.path.getsize(cela)))
+        else:
+            with open(pot, "rb") as d:
+                d.seek(16 * SEKTOR)
+                pvd = d.read(SEKTOR)
+                if pvd[1:6] != b"CD001":
+                    return []
+                koren = pvd[156:190]
+                vnosi = _iso_vnosi(d, int.from_bytes(koren[2:6], "little"), int.from_bytes(koren[10:14], "little"))
+                vts = next((v for v in vnosi if v[0] == "VIDEO_TS" and v[3]), None)
+                if vts:
+                    for ime, sektor, velikost, mapa in _iso_vnosi(d, vts[1], vts[2]):
+                        if ime.startswith("VTS_") and ime.endswith(".VOB") and not ime.endswith("_0.VOB"):
+                            kandidati.append((pot, sektor * SEKTOR, velikost))
+    except OSError:
+        return []
+    return sorted(kandidati, key=lambda k: -k[2])[:2]
+
+
+def je_zasciten(pot: str) -> Optional[bool]:
+    """Ali je disk zaščiten s CSS: pogleda zastavico šifriranja v glavah sektorjev MPEG (bajt 0x14, kot libdvdcss).
+
+    True = zaščiten (Safeer ga ne predvaja), False = brez zaščite, None = ni bilo mogoče preveriti.
+    Branje zaščitenega diska brez odklepanja pogon pogosto zavrne - tudi to štejemo kot zaščito."""
+    if pot.startswith("dvd://"):
+        pot = urllib.parse.unquote(pot[len("dvd://"):])
+        if len(pot) > 2 and pot[0] == "/" and pot[2] == ":":
+            pot = pot[1:]                       # dvd:///C:/Filmi/x.iso -> C:/Filmi/x.iso
+    vobi = _vobi(pot)
+    if not vobi:
+        return None
+    prebrano = 0
+    for datoteka, odmik, velikost in vobi:
+        sektorjev = max(1, velikost // SEKTOR)
+        try:
+            with open(datoteka, "rb") as d:
+                for delez in (0.0, 0.1, 0.3, 0.5, 0.7):
+                    zacetek = int(sektorjev * delez)
+                    d.seek(odmik + zacetek * SEKTOR)
+                    for _ in range(16):
+                        sektor = d.read(SEKTOR)
+                        if len(sektor) < SEKTOR:
+                            break
+                        prebrano += 1
+                        if sektor[:4] == b"\x00\x00\x01\xba" and sektor[14:17] == b"\x00\x00\x01" and (sektor[0x14] >> 4) & 0x03:
+                            return True
+        except OSError:
+            # Pogon, ki branja brez odklepanja ne dovoli, ima zaščiten disk (naprava /dev/sr* ali črka pogona).
+            if pot.startswith("/dev/") or (len(pot.rstrip("/\\")) <= 2 and pot[1:2] == ":"):
+                return True
+            return None
+    return False if prebrano else None
+
+
 def je_dvd(pot: str) -> bool:
     return (os.path.isfile(pot) and pot.lower().endswith(".iso") and je_dvd_iso(pot)) or _mapa_video_ts(pot) is not None
 
