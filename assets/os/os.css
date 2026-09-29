@@ -921,3 +921,19 @@ body.vrstica-skrcena:not(.nacin-splet) .uporabnik { flex-direction: column; padd
 .magnet-dejanja button.vklopljen { border-color:var(--zelena); color:var(--zelena); }
 .magnet-povezava { flex-basis:100%; font-size:12px; word-break:break-all; color:var(--medlo); }
 .magnet-plosca .gumbi { display:flex; justify-content:flex-end; gap:10px; flex-wrap:wrap; }
+
+/* Povsem skrita stranska vrstica (gumb »Skrij vrstico«): vsebina cez ves zaslon, na levem robu rocaj. */
+.skrij-vrstico { display: flex; align-items: center; gap: 12px; padding: 9px 12px; border: 0; border-radius: 12px;
+  background: transparent; color: var(--medlo); font: inherit; font-size: 13px; cursor: pointer; text-align: left; }
+.skrij-vrstico svg { width: 20px; height: 20px; flex: none; }
+.skrij-vrstico:hover, .skrij-vrstico:focus-visible { color: var(--zelena); background: rgba(255, 255, 255, .05); }
+body.vrstica-skrcena:not(.nacin-splet) .skrij-vrstico { justify-content: center; padding: 9px 0; }
+body.vrstica-skrcena:not(.nacin-splet) .skrij-vrstico span { display: none; }
+.rocaj-vrstice { display: none; position: fixed; left: 0; top: 50%; transform: translateY(-50%); z-index: 60;
+  width: 22px; height: 96px; padding: 0; border: 0; background: transparent; cursor: pointer; }
+.rocaj-vrstice::before { content: ""; position: absolute; left: 7px; top: 12px; width: 6px; height: 72px;
+  border-radius: 3px; background: var(--zelena); opacity: .6; transition: opacity .15s, width .15s; }
+.rocaj-vrstice:hover::before, .rocaj-vrstice:focus-visible::before { opacity: 1; width: 8px; }
+body.vrstica-skrita:not(.nacin-splet) #aplikacija { grid-template-columns: 1fr; }
+body.vrstica-skrita:not(.nacin-splet) #stranska { display: none; }
+body.vrstica-skrita:not(.nacin-splet) .rocaj-vrstice { display: block; }

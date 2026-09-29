@@ -211,8 +211,22 @@
     gumb.dataset.vezan = "1";
     gumb.addEventListener("click", vrsticaPreklopi);
     document.addEventListener("keydown", function (e) {
-      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === "b" || e.key === "B")) { e.preventDefault(); vrsticaPreklopi(); }
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === "b" || e.key === "B")) {
+        e.preventDefault();
+        // Skrita vrstica se s Ctrl+B najprej pokaze (kot v brskalnikih), sicer se skrci/razsiri.
+        if (document.body.classList.contains("vrstica-skrita")) vrsticaSkrij(false); else vrsticaPreklopi();
+      }
     });
+    var skrij = document.getElementById("gumbSkrijVrstico"), rocaj = document.getElementById("rocajVrstice");
+    if (skrij) skrij.addEventListener("click", function () { vrsticaSkrij(true); });
+    if (rocaj) rocaj.addEventListener("click", function () { vrsticaSkrij(false); });
+  }
+  function vrsticaSkrij(da) {
+    document.body.classList.toggle("vrstica-skrita", !!da);
+    try { localStorage.setItem("safeer_vrstica_skrita", da ? "1" : "0"); } catch (e) {}
+    var rocaj = document.getElementById("rocajVrstice");
+    if (rocaj) { rocaj.title = t("vrsticaPokazi"); rocaj.setAttribute("aria-label", rocaj.title); }
+    if (!da) { var izbran = document.querySelector("#meni button.izbran"); if (izbran) izbran.focus(); }
   }
   function vrsticaPreklopi() {
     var skrcena = document.body.classList.toggle("vrstica-skrcena");
@@ -220,6 +234,7 @@
     vrsticaUredi();
   }
   try { if (localStorage.getItem("safeer_vrstica_skrcena") === "1") document.body.classList.add("vrstica-skrcena"); } catch (e) {}
+  try { if (localStorage.getItem("safeer_vrstica_skrita") === "1") document.body.classList.add("vrstica-skrita"); } catch (e) {}
 
   function $(id) { return document.getElementById(id); }
   function on(id, dogodek, poslusaj) {
