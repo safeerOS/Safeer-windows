@@ -163,7 +163,8 @@ class Mesh(unittest.TestCase):
         povezi(self.a, self.c)
         povezi(self.b, self.c)
         self.a.odklopi(ab)                 # povezava a->b pade na strani a
-        self.assertEqual(ids(tv), ["tel", "tv"])
+        # b je se vedno dosegljiv prek c (en vmesni skok)
+        self.assertEqual(ids(tv), ["pc", "tel", "tv"])
         self.assertEqual(ids(tel), ["pc", "tel", "tv"])   # c se vedno vidi oba
         self.assertEqual(self.a.sosedje(), ["hub-c"])
 
@@ -275,6 +276,74 @@ class Mesh(unittest.TestCase):
         self.a.obdelaj(ab, json.dumps({"type": "mesh.route", "payload": {
             "to": "tv", "msg": json.dumps({"type": "pair.code", "payload": {"code": "123456"}})}}))
         self.assertIsNotNone(tv.zadnje("pair.code"))
+
+    # -- dostava prek vmesnega vozlisca (relay, en skok)
+
+    def test_relay_vidi_in_usmeri(self):
+        tv = prijava(self.a, "tv")
+        prijava(self.b, "pc")
+        tel = prijava(self.c, "tel")
+        povezi(self.a, self.b)
+        bc, cb = povezi(self.b, self.c)          # a in c se ne dosezeta
+        self.assertEqual(ids(tv), ["pc", "tel", "tv"])
+        self.assertEqual(ids(tel), ["pc", "tel", "tv"])
+        self.a.obdelaj(tv, json.dumps({"id": "r1", "type": "control.command", "target": "tel", "payload": {}}))
+        ukaz = tel.zadnje("control.command")
+        self.assertIsNotNone(ukaz)
+        self.assertEqual(ukaz["sender"], "tv")
+        self.c.obdelaj(tel, json.dumps({"id": "r2", "type": "control.result", "target": "tv", "ref_id": "r1"}))
+        self.assertIsNotNone(tv.zadnje("control.result"))
+
+    def test_neposredna_pot_ima_prednost(self):
+        tv = prijava(self.a, "tv")
+        prijava(self.b, "pc")
+        tel = prijava(self.c, "tel")
+        ab, _ = povezi(self.a, self.b)
+        povezi(self.b, self.c)
+        povezi(self.a, self.c)
+        pred = len([s for s in ab.poslano if s["type"] == "mesh.route"])
+        self.a.obdelaj(tv, json.dumps({"id": "d", "type": "share.text", "target": "tel", "payload": {"text": "x"}}))
+        self.assertEqual(len(tel.vrste("share.text")), 1)
+        self.assertEqual(len([s for s in ab.poslano if s["type"] == "mesh.route"]), pred, "ne prek b")
+
+    def test_izpad_neposredne_pot_prek_vmesnega(self):
+        tv = prijava(self.a, "tv")
+        prijava(self.b, "pc")
+        tel = prijava(self.c, "tel")
+        povezi(self.a, self.b)
+        povezi(self.b, self.c)
+        ac, _ = povezi(self.a, self.c)
+        self.a.odklopi(ac)                        # a izgubi c, b pa ga se vidi
+        self.assertEqual(ids(tv), ["pc", "tel", "tv"])
+        self.a.obdelaj(tv, json.dumps({"id": "e", "type": "share.text", "target": "tel", "payload": {"text": "x"}}))
+        self.assertEqual(len(tel.vrste("share.text")), 1)
+
+    def test_relay_ni_verige_in_ne_ponareja(self):
+        prijava(self.a, "tv")
+        prijava(self.b, "pc")
+        tel = prijava(self.c, "tel")
+        ab, _ = povezi(self.a, self.b)
+        povezi(self.b, self.c)
+        # b dobi prosnjo za posredovanje v imenu naprave, ki ni lokalno pri a: zavrzeno
+        self.b.obdelaj(self.b._sosedje["hub-a"], json.dumps({"type": "mesh.route", "payload": {
+            "to": "tel", "relay": True, "msg": json.dumps({"type": "share.text", "sender": "pc"})}}))
+        self.assertEqual(len(tel.vrste("share.text")), 0)
+        # relay na napravo, ki je pri b posredna (ali lokalna), se ne posreduje dalje
+        d = lhs.Hub(odtis="dd" * 32, nas_id="hub-d")
+        tab = prijava(d, "tablica")
+        povezi(self.c, d)
+        self.b.obdelaj(self.b._sosedje["hub-a"], json.dumps({"type": "mesh.route", "payload": {
+            "to": "tablica", "relay": True, "msg": json.dumps({"type": "share.text", "sender": "tv"})}}))
+        self.assertEqual(len(tab.vrste("share.text")), 0, "najvec en vmesni skok")
+
+    def test_izpad_vmesnega(self):
+        tv = prijava(self.a, "tv")
+        prijava(self.b, "pc")
+        prijava(self.c, "tel")
+        ab, _ = povezi(self.a, self.b)
+        povezi(self.b, self.c)
+        self.a.odklopi(ab)
+        self.assertEqual(ids(tv), ["tv"])
 
 
 class Klicanje(unittest.TestCase):
