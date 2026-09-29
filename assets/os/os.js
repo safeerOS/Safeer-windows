@@ -2947,14 +2947,22 @@
     on("napraveIskanje", "input", function () { narisiSeznamNaprav(S.povezava.stanje === "povezan" && !!S.povezava.control); });
     // Kot meni Start: kar zacnes tipkati, gre v iskanje.
     document.addEventListener("keydown", function (e) {
+      var predvajalnik = $("mediaPredvajalnik");
+      var predvajalnikOdprt = !!(predvajalnik && !predvajalnik.hidden);
+      var pogovor = document.querySelector(".sloj-koda-prijave");
       if (e.key === "Escape") {
+        // Esc v predvajalniku ali v vprašanju ga zapre sam (poslušalec na oknu), ne skoči na Domov.
+        if (predvajalnikOdprt || pogovor) return;
         var odprt = document.querySelector(".sloj.viden");
         if (odprt || iskanje.value) { iskanje.value = ""; zapriSloje(); iskanje.blur(); }
         else pojdi("domov");
         return;
       }
       var v = document.activeElement;
-      if (v && (v.tagName === "INPUT" || v.tagName === "TEXTAREA")) return;
+      if (v && (v.tagName === "INPUT" || v.tagName === "TEXTAREA" || v.tagName === "SELECT" || v.isContentEditable)) return;
+      // Odprt obrazec, vprašanje ali predvajalnik: tipke ne smejo teči v iskanje za njimi.
+      var sloj = document.querySelector(".sloj.viden");
+      if ((sloj && sloj.id !== "slojIskanje") || pogovor || predvajalnikOdprt) return;
       if (e.ctrlKey || e.altKey || e.metaKey) return;
       if (e.key && e.key.length === 1 && e.key !== " ") {
         e.preventDefault();
