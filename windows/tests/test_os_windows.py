@@ -1424,6 +1424,9 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
         js = (Path(__file__).resolve().parent.parent.parent / "assets" / "os" / "os.js").read_text(encoding="utf-8")
         self.assertIn("if (predvajalnikOdprt || pogovor) return;", js)
         self.assertIn('if ((sloj && sloj.id !== "slojIskanje") || pogovor || predvajalnikOdprt) return;', js)
+        app = (Path(__file__).resolve().parent.parent.parent / "windows" / "safeer_windows" / "os_app.py").read_text(encoding="utf-8")
+        esc = app[app.index("    def na_escape"):app.index("    def _nastavi_celozaslonsko")]
+        self.assertIn("dispatchEvent(new KeyboardEvent('keydown'", esc)
 
     def test_safeer_splet_ostane_v_os_postavitvi_in_izhod_razsiri_os(self):
         koren = Path(__file__).resolve().parent.parent.parent

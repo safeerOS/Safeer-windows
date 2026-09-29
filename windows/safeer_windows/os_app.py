@@ -616,6 +616,14 @@ class SafeerOsWindow(QMainWindow):
         if self.zaslon.currentWidget() is self.webview2_media:
             self._zapri_webview2_media()
             return
+        # Bližnjica Qt pojé Esc, preden ga dobi stran: predvajalnik na strani, iskanje, obrazci in
+        # vprašanja se brez tega z Esc niso zapirali. Tipko zato posredujemo strani.
+        try:
+            self.view.page().runJavaScript(
+                "(document.activeElement || document).dispatchEvent(new KeyboardEvent('keydown',"
+                "{key:'Escape', code:'Escape', bubbles:true}));")
+        except Exception:  # noqa: BLE001
+            pass
 
     def _nastavi_celozaslonsko(self, vklopi: bool) -> None:
         """Izhod iz celega zaslona vrne prejšnje stanje (razpeto okno ostane razpeto, ne pomanjša se).
