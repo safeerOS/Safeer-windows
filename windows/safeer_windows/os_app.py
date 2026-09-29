@@ -645,6 +645,36 @@ class SafeerOsWindow(QMainWindow):
             return
         self._zapusti_celozaslonsko()
 
+    def _predvajaj_z_naprave(self, id_n: str, id_dat: str, ime: str, streznik: Optional[dict],
+                             vrsta: str, mime: str) -> dict:
+        from core import link_krog, link_pretok
+        try:
+            clan = link_krog.krog().clan_za_id(id_n) or {}
+        except Exception:
+            clan = {}
+        vir = link_pretok.vir_iz_streznika(streznik or {}, id_dat, str(clan.get("kljuc") or ""), mime)
+        if vir is None:
+            return {"ok": False, "napaka": "Naprava ni poslala varnega naslova za predvajanje."}
+        url = link_pretok.pretok().dodaj(vir)
+        zvok = vrsta == "audio"
+        try:
+            naprava = next((n for n in self.control_backend.naprave_s_datotekami() if n.get("id") == id_n), {})
+        except Exception:
+            naprava = {}
+        item = {"ok": True, "id": "link:%s:%s" % (id_n, id_dat), "naslov": os.path.splitext(ime)[0] or ime,
+                "vrsta": "glasba" if zvok else "video", "url": url, "mime": mime,
+                "vir": str(naprava.get("ime") or ""), "neposredni": True}
+        # Vgrajeni brskalnik (Qt WebEngine) nima patentiranih kodekov (AAC/M4A, WMA ...): tak zvok predvaja
+        # VLC, ki zna vse; MP3, FLAC, OGG/Opus in WAV ostanejo v strani z vrsto in glasbo v ozadju.
+        koncnica = os.path.splitext(ime.lower())[1]
+        v_strani = koncnica in (".mp3", ".flac", ".ogg", ".oga", ".opus", ".wav", ".weba", ".webm")
+        if zvok and (v_strani or not self.media_player.available):
+            return dict(item, native=False, neposredni_zvok=True)
+        if not zvok and not self.media_player.available:
+            return dict(item, native=False, neposredni_zvok=False)
+        self.dispatcher.dispatch(lambda: self._odpri_media(item))
+        return dict(item, native=True)
+
     def _odpri_media(self, item: dict) -> None:
         if self.media_player.play_item(item):
             self.zaslon.setCurrentWidget(self.media_player)
@@ -1363,6 +1393,18 @@ class SafeerOsWindow(QMainWindow):
             ime_dat = str(a[2]) if len(a) > 2 else ""
             streznik = a[3] if len(a) > 3 and isinstance(a[3], dict) else None
             return self.control_backend.prenesi_datoteko_naprave(id_n, id_dat, ime_dat, streznik)
+
+        if metoda == "predvajajDatotekoNaprave":
+            # Glasba in video z druge naprave se predvajata sproti (brez prenosa na disk): lokalni tok na
+            # 127.0.0.1 vodi do naprave po HTTPS s pripetim potrdilom in zetonom - doma neposredno,
+            # zunaj doma prek Global Linka (core/link_pretok.py).
+            id_n = str(a[0]) if a else ""
+            id_dat = str(a[1]) if len(a) > 1 else ""
+            ime_dat = str(a[2]) if len(a) > 2 else ""
+            streznik = a[3] if len(a) > 3 and isinstance(a[3], dict) else None
+            vrsta = str(a[4]) if len(a) > 4 else ""
+            mime = str(a[5]) if len(a) > 5 else ""
+            return self._predvajaj_z_naprave(id_n, id_dat, ime_dat, streznik, vrsta, mime)
 
         if metoda == "zazeniNaNapravi":
             id_n = str(a[0]) if a else ""

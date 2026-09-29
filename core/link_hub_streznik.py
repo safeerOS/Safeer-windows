@@ -33,11 +33,13 @@ import time
 from typing import Callable, Dict, List, Optional
 from urllib.parse import parse_qs, urlparse
 
-from core import link_krog, link_ws
+from core import link_krog, link_tls, link_ws
 
 #: Vrata Huba. Najprej privzeta (naprave jih poznajo tudi brez mDNS), sicer katerakoli prosta.
 PRIVZETA_VRATA = 8990
 POT_WS = "/cast/ws"
+#: Deljene datoteke prek Huba (tok in prenos tudi prek Global Linka).
+POT_DATOTEKE = "/cast/d/"
 
 NAJVEC_NAPRAV = 32
 NAJVEC_IMENA = 64
@@ -1295,6 +1297,9 @@ class _Obravnava(http.server.BaseHTTPRequestHandler):
             # Samo stevila, nikoli imena naprav: to je preverba, da tu res tece Safeer Hub.
             self._odgovori(200, self._hub.zdravje())
             return
+        if pot.startswith(POT_DATOTEKE):
+            self._datoteka(pot, samo_glava=False)
+            return
         if pot in ("/cast/devices", "/cast/trust/ring"):
             # Seznam naprav in krog zaupanja (kljuci, imena, kdo je koga dodal) dobijo samo prijavljene
             # naprave, po WebSocketu (cast.devices, trust.update). Po HTTP ju ta Hub ne daje nikomur:
@@ -1307,6 +1312,34 @@ class _Obravnava(http.server.BaseHTTPRequestHandler):
             self._napaka(405, "Ta način za to pot ni dovoljen.", "metoda_ni_dovoljena")
             return
         self._napaka(404, "Ni te poti.", "ni_poti")
+
+    def do_HEAD(self) -> None:
+        pot = urlparse(self.path).path
+        if self._je_krajevni() and pot.startswith(POT_DATOTEKE):
+            self._datoteka(pot, samo_glava=True)
+            return
+        # HEAD nima telesa (HTTP/1.1).
+        self.send_response(403 if not self._je_krajevni() else 404)
+        self.send_header("Content-Length", "0")
+        self.send_header("Connection", "close")
+        self.end_headers()
+
+    def _datoteka(self, pot: str, samo_glava: bool) -> None:
+        """Deljena datoteka prek Huba (Global Link: rele pripelje samo do vrat Huba). Isti zeton in
+        ista pravila kot streznik datotek (core/link_datoteke.postrezi_datoteko)."""
+        dobi = getattr(self.server, "datoteke", None)
+        streznik = dobi() if callable(dobi) else None
+        if isinstance(streznik, (list, tuple)):
+            # Vec streznikov (npr. Windows: loceno za omejen dostop in za cel disk): tisti, ki pozna zeton.
+            z = (self.headers.get("X-Safeer-Token") or "").strip()
+            streznik = next((s for s in streznik if s is not None and s.zeton_velja(z)), None) or \
+                next((s for s in streznik if s is not None), None)
+        if streznik is None:
+            self._napaka(404, "Ta naprava ne deli datotek.", "ni_datotek")
+            return
+        from urllib.parse import unquote
+        from core import link_datoteke
+        link_datoteke.postrezi_datoteko(self, streznik, unquote(pot[len(POT_DATOTEKE):]), samo_glava)
 
     # ------------------------------------------------------------------ POST
     def do_POST(self) -> None:
@@ -1550,7 +1583,7 @@ def _obvestilo_kode_windows(ime: str, koda: str) -> None:
         pass
 
 
-class _Streznik(http.server.ThreadingHTTPServer):
+class _Streznik(link_tls.RokovanjeVNiti, http.server.ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
@@ -1575,6 +1608,9 @@ class HubStreznik:
         self.odtis = ""
         self.vrata = 0
         self.hub: Optional[Hub] = None
+        #: Streznik datotek (core/link_datoteke.StreznikDatotek ali funkcija, ki ga vrne) za tok prek
+        #: Huba (/cast/d/<id>); None = ta naprava datotek ne deli.
+        self.datoteke = None
         self._streznik: Optional[_Streznik] = None
         self._nit: Optional[threading.Thread] = None
         self._zaklep = threading.Lock()
@@ -1613,8 +1649,9 @@ class HubStreznik:
                     streznik = None
             if streznik is None:
                 return False
-            streznik.socket = ctx.wrap_socket(streznik.socket, server_side=True)
+            streznik.socket = ctx.wrap_socket(streznik.socket, server_side=True, do_handshake_on_connect=False)
             streznik.hub = self.hub          # type: ignore[attr-defined]
+            streznik.datoteke = lambda: self.datoteke() if callable(self.datoteke) else self.datoteke  # type: ignore[attr-defined]
             self.vrata = streznik.server_address[1]
             try:
                 self.hub.naslov_za_qr = "%s:%d" % (_krajevni_ip(), self.vrata)
