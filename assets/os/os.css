@@ -877,3 +877,15 @@ body.vrstica-skrcena:not(.nacin-splet) .znamka .skrci-vrstico { margin: 0; trans
 body.vrstica-skrcena:not(.nacin-splet) nav button { justify-content: center; padding: 14px 0; }
 body.vrstica-skrcena:not(.nacin-splet) .uporabnik { flex-direction: column; padding: 8px 4px; }
 @media (prefers-reduced-motion: no-preference) { #aplikacija { transition: grid-template-columns .18s ease; } }
+
+/* Glasba v ozadju (mala vrstica) */
+.media-mini { position:fixed; left:50%; bottom:18px; transform:translateX(-50%); z-index:30; display:flex; align-items:center; gap:10px;
+  width:min(640px, calc(100vw - 32px)); padding:8px 12px; border:1px solid rgba(84,214,165,.38); border-radius:16px;
+  background:linear-gradient(120deg,rgba(28,55,53,.97),rgba(14,29,40,.98)); box-shadow:0 12px 34px rgba(0,0,0,.35); }
+.media-mini[hidden] { display:none; }
+.media-mini-odpri { flex:none; width:44px; height:44px; border-radius:11px; background:linear-gradient(130deg,#5ccbaa,#204858); color:#e9fff3; font-size:22px; border:0; cursor:pointer; }
+.media-mini-besedilo { display:flex; flex-direction:column; min-width:0; flex:1; }
+.media-mini-besedilo b { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:14px; }
+.media-mini-besedilo small { color:var(--medlo, #9fb3b0); font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.media-mini-premor { flex:none; width:40px; height:40px; border-radius:50%; border:0; background:var(--zelena, #54d6a5); color:#083527; font-weight:800; cursor:pointer; }
+.media-mini .gumb-ikona:disabled { opacity:.35; }

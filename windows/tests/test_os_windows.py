@@ -1407,6 +1407,19 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
         self.assertIn('not parsed_path.endswith((".m3u8", ".mpd"))', pot)
         self.assertIn("(audio && /^https?:/i.test(url)", js)
 
+    def test_glasba_igra_v_ozadju_in_nazaj_ne_pomanjsa_okna(self):
+        koren = Path(__file__).resolve().parent.parent.parent
+        app = (koren / "windows" / "safeer_windows" / "os_app.py").read_text(encoding="utf-8")
+        js = (koren / "assets" / "os" / "os.js").read_text(encoding="utf-8")
+        html = (koren / "assets" / "os" / "index.html").read_text(encoding="utf-8")
+        self.assertIn('on("mediaPredvajalnikNazaj", "click", nazajIzPredvajalnika);', js)
+        self.assertIn('id="mediaMini"', html)
+        # Naslednja skladba v ozadju ne odpre plosce sredi brskanja.
+        self.assertIn("pl.hidden = !!media.ozadje;", js)
+        metoda = app[app.index("    def _nastavi_celozaslonsko"):app.index("    def _odpri_media(self, item: dict)")]
+        self.assertIn("self.showMaximized()", metoda)
+        self.assertIn("if not self.isFullScreen():\n            return", metoda)
+
     def test_safeer_splet_ostane_v_os_postavitvi_in_izhod_razsiri_os(self):
         koren = Path(__file__).resolve().parent.parent.parent
         app = (koren / "windows" / "safeer_windows" / "os_app.py").read_text(encoding="utf-8")

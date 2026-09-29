@@ -3146,7 +3146,9 @@
     if (playerImage) { playerImage.removeAttribute("src"); playerImage.hidden = true; }
 
     var pl = $("mediaPredvajalnik");
-    if (pl) { pl.hidden = false; pl.classList.remove("kino"); }
+    // Glasba v ozadju: naslednja skladba iz vrste ne sme sredi brskanja odpreti plošče predvajalnika.
+    if (!audio) media.ozadje = false;
+    if (pl) { pl.hidden = !!media.ozadje; pl.classList.remove("kino"); }
     var napakaEl = $("mediaNapaka");
     napakaEl.hidden = true;
     napakaEl.classList.remove("media-opozorilo");
@@ -3191,8 +3193,10 @@
           media.timer = 0;
           if (!poskusiNaslednjo()) $("mediaNapaka").hidden = false;
         };
-        player.onended = audio ? function () { predvajajIzVrste(1); } : null;
+        player.onended = audio ? function () { if (!predvajajIzVrste(1)) osveziMini(); } : null;
+        if (audio) { player.onplay = osveziMini; player.onpause = osveziMini; }
         player.play().catch(function () {});
+        osveziMini();
         if (navigator.mediaSession) {
           try { navigator.mediaSession.metadata = new MediaMetadata({title: item.naslov || "Medijski center", artist: item.izvajalec || item.vir || "Safeer OS", artwork: item.slika ? [{src: item.slika}] : []}); } catch (e) {}
         }
@@ -3316,7 +3320,40 @@
   document.addEventListener("DOMContentLoaded", vezaVrste);
   if (document.readyState !== "loading") setTimeout(vezaVrste, 0);
 
+  // Mala vrstica za glasbo v ozadju: naslov, nazaj/pavza/naprej, odpri ploščo, ustavi.
+  function zvokTece() {
+    var a = $("mediaAudio");
+    return !!(media.aktivni && a && a.getAttribute("src"));
+  }
+  function osveziMini() {
+    var m = $("mediaMini"); if (!m) return;
+    var a = $("mediaAudio");
+    var vidna = !!media.ozadje && zvokTece();
+    m.hidden = !vidna;
+    if (!vidna) return;
+    $("mediaMiniNaslov").textContent = (media.aktivni && media.aktivni.naslov) || "";
+    $("mediaMiniMeta").textContent = (media.aktivni && (media.aktivni.izvajalec || media.aktivni.vir)) || "";
+    $("mediaMiniPremor").innerHTML = a && !a.paused ? "&#10074;&#10074;" : "&#9654;";
+    var vec = (media.vrsta || []).length > 1;
+    $("mediaMiniPrejsnja").disabled = !vec; $("mediaMiniNaslednja").disabled = !vec;
+  }
+  function nazajIzPredvajalnika() {
+    // Zvok igra naprej v ozadju (kot v vsakem glasbenem predvajalniku); video in spletni viri se zaprejo.
+    if (!zvokTece()) { zapriMediaHtml(); return; }
+    var pl = $("mediaPredvajalnik");
+    if (pl) { if (pl.classList.contains("kino")) { pl.classList.remove("kino"); klic("celozaslonsko", [false]); } pl.hidden = true; }
+    media.ozadje = true;
+    osveziMini();
+  }
+  function odpriIzMini() {
+    media.ozadje = false;
+    var pl = $("mediaPredvajalnik"); if (pl) pl.hidden = false;
+    osveziMini();
+    if (window.safeerOsPojdi) window.safeerOsPojdi("media");
+  }
   function zapriMediaHtml() {
+    media.ozadje = false;
+    var mini = $("mediaMini"); if (mini) mini.hidden = true;
     if (media.timer) { window.clearTimeout(media.timer); media.timer = 0; }
     [$("mediaVideo"), $("mediaAudio")].forEach(function (player) {
       if (player) { player.pause(); player.removeAttribute("src"); player.load(); player.hidden = true; player.style.display = "none"; }
@@ -3701,12 +3738,17 @@
     p.appendChild(el("div", "drobno", ubezi(t("zvocnikIscem"))));
     naloziZvocnike(0);
   });
-  on("mediaPredvajalnikNazaj", "click", zapriMediaHtml);
+  on("mediaPredvajalnikNazaj", "click", nazajIzPredvajalnika);
+  on("mediaMiniOdpri", "click", odpriIzMini);
+  on("mediaMiniZapri", "click", zapriMediaHtml);
+  on("mediaMiniPrejsnja", "click", function () { predvajajIzVrste(-1); });
+  on("mediaMiniNaslednja", "click", function () { predvajajIzVrste(1); });
+  on("mediaMiniPremor", "click", function () { var a = $("mediaAudio"); if (!a) return; if (a.paused) a.play().catch(function () {}); else a.pause(); });
   window.addEventListener("keydown", function (e) {
     if (e.key === "Escape") {
       var pl = $("mediaPredvajalnik");
       if (pl && !pl.hidden) {
-        zapriMediaHtml();
+        nazajIzPredvajalnika();
         e.preventDefault();
       }
     }
