@@ -60,6 +60,12 @@ NAJVEC_ZETONOV = 32
 NACIN_SPAKE2 = "spake2"
 
 
+#: Link Mesh (docs/LINK-MESH.md): vsaka naprava gosti svoj Hub, Hubi so sosedje vsak z vsakim.
+MESH = "mesh1"
+#: Najvec sosednjih Hubov in najvecje sporocilo, ki ga sosed sme poslati za eno napravo.
+NAJVEC_SOSEDOV = 16
+NAJVEC_MESH_SPOROCILO = 1024 * 1024
+
 #: Safeer Chat: najvec cakajocih sporocil na napravo in koliko casa pocakajo.
 KLEPET_NA_NAPRAVO = 100
 KLEPET_ZIVLJENJE_S = 7 * 24 * 3600.0
@@ -91,6 +97,8 @@ class Naprava:
         self.razlicica = ""
         self.prioriteta = 0
         self.aplikacije: dict = {}
+        #: Id sosednjega Huba, pri katerem je naprava prijavljena (prazno = pri nas).
+        self.sosed = ""
 
     def json(self) -> dict:
         zapis = {
@@ -115,6 +123,29 @@ class Naprava:
         if self.aplikacije:
             zapis["apps"] = self.aplikacije
         return zapis
+
+
+class _Namestnik:
+    """Povezava do naprave, ki je prijavljena pri sosednjem Hubu.
+
+    Kar Hub poslje tej napravi, se ovije v `mesh.route` in gre sosedu; ta ga nespremenjenega preda
+    svoji lokalni napravi. Tako vse obstojece usmerjanje (cilj, oddaja, klepet) dela brez sprememb.
+    """
+
+    def __init__(self, sosed_id: str, povezava, cilj: str, naslov: str = "") -> None:
+        self.sosed_id = sosed_id
+        self.povezava = povezava
+        self.cilj = cilj
+        self.naslov = naslov
+        self.podatki: dict = {"sosed": sosed_id}
+
+    def poslji(self, besedilo: str) -> bool:
+        ovoj = {"id": link_ws.nakljucni(8), "type": "mesh.route", "payload": {"to": self.cilj, "msg": besedilo}}
+        return bool(self.povezava.poslji(json.dumps(ovoj, ensure_ascii=False)))
+
+    def zapri(self, *_a, **_k) -> None:
+        # Zapreti se da samo sosednjo povezavo, ne posamezne oddaljene naprave.
+        return None
 
 
 class Hub:
@@ -147,6 +178,13 @@ class Hub:
         self.ob_spremembi: Optional[Callable[[], None]] = None
         #: Nova naprava caka na kodo: (ime naprave, koda) - racunalnik pokaze obvestilo.
         self.ob_kodi: Optional[Callable[[str, str], None]] = None
+        #: Link Mesh: sosednji Hubi (id -> povezava), naprave vsakega soseda in zadnji poslani seznam.
+        self._sosedje: Dict[str, object] = {}
+        self._sosed_naprave: Dict[str, set] = {}
+        self._zadnji_mesh = ""
+        #: Klice se, ko sosed pride ali odide (id, naslov ali ""): MeshPovezovalec si zapomni naslov
+        #: in ob izgubi takoj poskusi znova.
+        self.ob_sosedu: Optional[Callable[[str, str], None]] = None
 
     # ------------------------------------------------------------------ prijava s podpisom
 
@@ -191,7 +229,7 @@ class Hub:
         podatki = link_krog.podatki_za_podpis(self.odtis, nonce, device_id)
         if not link_krog.preveri_podpis(str(clan["kljuc"]), podatki, podpis or ""):
             return None
-        odgovor = {"ticket": self._nova_vstopnica(device_id), "hub_id": IDENTITETA_HUBA, "fp": self.odtis}
+        odgovor = {"ticket": self._nova_vstopnica(device_id, podpis=True), "hub_id": IDENTITETA_HUBA, "fp": self.odtis}
         try:
             odgovor["ring"] = link_krog.krog().json()
         except Exception:
@@ -200,24 +238,30 @@ class Hub:
 
     def _pocisti_vstopnice(self) -> None:
         meja = self.ura() - VSTOPNICA_VELJA_S
-        for v in [v for v, (_, ko) in self._vstopnice.items() if ko < meja]:
+        for v in [v for v, vnos in self._vstopnice.items() if vnos[1] < meja]:
             self._vstopnice.pop(v, None)
 
     def porabi_vstopnico(self, vstopnica: str) -> Optional[str]:
         """Id naprave, ki ji vstopnica pripada. Velja natanko enkrat."""
+        return self.porabi_vstopnico_s_podpisom(vstopnica)[0]
+
+    def porabi_vstopnico_s_podpisom(self, vstopnica: str) -> tuple:
+        """(id naprave ali None, ali je bila vstopnica izdana s podpisom kljuca iz kroga)."""
         with self._zaklep:
             self._pocisti_vstopnice()
             vnos = self._vstopnice.pop((vstopnica or "").strip(), None)
-        return vnos[0] if vnos else None
+        if not vnos:
+            return None, False
+        return vnos[0], bool(vnos[2]) if len(vnos) > 2 else False
 
-    def _nova_vstopnica(self, device_id: str) -> str:
+    def _nova_vstopnica(self, device_id: str, podpis: bool = False) -> str:
         vstopnica = link_ws.nakljucni(24)
         with self._zaklep:
             self._pocisti_vstopnice()
             if len(self._vstopnice) >= NAJVEC_VSTOPNIC:
                 najstarejsa = min(self._vstopnice, key=lambda k: self._vstopnice[k][1])
                 self._vstopnice.pop(najstarejsa, None)
-            self._vstopnice[vstopnica] = (device_id, self.ura())
+            self._vstopnice[vstopnica] = (device_id, self.ura(), podpis)
         return vstopnica
 
     # ------------------------------------------------------------------ seznanitev s kodo
@@ -511,8 +555,9 @@ class Hub:
         sporocilo = self.seznam_json()
         for n in self.povezane():
             p = n.povezava
-            if p is not None:
+            if p is not None and not n.sosed:
                 p.poslji(sporocilo)
+        self._objavi_sosedom()
         if self.ob_spremembi is not None:
             try:
                 self.ob_spremembi()
@@ -590,6 +635,11 @@ class Hub:
         stara = None
         with self._zaklep:
             obstojeca = self._naprave.get(device_id)
+            if obstojeca is not None and obstojeca.sosed:
+                # Naprava je bila vidna prek soseda, zdaj se prijavlja pri nas: velja lokalna povezava.
+                self._sosed_naprave.get(obstojeca.sosed, set()).discard(device_id)
+                obstojeca.sosed = ""
+                obstojeca.povezava = None
             if obstojeca is not None and obstojeca.povezava is not None and obstojeca.povezava is not povezava:
                 # Nova povezava iste naprave zamenja staro; sicer naprava ostane "povezana", a nevidna.
                 stara = obstojeca.povezava
@@ -624,6 +674,10 @@ class Hub:
         return "accepted", ""
 
     def odklopi(self, povezava) -> None:
+        sosed = self._sosed_povezave(povezava)
+        if sosed:
+            self._odstrani_soseda(sosed, povezava)
+            return
         spremenjeno = False
         with self._zaklep:
             for n in self._naprave.values():
@@ -632,6 +686,285 @@ class Hub:
                     spremenjeno = True
         if spremenjeno:
             self.objavi_naprave()
+
+    # ------------------------------------------------------------------ Link Mesh (docs/LINK-MESH.md)
+
+    def sosedje(self) -> List[str]:
+        with self._zaklep:
+            return sorted(self._sosedje)
+
+    def _sosed_povezave(self, povezava) -> str:
+        with self._zaklep:
+            for sid, p in self._sosedje.items():
+                if p is povezava:
+                    return sid
+        return ""
+
+    def _je_clan(self, device_id: str) -> bool:
+        try:
+            return link_krog.krog().clan_za_id(device_id) is not None
+        except Exception:
+            return False
+
+    def _lokalne_json(self) -> Dict[str, dict]:
+        """Nase lokalne naprave za sosede (id -> zapis): samo clani kroga, brez oddaljenih in brez casa
+        zadnjega stika. Oblika je ista kot na Androidu (HubUsmerjevalnik.lokalneZaSosede)."""
+        naprave = {}
+        for n in self.povezane():
+            if n.sosed or not self._je_clan(n.id):
+                continue
+            zapis = n.json()
+            for polje in ("id", "last_seen", "port"):
+                zapis.pop(polje, None)
+            naprave[n.id] = zapis
+        return naprave
+
+    def _mesh_naprave(self) -> str:
+        return json.dumps({"type": "mesh.devices", "id": link_ws.nakljucni(8),
+                           "payload": {"hub": self.nas_id, "devices": self._lokalne_json()}},
+                          ensure_ascii=False, sort_keys=True)
+
+    def _objavi_sosedom(self, samo: Optional[object] = None) -> None:
+        seznam = self._lokalne_json()
+        kljuc = json.dumps(seznam, sort_keys=True)
+        with self._zaklep:
+            if samo is None and kljuc == self._zadnji_mesh:
+                return
+            if samo is None:
+                self._zadnji_mesh = kljuc
+            prejemniki = [samo] if samo is not None else list(self._sosedje.values())
+        besedilo = self._mesh_naprave()
+        for p in prejemniki:
+            try:
+                p.poslji(besedilo)
+            except Exception:
+                pass
+
+    def dodaj_soseda(self, sosed_id: str, povezava, zacel: str) -> bool:
+        """Sosednja povezava je vzpostavljena (`zacel` = id Huba, ki jo je odprl).
+
+        Ce za istega soseda ze obstaja povezava (oba sta klicala hkrati), ostane tista, ki jo je
+        odprl manjsi id - obe strani tako izbereta isto in ena povezava se zapre.
+        """
+        if not sosed_id or sosed_id == self.nas_id:
+            return False
+        stara = None
+        with self._zaklep:
+            obstojeca = self._sosedje.get(sosed_id)
+            if obstojeca is not None and obstojeca is not povezava:
+                zacetnik_stare = getattr(obstojeca, "podatki", {}).get("zacel", "")
+                if zacetnik_stare == min(sosed_id, self.nas_id) and zacel != zacetnik_stare:
+                    return False
+                stara = obstojeca
+            if obstojeca is None and len(self._sosedje) >= NAJVEC_SOSEDOV:
+                return False
+            try:
+                povezava.podatki["zacel"] = zacel
+            except Exception:
+                pass
+            self._sosedje[sosed_id] = povezava
+        if stara is not None:
+            self._pocisti_soseda(sosed_id)
+            try:
+                stara.zapri(1000, "podvojena sosednja povezava")
+            except Exception:
+                pass
+        if self.ob_sosedu is not None:
+            try:
+                self.ob_sosedu(sosed_id, str(getattr(povezava, "naslov", "") or ""))
+            except Exception:
+                pass
+        # Novemu sosedu takoj nase naprave in nas krog.
+        self._objavi_sosedom(samo=povezava)
+        try:
+            povezava.poslji(json.dumps({"type": "mesh.trust", "id": link_ws.nakljucni(8),
+                                        "payload": link_krog.krog().json()}, ensure_ascii=False))
+        except Exception:
+            pass
+        return True
+
+    def _sprejmi_soseda(self, povezava, tovor: dict, id_sporocila: str) -> str:
+        """Drug Hub se je prijavil kot sosed. Samo clan kroga s podpisom kljuca, pod svojim id."""
+        sosed_id = str(tovor.get("device_id") or "").strip()[:NAJVEC_IMENA]
+        podatki = getattr(povezava, "podatki", {}) or {}
+        if not sosed_id or podatki.get("id") != sosed_id or not podatki.get("podpis") or not self._je_clan(sosed_id):
+            return self._potrditev(id_sporocila, "cast", "rejected", "Sosed mora biti clan kroga s podpisom.", "ni_sosed")
+        if not self.dodaj_soseda(sosed_id, povezava, sosed_id):
+            return self._potrditev(id_sporocila, "cast", "rejected", "Sosednja povezava ze obstaja.", "podvojen_sosed")
+        return self._potrditev(id_sporocila, "cast", "accepted")
+
+    def _pocisti_soseda(self, sosed_id: str) -> List[str]:
+        """Odstrani oddaljene naprave soseda iz registra. Vrne njihove id-je."""
+        with self._zaklep:
+            ids = list(self._sosed_naprave.pop(sosed_id, set()))
+            for i in ids:
+                n = self._naprave.get(i)
+                if n is not None and n.sosed == sosed_id:
+                    # Ostane znana, a nepovezana (kot lokalna po odklopu): klepet zanjo pocaka.
+                    n.sosed = ""
+                    n.povezava = None
+        return ids
+
+    def _odstrani_soseda(self, sosed_id: str, povezava=None) -> None:
+        with self._zaklep:
+            if povezava is not None and self._sosedje.get(sosed_id) is not povezava:
+                return          # zaprla se je stara (podvojena) povezava; velja nova
+            self._sosedje.pop(sosed_id, None)
+        if self._pocisti_soseda(sosed_id):
+            self.objavi_naprave()
+        if self.ob_sosedu is not None:
+            try:
+                self.ob_sosedu(sosed_id, "")
+            except Exception:
+                pass
+
+    def _sosedove_naprave(self, sosed_id: str, povezava, naprave: dict) -> None:
+        novi: Dict[str, dict] = {}
+        for did, z in list((naprave if isinstance(naprave, dict) else {}).items())[:NAJVEC_NAPRAV]:
+            if not isinstance(z, dict):
+                continue
+            did = str(did or "").strip()
+            if len(did) > NAJVEC_IMENA:
+                continue
+            # Cez mejo Huba gredo samo clani kroga (sosed ne more pripeljati tujca) in nikoli mi sami.
+            if did and did != self.nas_id and self._je_clan(did):
+                novi[did] = z
+        dodani = []
+        with self._zaklep:
+            if self._sosedje.get(sosed_id) is not povezava:
+                return
+            stari = self._sosed_naprave.get(sosed_id, set())
+            obdrzani = set()
+            for did, z in novi.items():
+                n = self._naprave.get(did)
+                if n is not None and not n.sosed and n.povezava is not None:
+                    continue                      # lokalna prijava ima prednost
+                if n is not None and n.sosed and n.sosed != sosed_id:
+                    continue                      # ze vidna prek drugega soseda
+                if n is None:
+                    n = Naprava(did, "", "receiver", [], "")
+                    self._naprave[did] = n
+                if n.povezava is None:
+                    dodani.append(did)
+                n.sosed = sosed_id
+                n.ime = str(z.get("name") or did)[:NAJVEC_IMENA]
+                n.vloga = str(z.get("role") or "receiver")[:16]
+                n.zmoznosti = [str(x)[:24] for x in (z.get("capabilities") or [])][:24]
+                n.naslov = str(z.get("ip") or "")[:64]
+                n.protokol = str(z.get("protocol") or "")[:8]
+                n.platforma = str(z.get("platform") or "")[:16]
+                n.vrsta = str(z.get("kind") or "")[:16]
+                n.razlicica = str(z.get("version") or "")[:32]
+                try:
+                    n.prioriteta = max(0, min(1000, int(z.get("priority") or 0)))
+                except Exception:
+                    n.prioriteta = 0
+                n.aplikacije = z["apps"] if isinstance(z.get("apps"), dict) else {}
+                n.zadnjic = self.ura()
+                n.povezava = _Namestnik(sosed_id, povezava, did, n.naslov)
+                obdrzani.add(did)
+            for did in stari - obdrzani:
+                n = self._naprave.get(did)
+                if n is not None and n.sosed == sosed_id:
+                    n.sosed = ""
+                    n.povezava = None
+            self._sosed_naprave[sosed_id] = obdrzani
+        # Klepet, ki je cakal na napravo, gre zdaj prek soseda.
+        for did in dodani:
+            n = self.najdi(did)
+            if n is not None and n.povezava is not None:
+                self._dostavi_klepet(did, n.povezava)
+                kljuc = self.naprava_iz_kljuca(did)
+                if kljuc and "chat" in (n.zmoznosti or []):
+                    self._dostavi_klepet(kljuc, n.povezava)
+        self.objavi_naprave()
+
+    def _po_spremembi_kroga(self, razen: Optional[object] = None) -> None:
+        """Krog se je spremenil: lokalnim napravam trust.update, sosedom mesh.trust; umaknjeni
+        clani izgubijo sosednjo povezavo in oddaljene zapise."""
+        try:
+            krog = link_krog.krog().json()
+        except Exception:
+            return
+        posodobitev = json.dumps({"type": "trust.update", "payload": krog}, ensure_ascii=False)
+        for n in self.povezane():
+            if n.povezava is not None and not n.sosed:
+                try:
+                    n.povezava.poslji(posodobitev)
+                except Exception:
+                    pass
+        mesh = json.dumps({"type": "mesh.trust", "id": link_ws.nakljucni(8), "payload": krog}, ensure_ascii=False)
+        with self._zaklep:
+            sosedje = list(self._sosedje.items())
+        for sid, p in sosedje:
+            if not self._je_clan(sid):
+                self._odstrani_soseda(sid, p)
+                try:
+                    p.zapri(1008, "umaknjen iz kroga")
+                except Exception:
+                    pass
+                continue
+            if p is not razen:
+                try:
+                    p.poslji(mesh)
+                except Exception:
+                    pass
+        with self._zaklep:
+            tujci = [i for i, n in self._naprave.items() if n.sosed and not self._je_clan(i)]
+            for i in tujci:
+                sosed = self._naprave[i].sosed
+                self._sosed_naprave.get(sosed, set()).discard(i)
+                del self._naprave[i]
+        self.objavi_naprave()
+
+    def obdelaj_soseda(self, sosed_id: str, povezava, sporocilo: dict) -> Optional[str]:
+        """Sporocilo sosednjega Huba. Sosed nikoli ne posreduje naprej - samo nasim lokalnim napravam."""
+        tip = str(sporocilo.get("type") or "")
+        tovor = sporocilo.get("payload") if isinstance(sporocilo.get("payload"), dict) else {}
+        if tip == "mesh.devices":
+            self._sosedove_naprave(sosed_id, povezava, tovor.get("devices"))
+            return None
+        if tip == "mesh.route":
+            cilj = str(tovor.get("to") or "")
+            msg = tovor.get("msg")
+            if not isinstance(msg, str) or len(msg.encode("utf-8")) > NAJVEC_MESH_SPOROCILO:
+                return None
+            n = self.najdi(cilj)
+            if n is None or n.sosed or n.povezava is None:
+                return None                       # samo lokalne naprave; nikoli naprej
+            try:
+                vsebina = json.loads(msg)
+            except Exception:
+                return None
+            if not isinstance(vsebina, dict):
+                return None
+            posiljatelj = str(vsebina.get("sender") or "")
+            with self._zaklep:
+                njegove = set(self._sosed_naprave.get(sosed_id, set()))
+            # Sosed sme govoriti samo v imenu naprav, ki so prijavljene pri njem (ali v svojem).
+            # Brez posiljatelja smejo samo obvestila Huba o seznanitvi (koda za novo napravo).
+            if not posiljatelj:
+                if not str(vsebina.get("type") or "").startswith("pair."):
+                    return None
+            elif posiljatelj not in njegove and posiljatelj != sosed_id:
+                return None
+            try:
+                n.povezava.poslji(msg)
+            except Exception:
+                pass
+            return None
+        if tip == "mesh.trust":
+            try:
+                # Nov clan, drug kljuc in umik samo s podpisom clana, ki ga ze poznamo.
+                spremenjeno = link_krog.krog().zdruzi(tovor, preveri_podpise=True)
+            except Exception:
+                spremenjeno = False
+            if spremenjeno:
+                self._po_spremembi_kroga(razen=povezava)
+            return None
+        if tip == "cast.ping":
+            return json.dumps({"id": str(sporocilo.get("id") or ""), "type": "cast.pong"}, ensure_ascii=False)
+        return None
 
     # ------------------------------------------------------------------ sporocila
 
@@ -662,9 +995,17 @@ class Hub:
         id_sporocila = str(sporocilo.get("id") or "")
         prostor = self.prostor(tip)
 
+        sosed = self._sosed_povezave(povezava)
+        if sosed:
+            return self.obdelaj_soseda(sosed, povezava, sporocilo)
+        if tip.startswith("mesh."):
+            return self._potrditev(id_sporocila, "mesh", "rejected", "Samo sosednji Hub.", "ni_sosed")
+
         if tip == "cast.register":
             tovor = sporocilo.get("payload")
             tovor = tovor if isinstance(tovor, dict) else {}
+            if str(tovor.get("role") or "") == "hub" and MESH in (tovor.get("capabilities") or []):
+                return self._sprejmi_soseda(povezava, tovor, id_sporocila)
             status, koda = self.registriraj(povezava, tovor, getattr(povezava, "podatki", {}).get("id", ""))
             if status == "accepted":
                 self.objavi_naprave()
@@ -713,14 +1054,7 @@ class Hub:
             except Exception:
                 spremenjeno = False
             if spremenjeno:
-                krog = json.dumps({"type": "trust.update", "payload": link_krog.krog().json()}, ensure_ascii=False)
-                for n in self.povezane():
-                    if n.povezava is not None:
-                        try:
-                            n.povezava.poslji(krog)
-                        except Exception:
-                            pass
-                self.objavi_naprave()
+                self._po_spremembi_kroga()
             return self._potrditev(id_sporocila, "trust", "accepted")
 
         if tip == "pair.invite":
@@ -986,7 +1320,7 @@ class _Obravnava(http.server.BaseHTTPRequestHandler):
             self._napaka(400, "Manjka nadgradnja na WebSocket.", "ni_nadgradnje")
             return
         vstopnica = (parse_qs(urlparse(self.path).query).get("ticket") or [""])[0]
-        device_id = self._hub.porabi_vstopnico(vstopnica)
+        device_id, s_podpisom = self._hub.porabi_vstopnico_s_podpisom(vstopnica)
         if not device_id:
             self._napaka(401, "Neveljavna ali potekla vstopnica.", "ni_vstopnice")
             return
@@ -1008,6 +1342,7 @@ class _Obravnava(http.server.BaseHTTPRequestHandler):
             ob_koncu=hub.odklopi)
         # Vstopnica je vezana na en id: prijava z drugim id-jem se zavrne (glej registriraj).
         povezava.podatki["id"] = device_id
+        povezava.podatki["podpis"] = s_podpisom
         povezava.zanka_branja()
 
 
@@ -1228,6 +1563,8 @@ class Oglas:
                 b"name": (ime or "").encode("utf-8")[:63],
                 b"id": (id_naprave or "").encode(),
                 b"prio": str(PRIORITETA_LINUX).encode(),
+                # Link Mesh: ta Hub zna sosednje povezave (star Hub tega ne oglasi in ga ne klicemo).
+                b"mesh": MESH.encode(),
             }
             naslov = _s.inet_aton(_krajevni_ip())
             ime_storitve = ("safeer-%s.%s" % ((id_naprave or "pc")[-8:], STORITEV_MDNS))
@@ -1347,6 +1684,13 @@ def id_za_oglas() -> str:
     except Exception:
         return ""
 
+def mesh_vklopljen() -> bool:
+    """Link Mesh (docs/LINK-MESH.md): vsaka naprava gosti svoj Hub in se poveze s sosedi.
+    Izklop za primerjavo/odpravljanje napak: SAFEER_LINK_MESH=0."""
+    import os
+    return os.environ.get("SAFEER_LINK_MESH", "1") != "0"
+
+
 class HubGostitelj:
     """Zdruzi Hub, oglas in pravilo »gosti samo, kadar drugega ni«.
 
@@ -1370,6 +1714,7 @@ class HubGostitelj:
         self.oglas = oglas or Oglas()
         self.nas_id = ""
         self._zaklep = threading.Lock()
+        self.mesh = None
 
     def gostimo(self) -> bool:
         return self.streznik.tece()
@@ -1386,7 +1731,10 @@ class HubGostitelj:
             oglaseni = []
         with self._zaklep:
             nas_odtis = self.streznik.odtis if self.streznik.tece() else ""
-            if oglaseni:
+            if mesh_vklopljen():
+                # Link Mesh: vsaka naprava je vozlisce; nihce se ne umika.
+                gostimo = True
+            elif oglaseni:
                 # Gateway: racunalnik (80) je boljsi koordinator od televizorja (60), tablice (40) in
                 # telefona (20); umaknemo se samo boljsemu clanu kroga (npr. domacemu strezniku, 100).
                 nas_id = self.nas_id or (self.nas_id_fn() if self.nas_id_fn is not None else "")
@@ -1401,6 +1749,14 @@ class HubGostitelj:
                 self.nas_id = id_za_oglas()
                 self.oglas.zacni(self.streznik.vrata, self.streznik.odtis, self.nas_id, self.ime)
                 print("[SafeerLink] računalnik gosti Safeer Link (vrata %d)" % self.streznik.vrata)
+                if mesh_vklopljen() and self.nas_id and getattr(self.streznik, "hub", None) is not None:
+                    from core import link_mesh
+                    self.streznik.hub.nas_id = self.nas_id
+                    import os
+                    self.mesh = link_mesh.MeshPovezovalec(
+                        self.streznik.hub, self.nas_id, self.ime,
+                        pot_znanih=os.path.join(link_krog._mapa_nastavitev(), "mesh-sosedje.json"))
+                    self.mesh.zazeni()
                 return True
             if self.streznik.tece():
                 # Drug Hub je spet tu: umaknemo se, da hisa nima dveh sredisc.
@@ -1411,5 +1767,8 @@ class HubGostitelj:
 
     def koncaj(self) -> None:
         with self._zaklep:
+            if self.mesh is not None:
+                self.mesh.ustavi()
+                self.mesh = None
             self.oglas.koncaj()
             self.streznik.ustavi()
