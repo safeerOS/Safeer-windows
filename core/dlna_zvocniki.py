@@ -10,6 +10,7 @@ import mimetypes
 import os
 import re
 import secrets
+import select
 import socket
 import threading
 import time
@@ -223,26 +224,53 @@ def _naprava(opis_url: str, izvor_ip: str) -> Zvocnik | None:
     return Zvocnik(_xml_text(device, "friendlyName"), _xml_text(device, "manufacturer"), _xml_text(device, "modelName"), udn, p.hostname or "", opis_url, _lokalni_url(urlbase, av), _lokalni_url(urlbase, rc), next((_lokalni_url(urlbase, v) for k, v in services.items() if k.startswith("urn:schemas-upnp-org:service:ConnectionManager:")), None))
 
 
+def lokalni_vmesniki() -> list[str]:
+    """Domaci IPv4 naslovi te naprave. Na Windows z vec omreznimi vmesniki (VPN, Hyper-V ...) gre
+    poizvedba brez vezave pogosto skozi napacen vmesnik in zvocnika ni (izmerjeno 29. 9. 2026)."""
+    naslovi: list[str] = []
+    try:
+        naslovi.append(lan_naslov_za("8.8.8.8"))      # vmesnik privzete poti (brez posiljanja)
+    except OSError:
+        pass
+    try:
+        for n in socket.gethostbyname_ex(socket.gethostname())[2]:
+            if n not in naslovi:
+                naslovi.append(n)
+    except OSError:
+        pass
+    return [n for n in naslovi if n and not n.startswith("127.") and not n.startswith("169.254.")]
+
+
 def najdi(cas: float = 3.0, vmesnik: str | None = None) -> list[Zvocnik]:
     msg = ("M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:discover\"\r\nMX: 2\r\nST: " + ST + "\r\n\r\n").encode("ascii")
     devices: dict[str, Zvocnik] = {}
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+    vmesniki = [vmesnik] if vmesnik else (lokalni_vmesniki() or [""])
+    socks: list[socket.socket] = []
     try:
-        if vmesnik:
-            sock.bind((vmesnik, 0))
-        sock.settimeout(0.2)
-        for _ in range(2):  # UDP se lahko izgubi: dve poizvedbi, kot priporoca UPnP
-            sock.sendto(msg, SSDP_GROUP)
+        for v in vmesniki:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+            try:
+                if v:
+                    sock.bind((v, 0))
+                    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(v))
+                sock.setblocking(False)
+                for _ in range(2):  # UDP se lahko izgubi: dve poizvedbi, kot priporoca UPnP
+                    sock.sendto(msg, SSDP_GROUP)
+                socks.append(sock)
+            except OSError:
+                sock.close()
         deadline = time.monotonic() + max(0.0, cas)
         locations: set[tuple[str, str]] = set()
-        while time.monotonic() < deadline:
-            try:
-                data, addr = sock.recvfrom(65535)
-            except socket.timeout:
-                continue
-            location = razcleni_ssdp(data, addr[0])
-            if location:
-                locations.add((location, addr[0]))
+        while socks and time.monotonic() < deadline:
+            pripravljeni, _, _ = select.select(socks, [], [], 0.2)
+            for sock in pripravljeni:
+                try:
+                    data, addr = sock.recvfrom(65535)
+                except OSError:
+                    continue
+                location = razcleni_ssdp(data, addr[0])
+                if location:
+                    locations.add((location, addr[0]))
         for location, host in locations:
             try:
                 item = _naprava(location, host)
@@ -251,7 +279,8 @@ def najdi(cas: float = 3.0, vmesnik: str | None = None) -> list[Zvocnik]:
             except (OSError, ET.ParseError, DlnaNapaka, ValueError):
                 continue
     finally:
-        sock.close()
+        for sock in socks:
+            sock.close()
     return list(devices.values())
 
 
