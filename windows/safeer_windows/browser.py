@@ -1310,7 +1310,10 @@ class BrowserWindow(QMainWindow):
             if allowed and host != allowed and not host.endswith("." + allowed):
                 self.app.note_blocked(text, "block-media-navigation")
                 return False
-        if url.scheme().lower() == "magnet" and self.na_magnet is not None:
+        if url.scheme().lower() == "magnet":
+            # Samo klik uporabnika na povezavo; preusmeritve iz skripte strani magneta ne odprejo.
+            if self.na_magnet is None or nav_type != QWebEnginePage.NavigationType.NavigationTypeLinkClicked:
+                return False
             # Samo pravi BitTorrent magnet (os_app.odpri_magnet ga preveri); strani ne zapustimo.
             # toEncoded: brez dekodiranja (%20 bi postal presledek in povezava ne bi bila vec veljavna).
             kodiran = bytes(url.toEncoded()).decode("utf-8", "replace")

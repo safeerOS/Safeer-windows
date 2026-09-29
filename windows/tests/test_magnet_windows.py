@@ -18,6 +18,8 @@ from core import os_dvd, os_media  # noqa: E402
 
 HASH = "dd8255ecdc7ca55fb0bbf81323d87062db1f6d1c"
 MAGNET = "magnet:?xt=urn:btih:%s&dn=Big+Buck+Bunny" % HASH
+# Motor dobi očiščeno povezavo (samo xt, dn in javni sledilniki) - core/os_torrent.razcleni_magnet.
+CIST = "magnet:?xt=urn:btih:dd8255ecdc7ca55fb0bbf81323d87062db1f6d1c&dn=Big%20Buck%20Bunny"
 
 
 class _Povezava:
@@ -49,7 +51,7 @@ class LinkMagnet(unittest.TestCase):
         odprti = []
         self.backend.ob_magnetu = odprti.append
         self.assertTrue(self._ukaz("magnet.open", {"uri": MAGNET})["ok"])
-        self.assertEqual(odprti, [MAGNET])
+        self.assertEqual(odprti, [CIST])
         # Karkoli drugega (ukaz, pot, spletni naslov) naprava ne more podtakniti.
         for slab in ("--help", "https://x.si", "magnet:?xt=urn:btih:abc; rm -rf ~", "", "C:\\Windows\\notepad.exe"):
             odgovor = self._ukaz("magnet.open", {"uri": slab})
@@ -62,7 +64,7 @@ class LinkMagnet(unittest.TestCase):
         with mock.patch.object(magnet_win, "zaganjalnik", lambda: ["C:\\Safeer\\SafeerOS.exe"]), \
                 mock.patch("subprocess.Popen", lambda ukaz, **_k: zagnani.append(ukaz)):
             self.assertTrue(self._ukaz("magnet.open", {"uri": MAGNET})["ok"])
-        self.assertEqual(zagnani, [["C:\\Safeer\\SafeerOS.exe", "--magnet", MAGNET]])
+        self.assertEqual(zagnani, [["C:\\Safeer\\SafeerOS.exe", "--magnet-naprava", CIST]])
         with mock.patch.object(magnet_win, "zaganjalnik", lambda: []):
             self.assertEqual(self._ukaz("magnet.open", {"uri": MAGNET})["code"], "ni_safeer_os")
 
@@ -90,7 +92,7 @@ class LinkMagnet(unittest.TestCase):
         self.assertEqual(self.backend.poslji_magnet("tv-1", "https://x.si")["koda"], "ni_magnet")
         with mock.patch.object(self.backend, "ukaz_pocakaj", lambda n, d, p, cas=0: {"ok": True, "n": n, "d": d, "p": p}):
             r = self.backend.poslji_magnet("tv-1", MAGNET)
-        self.assertEqual((r["n"], r["d"], r["p"]), ("tv-1", "magnet.open", {"uri": MAGNET}))
+        self.assertEqual((r["n"], r["d"], r["p"]), ("tv-1", "magnet.open", {"uri": CIST}))
 
 
 class _LazniRegister:

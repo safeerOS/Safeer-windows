@@ -92,17 +92,43 @@ def razcleni_magnet(besedilo: str) -> Optional[dict]:
             break
     if not hash_:
         return None
-    sledilniki = [t for t in parametri.get("tr", []) if t.startswith(("udp://", "http://", "https://"))]
+    sledilniki = [t for t in parametri.get("tr", []) if _javen_sledilnik(t)][:20]
     ime = (parametri.get("dn") or [""])[0][:200]
-    return {"hash": hash_, "ime": ime, "sledilniki": sledilniki, "uri": uri}
+    # Motorju damo očiščeno povezavo: samo xt, dn in javni sledilniki. Brez x.pe/ws in brez sledilnikov v
+    # domačem omrežju - tuja povezava ne sme usmerjati zahtev na usmerjevalnik ali druge naprave doma.
+    xt = "urn:btih:" + hash_ if len(hash_) == 40 else next(x for x in parametri["xt"] if _BTMH.match(x))
+    cist = "magnet:?xt=" + xt + ("&dn=" + urllib.parse.quote(ime, safe="") if ime else "") + \
+        "".join("&tr=" + urllib.parse.quote(t, safe="") for t in sledilniki)
+    return {"hash": hash_, "ime": ime, "sledilniki": sledilniki, "uri": cist}
+
+
+def _javen_sledilnik(t: str) -> bool:
+    """Sledilnik udp/http/https na javnem naslovu (ne localhost, ne zasebno omrežje, ne .local)."""
+    import ipaddress
+    if not t.startswith(("udp://", "http://", "https://")):
+        return False
+    try:
+        gostitelj = (urllib.parse.urlsplit(t).hostname or "").lower().rstrip(".")
+    except ValueError:
+        return False
+    if not gostitelj or gostitelj == "localhost" or gostitelj.endswith((".localhost", ".local", ".lan", ".home",
+                                                                         ".internal", ".home.arpa")) or "." not in gostitelj:
+        return False
+    try:
+        ip = ipaddress.ip_address(gostitelj)
+    except ValueError:
+        return True
+    return ip.is_global
 
 
 def z_sledilniki(uri: str) -> str:
     """Magnet brez sledilnikov dobi nekaj zanesljivih (hitrejše iskanje); ostalih ne spreminjamo."""
     m = razcleni_magnet(uri)
-    if m is None or m["sledilniki"]:
+    if m is None:
         return uri
-    return uri + "".join("&tr=" + urllib.parse.quote(t, safe="") for t in SLEDILNIKI)
+    if m["sledilniki"]:
+        return m["uri"]
+    return m["uri"] + "".join("&tr=" + urllib.parse.quote(t, safe="") for t in SLEDILNIKI)
 
 
 def vrsta_datoteke(ime: str) -> str:
@@ -136,6 +162,90 @@ def razvrsti_datoteke(datoteke: List[dict]) -> List[dict]:
         izid.append({"i": i, "ime": ime, "velikost": int(d.get("length") or 0), "vrsta": vrsta,
                      "predvajljivo": vrsta in ("video", "audio"),
                      "izbrana": vrsta in ("video", "audio", "podnapisi")})
+    return izid
+
+
+def _ustavi_sirote(mapa_stanja: str, program: str) -> None:
+    """Ustavi rqbit iz prejšnjega zagona (datoteka rqbit.pid), a samo, če PID res pripada našemu programu."""
+    pot = os.path.join(mapa_stanja, "rqbit.pid")
+    try:
+        with open(pot) as d:
+            pid = int(d.read().strip())
+    except (OSError, ValueError):
+        return
+    try:
+        if sys.platform.startswith("win"):
+            return          # na Windows rqbit ustavi posel (Job Object) skupaj s Safeer OS
+        exe = os.path.realpath("/proc/%d/exe" % pid)
+        if exe == os.path.realpath(program):
+            import signal
+            os.kill(pid, signal.SIGTERM)
+            for _ in range(30):
+                time.sleep(0.1)
+                if not os.path.exists("/proc/%d" % pid):
+                    break
+    except OSError:
+        pass
+    try:
+        os.remove(pot)
+    except OSError:
+        pass
+
+
+_POSEL = None
+
+
+def _vezi_na_safeer(proces) -> None:
+    """Windows: rqbit v "posel" (Job Object), ki se zapre s Safeer OS - tudi ob sesutju ne ostane sirota."""
+    global _POSEL
+    try:
+        import ctypes
+        from ctypes import wintypes
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.CreateJobObjectW.restype = wintypes.HANDLE
+        k32.OpenProcess.restype = wintypes.HANDLE
+        if _POSEL is None:
+            posel = k32.CreateJobObjectW(None, None)
+
+            class _Osnovno(ctypes.Structure):
+                _fields_ = [("a", ctypes.c_int64), ("b", ctypes.c_int64), ("LimitFlags", wintypes.DWORD),
+                            ("c", ctypes.c_size_t), ("d", ctypes.c_size_t), ("e", wintypes.DWORD),
+                            ("f", ctypes.c_size_t), ("g", wintypes.DWORD), ("h", wintypes.DWORD)]
+
+            class _IoStevci(ctypes.Structure):
+                _fields_ = [("x", ctypes.c_uint64 * 6)]
+
+            class _Razsirjeno(ctypes.Structure):
+                _fields_ = [("osnovno", _Osnovno), ("io", _IoStevci), ("p1", ctypes.c_size_t), ("p2", ctypes.c_size_t),
+                            ("p3", ctypes.c_size_t), ("p4", ctypes.c_size_t)]
+            info = _Razsirjeno()
+            info.osnovno.LimitFlags = 0x2000          # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+            k32.SetInformationJobObject(posel, 9, ctypes.byref(info), ctypes.sizeof(info))  # Extended limits
+            _POSEL = posel
+        rocaj = k32.OpenProcess(0x0101, False, proces.pid)   # PROCESS_SET_QUOTA | PROCESS_TERMINATE
+        if rocaj:
+            k32.AssignProcessToJobObject(_POSEL, rocaj)
+            k32.CloseHandle(rocaj)
+    except Exception as e:  # noqa: BLE001 - brez posla rqbit še vedno ustavimo ob običajnem izhodu
+        print("[SafeerOS] rqbit posel:", e, flush=True)
+
+
+def _podnapisi_k_videom(datoteke: List[dict], izbrane) -> set:
+    """Indeksi podnapisov v torrentu, ki sodijo k izbranim videom (ista mapa ali podmapa Subs)."""
+    from core import podnapisi as pn
+    po_indeksu = {d["i"]: d for d in datoteke}
+    izid = set()
+    for i in izbrane:
+        video = po_indeksu.get(i)
+        if not video or video["vrsta"] != "video":
+            continue
+        mapa = video["ime"].replace("\\", "/").rpartition("/")[0]
+        predpona = mapa + "/" if mapa else ""
+        relativno = {d["ime"].replace("\\", "/")[len(predpona):]: d["i"] for d in datoteke
+                     if d["ime"].replace("\\", "/").startswith(predpona) and (d["vrsta"] == "video" or (
+                         d["vrsta"] == "podnapisi" and d.get("velikost", 0) <= pn.NAJVEC_BAJTOV))}
+        videov = sum(1 for r in relativno if "/" not in r and vrsta_datoteke(r) == "video")
+        izid |= {relativno[r] for r in pn.ujemajoci(video["ime"], list(relativno), videov == 1)}
     return izid
 
 
@@ -307,6 +417,8 @@ class Torrenti:
                 raise NapakaTorrenta("ni_programa")
             os.makedirs(self.mapa_prenosov, exist_ok=True)
             os.makedirs(self.mapa_stanja, exist_ok=True)
+            # rqbit, ki je ostal po sesutju Safeer OS, bi oddajal brez nadzora in si delil stanje z novim.
+            _ustavi_sirote(self.mapa_stanja, program)
             self.vrata = _prosta_vrata()
             self._geslo = secrets.token_urlsafe(24)
             okolje = dict(os.environ, RQBIT_HTTP_BASIC_AUTH_USERPASS="safeer:" + self._geslo)
@@ -324,6 +436,13 @@ class Torrenti:
                 dodatno["start_new_session"] = True
             self._proces = subprocess.Popen(ukaz, env=okolje, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                             stderr=subprocess.DEVNULL, **dodatno)
+            if sys.platform.startswith("win"):
+                _vezi_na_safeer(self._proces)
+            try:
+                with open(os.path.join(self.mapa_stanja, "rqbit.pid"), "w") as d:
+                    d.write(str(self._proces.pid))
+            except OSError:
+                pass
             for _ in range(100):
                 time.sleep(0.1)
                 if self._proces.poll() is not None:
@@ -337,6 +456,16 @@ class Torrenti:
             else:
                 self.ustavi()
                 raise NapakaTorrenta("program_ne_odgovori")
+            # API mora brez gesla zavrniti (401), sicer bi ga lahko uporabil vsak proces ali stran z 127.0.0.1.
+            geslo, self._geslo = self._geslo, ""
+            try:
+                koda, _ = self._api("GET", "/torrents", cas=3)
+            except OSError:
+                koda = 0
+            self._geslo = geslo
+            if koda != 401:
+                self.ustavi()
+                raise NapakaTorrenta("program_brez_gesla")
             if self._nadzor is None:
                 self._nadzor = threading.Thread(target=self._nadzoruj, name="safeer-torrent-nadzor", daemon=True)
                 self._nadzor.start()
@@ -406,6 +535,8 @@ class Torrenti:
         izbrane = sorted({int(i) for i in izbrane} & dovoljene)
         if not izbrane:
             raise NapakaTorrenta("ni_izbranih")
+        # Podnapise, ki sodijo k izbranim videom, prenesemo zraven (majhni so) - predvajalnik jih ponudi sam.
+        izbrane = sorted(set(izbrane) | _podnapisi_k_videom(opis["datoteke"], izbrane))
         obstojeci = self._poisci(opis["hash"])
         if obstojeci is not None:
             tid, trenutne = obstojeci
@@ -529,7 +660,9 @@ class Torrenti:
         def pot(f: dict) -> str:
             deli = f.get("components")
             return "/".join(str(x) for x in deli) if isinstance(deli, list) and deli else str(f.get("name") or "")
-        poti = [pot(f) for f in datoteke]
+        # Prevelika "podnapisna" datoteka ni podnapis: ne prenašamo je in je ne ponudimo predvajalniku.
+        poti = [pot(f) if not (vrsta_datoteke(pot(f)) == "podnapisi" and int(f.get("length") or 0) > pn.NAJVEC_BAJTOV)
+                else "" for f in datoteke]
         if not 0 <= int(i) < len(poti):
             return []
         mapa = poti[int(i)].rpartition("/")[0]
@@ -547,9 +680,17 @@ class Torrenti:
             raise NapakaTorrenta("ni_predvajljivo")
         if not datoteke[int(i)].get("included"):
             vkljucene = [j for j, f in enumerate(datoteke) if f.get("included")] + [int(i)]
-            self._json("POST", "/torrents/%d/update_only_files" % int(tid),
-                       json.dumps({"only_files": sorted(set(vkljucene))}).encode(),
-                       glave={"Content-Type": "application/json"})
+            # rqbit med pripravo torrenta spremembo včasih zavrne (500): poskusimo še nekajkrat.
+            for poskus in range(5):
+                try:
+                    self._json("POST", "/torrents/%d/update_only_files" % int(tid),
+                               json.dumps({"only_files": sorted(set(vkljucene))}).encode(),
+                               glave={"Content-Type": "application/json"})
+                    break
+                except NapakaTorrenta:
+                    if poskus == 4:
+                        raise
+                    time.sleep(1)
         self._api("POST", "/torrents/%d/start" % int(tid))
         with self._zaklep:
             if self._streznik is None:

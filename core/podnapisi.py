@@ -200,7 +200,8 @@ def pripravi(uri: str, ime: str = "", mapa: str = "") -> str:
             with open(pot, "rb") as d:
                 podatki = d.read()
         elif u.scheme == "http" and u.hostname == "127.0.0.1":
-            with urllib.request.urlopen(uri, timeout=60) as o:
+            # Brez sistemskega posrednika: skrivni naslov lokalnega toka ne sme na proxy.
+            with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(uri, timeout=60) as o:
                 podatki = o.read(NAJVEC_BAJTOV + 1)
             if len(podatki) > NAJVEC_BAJTOV:
                 return uri
