@@ -44,6 +44,14 @@ NAJVEC_ZETONOV = 64
 NAJDLJE_S = 7 * 24 * 3600.0
 
 
+def _umaknjena_iz_kroga(id_naprave: str) -> bool:
+    try:
+        from core import link_krog
+        return link_krog.je_umaknjen(id_naprave)
+    except Exception:
+        return False
+
+
 def _zeton_zivi(izdan: float, rabljen: float, zdaj: float) -> bool:
     return zdaj - rabljen < ZETON_VELJA_S and zdaj - izdan < NAJDLJE_S
 TLS_MAPA = os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")), "safeer-control", "tls")
@@ -513,6 +521,8 @@ class StreznikDatotek:
         self.odtis = ""
         self.vrata = 0
         self._zetoni: Dict[str, Tuple[str, float, float]] = {}   # zeton -> (id naprave, izdan, zadnja raba)
+        #: Ali je naprava umaknjena iz kroga zaupanja: njeni zetoni takoj prenehajo veljati (ne sele po 12 h).
+        self.umaknjena = _umaknjena_iz_kroga
         self._streznik: Optional[_Streznik] = None
         self._nit: Optional[threading.Thread] = None
         self._kljucavnica = threading.Lock()
@@ -576,6 +586,9 @@ class StreznikDatotek:
         with self._kljucavnica:
             for z, (n, izdan, rabljen) in list(self._zetoni.items()):
                 if hmac.compare_digest(zeton.encode(), z.encode()) and _zeton_zivi(izdan, rabljen, zdaj):
+                    if self.umaknjena(n):
+                        self._zetoni.pop(z, None)
+                        return False
                     self._zetoni[z] = (n, izdan, zdaj)
                     return True
         return False
