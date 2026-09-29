@@ -10,14 +10,14 @@ from pathlib import Path
 from typing import Dict, Iterable, Optional
 
 from .adapter import Adapter
-from .identiteta import IdentitetniGraf, PRIVZETA_POT
+from .identiteta import IdentitetniGraf, PRIVZETA_POT, zasebna_baza
 from .model import Kanal, Pogovor, Sporocilo
 
 
 class StoritevSporocil:
     def __init__(self, pot: Optional[Path] = None, interval: float = 60):
         self.pot = Path(pot or PRIVZETA_POT)
-        self.pot.parent.mkdir(parents=True, exist_ok=True)
+        zasebna_baza(self.pot)
         self.db = sqlite3.connect(str(self.pot), check_same_thread=False)
         self.db.row_factory = sqlite3.Row
         self.graf = IdentitetniGraf(self.pot)
