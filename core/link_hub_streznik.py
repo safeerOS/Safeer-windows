@@ -99,6 +99,8 @@ class Naprava:
         self.aplikacije: dict = {}
         #: Id sosednjega Huba, pri katerem je naprava prijavljena (prazno = pri nas).
         self.sosed = ""
+        #: Naprava je pri sosedu nasega soseda: pot gre prek enega vmesnega Huba (relay).
+        self.posredno = False
 
     def json(self) -> dict:
         zapis = {
@@ -132,15 +134,19 @@ class _Namestnik:
     svoji lokalni napravi. Tako vse obstojece usmerjanje (cilj, oddaja, klepet) dela brez sprememb.
     """
 
-    def __init__(self, sosed_id: str, povezava, cilj: str, naslov: str = "") -> None:
+    def __init__(self, sosed_id: str, povezava, cilj: str, naslov: str = "", posredno: bool = False) -> None:
         self.sosed_id = sosed_id
         self.povezava = povezava
         self.cilj = cilj
         self.naslov = naslov
+        self.posredno = posredno
         self.podatki: dict = {"sosed": sosed_id}
 
     def poslji(self, besedilo: str) -> bool:
-        ovoj = {"id": link_ws.nakljucni(8), "type": "mesh.route", "payload": {"to": self.cilj, "msg": besedilo}}
+        tovor = {"to": self.cilj, "msg": besedilo}
+        if self.posredno:
+            tovor["relay"] = True       # sosed naj preda svojemu sosedu (en sam vmesni skok)
+        ovoj = {"id": link_ws.nakljucni(8), "type": "mesh.route", "payload": tovor}
         return bool(self.povezava.poslji(json.dumps(ovoj, ensure_ascii=False)))
 
     def zapri(self, *_a, **_k) -> None:
@@ -181,6 +187,8 @@ class Hub:
         #: Link Mesh: sosednji Hubi (id -> povezava), naprave vsakega soseda in zadnji poslani seznam.
         self._sosedje: Dict[str, object] = {}
         self._sosed_naprave: Dict[str, set] = {}
+        #: Zadnji relay zemljevid vsakega soseda (naprave njegovih sosedov): id -> zapis.
+        self._zadnji_relay: Dict[str, dict] = {}
         self._zadnji_mesh = ""
         #: Klice se, ko sosed pride ali odide (id, naslov ali ""): MeshPovezovalec si zapomni naslov
         #: in ob izgubi takoj poskusi znova.
@@ -639,6 +647,7 @@ class Hub:
                 # Naprava je bila vidna prek soseda, zdaj se prijavlja pri nas: velja lokalna povezava.
                 self._sosed_naprave.get(obstojeca.sosed, set()).discard(device_id)
                 obstojeca.sosed = ""
+                obstojeca.posredno = False
                 obstojeca.povezava = None
             if obstojeca is not None and obstojeca.povezava is not None and obstojeca.povezava is not povezava:
                 # Nova povezava iste naprave zamenja staro; sicer naprava ostane "povezana", a nevidna.
@@ -719,13 +728,28 @@ class Hub:
             naprave[n.id] = zapis
         return naprave
 
+    def _posredne_json(self) -> Dict[str, dict]:
+        """Naprave nasih NEPOSREDNIH sosedov (ne tistih, ki jih ze sami vidimo posredno): sosed, ki
+        do njih nima svoje poti, jih doseze prek nas. Tako je pot najvec en vmesni Hub - brez zank."""
+        naprave = {}
+        for n in self.povezane():
+            if not n.sosed or n.posredno or not self._je_clan(n.id):
+                continue
+            zapis = n.json()
+            for polje in ("id", "last_seen", "port"):
+                zapis.pop(polje, None)
+            zapis["hub"] = n.sosed
+            naprave[n.id] = zapis
+        return naprave
+
     def _mesh_naprave(self) -> str:
         return json.dumps({"type": "mesh.devices", "id": link_ws.nakljucni(8),
-                           "payload": {"hub": self.nas_id, "devices": self._lokalne_json()}},
+                           "payload": {"hub": self.nas_id, "devices": self._lokalne_json(),
+                                       "relay": self._posredne_json()}},
                           ensure_ascii=False, sort_keys=True)
 
     def _objavi_sosedom(self, samo: Optional[object] = None) -> None:
-        seznam = self._lokalne_json()
+        seznam = {"d": self._lokalne_json(), "r": self._posredne_json()}
         kljuc = json.dumps(seznam, sort_keys=True)
         with self._zaklep:
             if samo is None and kljuc == self._zadnji_mesh:
@@ -794,15 +818,21 @@ class Hub:
         return self._potrditev(id_sporocila, "cast", "accepted")
 
     def _pocisti_soseda(self, sosed_id: str) -> List[str]:
-        """Odstrani oddaljene naprave soseda iz registra. Vrne njihove id-je."""
+        """Odstrani oddaljene naprave soseda iz registra. Vrne njihove id-je.
+
+        Neposredne naprave izgubljenega soseda so morda se dosegljive prek drugega soseda (relay):
+        zato posredne poti takoj preracunamo."""
         with self._zaklep:
             ids = list(self._sosed_naprave.pop(sosed_id, set()))
+            self._zadnji_relay.pop(sosed_id, None)
             for i in ids:
                 n = self._naprave.get(i)
-                if n is not None and n.sosed == sosed_id:
+                if n is not None and n.sosed == sosed_id and not n.posredno:
                     # Ostane znana, a nepovezana (kot lokalna po odklopu): klepet zanjo pocaka.
                     n.sosed = ""
                     n.povezava = None
+            ids += self._pocisti_posredne_prek(sosed_id)
+        self._uporabi_posredne()
         return ids
 
     def _odstrani_soseda(self, sosed_id: str, povezava=None) -> None:
@@ -818,7 +848,74 @@ class Hub:
             except Exception:
                 pass
 
-    def _sosedove_naprave(self, sosed_id: str, povezava, naprave: dict) -> None:
+    def _pocisti_posredne_prek(self, sosed_id: str) -> List[str]:
+        """Pod kljucavnico: posredne naprave prek tega soseda postanejo nepovezane."""
+        ids = []
+        for i, n in self._naprave.items():
+            if n.posredno and n.sosed == sosed_id:
+                n.sosed, n.posredno, n.povezava = "", False, None
+                ids.append(i)
+        return ids
+
+    def _napolni(self, n: "Naprava", z: dict) -> None:
+        n.ime = str(z.get("name") or n.id)[:NAJVEC_IMENA]
+        n.vloga = str(z.get("role") or "receiver")[:16]
+        n.zmoznosti = [str(x)[:24] for x in (z.get("capabilities") or [])][:24]
+        n.naslov = str(z.get("ip") or "")[:64]
+        n.protokol = str(z.get("protocol") or "")[:8]
+        n.platforma = str(z.get("platform") or "")[:16]
+        n.vrsta = str(z.get("kind") or "")[:16]
+        n.razlicica = str(z.get("version") or "")[:32]
+        try:
+            n.prioriteta = max(0, min(1000, int(z.get("priority") or 0)))
+        except Exception:
+            n.prioriteta = 0
+        n.aplikacije = z["apps"] if isinstance(z.get("apps"), dict) else {}
+        n.zadnjic = self.ura()
+
+    def _uporabi_posredne(self) -> None:
+        """Iz zadnjih relay zemljevidov sosedov sestavi posredne poti. Lokalna in neposredna pot imata
+        vedno prednost; ce napravo ponuja vec sosedov, velja prvi po id (vsi Hubi izberejo enako)."""
+        novi: List[str] = []
+        with self._zaklep:
+            zeljene: Dict[str, tuple] = {}
+            for sosed in sorted(self._zadnji_relay):
+                if sosed not in self._sosedje:
+                    continue
+                for did, z in list(self._zadnji_relay[sosed].items())[:NAJVEC_NAPRAV]:
+                    if did in zeljene or did == self.nas_id or str(z.get("hub") or "") == self.nas_id:
+                        continue
+                    n = self._naprave.get(did)
+                    if n is not None and n.povezava is not None and not n.posredno:
+                        continue                  # lokalna ali neposredna pot
+                    zeljene[did] = (sosed, z)
+            for did, n in list(self._naprave.items()):
+                if n.posredno and (did not in zeljene or zeljene[did][0] != n.sosed):
+                    n.sosed, n.posredno, n.povezava = "", False, None
+            for did, (sosed, z) in zeljene.items():
+                n = self._naprave.get(did)
+                if n is None:
+                    n = Naprava(did, "", "receiver", [], "")
+                    self._naprave[did] = n
+                if n.povezava is None:
+                    novi.append(did)
+                self._napolni(n, z)
+                n.sosed, n.posredno = sosed, True
+                if not (isinstance(n.povezava, _Namestnik) and n.povezava.sosed_id == sosed and n.povezava.posredno):
+                    n.povezava = _Namestnik(sosed, self._sosedje[sosed], did, n.naslov, posredno=True)
+        self._dostavi_cakajoce(novi)
+
+    def _dostavi_cakajoce(self, ids: List[str]) -> None:
+        """Klepet, ki je cakal na napravo, gre zdaj prek soseda."""
+        for did in ids:
+            n = self.najdi(did)
+            if n is not None and n.povezava is not None:
+                self._dostavi_klepet(did, n.povezava)
+                kljuc = self.naprava_iz_kljuca(did)
+                if kljuc and "chat" in (n.zmoznosti or []):
+                    self._dostavi_klepet(kljuc, n.povezava)
+
+    def _sosedove_naprave(self, sosed_id: str, povezava, naprave: dict, relay: Optional[dict] = None) -> None:
         novi: Dict[str, dict] = {}
         for did, z in list((naprave if isinstance(naprave, dict) else {}).items())[:NAJVEC_NAPRAV]:
             if not isinstance(z, dict):
@@ -839,44 +936,32 @@ class Hub:
                 n = self._naprave.get(did)
                 if n is not None and not n.sosed and n.povezava is not None:
                     continue                      # lokalna prijava ima prednost
-                if n is not None and n.sosed and n.sosed != sosed_id:
-                    continue                      # ze vidna prek drugega soseda
+                if n is not None and n.sosed and n.sosed != sosed_id and not n.posredno and n.povezava is not None:
+                    continue                      # ze vidna neposredno prek drugega soseda
                 if n is None:
                     n = Naprava(did, "", "receiver", [], "")
                     self._naprave[did] = n
                 if n.povezava is None:
                     dodani.append(did)
-                n.sosed = sosed_id
-                n.ime = str(z.get("name") or did)[:NAJVEC_IMENA]
-                n.vloga = str(z.get("role") or "receiver")[:16]
-                n.zmoznosti = [str(x)[:24] for x in (z.get("capabilities") or [])][:24]
-                n.naslov = str(z.get("ip") or "")[:64]
-                n.protokol = str(z.get("protocol") or "")[:8]
-                n.platforma = str(z.get("platform") or "")[:16]
-                n.vrsta = str(z.get("kind") or "")[:16]
-                n.razlicica = str(z.get("version") or "")[:32]
-                try:
-                    n.prioriteta = max(0, min(1000, int(z.get("priority") or 0)))
-                except Exception:
-                    n.prioriteta = 0
-                n.aplikacije = z["apps"] if isinstance(z.get("apps"), dict) else {}
-                n.zadnjic = self.ura()
+                self._napolni(n, z)
+                n.sosed, n.posredno = sosed_id, False
                 n.povezava = _Namestnik(sosed_id, povezava, did, n.naslov)
                 obdrzani.add(did)
             for did in stari - obdrzani:
                 n = self._naprave.get(did)
-                if n is not None and n.sosed == sosed_id:
+                if n is not None and n.sosed == sosed_id and not n.posredno:
                     n.sosed = ""
                     n.povezava = None
             self._sosed_naprave[sosed_id] = obdrzani
-        # Klepet, ki je cakal na napravo, gre zdaj prek soseda.
-        for did in dodani:
-            n = self.najdi(did)
-            if n is not None and n.povezava is not None:
-                self._dostavi_klepet(did, n.povezava)
-                kljuc = self.naprava_iz_kljuca(did)
-                if kljuc and "chat" in (n.zmoznosti or []):
-                    self._dostavi_klepet(kljuc, n.povezava)
+            if relay is not None:
+                cisti = {}
+                for did, zz in list((relay if isinstance(relay, dict) else {}).items())[:NAJVEC_NAPRAV]:
+                    did = str(did or "").strip()
+                    if isinstance(zz, dict) and did and len(did) <= NAJVEC_IMENA and self._je_clan(did):
+                        cisti[did] = zz
+                self._zadnji_relay[sosed_id] = cisti
+        self._dostavi_cakajoce(dodani)
+        self._uporabi_posredne()
         self.objavi_naprave()
 
     def _po_spremembi_kroga(self, razen: Optional[object] = None) -> None:
@@ -922,7 +1007,7 @@ class Hub:
         tip = str(sporocilo.get("type") or "")
         tovor = sporocilo.get("payload") if isinstance(sporocilo.get("payload"), dict) else {}
         if tip == "mesh.devices":
-            self._sosedove_naprave(sosed_id, povezava, tovor.get("devices"))
+            self._sosedove_naprave(sosed_id, povezava, tovor.get("devices"), tovor.get("relay") or {})
             return None
         if tip == "mesh.route":
             cilj = str(tovor.get("to") or "")
@@ -930,8 +1015,6 @@ class Hub:
             if not isinstance(msg, str) or len(msg.encode("utf-8")) > NAJVEC_MESH_SPOROCILO:
                 return None
             n = self.najdi(cilj)
-            if n is None or n.sosed or n.povezava is None:
-                return None                       # samo lokalne naprave; nikoli naprej
             try:
                 vsebina = json.loads(msg)
             except Exception:
@@ -939,8 +1022,25 @@ class Hub:
             if not isinstance(vsebina, dict):
                 return None
             posiljatelj = str(vsebina.get("sender") or "")
+            if tovor.get("relay"):
+                # En vmesni skok: samo napravi, ki je NEPOSREDNO pri nasem drugem sosedu, in samo v imenu
+                # naprave, ki je lokalno pri sosedu, ki prosi za posredovanje. Nikoli se enkrat naprej.
+                with self._zaklep:
+                    njegove = set(self._sosed_naprave.get(sosed_id, set()))
+                if n is None or not n.sosed or n.posredno or n.sosed == sosed_id or n.povezava is None:
+                    return None
+                if not posiljatelj or posiljatelj not in njegove:
+                    return None
+                try:
+                    n.povezava.poslji(msg)
+                except Exception:
+                    pass
+                return None
+            if n is None or n.sosed or n.povezava is None:
+                return None                       # samo lokalne naprave; nikoli naprej
             with self._zaklep:
-                njegove = set(self._sosed_naprave.get(sosed_id, set()))
+                # Sosed govori v imenu svojih naprav in naprav, ki jih posreduje (relay, en skok).
+                njegove = set(self._sosed_naprave.get(sosed_id, set())) | set(self._zadnji_relay.get(sosed_id, {}))
             # Sosed sme govoriti samo v imenu naprav, ki so prijavljene pri njem (ali v svojem).
             # Brez posiljatelja smejo samo obvestila Huba o seznanitvi (koda za novo napravo).
             if not posiljatelj:
