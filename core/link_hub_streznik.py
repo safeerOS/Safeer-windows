@@ -808,11 +808,24 @@ class Hub:
         return True
 
     def _sprejmi_soseda(self, povezava, tovor: dict, id_sporocila: str) -> str:
-        """Drug Hub se je prijavil kot sosed. Samo clan kroga s podpisom kljuca, pod svojim id."""
+        """Drug Hub se je prijavil kot sosed. Samo clan kroga s podpisom kljuca, pod svojim id.
+        Zavrnjena povezava se po odgovoru zapre - sicer bi vsak ponovni poskus pustil odprto vticnico."""
+        odgovor = self._sprejmi_soseda_odlocitev(povezava, tovor, id_sporocila)
+        if '"rejected"' in odgovor:
+            try:
+                povezava.podatki["zapri_po_odgovoru"] = True
+            except Exception:
+                pass
+        return odgovor
+
+    def _sprejmi_soseda_odlocitev(self, povezava, tovor: dict, id_sporocila: str) -> str:
         sosed_id = str(tovor.get("device_id") or "").strip()[:NAJVEC_IMENA]
         podatki = getattr(povezava, "podatki", {}) or {}
         if not sosed_id or podatki.get("id") != sosed_id or not podatki.get("podpis") or not self._je_clan(sosed_id):
             return self._potrditev(id_sporocila, "cast", "rejected", "Sosed mora biti clan kroga s podpisom.", "ni_sosed")
+        from core import link_mesh
+        if sosed_id in link_mesh.brez_neposredne():
+            return self._potrditev(id_sporocila, "cast", "rejected", "Preizkus: brez neposredne povezave.", "preizkus")
         if not self.dodaj_soseda(sosed_id, povezava, sosed_id):
             return self._potrditev(id_sporocila, "cast", "rejected", "Sosednja povezava ze obstaja.", "podvojen_sosed")
         return self._potrditev(id_sporocila, "cast", "accepted")
@@ -1450,6 +1463,8 @@ def _na_sporocilo(hub: "Hub", povezava, surovo: str) -> None:
     odgovor = hub.obdelaj(povezava, surovo)
     if odgovor:
         povezava.poslji(odgovor)
+    if getattr(povezava, "podatki", {}).get("zapri_po_odgovoru"):
+        povezava.zapri(1008, "zavrnjeno")
 
 
 def _je_krajevni_naslov(naslov: str) -> bool:
