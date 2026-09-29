@@ -273,7 +273,7 @@ function Test-PythonModule($mod) {
 }
 
 $manjkajoce = @()
-foreach ($mod in @("PySide6", "PIL", "cryptography", "qrcode", "vlc")) {
+foreach ($mod in @("PySide6", "PIL", "cryptography", "qrcode", "vlc", "zeroconf")) {
     if (-not (Test-PythonModule $mod)) {
         $manjkajoce += $mod
     }
@@ -281,10 +281,10 @@ foreach ($mod in @("PySide6", "PIL", "cryptography", "qrcode", "vlc")) {
 
 if ($manjkajoce.Count -gt 0) {
     Write-Info "Nameščam manjkajoče knjižnice: PySide6 Pillow cryptography qrcode python-vlc..."
-    Invoke-SafeerPip @("install", "--disable-pip-version-check", "--quiet", "PySide6", "Pillow", "cryptography", "qrcode", "python-vlc")
+    Invoke-SafeerPip @("install", "--disable-pip-version-check", "--quiet", "PySide6", "Pillow", "cryptography", "qrcode", "python-vlc", "zeroconf")
     if ($LASTEXITCODE -ne 0) {
         Write-Warn "Poskušam ponovno namestiti knjižnice z uporabniškimi pravicami..."
-        Invoke-SafeerPip @("install", "--user", "--disable-pip-version-check", "PySide6", "Pillow", "cryptography", "qrcode", "python-vlc")
+        Invoke-SafeerPip @("install", "--user", "--disable-pip-version-check", "PySide6", "Pillow", "cryptography", "qrcode", "python-vlc", "zeroconf")
     }
 }
 

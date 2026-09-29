@@ -8,3 +8,4 @@ mutagen>=1.47,<2
 truststore>=0.9
 pypng>=0.20220715.0,<1  # vendored qrcode (windows/qrcode) uvozi png; brez njega QR za Safeer Link ne nastane
 typing_extensions>=4.7  # vendored qrcode (main.py) ga uvozi
+zeroconf>=0.130,<1  # Link Mesh: iskanje sosednjih Hubov (mDNS)

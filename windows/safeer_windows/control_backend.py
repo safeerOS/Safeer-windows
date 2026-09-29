@@ -684,6 +684,12 @@ class SafeerControlBackend:
             except Exception:
                 pass
             self.povezava = None
+        if getattr(self, "_mesh", None) is not None:
+            self._mesh.ustavi()
+            self._mesh = None
+        if getattr(self, "_oglas", None) is not None:
+            self._oglas.koncaj()
+            self._oglas = None
         if self._lokalni_hub is not None:
             self._lokalni_hub.ustavi()
             self._lokalni_hub = None
@@ -728,10 +734,48 @@ class SafeerControlBackend:
         self._oddaj_dogodek("stanje", self.stanje_linka())
         return True
 
+    # ------------------------------------------------------------------ Link Mesh (docs/LINK-MESH.md)
+    def _zagotovi_mesh(self) -> None:
+        """Link Mesh: ta racunalnik gosti SVOJ Hub, se oglasi (mDNS mesh=mesh1) in se sam poveze s Hubi
+        drugih naprav iz kroga zaupanja. Control se poveze na lastni Hub; izpad televizorja ne podre nicesar.
+        Samo zaupan racunalnik, ki je v krogu zaupanja (prijava s podpisom kljuca)."""
+        if not link_hub_streznik.mesh_vklopljen() or not self.nastavitve.get("zaupana", True):
+            return
+        try:
+            from core import link_krog
+            if not link_krog.lahko_s_podpisom(self.device_id):
+                return
+        except Exception:
+            return
+        lokalni = self._lokalni_hub
+        if lokalni is None or not lokalni.tece():
+            if self.zagotovi_lokalni_hub() is None:
+                return
+            lokalni = self._lokalni_hub
+        if getattr(self, "_mesh", None) is not None or lokalni is None or lokalni.hub is None:
+            return
+        from core import link_mesh
+        nas_id = link_hub_streznik.id_za_oglas()
+        if not nas_id:
+            return
+        lokalni.hub.nas_id = nas_id
+        self._oglas = link_hub_streznik.Oglas()
+        self._oglas.zacni(lokalni.vrata, lokalni.odtis, nas_id, self.device_ime)
+        from core import link_krog
+        self._mesh = link_mesh.MeshPovezovalec(
+            lokalni.hub, nas_id, self.device_ime,
+            pot_znanih=os.path.join(link_krog._mapa_nastavitev(), "mesh-sosedje.json"))
+        self._mesh.zazeni()
+        print(f"[ControlBackend] Link Mesh: vozlisce {nas_id} na vratih {lokalni.vrata}")
+
     # ------------------------------------------------------------------ Trajna WebSocket povezava
     def povezi_se(self) -> bool:
         if self._povezovanje or self.je_povezan():
             return True
+        try:
+            self._zagotovi_mesh()
+        except Exception as e:  # noqa: BLE001
+            print(f"[ControlBackend] Link Mesh se ni zagnal: {e}")
 
         hub = self.hub_url()
         zeton = self.zeton()

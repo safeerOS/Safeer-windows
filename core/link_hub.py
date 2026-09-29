@@ -218,10 +218,13 @@ def poisci_hube_mdns(cas: float = 2.0) -> List[dict]:
                 prio = max(0, min(1000, int(str(prio).strip())))
             except ValueError:
                 prio = 0     # starejsi hub brez prioritete steje kot najnizja (kot na Androidu)
+            mesh = lastnosti.get(b"mesh") or lastnosti.get("mesh") or b""
+            if isinstance(mesh, bytes):
+                mesh = mesh.decode("utf-8", "replace")
             naslov = f"{shema}://{naslovi[0]}:{info.port}{pot}"
             if all(n["naslov"] != naslov for n in najdeno):
                 najdeno.append({"naslov": naslov, "fp": str(fp).lower(), "tls": str(tls) == "1", "ime": str(ime_h),
-                                "id": str(id_h), "prio": prio})
+                                "id": str(id_h), "prio": prio, "mesh": str(mesh)})
 
         def update_service(self, zc, vrsta, ime):
             pass
