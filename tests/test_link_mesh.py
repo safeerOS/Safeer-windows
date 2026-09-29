@@ -405,6 +405,12 @@ class Klicanje(unittest.TestCase):
             threading.Thread = stari
         self.assertEqual(klicani, ["n-z"])
 
+    def test_premor_po_zavrnitvi(self):
+        m = self.link_mesh.MeshPovezovalec(self.hub, "n-m")
+        m._zavrnjeni["n-z"] = (1000.0, 30.0)
+        self.assertEqual(m.kandidati([self.oglas("n-z")], zdaj=999.0), [])
+        self.assertEqual([h["id"] for h in m.kandidati([self.oglas("n-z")], zdaj=1001.0)], ["n-z"])
+
 
 if __name__ == "__main__":
     unittest.main()
