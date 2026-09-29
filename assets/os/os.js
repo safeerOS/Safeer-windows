@@ -16,6 +16,7 @@
     splet: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z M3 12h18 M12 3c2.5 2.5 3.8 5.5 3.8 9s-1.3 6.5-3.8 9 M12 3C9.5 5.5 8.2 8.5 8.2 12s1.3 6.5 3.8 9",
     desno: "M9 6l6 6-6 6",
     nazaj: "M15 6l-6 6 6 6",
+    vrstica: "M4 5h16v14H4z M9 5v14 M15.5 9.5L13 12l2.5 2.5",
     naprave: "M2 5h14v10H2z M6 19h6 M9 15v4 M17 9h4a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1z",
     qr: "M4 4h6v6H4z M14 4h6v6h-6z M4 14h6v6H4z M14 14h2v2h-2z M18 14h2 M14 18h2 M18 18h2v2",
     poslji: "M4 12l16-8-6 16-2-7z",
@@ -195,7 +196,30 @@
       el.setAttribute("viewBox", "0 0 24 24");
       el.innerHTML = '<path d="' + (IK[el.getAttribute("data-ikona")] || "") + '"/>';
     });
+    vrsticaUredi();
   }
+
+  /* Zlozljiva stranska vrstica: gumb v glavi ali Ctrl+B, kot v brskalnikih. */
+  function vrsticaUredi() {
+    var gumb = document.getElementById("gumbVrstica");
+    if (!gumb) return;
+    var skrcena = document.body.classList.contains("vrstica-skrcena");
+    gumb.setAttribute("aria-expanded", skrcena ? "false" : "true");
+    gumb.title = t(skrcena ? "vrsticaRazsiri" : "vrsticaSkrci");
+    gumb.setAttribute("aria-label", gumb.title);
+    if (gumb.dataset.vezan) return;
+    gumb.dataset.vezan = "1";
+    gumb.addEventListener("click", vrsticaPreklopi);
+    document.addEventListener("keydown", function (e) {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === "b" || e.key === "B")) { e.preventDefault(); vrsticaPreklopi(); }
+    });
+  }
+  function vrsticaPreklopi() {
+    var skrcena = document.body.classList.toggle("vrstica-skrcena");
+    try { localStorage.setItem("safeer_vrstica_skrcena", skrcena ? "1" : "0"); } catch (e) {}
+    vrsticaUredi();
+  }
+  try { if (localStorage.getItem("safeer_vrstica_skrcena") === "1") document.body.classList.add("vrstica-skrcena"); } catch (e) {}
 
   function $(id) { return document.getElementById(id); }
   function on(id, dogodek, poslusaj) {

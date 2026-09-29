@@ -857,3 +857,23 @@ div.vrstica { cursor: default; }
 .media-zvocnik{position:absolute;right:24px;top:64px;z-index:5;min-width:280px;max-width:380px;padding:14px;border-radius:16px;border:1px solid rgba(84,214,165,.35);background:rgba(9,16,24,.97);box-shadow:0 18px 40px rgba(0,0,0,.5);display:flex;flex-direction:column;gap:8px}
 .media-zvocnik .vrsta{display:flex;gap:8px;flex-wrap:wrap}
 .media-zvocnik .zvocnik{justify-content:flex-start;text-align:left}
+
+/* Zlozljiva stranska vrstica (kot v brskalnikih): gumb v glavi vrstice ali Ctrl+B; izbira ostane zapomnjena. */
+.znamka { position: relative; }
+.znamka > div { flex: 1; min-width: 0; }
+.znamka b { white-space: nowrap; }
+.znamka .skrci-vrstico { margin-left: auto; width: 36px; height: 36px; flex: none; display: grid; place-items: center; color: var(--medlo); }
+.znamka .skrci-vrstico svg { width: 20px; height: 20px; }
+.znamka .skrci-vrstico:hover { color: var(--zelena); }
+body.vrstica-skrcena:not(.nacin-splet) #aplikacija { grid-template-columns: 96px 1fr; }
+body.vrstica-skrcena:not(.nacin-splet) #stranska { padding-left: 12px; padding-right: 12px; }
+body.vrstica-skrcena:not(.nacin-splet) .znamka { flex-direction: column; gap: 10px; padding: 0 0 22px; }
+body.vrstica-skrcena:not(.nacin-splet) .znamka img { width: 44px; height: 44px; }
+body.vrstica-skrcena:not(.nacin-splet) .znamka > div,
+body.vrstica-skrcena:not(.nacin-splet) nav button span,
+body.vrstica-skrcena:not(.nacin-splet) .uporabnik .ime,
+body.vrstica-skrcena:not(.nacin-splet) .poganja { display: none; }
+body.vrstica-skrcena:not(.nacin-splet) .znamka .skrci-vrstico { margin: 0; transform: scaleX(-1); }
+body.vrstica-skrcena:not(.nacin-splet) nav button { justify-content: center; padding: 14px 0; }
+body.vrstica-skrcena:not(.nacin-splet) .uporabnik { flex-direction: column; padding: 8px 4px; }
+@media (prefers-reduced-motion: no-preference) { #aplikacija { transition: grid-template-columns .18s ease; } }
