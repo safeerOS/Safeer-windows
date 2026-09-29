@@ -12,6 +12,7 @@ import socket
 import socketserver
 import sys
 import threading
+import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -64,6 +65,21 @@ _POVEZAVA = {"sl": ("Povezano", "Ni povezano"), "en": ("Connected", "Not connect
              "de": ("Verbunden", "Nicht verbunden"), "es": ("Conectado", "No conectado"),
              "fr": ("Connecté", "Non connecté"), "it": ("Connesso", "Non connesso")}
 
+
+
+def koncaj_proces(pid: int) -> bool:
+    """Konca proces strani (Windows TerminateProcess); True, ce je uspelo."""
+    if not pid or sys.platform != "win32":
+        return False
+    import ctypes
+    k = ctypes.windll.kernel32
+    h = k.OpenProcess(0x0001, False, pid)  # PROCESS_TERMINATE
+    if not h:
+        return False
+    try:
+        return bool(k.TerminateProcess(h, 1))
+    finally:
+        k.CloseHandle(h)
 
 
 def zasebni_pomnilnik_mb(pid: int) -> int:
@@ -353,6 +369,8 @@ class SafeerOsWindow(QMainWindow):
         self.view.setPage(self.page_obj)
         # Straza pomnilnika izrisa: ce proces strani zraste cez mejo (puscanje v QtWebEngine), stran
         # tiho nalozimo znova v istem razdelku, preden Windows zacne menjati pomnilnik na disk.
+        self._zadnja_obnova = -1e9
+        self._razdelek_po_obnovi = ""
         self._straza_izrisa = QTimer(self)
         self._straza_izrisa.setInterval(60_000)
         self._straza_izrisa.timeout.connect(self._preveri_pomnilnik_izrisa)
@@ -929,8 +947,9 @@ class SafeerOsWindow(QMainWindow):
     def _izris_koncan(self, status, koda) -> None:
         print(f"[SafeerOS] RenderProcessTerminated: status={status}, code={koda}", flush=True)
         if status != QWebEnginePage.RenderProcessTerminationStatus.NormalTerminationStatus:
-            # Sesut ali ubit proces strani: brez tega ostane okno prazno do ponovnega zagona.
-            QTimer.singleShot(1000, lambda: self._nalozi_znova_v_razdelku(""))
+            # Sesut ali (zaradi pomnilnika) koncan proces strani: brez tega ostane okno prazno.
+            razdelek, self._razdelek_po_obnovi = self._razdelek_po_obnovi, ""
+            QTimer.singleShot(1000, lambda: self._nalozi_znova_v_razdelku(razdelek))
 
     def _preveri_pomnilnik_izrisa(self) -> None:
         try:
@@ -938,10 +957,19 @@ class SafeerOsWindow(QMainWindow):
         except Exception:
             return
         mb = zasebni_pomnilnik_mb(pid)
-        if mb >= self.MEJA_IZRISA_MB:
-            print(f"[SafeerOS] Proces strani porablja {mb} MB (meja {self.MEJA_IZRISA_MB}) - nalagam znova", flush=True)
-            self.page_obj.runJavaScript("window.safeerOsRazdelek ? window.safeerOsRazdelek() : ''",
-                                        lambda r: self._nalozi_znova_v_razdelku(str(r or "")))
+        if mb < self.MEJA_IZRISA_MB or time.monotonic() - self._zadnja_obnova < 900:
+            return
+        # Ponovno nalaganje v istem procesu pomnilnika ne vrne (izmerjeno 29. 9.: 1,9 GB ostane in
+        # stran se je nalagala vsako minuto). Zato proces strani koncamo; Qt javi konec in
+        # _izris_koncan stran nalozi v NOVEM procesu, v istem razdelku.
+        self._zadnja_obnova = time.monotonic()
+        print(f"[SafeerOS] Proces strani porablja {mb} MB (meja {self.MEJA_IZRISA_MB}) - nov proces strani", flush=True)
+
+        def _koncaj(razdelek):
+            self._razdelek_po_obnovi = str(razdelek or "")
+            if not koncaj_proces(pid):
+                self._nalozi_znova_v_razdelku(self._razdelek_po_obnovi)
+        self.page_obj.runJavaScript("window.safeerOsRazdelek ? window.safeerOsRazdelek() : ''", _koncaj)
 
     def _nalozi_znova_v_razdelku(self, razdelek: str) -> None:
         razdelek = re.sub(r"[^a-zA-Z_-]", "", razdelek)[:40]
