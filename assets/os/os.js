@@ -3133,7 +3133,9 @@
     var variants = item.razlicice && item.razlicice.length ? item.razlicice : [{ url:item.url, vir:item.vir, kakovost:item.kakovost, vrsta:item.vrsta }];
     var variant = variants[index || 0] || variants[0], audio = item.vrsta === "glasba" || item.vrsta === "radio" || item.vrsta === "podcast";
     var url = variant.url || "";
-    var isDirectMedia = /\.(mp4|mkv|webm|avi|mov|m4v|mp3|flac|ogg|opus|m4a|aac|wav|m3u8)($|\?)/i.test(url) || url.startsWith("file:") || /mpegurl/i.test(variant.mime || item.mime || "");
+    var isDirectMedia = /\.(mp4|mkv|webm|avi|mov|m4v|mp3|flac|ogg|opus|m4a|aac|wav|m3u8)($|\?)/i.test(url) || url.startsWith("file:") || /mpegurl/i.test(variant.mime || item.mime || "") ||
+      // Zvočni tok brez končnice (Jamendo, Icecast radio) je še vedno neposreden zvok, ne spletna stran.
+      (audio && /^https?:/i.test(url) && !/\.(m3u8|mpd)($|\?)/i.test(url) && variant.vrsta !== "embed");
     var video = $("mediaVideo"), playerAudio = $("mediaAudio"), iframe = $("mediaIframe"), playerImage = $("mediaSlika");
 
     if (media.timer) { window.clearTimeout(media.timer); media.timer = 0; }
