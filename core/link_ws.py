@@ -218,14 +218,18 @@ class Povezava:
 
     def zapri(self, koda: int = 1000, razlog: str = "") -> None:
         """Zapre povezavo. Zakljucek odda pisec; ce se je zataknil, po kratkem roku nehamo cakati."""
+        telo = struct.pack(">H", koda) + razlog.encode("utf-8")[:120]
         with self._zaklep:
             if self._zaprta:
                 bil_odprt = False
             else:
                 bil_odprt = True
                 self._zaprta = True
+                if self._pisec is not None and self._pisec.is_alive():
+                    # Zakljucek gre ZA sporocili, ki ze cakata v vrsti (npr. zavrnitev tik pred zaprtjem).
+                    self._vrsta.append(okvir(OPKODA_ZAPRI, telo))
+                    bil_odprt = False
         if bil_odprt:
-            telo = struct.pack(">H", koda) + razlog.encode("utf-8")[:120]
             try:
                 self.vticnik.sendall(okvir(OPKODA_ZAPRI, telo))
             except Exception:

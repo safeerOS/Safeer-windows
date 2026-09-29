@@ -99,6 +99,8 @@ class MeshPovezovalec:
         self.poisci = poisci or (lambda: link_hub.poisci_hube_mdns(2.0))
         self._klicem: set = set()
         self._prvic_videni: Dict[str, float] = {}
+        #: Sosed, ki nas je zavrnil: id -> (do kdaj ga ne klicemo, zadnji premor). Premor raste do 10 min.
+        self._zavrnjeni: Dict[str, tuple] = {}
         self._ustavljen = threading.Event()
         self._zbudi = threading.Event()
         self._zaklep = threading.Lock()
@@ -199,6 +201,8 @@ class MeshPovezovalec:
                     continue
             except Exception:
                 continue
+            if self._zavrnjeni.get(hid, (0.0, 0.0))[0] > zdaj:
+                continue            # nas je zavrnil; pocakamo
             if hid < self.nas_id and zdaj - prvic < VECJI_CAKA_S:
                 continue            # manjsi id klice prvi; pocakamo nanj
             izbrani.append(h)
@@ -253,6 +257,7 @@ class MeshPovezovalec:
             povezava.zapri()
             return
         print("[SafeerLink] mesh: sosed %s (%s)" % (hid, naslov))
+        self._zavrnjeni.pop(hid, None)
         self._beri(hid, povezava)
 
     def _beri(self, hid: str, povezava: OdhodnaSosednja) -> None:
@@ -273,6 +278,9 @@ class MeshPovezovalec:
                 if isinstance(sporocilo, dict) and sporocilo.get("type") == "cast.ack" \
                         and sporocilo.get("status") == "rejected":
                     print("[SafeerLink] mesh: %s nas ni sprejel (%s)" % (hid, sporocilo.get("error_code", "")))
+                    prej = self._zavrnjeni.get(hid, (0.0, 0.0))[1]
+                    premor = min(600.0, prej * 2 if prej else 30.0)
+                    self._zavrnjeni[hid] = (time.time() + premor, premor)
                     # Sosed nas ne sprejme (npr. ze ima povezavo, ki jo je odprl on).
                     break
                 odgovor = self.hub.obdelaj(povezava, surovo)
