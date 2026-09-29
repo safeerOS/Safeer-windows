@@ -188,6 +188,8 @@ class MeshPovezovalec:
                 continue
             if h.get("mesh") != link_hub_streznik_mesh():
                 continue            # star Hub: sosednje povezave ne razume
+            if hid in brez_neposredne():
+                continue            # preizkus poti prek vmesnega vozlisca
             with self._zaklep:
                 if hid in self._klicem:
                     continue
@@ -270,6 +272,7 @@ class MeshPovezovalec:
                     continue
                 if isinstance(sporocilo, dict) and sporocilo.get("type") == "cast.ack" \
                         and sporocilo.get("status") == "rejected":
+                    print("[SafeerLink] mesh: %s nas ni sprejel (%s)" % (hid, sporocilo.get("error_code", "")))
                     # Sosed nas ne sprejme (npr. ze ima povezavo, ki jo je odprl on).
                     break
                 odgovor = self.hub.obdelaj(povezava, surovo)
@@ -278,6 +281,11 @@ class MeshPovezovalec:
         finally:
             povezava.zapri()
             self.hub.odklopi(povezava)
+
+
+def brez_neposredne() -> set:
+    """Samo za preizkus dostave prek vmesnega vozlisca: SAFEER_MESH_BREZ=id1,id2 (brez neposredne povezave)."""
+    return {i.strip() for i in os.environ.get("SAFEER_MESH_BREZ", "").split(",") if i.strip()}
 
 
 def link_hub_streznik_mesh() -> str:

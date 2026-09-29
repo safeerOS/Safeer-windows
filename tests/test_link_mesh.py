@@ -225,6 +225,14 @@ class Mesh(unittest.TestCase):
         self.assertEqual(json.loads(self.a.obdelaj(t, json.dumps({"id": "h", "type": "cast.register", "payload": {
             "device_id": "tujec", "role": "hub", "capabilities": ["mesh1"]}})))["status"], "rejected")
 
+    def test_zavrnjen_sosed_se_zapre(self):
+        p = LaznaPovezava()
+        p.podatki = {"id": "hub-x", "podpis": False}
+        lhs._na_sporocilo(self.a, p, json.dumps({"id": "h", "type": "cast.register", "payload": {
+            "device_id": "hub-x", "role": "hub", "capabilities": ["mesh1"]}}))
+        self.assertEqual(p.zadnje("cast.ack")["status"], "rejected")
+        self.assertIsNotNone(p.zaprta_z, "zavrnjena sosednja povezava ne sme ostati odprta")
+
     def test_tujec_ne_pride_cez_mejo_huba(self):
         tv = prijava(self.a, "tv")
         prijava(self.b, "tujec")
