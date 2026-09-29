@@ -67,6 +67,27 @@ mesh.trust     {type, id, payload: <krog json>}     (zdruzi s preverjanjem podpi
 - Klepet, ki čaka na nepovezano napravo, hrani hub pošiljatelja in ga dostavi, ko se cilj pojavi
   lokalno **ali prek soseda**.
 
+## Global Link: soseda zunaj doma (narejeno 29. 9.)
+
+- Vsak Hub se objavi na `link.safeer.si` (AgentHuba: `/v1/presence` s seznamom `allow` = člani kroga,
+  `/v1/listen`, kanal `/v1/accept` → lokalni Hub). Rele prenaša samo šifrirane bajte; TLS s pripetim
+  ključem iz kroga in prijava s podpisom sta enaka kot v LAN. Tujec ne izve niti, ali Hub obstaja.
+- Kdor kliče soseda: najprej neposredno (mDNS ali zapomnjeni naslov). Po **2 zaporednih** neuspelih
+  klicih (brez odgovora ali napačen ključ) pokliče prek releja (`LokalniRele` / `GlobalLink.naslov`):
+  lokalna vrata `127.0.0.1:x` → kanal `/v1/connect?to=<id iz ključa>`. Zavrnitev (`cast.ack rejected`)
+  ni neuspeh — sosed je dosegljiv.
+- Cilj releja je id iz ključa člana (Hub se lahko oglaša s pripono, npr. `n-…-control`).
+- Po neuspehu prek releja premor 60 s, podvaja se do 10 min (dnevna kvota Workerja).
+- Naslov `127.*` / `::1` / `localhost` si nikoli ne zapomnimo kot naslov soseda (to je lokalni konec releja
+  ali dohodni kanal releja).
+- Izklop: `SAFEER_GLOBAL_LINK=0` (računalnik) / nastavitev »Dostop do mojih naprav od kjerkoli« (Android).
+  Preizkus doma: `SAFEER_MESH_RELE=id1,id2` (računalnik) / »Preizkus: tudi doma prek interneta« (Android).
+- Znana meja: povezava prek releja ostane, dokler deluje; ko se naprava vrne domov, preide na LAN šele ob
+  naslednjem ponovnem priklopu.
+- Popravek ob tem: kanal releja in sosednja povezava vtičnico ob koncu samo `shutdown`, zapre pa jo šele,
+  ko je nobena nit ne uporablja več. Prej je druga nit (OpenSSL) brala že zaprto številko vtičnice, ki jo je
+  sistem dal naslednjemu kanalu → `WRONG_VERSION_NUMBER` (4 od 10 prijav prek releja; po popravku 25/25).
+
 ## Združljivost
 
 - Hub z mesh1 sprejema stare odjemalce kot doslej.

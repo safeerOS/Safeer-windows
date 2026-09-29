@@ -764,7 +764,8 @@ class SafeerControlBackend:
         from core import link_krog
         self._mesh = link_mesh.MeshPovezovalec(
             lokalni.hub, nas_id, self.device_ime,
-            pot_znanih=os.path.join(link_krog._mapa_nastavitev(), "mesh-sosedje.json"))
+            pot_znanih=os.path.join(link_krog._mapa_nastavitev(), "mesh-sosedje.json"),
+            vrata=lambda s=lokalni: s.vrata if s.tece() else 0)
         self._mesh.zazeni()
         print(f"[ControlBackend] Link Mesh: vozlisce {nas_id} na vratih {lokalni.vrata}")
 

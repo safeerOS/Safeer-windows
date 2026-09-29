@@ -436,5 +436,161 @@ class Klicanje(unittest.TestCase):
         self.assertNotIn("n-z", m._zavrnjeni)
 
 
+class GlobalLinkMesh(unittest.TestCase):
+    """Sosed zunaj doma: po neuspelih neposrednih klicih ga klicemo prek releja link.safeer.si."""
+
+    def setUp(self):
+        import base64, hashlib, os
+        from core import link_mesh, link_rele
+        self.link_mesh = link_mesh
+        self.kljuc = base64.b64encode(os.urandom(32)).decode()
+        self.hid = link_rele.id_iz_kljuca(self.kljuc)
+        krog = mock.MagicMock()
+        krog.clan_za_id.side_effect = lambda i: {"kljuc": self.kljuc} if i in (self.hid, "n-drug") else None
+        self._krog = mock.patch.object(link_mesh.link_krog, "krog", return_value=krog)
+        self._krog.start()
+        self._okolje = mock.patch.dict(os.environ, {"SAFEER_MESH_RELE": "", "SAFEER_GLOBAL_LINK": "1"})
+        self._okolje.start()
+        self.hub = lhs.Hub(odtis="aa" * 32, nas_id="n-m")
+        self.m = link_mesh.MeshPovezovalec(self.hub, "n-m")
+        self.naslovi = []
+
+        class Rele:
+            vrata, zadnja_napaka = 45678, "404"
+            def zapri(self): pass
+        self.m._releji[self.hid] = Rele()
+
+    def tearDown(self):
+        self._okolje.stop()
+        self._krog.stop()
+
+    def oglas(self):
+        return {"id": self.hid, "naslov": "wss://192.168.0.77:8990/cast/ws", "tls": True, "mesh": "mesh1"}
+
+    def odpri(self, doma: bool, rele: bool):
+        def f(h):
+            self.naslovi.append(h["naslov"])
+            return rele if h["naslov"].startswith("wss://127.0.0.1:") else doma
+        self.m._odpri = f
+
+    def test_rele_sele_po_dveh_neuspehih(self):
+        self.odpri(doma=False, rele=True)
+        self.m._klici(self.oglas())
+        self.assertEqual(self.naslovi, ["wss://192.168.0.77:8990/cast/ws"])
+        self.m._klici(self.oglas())
+        self.assertEqual(self.naslovi[1:], ["wss://192.168.0.77:8990/cast/ws", "wss://127.0.0.1:45678/cast/ws"])
+        # Doma spet dosegljiv: stevec neuspehov se pobrise, rele ni vec potreben.
+        self.odpri(doma=True, rele=True)
+        self.naslovi.clear()
+        self.m._klici(self.oglas())
+        self.assertEqual(self.naslovi, ["wss://192.168.0.77:8990/cast/ws"])
+        self.assertNotIn(self.hid, self.m._neuspehi)
+
+    def test_zavrnitev_ni_neuspeh(self):
+        # Sosed je dosegljiv, a nas zavrne (ze ima povezavo): to ni razlog za rele.
+        self.odpri(doma=True, rele=True)
+        for _ in range(3):
+            self.m._klici(self.oglas())
+        self.assertTrue(all(n.startswith("wss://192.168.0.77") for n in self.naslovi))
+
+    def test_premor_releja_raste(self):
+        self.odpri(doma=False, rele=False)
+        self.m._neuspehi[self.hid] = 5
+        self.m._klici(self.oglas())
+        self.assertEqual(self.m._premor_releja[self.hid][1], self.link_mesh.PREMOR_RELEJA_S)
+        self.naslovi.clear()
+        self.m._klici(self.oglas())           # v premoru: rele ne klicemo (kvota)
+        self.assertEqual(self.naslovi, ["wss://192.168.0.77:8990/cast/ws"])
+        self.m._premor_releja[self.hid] = (0.0, self.link_mesh.PREMOR_RELEJA_S)
+        self.m._klici(self.oglas())
+        self.assertEqual(self.m._premor_releja[self.hid][1], 2 * self.link_mesh.PREMOR_RELEJA_S)
+
+    def test_preizkusno_samo_prek_releja(self):
+        import os
+        self.odpri(doma=True, rele=True)
+        with mock.patch.dict(os.environ, {"SAFEER_MESH_RELE": self.hid}):
+            self.m._klici(self.oglas())
+        self.assertEqual(self.naslovi, ["wss://127.0.0.1:45678/cast/ws"])
+
+    def test_izklopljen_global_link(self):
+        import os
+        self.odpri(doma=False, rele=True)
+        self.m._neuspehi[self.hid] = 5
+        with mock.patch.dict(os.environ, {"SAFEER_GLOBAL_LINK": "0"}):
+            self.m._klici(self.oglas())
+        self.assertEqual(self.naslovi, ["wss://192.168.0.77:8990/cast/ws"])
+
+    def test_rele_samo_za_id_iz_kljuca(self):
+        # Rele pozna napravo samo po id-ju iz njenega kljuca; id, ki ne izhaja iz kljuca, ne gre prek releja.
+        self.assertIsNone(self.m._rele("n-drug"))
+        # Hub z id-jem s pripono (n-...-control): cilj releja je id iz kljuca.
+        from core import link_rele
+        ustvarjeni = []
+
+        class Lazni:
+            def __init__(self, cilj): self.cilj, self.vrata = cilj, 1; ustvarjeni.append(cilj)
+        krog = self.link_mesh.link_krog.krog()
+        krog.clan_za_id.side_effect = lambda i: {"kljuc": self.kljuc}
+        with mock.patch.object(link_rele, "LokalniRele", Lazni):
+            self.assertIsNotNone(self.m._rele(self.hid + "-control"))
+        self.assertEqual(ustvarjeni, [self.hid])
+
+    def test_naslov_releja_si_ne_zapomnimo(self):
+        self.m.zapomni(self.hid, "127.0.0.1")
+        self.m.zapomni(self.hid, "wss://127.0.0.1:45678/cast/ws")
+        self.m.zapomni(self.hid, "::1")
+        self.assertNotIn(self.hid, self.m._znani)
+        self.m.zapomni(self.hid, "192.168.0.77")
+        self.assertEqual(self.m._znani[self.hid]["naslov"], "wss://192.168.0.77:8990/cast/ws")
+
+    def test_agent_samo_z_vrati_in_vklopljen(self):
+        import os
+        zagnani = []
+
+        class Agent:
+            def __init__(self, **k): self.k = k
+            def zazeni(self): zagnani.append(self)
+        from core import link_rele
+        with mock.patch.object(link_rele, "AgentHuba", Agent), mock.patch.object(self.link_mesh, "_agent", None):
+            self.m._zazeni_agenta()                         # brez vrat (npr. preizkus): nic
+            self.assertEqual(zagnani, [])
+            with mock.patch.dict(os.environ, {"SAFEER_GLOBAL_LINK": "0"}):
+                self.link_mesh.MeshPovezovalec(self.hub, "n-m", vrata=lambda: 8990)._zazeni_agenta()
+            self.assertEqual(zagnani, [])
+            prvi = self.link_mesh.MeshPovezovalec(self.hub, "n-m", vrata=lambda: 8990)
+            prvi._zazeni_agenta()
+            drugi = self.link_mesh.MeshPovezovalec(self.hub, "n-m", vrata=lambda: 9001)
+            drugi._zazeni_agenta()
+            self.assertEqual(len(zagnani), 1)              # en agent na proces
+            self.assertEqual(zagnani[0].k["vrata"](), 9001)  # vrata trenutnega Huba
+            drugi.ustavi()
+            self.assertEqual(zagnani[0].k["vrata"](), 0)     # Hub ustavljen: agent ne sprejema kanalov
+
+
+class ReleCev(unittest.TestCase):
+    """Kanal releja: vticnici se sprostita sele, ko obe niti koncata (sicer TLS bere tuje bajte)."""
+
+    def test_sprostitev_po_koncu_obeh_niti(self):
+        import socket, threading
+        from core import link_rele
+        dogodki = []
+        a, b = socket.socketpair()
+
+        class Ws:
+            def __init__(self): self.konec = threading.Event()
+            def prejmi(self):
+                self.konec.wait(5)
+                raise ConnectionError("zaprto")
+            def poslji(self, _p): pass
+            def zapri(self): dogodki.append("ws.zapri"); self.konec.set()
+            def sprosti(self): dogodki.append("ws.sprosti")
+
+        b.sendall(b"x")
+        b.close()                     # lokalna stran konca: iz_tcp zapre kanal, glavna nit se vrne
+        link_rele.cev(Ws(), a)
+        self.assertEqual(dogodki[-1], "ws.sprosti")
+        self.assertEqual(a.fileno(), -1)   # tcp zaprt sele na koncu
+
+
 if __name__ == "__main__":
     unittest.main()

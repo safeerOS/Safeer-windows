@@ -1870,7 +1870,8 @@ class HubGostitelj:
                     import os
                     self.mesh = link_mesh.MeshPovezovalec(
                         self.streznik.hub, self.nas_id, self.ime,
-                        pot_znanih=os.path.join(link_krog._mapa_nastavitev(), "mesh-sosedje.json"))
+                        pot_znanih=os.path.join(link_krog._mapa_nastavitev(), "mesh-sosedje.json"),
+                        vrata=lambda s=self.streznik: s.vrata if s.tece() else 0)
                     self.mesh.zazeni()
                 return True
             if self.streznik.tece():
