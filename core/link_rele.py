@@ -171,18 +171,40 @@ class WsOdjemalec:
                 return prva, podatki
 
     def zapri(self) -> None:
+        """Konca povezavo (okvir zaprtja + shutdown), ne sprosti pa vticnice.
+
+        Druga nit morda se bere ali pise; ce bi vticnico zaprli, bi sistem njeno stevilko takoj dal
+        naslednji povezavi (npr. novemu kanalu), stara nit pa bi brala njene bajte - TLS nato pade
+        (WRONG_VERSION_NUMBER). shutdown obe niti le zbudi; vticnico sprosti `sprosti()` ali Python,
+        ko je nihce vec ne uporablja.
+        """
+        if getattr(self, "_koncana", False):
+            return
+        self._koncana = True
         try:
             self.poslji(b"", 0x8)
         except Exception:
             pass
+        _ustavi(self.s)
+
+    def sprosti(self) -> None:
+        """Zapre vticnico; klic samo, ko nobena druga nit vec ne dela z njo."""
+        self.zapri()
         try:
             self.s.close()
         except Exception:
             pass
 
 
+def _ustavi(s: socket.socket) -> None:
+    try:
+        s.shutdown(socket.SHUT_RDWR)
+    except Exception:
+        pass
+
+
 def cev(ws: WsOdjemalec, tcp: socket.socket) -> None:
-    """Bajti v obe smeri, dokler ena stran ne konca; nato zapre obe."""
+    """Bajti v obe smeri, dokler ena stran ne konca; nato zapre obe (sele ko obe niti koncata)."""
     def iz_tcp():
         try:
             while True:
@@ -194,7 +216,8 @@ def cev(ws: WsOdjemalec, tcp: socket.socket) -> None:
             pass
         ws.zapri()
 
-    threading.Thread(target=iz_tcp, name="safeer-rele-tcp", daemon=True).start()
+    nit = threading.Thread(target=iz_tcp, name="safeer-rele-tcp", daemon=True)
+    nit.start()
     try:
         while True:
             op, podatki = ws.prejmi()
@@ -202,11 +225,15 @@ def cev(ws: WsOdjemalec, tcp: socket.socket) -> None:
                 tcp.sendall(podatki)
     except Exception:
         pass
-    try:
-        tcp.close()
-    except Exception:
-        pass
+    _ustavi(tcp)
     ws.zapri()
+    nit.join(15)
+    if not nit.is_alive():
+        try:
+            tcp.close()
+        except Exception:
+            pass
+        ws.sprosti()
 
 
 # ------------------------------------------------------------------ agent huba
@@ -336,7 +363,7 @@ class LokalniRele:
         except Exception as e:
             self.zadnja_napaka = str(e)[:120] or type(e).__name__
             if ws is not None:
-                ws.zapri()
+                ws.sprosti()
             try:
                 tcp.close()
             except Exception:

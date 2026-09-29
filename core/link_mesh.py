@@ -4,6 +4,10 @@ Hub na tej napravi tece vedno. Ta modul poisce druge Hube (mDNS), preveri, da po
 kljuc clana kroga, se prijavi s podpisom nasega kljuca in odpre **sosednjo povezavo**. Od tam naprej
 vse dela Hub.obdelaj_soseda: izmenjava lokalnih naprav, usmerjanje, krog.
 
+Global Link: kadar soseda neposredno ni (naprava je zunaj doma), ga poklicemo prek link.safeer.si.
+Rele prenasa samo sifrirane bajte; TLS s kljucem iz kroga in prijava s podpisom ostaneta enaka kot v LAN.
+Nas Hub se na releju tudi sam objavi (AgentHuba), da ga clani kroga dosezejo od zunaj.
+
 Da nastane za vsak par ena povezava, prvi klice manjsi id; vecji pocaka in klice sam sele, ce ga
 manjsi dolgo ne doseze (npr. pozarni zid na eni strani). Ce vseeno nastaneta dve, Hub obdrzi tisto,
 ki jo je odprl manjsi id (Hub.dodaj_soseda).
@@ -33,6 +37,16 @@ PRIVZETA_VRATA = 8990
 NAJVEC_ZNANIH = 32
 #: Najvec cakajocih sporocil na sosednjo povezavo, preden jo zapremo (sosed ne bere).
 NAJVEC_V_VRSTI = 512
+#: Po toliko zaporednih neuspelih neposrednih klicih soseda poskusimo prek releja (Global Link).
+RELE_PO_NEUSPEHIH = 2
+#: Premor po neuspelem klicu prek releja (raste do NAJDALJSI_PREMOR_RELEJA_S): varuje dnevno kvoto releja.
+PREMOR_RELEJA_S = 60.0
+NAJDALJSI_PREMOR_RELEJA_S = 600.0
+
+#: En agent Global Linka na proces (vec MeshPovezovalcev bi se na releju izrinjalo); vrata trenutnega Huba.
+_agent = None
+_agent_vrata: list = [None]
+_agent_zaklep = threading.Lock()
 
 
 class OdhodnaSosednja:
@@ -92,7 +106,8 @@ class MeshPovezovalec:
     """Poisce in vzdrzuje sosednje povezave nasega Huba."""
 
     def __init__(self, hub, nas_id: str, ime: str = "Safeer",
-                 poisci: Optional[Callable[[], List[dict]]] = None, pot_znanih: str = "") -> None:
+                 poisci: Optional[Callable[[], List[dict]]] = None, pot_znanih: str = "",
+                 vrata: Optional[Callable[[], int]] = None) -> None:
         self.hub = hub
         self.nas_id = nas_id
         self.ime = ime
@@ -109,6 +124,11 @@ class MeshPovezovalec:
         #: izolacija), in za hiter ponovni priklop po ponovnem zagonu.
         self._pot_znanih = pot_znanih
         self._znani: Dict[str, dict] = self._nalozi_znane()
+        #: Global Link: vrata nasega Huba (za agenta), zaporedni neuspehi neposrednih klicev in releji.
+        self._vrata = vrata
+        self._neuspehi: Dict[str, int] = {}
+        self._premor_releja: Dict[str, tuple] = {}
+        self._releji: Dict[str, object] = {}
         hub.ob_sosedu = self._ob_sosedu
 
     def zazeni(self) -> None:
@@ -116,10 +136,88 @@ class MeshPovezovalec:
             return
         self._nit = threading.Thread(target=self._zanka, name="safeer-mesh", daemon=True)
         self._nit.start()
+        self._zazeni_agenta()
 
     def ustavi(self) -> None:
         self._ustavljen.set()
         self._zbudi.set()
+        with _agent_zaklep:
+            if _agent_vrata[0] is self._vrata:
+                _agent_vrata[0] = None       # agent neha sprejemati kanale, dokler Hub ne tece znova
+        for rele in list(self._releji.values()):
+            try:
+                rele.zapri()
+            except Exception:
+                pass
+        self._releji.clear()
+
+    # -- Global Link
+
+    def _zazeni_agenta(self) -> None:
+        """Nas Hub objavi na link.safeer.si, da ga clani kroga dosezejo tudi zunaj doma."""
+        global _agent
+        if self._vrata is None or not global_link_vklopljen():
+            return
+        from core import link_rele
+        with _agent_zaklep:
+            _agent_vrata[0] = self._vrata
+            if _agent is not None:
+                return
+
+            def vrata() -> int:
+                f = _agent_vrata[0]
+                try:
+                    return int(f()) if f is not None else 0
+                except Exception:
+                    return 0
+
+            _agent = link_rele.AgentHuba(vrata=vrata, vklopljen=global_link_vklopljen,
+                                         krog_json=lambda: link_krog.krog().json())
+            _agent.zazeni()
+
+    def _rele(self, hid: str):
+        """Lokalna vrata do soseda prek releja (eno na soseda) ali None, ce ga rele ne more doseci."""
+        from core import link_rele
+        clan = link_krog.krog().clan_za_id(hid)
+        try:
+            # Rele pozna napravo po id-ju iz njenega kljuca (Hub se lahko oglasa z id-jem s pripono,
+            # npr. `n-...-control`); zaupanje da kljuc v potrdilu, ne id.
+            cilj = link_rele.id_iz_kljuca(clan["kljuc"]) if clan else ""
+        except Exception:
+            cilj = ""
+        if not cilj or not hid.startswith(cilj):
+            return None
+        with self._zaklep:
+            rele = self._releji.get(hid)
+            if rele is None:
+                rele = link_rele.LokalniRele(cilj)
+                self._releji[hid] = rele
+        return rele
+
+    def _klici_prek_releja(self, h: dict) -> bool:
+        hid = str(h["id"])
+        zdaj = time.time()
+        if self._premor_releja.get(hid, (0.0, 0.0))[0] > zdaj:
+            return False
+        rele = self._rele(hid)
+        if rele is None:
+            return False
+        naslov = "wss://127.0.0.1:%d/cast/ws" % rele.vrata
+        try:
+            dosegljiv = self._odpri(dict(h, naslov=naslov))
+        except Exception as e:  # noqa: BLE001
+            print("[SafeerLink] mesh: %s prek releja ni dosegljiv (%s)" % (hid, e))
+            dosegljiv = False
+        if dosegljiv:
+            self._premor_releja.pop(hid, None)
+            return True
+        prej = self._premor_releja.get(hid, (0.0, 0.0))[1]
+        premor = min(NAJDALJSI_PREMOR_RELEJA_S, prej * 2 if prej else PREMOR_RELEJA_S)
+        self._premor_releja[hid] = (time.time() + premor, premor)
+        napaka = getattr(rele, "zadnja_napaka", "")
+        print("[SafeerLink] mesh: %s prek releja ni dosegljiv%s; znova cez %d s"
+              % (hid, " (%s)" % napaka if napaka else "", premor))
+        return False
 
     # -- zapomnjeni naslovi
 
@@ -147,8 +245,8 @@ class MeshPovezovalec:
 
     def zapomni(self, hid: str, naslov: str) -> None:
         """Naslov soseda si zapomnimo (iz oglasa ali dohodne povezave; IP brez vrat = privzeta vrata)."""
-        if not hid or hid == self.nas_id or not naslov:
-            return
+        if not hid or hid == self.nas_id or not naslov or _je_zanka(naslov):
+            return               # 127.0.0.1 je rele (Global Link), ne naslov soseda
         if not naslov.startswith("wss://"):
             naslov = "wss://%s:%d/cast/ws" % (naslov, PRIVZETA_VRATA)
         with self._zaklep:
@@ -225,25 +323,40 @@ class MeshPovezovalec:
     def _klici(self, h: dict) -> None:
         hid = str(h["id"])
         try:
-            self._odpri(h)
-        except Exception as e:  # noqa: BLE001
-            print("[SafeerLink] mesh: %s ni dosegljiv (%s)" % (hid, e))
+            dosegljiv = False
+            if hid not in samo_prek_releja():
+                try:
+                    dosegljiv = self._odpri(h)
+                except Exception as e:  # noqa: BLE001
+                    print("[SafeerLink] mesh: %s ni dosegljiv (%s)" % (hid, e))
+                if dosegljiv:
+                    self._neuspehi.pop(hid, None)
+                    return
+                self._neuspehi[hid] = self._neuspehi.get(hid, 0) + 1
+            if self._ustavljen.is_set() or not global_link_vklopljen():
+                return
+            # Neposredno ga ni (zunaj doma ali za pozarnim zidom): prek link.safeer.si.
+            if hid in samo_prek_releja() or self._neuspehi.get(hid, 0) >= RELE_PO_NEUSPEHIH:
+                self._klici_prek_releja(h)
         finally:
             with self._zaklep:
                 self._klicem.discard(hid)
 
-    def _odpri(self, h: dict) -> None:
+    def _odpri(self, h: dict) -> bool:
+        """Poveze se s sosedom in bere do konca povezave. Vrne True, ce je bil sosed na tem naslovu
+        dosegljiv (pravi kljuc in vstopnica) - tudi ce nas je nato zavrnil, ker ze ima drugo povezavo."""
         hid, naslov = str(h["id"]), str(h["naslov"])
         clan = link_krog.krog().clan_za_id(hid)
         if clan is None:
-            return
+            return False
         # Zaupanje: kljuc v potrdilu mora biti kljuc tega clana v krogu (oglas mDNS ne velja nic).
         odtis, kljuc = link_tls.potrdilo_huba(naslov)
         if not odtis or not kljuc or kljuc != clan.get("kljuc"):
-            return
+            return False
         vstopnica, _ = link_hub.vzemi_vstopnico_s_podpisom(naslov, self.nas_id, odtis, self.ime)
         if not vstopnica:
-            return
+            return False
+        dosegljiv = True
         locilo = "&" if "?" in naslov else "?"
         ws = link_hub.WsOdjemalec(f"{naslov}{locilo}ticket={vstopnica}", odtis=odtis)
         ws.odpri()
@@ -255,13 +368,15 @@ class MeshPovezovalec:
         povezava = OdhodnaSosednja(ws, naslov)
         if not self.hub.dodaj_soseda(hid, povezava, self.nas_id):
             povezava.zapri()
-            return
-        print("[SafeerLink] mesh: sosed %s (%s)" % (hid, naslov))
+            return dosegljiv
+        print("[SafeerLink] mesh: sosed %s (%s%s)" % (hid, naslov, ", Global Link" if _je_zanka(naslov) else ""))
         # Premor po zavrnitvi pobrisemo sele, ko nas sosed res sprejme (prvo sporocilo, ki ni zavrnitev);
         # zavrnitev pride sele po odprtju, zato bi ga brisanje tu vedno vrnilo na 30 s.
         self._beri(hid, povezava)
+        return dosegljiv
 
-    def _beri(self, hid: str, povezava: OdhodnaSosednja) -> None:
+    def _beri(self, hid: str, povezava: OdhodnaSosednja) -> bool:
+        """Bere sosedova sporocila do konca povezave; vrne True, ce nas je sosed sprejel."""
         sprejet = False
         try:
             while not povezava.zaprta:
@@ -294,11 +409,29 @@ class MeshPovezovalec:
         finally:
             povezava.zapri()
             self.hub.odklopi(povezava)
+        return sprejet
 
 
 def brez_neposredne() -> set:
     """Samo za preizkus dostave prek vmesnega vozlisca: SAFEER_MESH_BREZ=id1,id2 (brez neposredne povezave)."""
     return {i.strip() for i in os.environ.get("SAFEER_MESH_BREZ", "").split(",") if i.strip()}
+
+
+def samo_prek_releja() -> set:
+    """Samo za preizkus Global Linka doma: SAFEER_MESH_RELE=id1,id2 (te sosede klicemo samo prek releja)."""
+    return {i.strip() for i in os.environ.get("SAFEER_MESH_RELE", "").split(",") if i.strip()}
+
+
+def global_link_vklopljen() -> bool:
+    """Global Link (rele link.safeer.si) je privzeto vklopljen; SAFEER_GLOBAL_LINK=0 ga izklopi."""
+    return os.environ.get("SAFEER_GLOBAL_LINK", "1").strip() != "0"
+
+
+def _je_zanka(naslov: str) -> bool:
+    """Ali naslov kaze na to napravo (127.x, ::1, localhost) - tam je lokalni konec releja."""
+    from urllib.parse import urlparse
+    gostitelj = (urlparse(naslov).hostname if "://" in naslov else naslov.strip("[]")) or ""
+    return gostitelj == "localhost" or gostitelj == "::1" or gostitelj.startswith("127.")
 
 
 def link_hub_streznik_mesh() -> str:

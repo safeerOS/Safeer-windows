@@ -887,8 +887,11 @@ class WsOdjemalec:
                 s.sendall(b"\x88\x80" + os.urandom(4))
         except Exception:
             pass
+        # Samo shutdown, brez close: druga nit morda se bere (TLS). Zaprta stevilka vticnice bi takoj
+        # pripadla naslednji povezavi, OpenSSL v stari niti pa bi bral njene bajte. Vticnico zapre
+        # Python, ko je nobena nit vec ne uporablja.
         try:
-            s.close()
+            s.shutdown(socket.SHUT_RDWR)
         except Exception:
             pass
 
