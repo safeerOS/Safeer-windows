@@ -176,7 +176,8 @@ class SporocilaOS:
             if streznik and "://" not in streznik:
                 streznik = "https://" + streznik
             zeton = str(podatki.get("zeton") or "").strip()
-            if not streznik.startswith("https://") or not zeton:
+            lokalni = streznik.startswith("http://localhost") or streznik.startswith("http://127.")
+            if not (streznik.startswith("https://") or lokalni) or not zeton:
                 raise ValueError("Vnesi naslov strežnika (https://…) in dostopni žeton.")
             nastavitve = {"streznik": streznik}
             a = self._adapter(kid, "matrix", nastavitve, zeton)
