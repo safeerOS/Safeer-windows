@@ -393,3 +393,15 @@ predvajanje vsebin iz TMDB kataloga prek dodatka. Dodano:
   brez IMDb ni vnosa, dodatek kot dodatna različica. Brez omrežja. (Root `tests/` ne teče v Windows CI – lokalno zeleno.)
 Kodi: dodatki so Python vtičniki za Kodi; Medijski center jih odpre na napravi s Kodijem (obstoječe `kodi_odpri_dodatek`),
 samostojni predvajalnik jih ne more poganjati – to piše v nastavitvah/README.
+
+## 2026-09-30 15:58 — Windows GUI r1 PREVERJEN (prijavljena seja 1, opravilo v lastnikovi seji)
+
+`sw_test\gui_r1.cmd` + `gui_r1b.cmd` prek Register-ScheduledTask (LogonType Interactive):
+- Vrata r1 (`run-safeer-gates.py`, r7 + runtime 14.51): MEJNIK 1 PREHOD (av1, dash, png, h264, mpeg4p2 …) → `gates-r1\summary-20260930-155410.json`.
+- Qt vgradnja (`test_okno_win.py`): pogon povezan z wid, predvaja h264 24 s, **vo=gpu-next, hwdec=d3d11va**, celozaslon → nazaj
+  (polozaj tece naprej 6,5 → 9 s), skok na 23 s, PNG posnetek 311 587 B; posnetki 1_okno/2_celozaslon/3_nazaj.png. OKNO_EXIT=0.
+- Prvi tek testa je pogon **nadzorovano zavrnil** (msvcp140 14.44 iz shiboken6 naložen pred runtime/), ker testna skripta ni
+  klicala `predpripravi_runtime()` pred PySide6 – aplikacija to dela; skripta popravljena. Zaščita torej deluje, kot je načrtovano.
+- Safeer OS iz razpakiranega paketa (`sw_test\app`, izbira pogona = libmpv): okno se odpre, domača stran naložena
+  (prvi zagon > 25 s, posnetek po 60 s v redu), brez sesutja; Link/Control zagnan.
+Mejnik 1 je s tem izpolnjen tudi na GUI ravni. Odprto: Windows SMTC; končni paket (SafeerOS.exe z libmpv) še ni izdan.
