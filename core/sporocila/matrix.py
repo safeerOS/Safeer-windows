@@ -160,7 +160,12 @@ class MatrixAdapter(Adapter):
             self._sobe.pop(rid, None)
 
     def pogovori(self, od: Optional[str] = None) -> Iterable[Pogovor]:
+        zacetni = not self._since
         self._sync()
+        if zacetni and self._since:
+            # Synapse zacetni /sync nekaj minut streze iz predpomnilnika (lahko je zastarel); inkrementalni
+            # sync od next_batch takoj prinese, kar je v vmesnem casu prislo (preverjeno na lokalnem Synapse).
+            self._sync()
         izid = []
         for rid, s in self._sobe.items():
             zadnje = s["sporocila"][-1] if s["sporocila"] else None
