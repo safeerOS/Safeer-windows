@@ -130,6 +130,8 @@ class MpvPlayerWidget(QWidget):
         self.volume = QSlider(Qt.Orientation.Horizontal); self.volume.setRange(0, 100); self.volume.setValue(80)
         self.volume.setMaximumWidth(130); self.volume.valueChanged.connect(self._set_volume)
         self.variants = QComboBox(); self.variants.currentIndexChanged.connect(self._change_variant)
+        self.kakovost = QComboBox(); self.kakovost.setVisible(False)   # HLS/DASH razlicice (mpv video sledi)
+        self.kakovost.currentIndexChanged.connect(self._change_kakovost); self._kakovost_kljuc = None
         self.subtitles = QComboBox(); self.subtitles.addItem("CC  Podnapisi izklopljeni", "izklop")
         self.subtitles.currentIndexChanged.connect(self._change_subtitle)
         self.background = QPushButton("♫  Ozadje")
@@ -137,10 +139,10 @@ class MpvPlayerWidget(QWidget):
         self.background.clicked.connect(self.ozadje.emit); self.background.setVisible(False)
         for w in (self.play_button, stop): controls.addWidget(w)
         controls.addWidget(self.position, 1)
-        for w in (self.time_label, volume_label, self.volume, self.variants, self.subtitles, self.background): controls.addWidget(w)
+        for w in (self.time_label, volume_label, self.volume, self.variants, self.kakovost, self.subtitles, self.background): controls.addWidget(w)
         root.addLayout(controls)
         self._fullscreen_control_widgets = [self.play_button, stop, self.position, self.time_label, volume_label,
-                                            self.volume, self.variants, self.subtitles, self.background]
+                                            self.volume, self.variants, self.kakovost, self.subtitles, self.background]
         self._player_layout = root
 
     def odpri_dodatke(self) -> None:
@@ -268,6 +270,25 @@ class MpvPlayerWidget(QWidget):
             self.pogon.pojdi_na(self.position.value() / 1000.0)
         self.seeking = False
 
+    def _osvezi_kakovost(self, p: dict) -> None:
+        s = (p or {}).get("steze") or {}
+        video = s.get("video") or []
+        kljuc = (tuple((t.get("indeks"), t.get("ime")) for t in video), s.get("trenutniVideo"))
+        if kljuc == self._kakovost_kljuc:
+            return
+        self._kakovost_kljuc = kljuc
+        self.kakovost.blockSignals(True); self.kakovost.clear()
+        for t in video:
+            self.kakovost.addItem("▤  " + str(t.get("ime", "")), t.get("indeks"))
+        i = self.kakovost.findData(s.get("trenutniVideo"))
+        self.kakovost.setCurrentIndex(max(0, i)); self.kakovost.setVisible(bool(video)); self.kakovost.blockSignals(False)
+
+    def _change_kakovost(self, index: int) -> None:
+        if self.pogon and index >= 0:
+            tid = self.kakovost.itemData(index)
+            if tid is not None:
+                self.pogon.nastavi_kakovost(int(tid))
+
     def _change_variant(self, index: int) -> None:
         if index >= 0 and self.current_item:
             self.play_item(self.current_item, index)
@@ -296,6 +317,7 @@ class MpvPlayerWidget(QWidget):
         if getattr(self, "mpris", None):
             self.mpris.ob_podatkih(p)
         self.stanje_spremenjeno.emit(p)
+        self._osvezi_kakovost(p)
         if not self.seeking and p.get("trajanje"):
             self.position.setValue(max(0, int(1000 * float(p.get("polozaj") or 0) / float(p["trajanje"]))))
         self.time_label.setText(f"{self._format_time(p.get('polozaj', 0))} / {self._format_time(p.get('trajanje', 0))}")
