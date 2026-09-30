@@ -51,6 +51,8 @@ class SafeerPredvajalnikOkno(QMainWindow):
         a = QAction("Odpri &URL…", self); a.setShortcut("Ctrl+U"); a.triggered.connect(self.odpri_url); m.addAction(a)
         a = QAction("Naloži &podnapise…", self); a.setShortcut("Ctrl+P"); a.triggered.connect(self.nalozi_podnapise); m.addAction(a)
         m.addSeparator()
+        a = QAction("&Brskaj po dodatkih (Stremio)…", self); a.setShortcut("Ctrl+B"); a.triggered.connect(self.brskaj_dodatke); m.addAction(a)
+        m.addSeparator()
         a = QAction("&Zapri", self); a.setShortcut(QKeySequence.Quit); a.triggered.connect(self.close); m.addAction(a)
         p = self.menuBar().addMenu("&Predvajanje")
         for ime, blz, f in (("Predvajaj/premor", "Space", self.pred.premor), ("Naslednja", "N", lambda: self.pred.pogon and self.pred.pogon.naslednja()),
@@ -195,6 +197,29 @@ class SafeerPredvajalnikOkno(QMainWindow):
         if okno.exec():
             n = okno.nastavitve
             self.statusBar().showMessage(f"Dodatki shranjeni: Stremio {len(n['stremio_dodatki'])}, Kodi {len(n['kodi_dodatki'])}", 4000)
+
+    def brskaj_dodatke(self) -> None:
+        """Stremio dodatki, ki jih je uporabnik vnesel: katalog → vnos → tok → predvajanje v tem oknu."""
+        if not self.pred.pogon_pripravljen():
+            QMessageBox.critical(self, "Safeer Predvajalnik", "Predvajalni pogon (libmpv) ni na voljo."); return
+        from .predvajalnik_stremio_okno import StremioOkno
+        okno = StremioOkno(self)
+        if okno.exec() and okno.izbrani_tok:
+            self.predvajaj_tok(okno.izbrani_tok)
+
+    def predvajaj_tok(self, tok: dict) -> bool:
+        """Tok iz dodatka: http/https naslov, po potrebi glave (Referer, User-Agent …) in spletni podnapisi."""
+        url = str(tok.get("url") or "")
+        if not url.lower().startswith(("http://", "https://")) or not self.pred.pogon:
+            return False
+        pg = self.pred.pogon
+        glave = dict(tok.get("glave") or {})
+        pg.nastavi_glave(referer=glave.pop("Referer", glave.pop("referer", "")), user_agent=glave.pop("User-Agent", glave.pop("user-agent", "")), glave=glave)
+        pg.dodaj(url, predvajaj=True, naslov=str(tok.get("naslov") or url))
+        for i, p in enumerate(tok.get("podnapisi") or []):
+            QTimer.singleShot(800, lambda u=p.get("url"), j=p.get("jezik", ""), prvi=(i == 0): pg.nalozi_podnapis_url(str(u), str(j), izberi=prvi))
+        self.statusBar().showMessage(f"Predvajam tok: {tok.get('naslov') or url}", 4000)
+        return True
 
     def nalozi_podnapise(self) -> None:
         pot, _ = QFileDialog.getOpenFileName(self, "Podnapisi", "", "Podnapisi (*.srt *.vtt *.ass *.ssa *.sub)")
