@@ -361,10 +361,21 @@ class SafeerMpvPogon:
                 self._zagotovi().referrer = referer
             if user_agent:
                 self._zagotovi().user_agent = user_agent
-            if glave:
+            if glave is not None:   # {} pocisti glave prejsnjega toka
                 self._zagotovi().http_header_fields = [f"{k}: {v}" for k, v in glave.items()]
         except Exception:
             pass
+
+    def nalozi_podnapis_url(self, url: str, jezik: str = "", izberi: bool = False) -> bool:
+        """Podnapisi s spleta (Stremio tok `subtitles`): mpv jih prenese sam; brez izbire ostanejo na voljo v meniju."""
+        if not str(url).lower().startswith(("http://", "https://")):
+            return False
+        try:
+            self._zagotovi().command("sub-add", url, "select" if izberi else "auto", jezik or "podnapisi", jezik or "")
+        except Exception:
+            return False
+        self._sporoci()
+        return True
 
     def predvajaj(self, indeks: int, zacetek: float = 0.0) -> bool:
         """[zacetek] > 0: predvajanje se zacne pri tem casu (nadaljuj tam, kjer si koncal)."""

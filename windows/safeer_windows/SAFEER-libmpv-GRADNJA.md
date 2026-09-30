@@ -358,3 +358,23 @@ oknu, prekritje skrito, zapiranje PiP zapre predvajanje; naslov »dvazvoka_120s.
 `am broadcast` iz lupine ga ne more sprožiti (sprejemnik ni izvožen – pravilno). Preveri ročno.
 Opomba: `file://` iz `am start` da EACCES (omejen dostop Androida) – to ni napaka aplikacije; upravitelji datotek
 pošljejo `content://`.
+
+## 2026-09-30 14:40 — sklop (5): predvajanje prek Stremio dodatkov (samostojni predvajalnik)
+
+- `stremio_dodatki.py`: odjemalec javnega protokola dodatkov (manifest → katalogi z iskanjem/skip in obveznimi
+  filtri → meta z epizodami → tokovi). Tokovi: `url` (http/https, predvajamo), `externalUrl`/`ytId` (odpremo v
+  brskalniku), `infoHash` (torrent — tu ne predvajamo; Medijski center v Safeer OS ima magnet pot), drugo označeno.
+  `behaviorHints.proxyHeaders.request` → glave (Referer/User-Agent prek mpv lastnosti, ostalo http-header-fields),
+  `subtitles` → `nalozi_podnapis_url` (sub-add s spleta). Samo http/https; brez DRM obvodov; noben dodatek ni priložen.
+- `predvajalnik_stremio_okno.py`: okno Datoteka ▸ Brskaj po dodatkih (Stremio)… (Ctrl+B): dodatek (iz Nastavitve ▸
+  Dodatki) → katalog → iskanje → vnosi → epizode → tokovi (▶ predvajljivi, ↗ zunanji, ⇣ torrent) → Predvajaj.
+  Omrežje v QThreadPool; odgovori z zastarelim rodom se zavržejo (hitro preklapljanje). Popravek med gradnjo:
+  signal iz QRunnable z lokalnim QObject ni prišel (objekt uničen) → en `_Most` v lasti okna.
+- `safeer_predvajalnik.predvajaj_tok(tok)`: glave, dodaj+predvajaj, spletni podnapisi.
+- Preverjeno: `tests/test_stremio_dodatki.py` (lažni dodatek na 127.0.0.1: manifest, katalog, search, skip, meta
+  z epizodami, 5 vrst tokov, zavrnitev file://); GUI klop `test_stremio_gui.py` (katalog → tok → HLS z 2 kakovostma
+  igra, naslov iz kataloga, Referer nastavljen; posnetek 13_stremio.png); protokol tudi proti javnemu Stremio
+  Cinemeta (le katalog/meta): 50 filmov, iskanje serij, 208 epizod. pytest 299 passed.
+Odprto: Medijski center (Safeer OS) ima spletni vmesnik — ista knjižnica, vez v os_app.py je naslednji korak;
+Kodi dodatki so Python vtičniki za Kodi in jih brez Kodija ni mogoče poganjati — polje v nastavitvah ostane, a
+predvajanja prek Kodi dodatkov ne obljubljamo (zabeleži na strani/README).
