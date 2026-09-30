@@ -470,14 +470,22 @@ class SafeerMpvPogon:
 
     # ---- steze ----
     def steze(self) -> dict:
-        zvok, podnapisi = [], [{"indeks": -1, "ime": "Brez"}]
-        trenutni_zvok, trenutni_pod = -1, -1
+        """Zvok, podnapisi in kakovosti videa. HLS/DASH (FFmpeg demuxer) izpostavi vsako razlicico kot svojo
+        video sled z demux-w/h in hls-bitrate; izbira kakovosti = preklop `vid` (preverjeno 2026-09-30).
+        `video` je prazen, ce je le ena video sled (ni kaj izbirati)."""
+        zvok, podnapisi, video = [], [{"indeks": -1, "ime": "Brez"}], []
+        trenutni_zvok, trenutni_pod, trenutni_video = -1, -1, -1
         try:
             for t in (self._mpv.track_list or []):
                 tip = t.get("type")
                 ime = (t.get("title") or t.get("lang") or "").strip()
                 tid = t.get("id")
-                if tip == "audio":
+                if tip == "video":
+                    video.append({"indeks": tid, "ime": _ime_kakovosti(t), "sirina": t.get("demux-w") or 0,
+                                  "visina": t.get("demux-h") or 0, "bitnost": t.get("hls-bitrate") or t.get("demux-bitrate") or 0})
+                    if t.get("selected"):
+                        trenutni_video = tid
+                elif tip == "audio":
                     zvok.append({"indeks": tid, "ime": ime or f"Zvok {tid}"})
                     if t.get("selected"):
                         trenutni_zvok = tid
@@ -487,8 +495,22 @@ class SafeerMpvPogon:
                         trenutni_pod = tid
         except Exception:
             pass
+        if len(video) < 2:
+            video = []
+        else:
+            video.sort(key=lambda v: (-(v["visina"] or 0), -(v["bitnost"] or 0)))
         return {"zvok": zvok, "trenutniZvok": trenutni_zvok,
-                "podnapisi": podnapisi, "trenutniPodnapis": trenutni_pod}
+                "podnapisi": podnapisi, "trenutniPodnapis": trenutni_pod,
+                "video": video, "trenutniVideo": trenutni_video}
+
+    def nastavi_kakovost(self, indeks) -> bool:
+        """Preklopi video sled (kakovost HLS/DASH); predvajanje se nadaljuje z istega mesta."""
+        try:
+            self._zagotovi().vid = int(indeks)
+        except Exception:
+            return False
+        self._sporoci()
+        return True
 
     def nastavi_zvok(self, indeks) -> bool:
         try:
@@ -694,6 +716,19 @@ class SafeerMpvPogon:
                     self._cb_sprememba(self.podatki())
                 except Exception:
                     pass
+
+
+def _ime_kakovosti(t: dict) -> str:
+    """'1920×1080 · 4,5 Mb/s' iz mpv track-list vnosa; brez podatkov 'Video N'."""
+    w, h = t.get("demux-w") or 0, t.get("demux-h") or 0
+    b = t.get("hls-bitrate") or t.get("demux-bitrate") or 0
+    deli = []
+    if w and h:
+        deli.append(f"{int(w)}×{int(h)}")
+    if b:
+        mb = float(b) / 1_000_000
+        deli.append((f"{mb:.1f}".replace(".", ",") if mb < 10 else f"{mb:.0f}") + " Mb/s")
+    return " · ".join(deli) or f"Video {t.get('id')}"
 
 
 def _ime_iz_uri(uri: str) -> str:

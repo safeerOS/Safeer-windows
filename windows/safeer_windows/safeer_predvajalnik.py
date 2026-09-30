@@ -73,6 +73,8 @@ class SafeerPredvajalnikOkno(QMainWindow):
         self._poglavja_kljuc = None
         nast = self.menuBar().addMenu("&Nastavitve")
         a = QAction("&Dodatki (Stremio, Kodi)…", self); a.setShortcut("Ctrl+D"); a.triggered.connect(self.odpri_dodatke); nast.addAction(a)
+        self.meni_kakovost = self.menuBar().addMenu("&Kakovost")
+        self.meni_kakovost.menuAction().setVisible(False)   # le pri HLS/DASH z vec razlicicami
         self.meni_zvok = self.menuBar().addMenu("&Zvok")
         self.meni_podnapisi = self.menuBar().addMenu("Pod&napisi")
         self._steze_kljuc = None
@@ -135,10 +137,16 @@ class SafeerPredvajalnikOkno(QMainWindow):
         """Meniji sledi se osvezijo le, ko se seznam sledi spremeni (ne ob vsakem tiku)."""
         s = p.get("steze") or {}
         kljuc = (tuple((t.get("indeks"), t.get("ime")) for t in s.get("zvok", [])), s.get("trenutniZvok"),
-                 tuple((t.get("indeks"), t.get("ime")) for t in s.get("podnapisi", [])), s.get("trenutniPodnapis"))
+                 tuple((t.get("indeks"), t.get("ime")) for t in s.get("podnapisi", [])), s.get("trenutniPodnapis"),
+                 tuple((t.get("indeks"), t.get("ime")) for t in s.get("video", [])), s.get("trenutniVideo"))
         if kljuc == self._steze_kljuc:
             return
         self._steze_kljuc = kljuc
+        video = s.get("video") or []
+        self.meni_kakovost.clear(); self.meni_kakovost.menuAction().setVisible(bool(video))
+        for t in video:
+            a = QAction(str(t.get("ime", "")), self); a.setCheckable(True); a.setChecked(t.get("indeks") == s.get("trenutniVideo"))
+            a.triggered.connect(lambda _c=False, i=t.get("indeks"): self.pred.pogon and self.pred.pogon.nastavi_kakovost(i)); self.meni_kakovost.addAction(a)
         for meni, sledi, trenutni, f in ((self.meni_zvok, s.get("zvok", []), s.get("trenutniZvok"), lambda i: self.pred.pogon.nastavi_zvok(i)),
                                         (self.meni_podnapisi, s.get("podnapisi", []), s.get("trenutniPodnapis"), lambda i: self.pred.pogon.nastavi_podnapis(i))):
             meni.clear()

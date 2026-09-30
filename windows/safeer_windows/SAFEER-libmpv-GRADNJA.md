@@ -323,3 +323,18 @@ predvajalnikom bo v sklopu 2b, ko preverim protokol Control-a.
   paused, play → playing, seek +40 → 46 s, volume 33, neznan ukaz → None, stop → stopped. pytest 293 passed.
 Odprto: odjemalec daljinca (Android Link) še nima gumbov naslednja/prejšnja; `keys` jih že oglašuje.
 Safeer Control na Linuxu (drug repo) bi lahko isto dosegel prek MPRIS (`org.mpris.MediaPlayer2.safeer*`).
+
+## 2026-09-30 14:10 — sklop (3): izbira kakovosti HLS/DASH
+
+- Ugotovitev (preverjeno z mpv 0.37 / FFmpeg 6.1 na lokalnem HLS master.m3u8 in DASH .mpd z 2 razlicicama):
+  FFmpeg demuxer izpostavi vsako razlicico kot svojo video sled (`demux-w/h`, `hls-bitrate`); mpv izbere ob
+  zacetku po `--hls-bitrate` (privzeto max) in NE preklaplja samodejno. Izbira kakovosti = preklop `vid`;
+  predvajanje se nadaljuje z istega mesta (640→320 v ~1 s).
+- Pogon: `steze()` vrne `video` [{indeks, ime "640×360 · 0,9 Mb/s", sirina, visina, bitnost}] urejeno od
+  najboljse (prazno pri eni sledi) in `trenutniVideo`; `nastavi_kakovost(id)`.
+- Samostojni predvajalnik: meni **Kakovost** (viden le pri ≥2 razlicicah, oznacena trenutna).
+- Medijski center: spustni seznam ▤ Kakovost poleg obstojecega izbora virov (viden le pri ≥2 razlicicah).
+- Preverjeno na klopi: HLS v samostojnem oknu (meni 640×360/320×180, preklop → width 320, polozaj tece naprej,
+  pri lokalni datoteki meni skrit), DASH v Medijskem centru (seznam, preklop → 320). Testi test_mpv_kakovost (3);
+  pytest 296 passed.
+Ni "samodejno" (ABR): mpv tega ne zna; ce bo potreba, je to lastna logika nad `nastavi_kakovost` (odprto).
