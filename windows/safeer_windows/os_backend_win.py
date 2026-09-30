@@ -12,7 +12,7 @@ import subprocess
 import sys
 from typing import List, Optional
 
-CONFIG_DIR = os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~/.config"), "SafeerOS")
+CONFIG_DIR = os.path.join(os.environ.get("APPDATA") or os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "SafeerOS")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "os.json")
 
 MAPE_WINDOWS = [

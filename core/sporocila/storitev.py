@@ -174,6 +174,13 @@ class StoritevSporocil:
             po_osebi[p.oseba_id]["neprebrano"] += p.neprebrano
         return skupine
 
+    def zadnje_smeri(self) -> dict:
+        """(kanal_id, pogovor_id) -> smer zadnjega sporocila ('noter'/'ven'); za mapo Poslano v nabiralniku."""
+        with self._zaklep:
+            vrstice = self.db.execute("""SELECT kanal_id, pogovor_id, smer FROM sporocila WHERE rowid IN
+                (SELECT MAX(rowid) FROM sporocila GROUP BY kanal_id, pogovor_id)""").fetchall()
+        return {(r["kanal_id"], r["pogovor_id"]): r["smer"] for r in vrstice}
+
     def sporocila(self, kanal_id: str, pogovor_id: str, najvec: int = 50):
         with self._zaklep:
             # Enak cas (e-posta ima natancnost sekunde): vrstni red prihoda (rowid) odloci.

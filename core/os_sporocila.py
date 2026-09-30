@@ -191,9 +191,14 @@ class SporocilaOS:
     def seznam(self, kanal: str = "") -> dict:
         skupine = self.storitev.zdruzeni_pogovori(kanal)
         kanali = {k.id: k.slovar() for k in self.storitev.kanali()}
+        try:
+            smeri = self.storitev.zadnje_smeri()
+        except Exception:
+            smeri = {}
         for s in skupine:
             for p in s["pogovori"]:
                 p["kanal"] = kanali.get(p["kanal_id"], {})
+                p["zadnji_ven"] = smeri.get((p["kanal_id"], p["id"])) == "ven"
         return {"kanali": list(kanali.values()), "skupine": skupine}
 
     def pogovor(self, kanal_id: str, pogovor_id: str) -> list:
