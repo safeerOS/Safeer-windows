@@ -338,3 +338,23 @@ Safeer Control na Linuxu (drug repo) bi lahko isto dosegel prek MPRIS (`org.mpri
   pri lokalni datoteki meni skrit), DASH v Medijskem centru (seznam, preklop → 320). Testi test_mpv_kakovost (3);
   pytest 296 passed.
 Ni "samodejno" (ABR): mpv tega ne zna; ce bo potreba, je to lastna logika nad `nastavi_kakovost` (odprto).
+
+## 2026-09-30 14:25 — sklop (4): Android predvajalnik (veja predvajalnik-android, 7895bc2, NI izdano)
+
+Namesto skritih kretenj (Matej 29. 9.: »vidni gumbi in kartice«) vidni gumbi na telefonu/tablici:
+- **Zvočna sled** (`ZvocneSledi.kt`, gumb 🔈 le pri >1 sledi, dialog kot pri podnapisih).
+- **−10 s / +10 s** gumba, **drsnik po posnetku** (SeekBar; premik ob spustu, med vlečenjem se ne prepisuje).
+- **Slika v sliki**: gumb + `supportsPictureInPicture`; razmerje iz videa (omejeno na 1:2,39–2,39:1); gumb
+  predvajaj/premor v PiP oknu (RemoteAction → PendingIntent → sprejemnik, prijavljen samo v PiP); samodejni
+  vstop ob Domov na Androidu 12+ (`setAutoEnterEnabled` med predvajanjem videa), na 8–11 `onUserLeaveHint`;
+  v PiP je prekritje skrito.
+- Popravka mimogrede: naslov pri `content://` je bil številka (zdaj DISPLAY_NAME); v samostojnem predvajalniku
+  je Nazaj iz Medijev vodil v Domov Safeer OS (»Poveži naprave« itd.) – zdaj Nazaj iz razdelka → Mediji, iz
+  Medijev → izhod.
+Preverjeno na WP28_S (Android 14) z datoteko z 2 zvočnima sledema (slv/eng): gumbi vidni, dialog »Zvočna sled«
+(Slovenščina · mono / Angleščina · mono), preklop na angleško obvelja; PiP se odpre (316×178, 16:9), video teče v
+oknu, prekritje skrito, zapiranje PiP zapre predvajanje; naslov »dvazvoka_120s.mp4«; Nazaj: Datoteke → Mediji → izhod.
+**Nepreverjeno:** gumb predvajaj/premor v PiP oknu – z adb dotiki nisem zadel gumba (dotik je okno razširil);
+`am broadcast` iz lupine ga ne more sprožiti (sprejemnik ni izvožen – pravilno). Preveri ročno.
+Opomba: `file://` iz `am start` da EACCES (omejen dostop Androida) – to ni napaka aplikacije; upravitelji datotek
+pošljejo `content://`.
