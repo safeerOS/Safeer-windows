@@ -34,7 +34,11 @@ class StoritevSporocil:
               CREATE TABLE IF NOT EXISTS sporocila(id TEXT,pogovor_id TEXT,kanal_id TEXT,smer TEXT,
                 besedilo TEXT,cas TEXT,priponke TEXT,stanje TEXT,PRIMARY KEY(id,kanal_id));
               CREATE TABLE IF NOT EXISTS kanal_stanje(id TEXT PRIMARY KEY, podatki TEXT);
+              CREATE TABLE IF NOT EXISTS oznake(kanal_id TEXT,pogovor_id TEXT,oznaka TEXT,PRIMARY KEY(kanal_id,pogovor_id,oznaka));
             """)
+            # Surova identiteta pogovora (naslov/racun pri kanalu) - potrebna za razdruzitev oseb.
+            if "identiteta" not in {r[1] for r in self.db.execute("PRAGMA table_info(pogovori)")}:
+                self.db.execute("ALTER TABLE pogovori ADD COLUMN identiteta TEXT NOT NULL DEFAULT ''")
         self._sinhronizacija = threading.Lock()
         self._obnovljeni = set()
 
@@ -99,8 +103,8 @@ class StoritevSporocil:
                                                (p.id, kid)).fetchone()
                         # Inkrementalno: nova neprebrana se pristejejo k ze znanim.
                         neprebrano = p.neprebrano + (int(prej["neprebrano"] or 0) if prej and hasattr(adapter, "obnovi") else 0)
-                        self.db.execute("INSERT OR REPLACE INTO pogovori VALUES(?,?,?,?,?,?,?)",
-                            (p.id, kid, oseba_id, p.zadeva, p.zadnje_sporocilo, neprebrano, p.cas))
+                        self.db.execute("INSERT OR REPLACE INTO pogovori(id,kanal_id,oseba_id,zadeva,zadnje_sporocilo,neprebrano,cas,identiteta) VALUES(?,?,?,?,?,?,?,?)",
+                            (p.id, kid, oseba_id, p.zadeva, p.zadnje_sporocilo, neprebrano, p.cas, str(p.oseba_id)))
                         for s in sporocila:
                             self._shrani_sporocilo(kid, s)
                         skupaj += 1
@@ -161,16 +165,56 @@ class StoritevSporocil:
                              r["zadnje_sporocilo"], r["neprebrano"], r["cas"])
                     for r in self.db.execute(sql, args)]
 
+    # ---- oznake pogovorov (uporabnikove; lokalno) ----
+    def oznake_pogovorov(self) -> dict:
+        with self._zaklep:
+            izid: dict = {}
+            for r in self.db.execute("SELECT kanal_id,pogovor_id,oznaka FROM oznake ORDER BY oznaka COLLATE NOCASE"):
+                izid.setdefault((r["kanal_id"], r["pogovor_id"]), []).append(r["oznaka"])
+            return izid
+
+    def vse_oznake(self) -> list:
+        with self._zaklep:
+            return [r[0] for r in self.db.execute("SELECT DISTINCT oznaka FROM oznake ORDER BY oznaka COLLATE NOCASE")]
+
+    def nastavi_oznake(self, kanal_id: str, pogovor_id: str, oznake) -> list:
+        ciste = []
+        for o in oznake or []:
+            o = str(o).strip()[:40]
+            if o and o.casefold() not in {c.casefold() for c in ciste}:
+                ciste.append(o)
+        with self._zaklep, self.db:
+            self.db.execute("DELETE FROM oznake WHERE kanal_id=? AND pogovor_id=?", (kanal_id, pogovor_id))
+            self.db.executemany("INSERT OR IGNORE INTO oznake VALUES(?,?,?)", [(kanal_id, pogovor_id, o) for o in ciste])
+        return ciste
+
+    def zdruzi_osebi(self, cilj_id: str, drugi_id: str):
+        """Drugo osebo zdruzi v cilj; njeni pogovori se preselijo k cilju."""
+        oseba = self.graf.zdruzi(cilj_id, drugi_id)
+        with self._zaklep, self.db:
+            self.db.execute("UPDATE pogovori SET oseba_id=? WHERE oseba_id=?", (cilj_id, drugi_id))
+        return oseba
+
+    def razdruzi_osebo(self, oseba_id: str, identiteta, novo_ime: str = ""):
+        """Identiteto (vrsta, naslov) izloci v novo osebo; pogovori te identitete gredo z njo."""
+        nova = self.graf.razdruzi(oseba_id, [tuple(identiteta)], novo_ime)
+        with self._zaklep, self.db:
+            self.db.execute("UPDATE pogovori SET oseba_id=? WHERE oseba_id=? AND (identiteta=? OR id=?)",
+                            (nova.id, oseba_id, str(identiteta[1]), str(identiteta[1])))
+        return nova
+
     def zdruzeni_pogovori(self, kanal: str = ""):
         skupine = []
         po_osebi = {}
+        oznake = self.oznake_pogovorov()
         for p in self.pogovori(kanal):
             if p.oseba_id not in po_osebi:
                 oseba = self.graf.oseba(p.oseba_id)
                 vnos = {"oseba": oseba.slovar() if oseba else {"id": p.oseba_id, "ime": p.oseba_id, "identitete": []},
                         "pogovori": [], "cas": p.cas, "neprebrano": 0}
                 po_osebi[p.oseba_id] = vnos; skupine.append(vnos)
-            po_osebi[p.oseba_id]["pogovori"].append(p.slovar())
+            slovar = p.slovar(); slovar["oznake"] = oznake.get((p.kanal_id, p.id), [])
+            po_osebi[p.oseba_id]["pogovori"].append(slovar)
             po_osebi[p.oseba_id]["neprebrano"] += p.neprebrano
         return skupine
 

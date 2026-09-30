@@ -64,6 +64,10 @@ class IdentitetniGraf:
                     iz_id TEXT PRIMARY KEY, v_id TEXT NOT NULL
                 );
             """)
+            # Lastno ime (uporabnik ga doloci sam; sinhronizacija ga ne prepise) - dodano naknadno.
+            stolpci = {r[1] for r in self._db.execute("PRAGMA table_info(osebe)")}
+            if "lastno_ime" not in stolpci:
+                self._db.execute("ALTER TABLE osebe ADD COLUMN lastno_ime TEXT NOT NULL DEFAULT ''")
 
     def zapri(self) -> None:
         self._db.close()
@@ -93,12 +97,19 @@ class IdentitetniGraf:
 
     def oseba(self, oseba_id: str) -> Optional[Oseba]:
         with self._zaklep:
-            vrstica = self._db.execute("SELECT id,ime FROM osebe WHERE id=?", (oseba_id,)).fetchone()
+            vrstica = self._db.execute("SELECT id,ime,lastno_ime FROM osebe WHERE id=?", (oseba_id,)).fetchone()
             if not vrstica:
                 return None
             identitete = [(r["vrsta"], r["naslov"]) for r in self._db.execute(
                 "SELECT vrsta,naslov FROM identitete WHERE oseba_id=? ORDER BY vrsta,naslov", (oseba_id,))]
-            return Oseba(vrstica["id"], vrstica["ime"], identitete)
+            lastno = str(vrstica["lastno_ime"] or "")
+            return Oseba(vrstica["id"], lastno or vrstica["ime"], identitete, privzeto_ime=vrstica["ime"], lastno_ime=lastno)
+
+    def preimenuj(self, oseba_id: str, ime: str) -> Optional[Oseba]:
+        """Uporabnikovo ime za osebo (prazno = nazaj na ime iz kanala)."""
+        with self._zaklep, self._db:
+            self._db.execute("UPDATE osebe SET lastno_ime=? WHERE id=?", (str(ime or "").strip()[:80], oseba_id))
+        return self.oseba(oseba_id)
 
     def najdi(self, vrsta: str, naslov: str) -> Optional[Oseba]:
         with self._zaklep:
@@ -116,6 +127,8 @@ class IdentitetniGraf:
             return
         self._db.execute("UPDATE identitete SET oseba_id=? WHERE oseba_id=?", (v_id, iz_id))
         self._db.execute("INSERT OR REPLACE INTO zdruzitve(iz_id,v_id) VALUES(?,?)", (iz_id, v_id))
+        self._db.execute("""UPDATE osebe SET lastno_ime=(SELECT lastno_ime FROM osebe WHERE id=?)
+                            WHERE id=? AND lastno_ime=''""", (iz_id, v_id))
         self._db.execute("DELETE FROM osebe WHERE id=?", (iz_id,))
 
     def zdruzi(self, prvi_id: str, drugi_id: str) -> Oseba:

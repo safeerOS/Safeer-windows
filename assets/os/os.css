@@ -823,8 +823,14 @@ div.vrstica { cursor: default; }
 .pogovor-pano { width:260px; border-left:1px solid var(--rob); padding:16px; overflow-y:auto; display:flex; flex-direction:column; gap:16px; }
 .pano-oseba { display:flex; flex-direction:column; align-items:center; gap:6px; text-align:center; }
 .pano-avatar { width:64px; height:64px; border-radius:50%; background:rgba(84,214,165,.18); color:var(--zelena); display:grid; place-items:center; font-size:24px; font-weight:700; }
-.pano-oseba small { color:var(--medlo); } .pano-skupina b { display:block; font-size:12px; letter-spacing:.06em; text-transform:uppercase; color:var(--medlo); margin-bottom:6px; }
-.pano-skupina .identiteta { display:block; padding:6px 0; border-bottom:1px solid var(--rob); font-size:13px; word-break:break-all; }
+.pano-oseba small { color:var(--medlo); } .pano-gumbi { display:flex; gap:6px; margin-top:6px; } .pano-gumbi .gumb { padding:6px 10px; font-size:12px; }
+.oznake-cipi { display:flex; flex-wrap:wrap; gap:6px; } .oznake-cipi span { display:inline-flex; align-items:center; gap:4px; padding:3px 8px; border-radius:999px; background:rgba(84,214,165,.16); color:var(--zelena); font-size:12px; }
+.oznake-cipi span button { background:none; color:inherit; padding:0 2px; font-size:13px; line-height:1; }
+.oznaka-vnos { display:flex; gap:6px; margin-top:8px; } .oznaka-vnos input { flex:1; min-width:0; border:1px solid var(--rob); border-radius:8px; background:#111b27; padding:6px 8px; } .oznaka-vnos .gumb { padding:4px 10px; }
+.oznake-mape button { padding:6px 12px; } .oznake-mape button span::before { content:"#"; color:var(--medlo); margin-right:4px; }
+.pogovor-vrstica .oznaka-pogovora { display:inline-block; margin-left:4px; padding:0 6px; border-radius:6px; background:rgba(84,214,165,.14); color:var(--zelena); font-size:11px; vertical-align:middle; } .pano-skupina b { display:block; font-size:12px; letter-spacing:.06em; text-transform:uppercase; color:var(--medlo); margin-bottom:6px; }
+.pano-skupina .identiteta { display:flex; align-items:center; gap:6px; padding:6px 0; border-bottom:1px solid var(--rob); font-size:13px; word-break:break-all; }
+.pano-skupina .identiteta .gumb { margin-left:auto; flex:none; }
 .pogovor-naslov { display:flex; align-items:center; justify-content:space-between; gap:10px; }
 .pogovor-naslov-besedilo b { display:block; } .pogovor-naslov-besedilo small { color:var(--medlo); font-weight:400; }
 .pogovor-vrstica .oznaka-kanala { display:inline-block; margin-left:6px; padding:1px 6px; border-radius:6px; background:rgba(255,255,255,.08); font-size:11px; color:var(--medlo); vertical-align:middle; }

@@ -47,13 +47,16 @@ class Kanal(JSONModel):
 @dataclass
 class Oseba(JSONModel):
     id: str
-    ime: str
+    ime: str                      # prikazno ime: uporabnikovo lastno ime, sicer ime iz kanala
     identitete: List[Tuple[str, str]] = field(default_factory=list)
+    privzeto_ime: str = ""        # ime, kot ga da kanal (profil, glava From) - ostane vidno tudi po preimenovanju
+    lastno_ime: str = ""          # ime, ki ga je dal uporabnik (ima prednost, sinhronizacija ga ne prepise)
 
     @classmethod
     def iz_slovarja(cls, podatki: Dict[str, Any]) -> "Oseba":
         return cls(id=str(podatki.get("id", "")), ime=str(podatki.get("ime", "")),
-                   identitete=[(str(v), str(n)) for v, n in podatki.get("identitete", [])])
+                   identitete=[(str(v), str(n)) for v, n in podatki.get("identitete", [])],
+                   privzeto_ime=str(podatki.get("privzeto_ime", "")), lastno_ime=str(podatki.get("lastno_ime", "")))
 
 
 @dataclass

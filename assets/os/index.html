@@ -299,6 +299,8 @@
               <button data-mapa="poslano"><svg data-ikona="poslji"></svg><span data-t="mapaPoslano"></span></button>
               <button data-mapa="vsi"><svg data-ikona="arhiv"></svg><span data-t="mapaVsiPogovori"></span></button>
             </div>
+            <b class="nabiralnik-naslov" data-t="oznakeNaslov"></b>
+            <div class="mape oznake-mape" id="sporocilaOznake"></div>
             <b class="nabiralnik-naslov" data-t="kanaliNaslov"></b>
             <div class="kanali-seznam" id="sporocilaKanali"></div>
           </aside>
@@ -317,7 +319,10 @@
             <div class="pogovor-telo">
               <div class="pogovor-vsebina" id="sporocilaVsebina"></div>
               <aside class="pogovor-pano" id="sporocilaPanoVsebina" hidden>
-                <div class="pano-oseba"><span class="pano-avatar" id="panoAvatar"></span><b id="panoIme"></b><small id="panoKanal"></small></div>
+                <div class="pano-oseba"><span class="pano-avatar" id="panoAvatar"></span><b id="panoIme"></b><small id="panoPrivzeto"></small><small id="panoKanal"></small>
+                  <div class="pano-gumbi"><button type="button" class="gumb" id="panoPreimenuj" data-t="panoPreimenuj"></button><button type="button" class="gumb" id="panoZdruzi" data-t="panoZdruzi"></button></div></div>
+                <div class="pano-skupina"><b data-t="panoOznake"></b><div class="oznake-cipi" id="panoOznake"></div>
+                  <form class="oznaka-vnos" id="panoOznakaObrazec"><input id="panoOznakaVnos" list="seznamOznak" maxlength="40" data-ph="panoNovaOznaka"><datalist id="seznamOznak"></datalist><button type="submit" class="gumb">+</button></form></div>
                 <div class="pano-skupina"><b data-t="panoIdentitete"></b><div id="panoIdentitete"></div></div>
                 <div class="pano-skupina"><b data-t="panoPriponke"></b><div id="panoPriponke"><p class="drobno" data-t="panoNiPriponk"></p></div></div>
               </aside>
@@ -571,6 +576,17 @@
     <p class="drobno" id="kanalUrediOpis"></p>
     <input id="kanalUrediGeslo" type="password" autocomplete="current-password" data-ph="gesloAplikacije">
     <div class="gumbi"><button type="button" class="gumb" id="kanalOdstrani" data-t="odstraniKanal"></button><button type="button" class="gumb" id="kanalUrediPreklici" data-t="preklici"></button><button class="gumb glavni" type="submit" data-t="povezi"></button></div>
+  </form>
+</div>
+
+<!-- Oseba: preimenuj / zdruzi z drugo osebo -->
+<div class="sloj" id="slojOseba"><div class="tancica"></div>
+  <form class="plosca kanal-carovnik" id="obrazecOseba">
+    <h3 id="osebaNaslov"></h3>
+    <p class="drobno" id="osebaOpis"></p>
+    <input id="osebaIme" type="text" maxlength="80" autocomplete="off">
+    <select id="osebaIzbira" hidden></select>
+    <div class="gumbi"><button type="button" class="gumb" id="osebaPreklici" data-t="preklici"></button><button class="gumb glavni" type="submit" id="osebaPotrdi" data-t="shrani"></button></div>
   </form>
 </div>
 

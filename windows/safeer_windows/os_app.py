@@ -2114,6 +2114,16 @@ class SafeerOsWindow(QMainWindow):
             return s.privzeta_streznika(prvi)
         if metoda == "sporocilaPonudniki":
             return s.ponudniki()
+        if metoda == "sporocilaPreimenuj":
+            return s.preimenuj_osebo(str(a[0]), str(a[1]))
+        if metoda == "sporocilaZdruzi":
+            return s.zdruzi_osebi(str(a[0]), str(a[1]))
+        if metoda == "sporocilaRazdruzi":
+            return s.razdruzi_osebo(str(a[0]), a[1])
+        if metoda == "sporocilaOznake":
+            return s.nastavi_oznake(str(a[0]), str(a[1]), a[2] if len(a) > 2 else [])
+        if metoda == "sporocilaOsebe":
+            return s.osebe()
         raise ValueError("neznano")
 
     def koncaj_za_posodobitev(self) -> None:
