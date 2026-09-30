@@ -42,6 +42,7 @@ class _PlayerShim:
 class MpvPlayerWidget(QWidget):
     nazaj = Signal()
     ozadje = Signal()
+    stanje_spremenjeno = Signal(dict)   # podatki pogona (nit vmesnika): os_app jih posreduje daljincu (Link)
     _sprememba = Signal(dict)     # iz mpv niti v nit vmesnika
     _napaka = Signal(str)
 
@@ -294,6 +295,7 @@ class MpvPlayerWidget(QWidget):
             _log.debug("nadaljuj: %s", e)
         if getattr(self, "mpris", None):
             self.mpris.ob_podatkih(p)
+        self.stanje_spremenjeno.emit(p)
         if not self.seeking and p.get("trajanje"):
             self.position.setValue(max(0, int(1000 * float(p.get("polozaj") or 0) / float(p["trajanje"]))))
         self.time_label.setText(f"{self._format_time(p.get('polozaj', 0))} / {self._format_time(p.get('trajanje', 0))}")

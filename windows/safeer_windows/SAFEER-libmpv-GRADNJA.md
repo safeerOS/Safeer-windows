@@ -306,3 +306,20 @@ Odprto: Windows SMTC (System Media Transport Controls) — potrebuje WinRT (pake
 brez prijave na Windows PC ni preverljivo, zato ga ne dodajam na slepo. Na Windows zaenkrat delujejo medijske tipke,
 ko ima okno fokus. Link daljinec: ukazi gredo prek Safeer Control → navidezni zaslon (tipke); posebna vez s
 predvajalnikom bo v sklopu 2b, ko preverim protokol Control-a.
+
+## 2026-09-30 14:00 — sklop (2b): daljinec Link → Medijski center (v istem procesu)
+
+- `control_backend.py`: `ob_mediju(ukaz, params)` (os_app nastavi). Tipke daljinca `play_pause/play/pause/stop/
+  next/previous` gredo najprej v Medijski center; če ta ne predvaja (`ni_predvajanja`) ali ga ni, ostane dosedanje
+  vedenje (navidezni zaslon). Nov ukaz `media` (`cmd`: play_pause, play, pause, stop, next, previous, seek
+  {seconds}, volume {level}); `status` dobi `media` {active, status, title, position, duration, volume, index,
+  count, engine}, `actions` += media, `keys` += next, previous. Dovoljenje kot za `key` (profil polno).
+- `os_app.py`: `_link_medij` (omrežna nit → `dispatcher` → nit vmesnika; odgovor takoj z zadnjim znanim
+  stanjem), `_media_zabelezi_stanje` (cache pod ključavnico iz signala `MpvPlayerWidget.stanje_spremenjeno`).
+  Z VLC pogonom: play_pause/play/pause/stop; z mpv še next/previous/seek/volume.
+- Preverjeno: `tests/test_link_medij.py` (3 testi: tipke → predvajalnik, neznana tipka → navidezni zaslon, brez
+  predvajanja → navidezni zaslon, `media` brez centra → `ni_medija`, status z `media`); Linux klop
+  `test_link_medij_gui.py` z MpvPlayerWidget iz tuje niti: status (stopped→playing "Film" 120 s), play_pause →
+  paused, play → playing, seek +40 → 46 s, volume 33, neznan ukaz → None, stop → stopped. pytest 293 passed.
+Odprto: odjemalec daljinca (Android Link) še nima gumbov naslednja/prejšnja; `keys` jih že oglašuje.
+Safeer Control na Linuxu (drug repo) bi lahko isto dosegel prek MPRIS (`org.mpris.MediaPlayer2.safeer*`).

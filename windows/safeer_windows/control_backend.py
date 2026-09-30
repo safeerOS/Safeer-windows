@@ -28,6 +28,10 @@ CONFIG_DIR = os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~/.co
 CONFIG_FILE = os.path.join(CONFIG_DIR, "link.json")
 #: Magnet povezava z druge naprave v krogu: odpre jo Safeer OS (Medijski center), kot na Linuxu.
 DEJANJA_MAGNET = ["magnet.open"]
+#: Daljinec (Link) upravlja Medijski center v istem procesu (os_app nastavi ob_mediju). Tipke daljinca
+#: play_pause/play/pause/stop/next/previous gredo najprej v predvajalnik; "media" je izrecni ukaz s parametri.
+DEJANJA_MEDIJ = ["media"]
+TIPKE_MEDIJ = ("play_pause", "play", "pause", "stop", "next", "previous", "naslednja", "prejsnja")
 
 
 class _WindowsDeljenjeZaslona(link_deljenje.DeljenjeZaslona):
@@ -82,6 +86,9 @@ class SafeerControlBackend:
         self.ob_klepetu: Optional[Callable[[dict], None]] = None
         #: Magnet povezava z druge naprave (magnet.open): os_app jo odpre v Medijskem centru istega procesa.
         self.ob_magnetu: Optional[Callable[[str], None]] = None
+        #: Medijski center (os_app): ob_mediju(ukaz, params) -> izid dict ali None (ni obdelano -> navidezni zaslon).
+        #: Klic pride iz omrezne niti; os_app ga sam prenese v nit vmesnika.
+        self.ob_mediju: Optional[Callable[[str, dict], Optional[Dict[str, Any]]]] = None
         self._poslusavci: List[Callable[[str, Any], None]] = []
         self._povezovanje = False
         self._zadnji_hubi: List[dict] = []
@@ -1026,6 +1033,11 @@ class SafeerControlBackend:
                 stanje_naprave = dict(self.navidezni_zaslon.stanje_naprave())
                 if self.magnet_na_voljo():
                     stanje_naprave["actions"] = list(stanje_naprave.get("actions") or []) + DEJANJA_MAGNET
+                medij = self._medij("status", {})
+                if medij is not None:
+                    stanje_naprave["actions"] = list(stanje_naprave.get("actions") or []) + DEJANJA_MEDIJ
+                    stanje_naprave["keys"] = list(dict.fromkeys(list(stanje_naprave.get("keys") or []) + ["next", "previous"]))
+                    stanje_naprave["media"] = medij.get("data") or {}
                 izid = {
                     "ok": True,
                     "message": "Stanje",
@@ -1035,10 +1047,18 @@ class SafeerControlBackend:
             elif akcija in DEJANJA_MAGNET:
                 izid = self.odpri_magnet(str(params.get("uri") or ""))
 
+            elif akcija in DEJANJA_MEDIJ:
+                izid = self._medij(str(params.get("cmd") or params.get("key") or ""), dict(params)) or {
+                    "ok": False, "message": "Medijski center ni na voljo", "code": "ni_medija"}
+
             elif akcija in ("key", "key_down", "key_up"):
                 k = str(params.get("key") or "")
-                self.navidezni_zaslon.obdelaj_tipko(k)
-                izid = {"ok": True, "message": f"Tipka {k}"}
+                medij = self._medij(k, {}) if (akcija == "key" and k.strip().lower() in TIPKE_MEDIJ) else None
+                if medij is not None and medij.get("ok"):
+                    izid = medij
+                else:
+                    self.navidezni_zaslon.obdelaj_tipko(k)
+                    izid = {"ok": True, "message": f"Tipka {k}"}
 
             elif akcija == "scroll":
                 smer = str(params.get("direction") or "down")
@@ -1187,6 +1207,18 @@ class SafeerControlBackend:
             "akcija": akcija,
             "izid": izid,
         })
+
+    # ------------------------------------------------------------------ Medijski center (daljinec)
+    def _medij(self, ukaz: str, params: dict) -> Optional[Dict[str, Any]]:
+        """Preda ukaz daljinca Medijskemu centru v istem procesu; None, ce ga ni ali ukaza ne pozna."""
+        if self.ob_mediju is None:
+            return None
+        try:
+            izid = self.ob_mediju(str(ukaz or "").strip().lower(), params or {})
+        except Exception as e:  # noqa: BLE001
+            print(f"[SafeerControl] medij {ukaz}: {e}")
+            return None
+        return izid if isinstance(izid, dict) else None
 
     # ------------------------------------------------------------------ Magnet povezave
     def magnet_na_voljo(self) -> bool:

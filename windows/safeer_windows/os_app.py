@@ -452,6 +452,12 @@ class SafeerOsWindow(QMainWindow):
         self.control_backend.ob_klepetu = self._prejmi_klepet
         # Magnet z druge naprave v Linku (magnet.open) se odpre tukaj, v Medijskem centru.
         self.control_backend.ob_magnetu = lambda uri: self.odpri_magnet("naprava:" + uri)
+        # Daljinec (Link) upravlja Medijski center: tipke play_pause/stop/next/previous in ukaz "media".
+        self._media_stanje: dict = {}
+        self._media_kljuc = threading.Lock()
+        if hasattr(self.media_player, "stanje_spremenjeno"):
+            self.media_player.stanje_spremenjeno.connect(self._media_zabelezi_stanje)
+        self.control_backend.ob_mediju = self._link_medij
         # Zacasni profili predvajalnika iz prejsnjih zagonov; v ozadju, da zagon ni pocasnejsi.
         threading.Thread(target=webview2_media.pocisti_seje, kwargs={"starejse_od_s": 120}, daemon=True).start()
         self.browser_window.na_zapisek = self._izrezek_iz_spleta
@@ -797,6 +803,72 @@ class SafeerOsWindow(QMainWindow):
             self.setWindowTitle(f"Safeer OS · Media · {item.get('naslov', '')}")
         else:
             self.poslji_dogodek("mediaFallback", item)
+
+    # ------------------------------------------------------------------ daljinec (Link) -> Medijski center
+    def _media_zabelezi_stanje(self, p: dict) -> None:
+        """Nit vmesnika: zadnje stanje pogona za daljinec (bere ga omrezna nit Linka)."""
+        with self._media_kljuc:
+            self._media_stanje = dict(p or {})
+
+    def _media_stanje_za_daljinec(self) -> dict:
+        with self._media_kljuc:
+            p = dict(self._media_stanje)
+        mp = self.media_player
+        predvaja = bool(mp.player and mp.player.is_playing()) if mp.player else False
+        stanje = p.get("stanje") or ("playing" if predvaja else "stopped")
+        stanje = {"predvaja": "playing", "premor": "paused", "ustavljeno": "stopped"}.get(stanje, stanje)
+        return {
+            "active": stanje != "stopped",
+            "status": stanje,
+            "title": str(p.get("naslov") or mp.current_item.get("naslov") or ""),
+            "position": int(float(p.get("polozaj") or 0)),
+            "duration": int(float(p.get("trajanje") or 0)),
+            "volume": int(p.get("glasnost") or 0),
+            "index": int(p.get("indeks", -1)) if p else -1,
+            "count": int(p.get("nSeznam") or 0),
+            "engine": "mpv" if hasattr(mp, "pogon") else "vlc",
+        }
+
+    def _link_medij(self, ukaz: str, params: dict) -> Optional[dict]:
+        """Ukaz daljinca (omrezna nit). Izvedba gre v nit vmesnika; odgovor je takojsen z zadnjim znanim stanjem.
+
+        Podpira: status, play_pause, play, pause, stop, next/naslednja, previous/prejsnja, seek (seconds),
+        volume (level). Vse ostalo -> None (Control ga obdela na navideznem zaslonu)."""
+        mp = self.media_player
+        stanje = self._media_stanje_za_daljinec()
+        if ukaz == "status":
+            return {"ok": True, "message": "Medijski center", "data": stanje}
+        if not stanje["active"] and ukaz not in ("status",):
+            return {"ok": False, "message": "Nič se ne predvaja", "code": "ni_predvajanja", "data": stanje}
+        pogon = getattr(mp, "pogon", None)
+
+        def gui() -> None:
+            if ukaz == "play_pause":
+                mp.toggle_play()
+            elif ukaz == "play":
+                if stanje["status"] != "playing":
+                    mp.toggle_play()
+            elif ukaz == "pause":
+                if stanje["status"] == "playing":
+                    mp.toggle_play()
+            elif ukaz == "stop":
+                self._zapri_media()
+            elif ukaz in ("next", "naslednja") and pogon:
+                pogon.naslednja()
+            elif ukaz in ("previous", "prejsnja") and pogon:
+                pogon.prejsnja()
+            elif ukaz == "seek" and pogon:
+                pogon.skok(float(params.get("seconds") or params.get("sekunde") or 0))
+            elif ukaz == "volume" and pogon and params.get("level") is not None:
+                pogon.nastavi_glasnost(int(params["level"]))
+
+        znani = {"play_pause", "play", "pause", "stop"} | ({"next", "naslednja", "previous", "prejsnja", "seek", "volume"} if pogon else set())
+        if ukaz not in znani:
+            return None
+        self.dispatcher.dispatch(gui)
+        return {"ok": True, "message": {"play_pause": "Predvajaj/premor", "play": "Predvajaj", "pause": "Premor", "stop": "Ustavi",
+                                        "next": "Naslednja", "naslednja": "Naslednja", "previous": "Prejšnja", "prejsnja": "Prejšnja",
+                                        "seek": "Premik", "volume": "Glasnost"}.get(ukaz, ukaz), "data": stanje}
 
     def _zapri_media(self) -> None:
         self.media_player.stop()
