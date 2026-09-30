@@ -552,8 +552,19 @@ def stremio_tokovi(koren: str, tip: str, ident: str) -> list[dict]:
     for t in data.get("streams") or []:
         url = str(t.get("url") or "")
         if url.startswith(("https://", "http://")):
-            tokovi.append({"url": url, "vir": (t.get("name") or t.get("title") or "Stremio").split("\n")[0][:60],
-                           "kakovost": (t.get("title") or "").split("\n")[0][:40]})
+            tok = {"url": url, "vir": (t.get("name") or t.get("title") or "Stremio").split("\n")[0][:60],
+                   "kakovost": (t.get("title") or "").split("\n")[0][:40]}
+            # behaviorHints.proxyHeaders.request: glave, ki jih tok zahteva (Referer, User-Agent ...); predvajalnik
+            # jih poslje sam. subtitles: podnapisi s spleta (predvajalnik jih ponudi v meniju).
+            namigi = t.get("behaviorHints") if isinstance(t.get("behaviorHints"), dict) else {}
+            glave = ((namigi.get("proxyHeaders") or {}).get("request") if isinstance(namigi.get("proxyHeaders"), dict) else None) or {}
+            if isinstance(glave, dict) and glave:
+                tok["glave"] = {str(k)[:80]: str(v)[:500] for k, v in glave.items() if "\n" not in str(v) and "\r" not in str(v)}
+            podnapisi = [{"uri": str(p.get("url")), "jezik": str(p.get("lang") or "")[:12]}
+                         for p in (t.get("subtitles") or []) if isinstance(p, dict) and str(p.get("url") or "").startswith(("https://", "http://"))]
+            if podnapisi:
+                tok["podnapisi"] = podnapisi[:24]
+            tokovi.append(tok)
         elif str(t.get("externalUrl") or "").startswith("https://"):
             tokovi.append({"url": t["externalUrl"], "vir": (t.get("name") or "Stremio")[:60], "zunanje": True})
         elif t.get("infoHash"):
