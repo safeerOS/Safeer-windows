@@ -432,3 +432,15 @@ Mejnik 1 je s tem izpolnjen tudi na GUI ravni. Odprto: Windows SMTC; končni pak
   ukazi iz sistema pause→Paused(5), play→Playing(4), stop→Stopped(3); dnevnik predvajalnika: "SMTC gumb: pause/play/stop".
   Testi: `windows/tests/test_predvajalnik_smtc.py` (2); windows/tests 301 passed.
 - Ni preverjeno: prikaz naslova na zaklenjenem zaslonu / Bluetooth slušalke (isti kanal SMTC, brez naprave za preizkus).
+
+## 2026-09-30 17:55 — Teme (namizje + Android), Link gumbi, Kodi opomba
+- Izbor tem po raziskavi (devresourc.es "Best VS Code Themes 2026", moltamp.com "Best Terminal Color Schemes 2026"):
+  najbolj razširjene čez aplikacije so Catppuccin, Tokyo Night, Gruvbox, Nord, Dracula (vse MIT, uradne palete).
+- Safeer OS namizje: `:root[data-tema=…]` v os.css (spremenljivke + nova `--vnos`), izbira v Nastavitve › Videz (kartice
+  s predogledom), shranjeno v localStorage `safeer_tema`, uporabljeno pred izrisom (skripta v <head>). Bench: Nord preverjen.
+- Android: barve kot atributi teme (`os_attrs.xml`, `Theme.SafeerOs.<Tema>`), `Tema.kt` (`osBarva`, `uporabi`), izbira v
+  Videz; 35+47+4 XML datotek in 13 kt datotek mehansko pretvorjenih; telefon: Catppuccin preverjen (domov, Sporočila, Videz).
+- Povezani zasloni (Android): vidni gumbi v pasu predvajalnika (⏮ −10 s ▶/❚❚ +10 s ⏭ ⏹) — prevedeno, brez živega preizkusa
+  (potrebuje sejo Link z računalnikom).
+- Medijski center: opomba pri viru Kodi (dodatki Kodija tečejo le v Kodiju).
+- TV: nova različica os (Sporočila + teme) nameščena v ozadju (192.168.0.77), preizkus na zaslonu odložen — TV je bil v uporabi (živa TV).
