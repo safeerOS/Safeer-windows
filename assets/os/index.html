@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src http://127.0.0.1:* file: data: http: https:; media-src http://127.0.0.1:* file: blob: http: https:; frame-src http://127.0.0.1:* file: http: https: blob:; child-src http://127.0.0.1:* file: http: https: blob:; connect-src http://127.0.0.1:* file: http: https:; style-src http://127.0.0.1:* 'self' 'unsafe-inline'; script-src http://127.0.0.1:* 'self' 'unsafe-inline'; font-src http://127.0.0.1:* data:">
 <title>Safeer OS</title>
+<script>try{var _t=localStorage.getItem("safeer_tema");if(_t&&_t!=="safeer")document.documentElement.setAttribute("data-tema",_t);}catch(e){}</script>
 <link rel="stylesheet" href="os.css">
 </head>
 <body>
@@ -488,6 +489,9 @@
       <section class="razdelek" id="r-nastavitve">
         <h1 data-t="nastavitve"></h1>
         <p data-t="nastavitveOpis"></p>
+        <h2 data-t="temaNaslov"></h2>
+        <p class="drobno" data-t="temaOpis"></p>
+        <div class="teme" id="temeMreza"></div>
         <h2 data-t="hitreNastavitve"></h2>
         <div class="hitre" id="hitreNastavitve"></div>
         <h2 data-t="scit"></h2>

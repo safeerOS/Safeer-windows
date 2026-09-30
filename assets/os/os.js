@@ -2320,7 +2320,37 @@
       klic("browserClearData").then(function () { var msg = $("browserSettingsMessage"); if (msg) msg.textContent = t("br_pocisceno"); }, function () { var msg = $("browserSettingsMessage"); if (msg) msg.textContent = t("br_napaka"); });
     });
   }
+  // ------------------------------------------------------------------ teme (videz)
+  // Pet najbolj razsirjenih shem (Catppuccin, Tokyo Night, Gruvbox, Nord, Dracula - vse MIT) + privzeta Safeer.
+  var TEME = [
+    { id: "safeer", ime: "Safeer", opis: "temaSafeer", barve: ["#090d15", "#111924", "#54d6a5", "#f0f4f3"] },
+    { id: "catppuccin", ime: "Catppuccin Mocha", opis: "catppuccin.com", barve: ["#1e1e2e", "#313244", "#94e2d5", "#cdd6f4"] },
+    { id: "tokyonight", ime: "Tokyo Night", opis: "tokyonight (enkia)", barve: ["#1a1b26", "#24283b", "#73daca", "#c0caf5"] },
+    { id: "gruvbox", ime: "Gruvbox Dark", opis: "gruvbox (morhetz)", barve: ["#282828", "#3c3836", "#8ec07c", "#ebdbb2"] },
+    { id: "nord", ime: "Nord", opis: "nordtheme.com", barve: ["#2e3440", "#3b4252", "#88c0d0", "#eceff4"] },
+    { id: "dracula", ime: "Dracula", opis: "draculatheme.com", barve: ["#282a36", "#44475a", "#8be9fd", "#f8f8f2"] }
+  ];
+  function trenutnaTema() { try { return localStorage.getItem("safeer_tema") || "safeer"; } catch (e) { return "safeer"; } }
+  function nastaviTemo(id) {
+    if (!TEME.some(function (x) { return x.id === id; })) id = "safeer";
+    if (id === "safeer") document.documentElement.removeAttribute("data-tema"); else document.documentElement.setAttribute("data-tema", id);
+    try { localStorage.setItem("safeer_tema", id); } catch (e) {}
+    narisiTeme();
+  }
+  function narisiTeme() {
+    var m = $("temeMreza"); if (!m) return;
+    var izbrana = trenutnaTema(); m.innerHTML = "";
+    TEME.forEach(function (tm) {
+      var b = el("button", "tema-kartica" + (tm.id === izbrana ? " izbran" : "")); b.type = "button"; b.setAttribute("aria-pressed", tm.id === izbrana ? "true" : "false");
+      var pred = el("div", "tema-predogled"); tm.barve.forEach(function (c) { var i = el("i"); i.style.background = c; pred.appendChild(i); });
+      b.appendChild(pred); b.appendChild(el("b", "", ubezi(tm.ime)));
+      b.appendChild(el("small", "", ubezi(tm.id === "safeer" ? t(tm.opis) : tm.opis) + (tm.id === izbrana ? " · " + ubezi(t("temaIzbrana")) : "")));
+      b.addEventListener("click", function () { nastaviTemo(tm.id); });
+      m.appendChild(b);
+    });
+  }
   function narisiNastavitve() {
+    narisiTeme();
     kontrole($("hitreNastavitve"), false);
     naloziNastavitveBrskalnika();
     $("stikaloCelozaslonsko").setAttribute("aria-checked", S.zacetek && S.zacetek.celozaslonsko ? "true" : "false");
