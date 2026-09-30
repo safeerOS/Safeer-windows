@@ -184,7 +184,7 @@ class MpvPlayerWidget(QWidget):
             else:
                 from .predvajalnik_mpris import SafeerMpris
                 m = SafeerMpris(self.pogon, ime="Safeer OS — Medijski center", okno=self.window(), storitev="safeeros")
-            self.mpris = m if m.aktiven else None
+            self.mpris = m if (m.aktiven or sys.platform == "win32") else None   # SMTC se prijavi kasneje (uvoz winrt v ozadju)
         except Exception as e:  # noqa: BLE001
             _log.debug("mpris: %s", e)
 

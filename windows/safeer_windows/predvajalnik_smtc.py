@@ -19,12 +19,13 @@ _log = logging.getLogger("safeer.predvajalnik.smtc")
 
 
 def na_voljo() -> bool:
+    """Ali so paketi winrt namesceni - BREZ uvoza: uvoz winrt (+asyncio) na Windows traja 4-6 s, zato ga
+    SafeerSmtc opravi v ozadju (glej __init__), ne ob zagonu okna."""
     if sys.platform != "win32":
         return False
     try:
-        import winrt.windows.media  # noqa: F401
-        import winrt.windows.media.playback  # noqa: F401
-        return True
+        import importlib.util
+        return importlib.util.find_spec("winrt.windows.media") is not None and importlib.util.find_spec("winrt.windows.media.playback") is not None
     except Exception:
         return False
 
@@ -47,14 +48,44 @@ class SafeerSmtc:
         self._smtc = None
         self._most = None
         self._zeton = None
+        self._zadnji_p: dict = {}
         if not na_voljo():
             _log.info("SMTC ni na voljo (ni Windows ali manjkajo paketi winrt) - medijske tipke delujejo le s fokusom okna")
             return
+        # Uvoz winrt je pocasen (merjeno 4-6 s na Windows 11); gre v nit v ozadju, SMTC se prijavi, ko je pripravljen.
+        # Do takrat predvajalnik dela normalno (medijske tipke s fokusom okna), stanje se ob prijavi prenese.
+        import threading
+        from PySide6.QtCore import QObject, Signal
+
+        class _Pripravljeno(QObject):
+            koncano = Signal(bool)
+
+        self._priprava = _Pripravljeno(okno)
+        self._priprava.koncano.connect(self._po_uvozu)
+
+        def uvozi():
+            try:
+                import winrt.windows.media  # noqa: F401
+                import winrt.windows.media.playback  # noqa: F401
+                ok = True
+            except Exception as e:  # noqa: BLE001
+                _log.warning("SMTC: uvoz winrt ni uspel: %s", e); ok = False
+            try:
+                self._priprava.koncano.emit(ok)
+            except Exception:
+                pass
+        threading.Thread(target=uvozi, name="safeer-smtc-uvoz", daemon=True).start()
+
+    def _po_uvozu(self, ok: bool) -> None:
+        """GUI nit: winrt je uvozen - prijava v SMTC in prenos zadnjega znanega stanja."""
+        if not ok or self.pogon is None:
+            return
         try:
             self._zazeni()
-        except Exception as e:
-            _log.warning("SMTC ni na voljo: %s", e)
-            self.aktiven = False
+        except Exception as e:  # noqa: BLE001
+            _log.warning("SMTC ni na voljo: %s", e); self.aktiven = False; return
+        if self._zadnji_p:
+            self.ob_podatkih(self._zadnji_p)
 
     # ---- zagon ----
     def _zazeni(self) -> None:
@@ -107,6 +138,8 @@ class SafeerSmtc:
 
     # ---- stanje iz pogona (GUI nit) ----
     def ob_podatkih(self, p: dict) -> None:
+        if p:
+            self._zadnji_p = dict(p)   # za prijavo, ko bo winrt uvozen
         if not self.aktiven or not p:
             return
         self._zadnji = dict(p)

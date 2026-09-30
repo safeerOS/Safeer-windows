@@ -333,6 +333,10 @@ class SafeerOsWindow(QMainWindow):
                  browser_settings: Optional[policy.SettingsStore] = None, magnet: str = ""):
         super().__init__()
         print("[SafeerOS] DIAG window_init_started", flush=True)
+        import time as _time
+        _t0 = _time.perf_counter()
+        def _korak(ime: str) -> None:   # merjenje zagona (kje gre cas do prvega okna)
+            print(f"[SafeerOS] DIAG cas {ime} +{(_time.perf_counter() - _t0) * 1000:.0f}ms", flush=True)
         self.v_oknu = v_oknu
         #: Magnet povezava, ki caka, da jo stran prevzame (zagon z --magnet; cakajociMagnet).
         # "naprava:" = ukaz z naprave v krogu (--magnet-naprava): sme se prebrati in predvajati sam.
@@ -351,12 +355,14 @@ class SafeerOsWindow(QMainWindow):
         self.dispatcher = GuiDispatcher(self)
 
         # Safeer Control & Safeer Link zaledje (enotni program)
+        _korak("pred_control_backend")
         self.control_backend = control_backend.get_backend()
         self.control_window: Optional[control_window.SafeerControlWindow] = None
         self.control_backend.dodaj_poslusalca(self._na_dogodek_linka)
         from core import link_hub_streznik
         link_hub_streznik.POSLUSALCI_KODE.append(
             lambda ime, koda: self.poslji_dogodek("kodaPrijave", {"ime": ime, "koda": koda}))
+        _korak("control_backend")
         self.media_center = os_media.MediaCenter(os_backend_win.CONFIG_DIR)
         try:
             self.media_center.izbrana_drzava = str(os_backend_win.nalozi_shrambo().get("media_watch_country") or "auto")
@@ -365,6 +371,7 @@ class SafeerOsWindow(QMainWindow):
         # Glavne poglede medijskega centra pripravimo v ozadju, da je prvi klik takojsen.
         QTimer.singleShot(8000, self.media_center.prednalozi)
 
+        _korak("media_center")
         # Safeer Ščit za zaščito celotne naprave (DNS filtriranje na napravi)
         self.scit = os_scit.Scit(ShrambaWrapper())
         self.scit.zacni_ce_vklopljen()
@@ -378,6 +385,7 @@ class SafeerOsWindow(QMainWindow):
             pass
 
         # Profil in nastavitve
+        _korak("pred_profile")
         self.profile = QWebEngineProfile("SafeerOSProfile", self)
         self.profile.setHttpUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
         settings = self.profile.settings()
@@ -400,6 +408,7 @@ class SafeerOsWindow(QMainWindow):
         self.profile.scripts().insert(script)
 
         # Pogled
+        _korak("profile")
         self.view = QWebEngineView(self)
         self.page_obj = SafeerOsPage(self.profile, self)
         self.page_obj.renderProcessTerminated.connect(self._izris_koncan)
@@ -415,6 +424,7 @@ class SafeerOsWindow(QMainWindow):
         self._straza_izrisa.timeout.connect(self._preveri_pomnilnik_izrisa)
         self._straza_izrisa.start()
 
+        _korak("view")
         self.zaslon = QStackedWidget(self)
         # Glavni OS pogled in vgrajeni brskalnik sta na isti strani sklada. V
         # nacinu Splet ostane levi del QWebEngineViewa (stranska vrstica) viden,
@@ -437,15 +447,19 @@ class SafeerOsWindow(QMainWindow):
         self.browser_app = browser.SafeerBrowserApp(
             QApplication.instance(), browser_settings or policy.SettingsStore(), "embedded"
         )
+        _korak("scit_in_profile")
         self.browser_window = browser.BrowserWindow(
             self.browser_app, private=True, embedded=True,
             on_safeer_home=lambda: self._zapri_browser("splet"),
             on_fullscreen_changed=self._na_browser_celozaslonsko,
         )
         self.browser_window.setWindowFlags(Qt.Widget)
+        _korak("browser_window")
         self.zapiski = zapiski.Zapiski(os.path.join(os_backend_win.CONFIG_DIR, "zapiski.json"))
         # Sporocila: e-posta in Chatwoot v eni niti na osebo; gesla samo v Upravitelju poverilnic.
+        _korak("zapiski")
         self.sporocila = os_sporocila.SporocilaOS(os.path.join(os_backend_win.CONFIG_DIR, "sporocila.sqlite3"))
+        _korak("sporocila")
         # Safeer Chat: po Linku, ki ga drzi vgrajeni Control.
         self.sporocila.poslji_klepet = lambda n, b, c: self.control_backend.poslji_klepet(n, b, c)
         self.sporocila.naprave_klepeta = lambda: self.control_backend.naprave_za_klepet()
@@ -468,12 +482,16 @@ class SafeerOsWindow(QMainWindow):
         self.browser_app.windows.append(self.browser_window)
         self.browser_window.stanje_povezave = self._stanje_povezave_za_splet
         self.browser_window.jezik_vmesnika = _jezik_oken
+        _korak("pred_new_tab")
         self.browser_window.new_tab()
+        _korak("new_tab")
         self.os_postavitev.addWidget(self.browser_window, 1)
         self.browser_window.hide()
         self.browser_window.set_embedded_content_visible(False)
+        _korak("pred_webview2")
         self.webview2_media = webview2_media.WebView2MediaWidget(self._zapri_webview2_media, self)
         self.zaslon.addWidget(self.webview2_media)
+        _korak("webview2")
         print("[SafeerOS] DIAG media_views_ready", flush=True)
         self._browser_media_active = False
         self._spletni_nacin = False

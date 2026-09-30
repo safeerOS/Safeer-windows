@@ -198,8 +198,10 @@ def _check_values(value, depth=0) -> None:
         for item in value:
             _check_values(item, depth + 1)
     elif isinstance(value, str):
-        if any(not 0x20 <= ord(ch) <= 0x7E for ch in value):
-            raise FeedVerificationError("string outside printable ASCII")
+        # Strings are already guaranteed printable ASCII by the raw-byte check and the escape rule in
+        # _check_text (only \\ and \" may appear), so there is nothing left to verify per character;
+        # doing so in Python cost up to 7 s of CPU at start-up on a large feed.
+        return
     elif isinstance(value, bool) or not isinstance(value, int):
         raise FeedVerificationError("only objects, arrays, strings and integers are allowed")
     elif not 0 <= value <= MAX_SAFE_INTEGER:
