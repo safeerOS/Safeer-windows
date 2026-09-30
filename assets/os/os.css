@@ -937,3 +937,6 @@ body.vrstica-skrcena:not(.nacin-splet) .skrij-vrstico span { display: none; }
 body.vrstica-skrita:not(.nacin-splet) #aplikacija { grid-template-columns: 1fr; }
 body.vrstica-skrita:not(.nacin-splet) #stranska { display: none; }
 body.vrstica-skrita:not(.nacin-splet) .rocaj-vrstice { display: block; }
+/* Skrita vrstica tudi v nacinu Splet: stransko vrstico (levi del OS pogleda) skrijemo, rocaj ostane. */
+body.vrstica-skrita.nacin-splet #stranska { display: none; }
+body.vrstica-skrita.nacin-splet .rocaj-vrstice { display: block; }

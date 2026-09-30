@@ -226,6 +226,9 @@
     try { localStorage.setItem("safeer_vrstica_skrita", da ? "1" : "0"); } catch (e) {}
     var rocaj = document.getElementById("rocajVrstice");
     if (rocaj) { rocaj.title = t("vrsticaPokazi"); rocaj.setAttribute("aria-label", rocaj.title); }
+    if (document.body.classList.contains("nacin-splet")) {
+      try { var _p = klic("skrijStransko", [!!da]); if (_p && _p.catch) _p.catch(function () {}); } catch (e) {}
+    }
     if (!da) { var izbran = document.querySelector("#meni button.izbran"); if (izbran) izbran.focus(); }
   }
   function vrsticaPreklopi() {

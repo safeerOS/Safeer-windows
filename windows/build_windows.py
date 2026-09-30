@@ -104,6 +104,35 @@ def shared_imports() -> list:
     return sorted(n for n in names if n != "__future__" and not n.startswith("core."))
 
 
+VENDOR_MPV = os.path.join(WINDOWS, "vendor", "mpv")
+_MPV_OBVEZNO = ("libmpv-2.dll", "libEGL.dll", "libGLESv2.dll", "manifest.json", "safeer-capabilities.json",
+                os.path.join("runtime", "msvcp140.dll"), os.path.join("runtime", "vcruntime140.dll"),
+                os.path.join("runtime", "vcruntime140_1.dll"), os.path.join("licenses", "COPYING.LGPL-2.1"))
+
+
+def mpv_vendor_args() -> list:
+    """libmpv (lastna LGPL gradnja) je izbirna priloga: windows/vendor/mpv -> _internal/safeer_windows/vendor/mpv.
+
+    Brez mape se zgradi kot doslej (LibVLC/HTML5). Ce mapa obstaja, mora biti POPOLNA (pravilo 6: manjkajoca
+    DLL ali runtime ustavi gradnjo, ne tiho izpusti) in gradnja prilozi tudi python-mpv.
+    """
+    if not os.path.isdir(VENDOR_MPV):
+        print("libmpv: windows/vendor/mpv ni prisoten -> brez libmpv (Medijski center: LibVLC/HTML5)", flush=True)
+        return []
+    manjka = [f for f in _MPV_OBVEZNO if not os.path.isfile(os.path.join(VENDOR_MPV, f))]
+    if manjka:
+        raise SystemExit("libmpv: windows/vendor/mpv je nepopoln, manjka: " + ", ".join(manjka))
+    try:
+        import mpv  # noqa: F401
+    except Exception as e:  # noqa: BLE001
+        raise SystemExit(f"libmpv: paket python-mpv ni namescen v gradbenem okolju ({e}); pip install python-mpv==1.0.8")
+    man = json.load(open(os.path.join(VENDOR_MPV, "manifest.json"), encoding="utf-8-sig"))
+    print(f"libmpv: prilozen {man.get('release')} ({man.get('arch')}), runtime {man.get('runtime', {}).get('msvcp140.dll')}", flush=True)
+    return ["--add-data", VENDOR_MPV + os.pathsep + os.path.join("safeer_windows", "vendor", "mpv"),
+            "--hidden-import", "mpv", "--hidden-import", "safeer_windows.mpv_player",
+            "--hidden-import", "safeer_windows.safeer_mpv_pogon", "--hidden-import", "safeer_windows.safeer_pogon_izbira"]
+
+
 def pyinstaller() -> None:
     make_icon()
     shutil.rmtree(DIST, ignore_errors=True)
@@ -123,6 +152,7 @@ def pyinstaller() -> None:
         command += ["--hidden-import", name]
     for source, target in SHARED_DATA:
         command += ["--add-data", os.path.join(ROOT, *source.split("/")) + os.pathsep + target]
+    command += mpv_vendor_args()
     command.append(os.path.join(WINDOWS, "launcher.py"))
     run(command)
     if not os.path.exists(EXE):
@@ -153,6 +183,7 @@ def pyinstaller() -> None:
             command_os += ["--hidden-import", name]
         for source, target in SHARED_DATA:
             command_os += ["--add-data", os.path.join(ROOT, *source.split("/")) + os.pathsep + target]
+        command_os += mpv_vendor_args()
         command_os.append(os_launcher)
         run(command_os)
         os_exe = os.path.join(DIST, "SafeerOS", "SafeerOS.exe")
@@ -427,6 +458,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("icon")
+    sub.add_parser("fetch-libmpv")
     sub.add_parser("pyinstaller")
     sub.add_parser("package")
     for name in ("smoke-source", "smoke-frozen"):
@@ -437,6 +469,9 @@ def main() -> None:
         smoke_parser.add_argument("--exe")
     sub.add_parser("install-test")
     args = parser.parse_args()
+    if args.command == "fetch-libmpv":
+        import fetch_libmpv
+        raise SystemExit(fetch_libmpv.main())
     if args.command == "icon":
         make_icon()
     elif args.command == "pyinstaller":

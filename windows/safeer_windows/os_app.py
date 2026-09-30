@@ -270,6 +270,9 @@ def _start_local_asset_server(assets_root: str) -> int:
     return port
 
 
+_ROCAJ_SIRINA = 22  # sirina ozkega rocaja, ko je stranska vrstica skrita v nacinu Splet
+
+
 class GuiDispatcher(QObject):
 
     signal_run = Signal(object)
@@ -405,6 +408,8 @@ class SafeerOsWindow(QMainWindow):
         # tiho nalozimo znova v istem razdelku, preden Windows zacne menjati pomnilnik na disk.
         self._zadnja_obnova = -1e9
         self._razdelek_po_obnovi = ""
+        self._stranska_skrita = False
+        self._sirina_stranske_splet = 0
         self._straza_izrisa = QTimer(self)
         self._straza_izrisa.setInterval(60_000)
         self._straza_izrisa.timeout.connect(self._preveri_pomnilnik_izrisa)
@@ -420,7 +425,7 @@ class SafeerOsWindow(QMainWindow):
         self.os_postavitev.setSpacing(0)
         self.os_postavitev.addWidget(self.view, 1)
         self.zaslon.addWidget(self.os_vsebnik)
-        self.media_player = vlc_player.VlcPlayerWidget(self)
+        self.media_player = self._ustvari_medijski_center()
         self.media_player.jezik_vmesnika = _jezik_oken
         self.media_player.nazaj.connect(self._zapri_media)
         self.media_player.ozadje.connect(self._media_v_ozadju)
@@ -850,20 +855,29 @@ class SafeerOsWindow(QMainWindow):
             "(function(){var s=document.getElementById('stranska'),b=document.body;"
             # Sirino stranske vrstice izmeri samo, ko nacin Splet se ni vklopljen (sicer je 100 %).
             "var w=b.classList.contains('nacin-splet')?Number(b.dataset.stranska||0):(s?s.getBoundingClientRect().width:0);"
-            "b.dataset.stranska=String(w);b.classList.add('nacin-splet');"
-            "if(window.safeerOsPojdi)window.safeerOsPojdi('splet');return w;})()"
+            "b.dataset.stranska=String(w);var sk=b.classList.contains('vrstica-skrita');b.classList.add('nacin-splet');"
+            "if(window.safeerOsPojdi)window.safeerOsPojdi('splet');return {w:w,skrita:sk};})()"
         )
         self.view.page().runJavaScript(js, self._dokoncaj_spletni_nacin)
 
-    def _dokoncaj_spletni_nacin(self, css_sirina: Any = 0) -> None:
+    def _dokoncaj_spletni_nacin(self, rezultat: Any = 0) -> None:
         if not self._spletni_nacin:
             return
+        # Rezultat je slovar {w, skrita} (nova koda) ali golo stevilo (zdruzljivost).
+        if isinstance(rezultat, dict):
+            css_sirina = rezultat.get("w", 0)
+            self._stranska_skrita = bool(rezultat.get("skrita", False))
+        else:
+            css_sirina = rezultat
         try:
             sirina = round(float(css_sirina) * float(self.view.zoomFactor()))
         except (TypeError, ValueError):
             sirina = 0
         if sirina < 160:
             sirina = 300 if self.width() > 1500 else 250
+        self._sirina_stranske_splet = sirina
+        if self._stranska_skrita:
+            sirina = _ROCAJ_SIRINA
         self.view.setFixedWidth(sirina)
         self.view.show()
         self.browser_window.show()
@@ -1520,6 +1534,24 @@ class SafeerOsWindow(QMainWindow):
             self.dispatcher.dispatch(self._vrni_spletni_nacin)
             return True
 
+        if metoda == "skrijStransko":
+            skrij = bool(a[0]) if a else False
+
+            def _uveljavi_skrij():
+                self._stranska_skrita = skrij
+                if not self._spletni_nacin:
+                    return
+                if skrij:
+                    self.view.setFixedWidth(_ROCAJ_SIRINA)
+                else:
+                    w = getattr(self, "_sirina_stranske_splet", 0)
+                    if w < 160:
+                        w = 300 if self.width() > 1500 else 250
+                    self.view.setFixedWidth(w)
+
+            self.dispatcher.dispatch(_uveljavi_skrij)
+            return True
+
         if metoda == "browserSettingsGet":
             settings = self.browser_app.settings
             values = {key: settings.get(key) for key in (
@@ -2022,7 +2054,27 @@ class SafeerOsWindow(QMainWindow):
             pass
         QApplication.quit()
 
+    def _ustvari_medijski_center(self):
+        """Medijski center: libmpv (mpv_player), ce je paket prilozen in nalozljiv, sicer dosedanji LibVLC.
+        Izbira in razlog gresta v dnevnik (safeer_pogon_izbira); VLC pot ostane nespremenjena."""
+        try:
+            from . import safeer_pogon_izbira
+            if safeer_pogon_izbira.izberi_pogon() == "mpv":
+                from . import mpv_player
+                w = mpv_player.MpvPlayerWidget(self)
+                print("[SafeerMedia] pogon: libmpv", flush=True)
+                return w
+            print(f"[SafeerMedia] pogon: LibVLC ({safeer_pogon_izbira.IZBRANO.get('razlog')})", flush=True)
+        except Exception as e:  # noqa: BLE001
+            print(f"[SafeerMedia] pogon: LibVLC (mpv izbira ni uspela: {e})", flush=True)
+        return vlc_player.VlcPlayerWidget(self)
+
     def closeEvent(self, event) -> None:
+        try:
+            if hasattr(self.media_player, "zapri_pogon"):
+                self.media_player.zapri_pogon()
+        except Exception:
+            pass
         try:
             self.control_backend.koncaj()
         except Exception:

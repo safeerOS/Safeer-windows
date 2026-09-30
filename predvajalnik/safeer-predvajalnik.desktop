@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Safeer Predvajalnik
+Name[en]=Safeer Player
+Comment=Predvajalnik videa in glasbe (libmpv, LGPL); Stremio in Kodi dodatki po tvoji izbiri
+Exec=safeer-predvajalnik %U
+Icon=safeer-predvajalnik
+Terminal=false
+Categories=AudioVideo;Player;Video;
+MimeType=video/mp4;video/x-matroska;video/webm;video/x-msvideo;video/quicktime;video/mp2t;audio/mpeg;audio/flac;audio/ogg;audio/x-wav;audio/mp4;application/dash+xml;application/vnd.apple.mpegurl;
