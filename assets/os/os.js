@@ -3015,29 +3015,71 @@
     $("kanalUrediGeslo").value = ""; $("kanalUrediGeslo").hidden = k.vrsta !== "email" && k.vrsta !== "chatwoot";
     $("slojKanalUredi").classList.add("viden"); $("kanalUrediGeslo").focus();
   }
+  function jeKlepet(vrsta) { return vrsta === "chatwoot" || vrsta === "safeer"; }
+  function zacetnice(ime) { return String(ime || "?").trim().split(/\s+/).slice(0, 2).map(function (x) { return x.charAt(0).toUpperCase(); }).join("") || "?"; }
+  function pogovorUstreza(skupina, p) {
+    var vrsta = (p.kanal || {}).vrsta || "";
+    var f = S.sporocilaFilter;
+    if (f === "email" && vrsta !== "email") return false;
+    if (f === "klepet" && !jeKlepet(vrsta)) return false;
+    var mapa = S.sporocilaMapa || "vse";
+    if (mapa === "neprebrano" && !p.neprebrano) return false;
+    if (mapa === "poslano" && !p.zadnji_ven) return false;
+    var n = (S.sporocilaNiz || "").trim().toLowerCase();
+    if (n) {
+      var besedilo = (skupina.oseba.ime + " " + (p.zadeva || "") + " " + (p.zadnje_sporocilo || "") + " " + ((p.kanal || {}).ime || "")).toLowerCase();
+      if (besedilo.indexOf(n) < 0) return false;
+    }
+    return true;
+  }
   function narisiSporocila() {
     narisiKanale();
     var cilj = $("sporocilaSeznam"); if (!cilj) return; cilj.innerHTML = "";
-    var kaj = S.sporocilaFilter;
+    var neprebrano = 0, vseh = 0, vrstice = [];
     S.sporocilaSkupine.forEach(function (skupina) {
       (skupina.pogovori || []).forEach(function (p) {
-        var vrsta = (p.kanal || {}).vrsta || "";
-        if (kaj && vrsta !== kaj) return;
-        var b = el("button", "pogovor-vrstica" + (S.sporocilaAktivni && S.sporocilaAktivni.id === p.id && S.sporocilaAktivni.kanal_id === p.kanal_id ? " izbran" : ""));
-        b.innerHTML = '<span class="kanal-ikona">' + svg(kanalIkona(vrsta)) + '</span><span><b>' + ubezi(skupina.oseba.ime) +
-          '</b><small>' + ubezi(p.zadnje_sporocilo || p.zadeva || "") + '</small></span><span><time>' +
-          ubezi(kratekCas(p.cas)) + '</time>' + (p.neprebrano ? '<i>' + Number(p.neprebrano) + '</i>' : '') + '</span>';
-        b.addEventListener("click", function () { odpriPogovor(skupina.oseba, p); }); cilj.appendChild(b);
+        vseh++; if (p.neprebrano) neprebrano += Number(p.neprebrano);
+        if (pogovorUstreza(skupina, p)) vrstice.push({ skupina: skupina, p: p });
       });
     });
-    if (!cilj.children.length) cilj.appendChild(el("p", "prazno", ubezi(t("niPogovorov"))));
+    vrstice.sort(function (a, b) { return String(b.p.cas || "").localeCompare(String(a.p.cas || "")); });
+    vrstice.forEach(function (v) {
+      var skupina = v.skupina, p = v.p, vrsta = (p.kanal || {}).vrsta || "";
+      var b = el("button", "pogovor-vrstica" + (S.sporocilaAktivni && S.sporocilaAktivni.id === p.id && S.sporocilaAktivni.kanal_id === p.kanal_id ? " izbran" : ""));
+      b.innerHTML = '<span class="kanal-ikona">' + ubezi(zacetnice(skupina.oseba.ime)) + '</span><span><b>' + ubezi(skupina.oseba.ime) +
+        '<span class="oznaka-kanala">' + ubezi((p.kanal || {}).ime || vrsta) + '</span></b><small>' + ubezi(p.zadeva && vrsta === "email" ? p.zadeva + " – " + (p.zadnje_sporocilo || "") : (p.zadnje_sporocilo || p.zadeva || "")) + '</small></span><span><time>' +
+        ubezi(kratekCas(p.cas)) + '</time>' + (p.neprebrano ? '<i>' + Number(p.neprebrano) + '</i>' : '') + '</span>';
+      b.addEventListener("click", function () { odpriPogovor(skupina.oseba, p); }); cilj.appendChild(b);
+    });
+    if (!cilj.children.length) cilj.appendChild(el("p", "prazno", ubezi(t(vseh ? "niZadetkov" : "niPogovorov"))));
+    var sn = $("stNeprebrano"), sp = $("stPrejeto");
+    if (sn) { sn.textContent = neprebrano; sn.hidden = !neprebrano; }
+    if (sp) { sp.textContent = neprebrano; sp.hidden = !neprebrano; }
   }
   function odpriPogovor(oseba, pogovor) {
-    S.sporocilaAktivni = pogovor; narisiSporocila();
-    $("sporocilaNaslov").textContent = oseba.ime + " · " + ((pogovor.kanal || {}).ime || "");
+    S.sporocilaAktivni = pogovor; S.sporocilaOseba = oseba; narisiSporocila();
+    $("sporocilaNaslov").textContent = oseba.ime;
+    $("sporocilaPodnaslov").textContent = ((pogovor.kanal || {}).ime || "") + (pogovor.zadeva ? " · " + pogovor.zadeva : "");
     var vnos = $("sporocilaBesedilo"), gumb = $("sporocilaVnos").querySelector("button");
     vnos.disabled = false; gumb.disabled = false;
+    var pano = $("sporocilaPano"); pano.hidden = false; pano.title = t("pokaziPano");
+    narisiPano(oseba, pogovor, []);
     naloziVsebinoPogovora(pogovor);
+  }
+  /* Stranski pano: oseba, njeni naslovi/racuni po kanalih in datoteke iz pogovora. */
+  function narisiPano(oseba, pogovor, sporocila) {
+    $("panoAvatar").textContent = zacetnice(oseba.ime); $("panoIme").textContent = oseba.ime;
+    $("panoKanal").textContent = (pogovor.kanal || {}).ime || "";
+    var idn = $("panoIdentitete"); idn.innerHTML = "";
+    var identitete = oseba.identitete || [];
+    if (!identitete.length && pogovor.id && (pogovor.kanal || {}).vrsta === "email") identitete = [["email", pogovor.id]];
+    identitete.forEach(function (i) { var v = Array.isArray(i) ? i : [i.vrsta, i.naslov]; idn.appendChild(el("span", "identiteta", ubezi((v[0] ? v[0] + ": " : "") + (v[1] || "")))); });
+    if (!idn.children.length) idn.appendChild(el("span", "identiteta", ubezi(pogovor.id || "")));
+    var pr = $("panoPriponke"); pr.innerHTML = "";
+    var priponke = [];
+    (sporocila || []).forEach(function (s) { (s.priponke || []).forEach(function (a) { priponke.push(a); }); });
+    if (!priponke.length) pr.appendChild(el("p", "drobno", ubezi(t("panoNiPriponk"))));
+    priponke.slice(-12).reverse().forEach(function (a) { pr.appendChild(el("span", "identiteta", ubezi(a.ime || a.name || String(a)))); });
   }
   function naloziVsebinoPogovora(pogovor) {
     klic("sporocilaPogovor", [pogovor.kanal_id, pogovor.id]).then(function (seznam) {
@@ -3047,6 +3089,7 @@
         var m = el("div", "mehurcek " + (s.smer === "ven" ? "ven" : "noter"));
         m.textContent = s.besedilo || ""; m.appendChild(el("time", "", ubezi(kratekCas(s.cas)))); cilj.appendChild(m);
       }); cilj.scrollTop = cilj.scrollHeight;
+      if (S.sporocilaOseba) narisiPano(S.sporocilaOseba, pogovor, seznam || []);
       if (pogovor.neprebrano) { pogovor.neprebrano = 0; naloziSporocila(); }
     });
   }
@@ -3060,7 +3103,8 @@
     });
     if (!nov) {
       S.sporocilaAktivni = null;
-      $("sporocilaNaslov").textContent = t("izberiPogovor");
+      $("sporocilaNaslov").textContent = t("izberiPogovor"); $("sporocilaPodnaslov").textContent = "";
+      $("sporocilaPano").hidden = true; $("sporocilaPanoVsebina").hidden = true;
       $("sporocilaVsebina").innerHTML = "";
       $("sporocilaBesedilo").disabled = true; $("sporocilaVnos").querySelector("button").disabled = true;
       narisiSporocila();
@@ -3199,6 +3243,15 @@
         narisiSporocila();
       });
     });
+    $("sporocilaMape").querySelectorAll("button").forEach(function (b) {
+      b.addEventListener("click", function () {
+        S.sporocilaMapa = b.getAttribute("data-mapa") || "vse";
+        $("sporocilaMape").querySelectorAll("button").forEach(function (x) { x.classList.toggle("izbran", x === b); });
+        narisiSporocila();
+      });
+    });
+    $("sporocilaIskanje").addEventListener("input", function () { S.sporocilaNiz = this.value; narisiSporocila(); });
+    $("sporocilaPano").addEventListener("click", function () { var p = $("sporocilaPanoVsebina"); p.hidden = !p.hidden; });
     $("obrazecKanal").addEventListener("submit", function (e) {
       e.preventDefault(); var email = $("kanalVrsta").value === "email";
       if ($("kanalVrsta").value === "aplikacije") return;

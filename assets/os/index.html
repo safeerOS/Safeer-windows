@@ -290,18 +290,38 @@
           <div class="gumbi-glave"><button class="gumb" id="sporocilaPisi"><svg data-ikona="povezava"></svg><span data-t="pisiNapravi"></span></button>
           <button class="gumb glavni" id="sporocilaDodaj"><svg data-ikona="plus"></svg><span data-t="dodajKanal"></span></button></div>
         </div>
-        <div class="filtri" id="sporocilaFiltri">
-          <button class="izbran" data-kanal="" data-t="vsiKanali"></button>
-          <button data-kanal-vrsta="email" data-t="eposta"></button>
-          <button data-kanal-vrsta="chatwoot">Chatwoot</button>
-          <button data-kanal-vrsta="safeer">Safeer Link</button>
-        </div>
-        <div class="kanali-seznam" id="sporocilaKanali"></div>
-        <div class="sporocila-postavitev">
-          <div class="pogovori-seznam" id="sporocilaSeznam"><p class="prazno" data-t="niPogovorov"></p></div>
+        <!-- Nabiralnik: mape in kanali | pogovori z iskanjem in filtri | pogovor + stranski pano z osebo -->
+        <div class="nabiralnik">
+          <aside class="nabiralnik-mape">
+            <div class="mape" id="sporocilaMape">
+              <button class="izbran" data-mapa="vse"><svg data-ikona="sporocila"></svg><span data-t="mapaPrejeto"></span><i id="stPrejeto" hidden></i></button>
+              <button data-mapa="neprebrano"><svg data-ikona="sporocila"></svg><span data-t="mapaNeprebrano"></span><i id="stNeprebrano" hidden></i></button>
+              <button data-mapa="poslano"><svg data-ikona="poslji"></svg><span data-t="mapaPoslano"></span></button>
+              <button data-mapa="vsi"><svg data-ikona="arhiv"></svg><span data-t="mapaVsiPogovori"></span></button>
+            </div>
+            <b class="nabiralnik-naslov" data-t="kanaliNaslov"></b>
+            <div class="kanali-seznam" id="sporocilaKanali"></div>
+          </aside>
+          <div class="nabiralnik-seznam">
+            <label class="ciljno-iskanje sporocila-iskanje"><svg data-ikona="isci"></svg><input id="sporocilaIskanje" type="search" autocomplete="off" data-ph="isciSporocila"></label>
+            <div class="filtri" id="sporocilaFiltri">
+              <button class="izbran" data-kanal-vrsta="" data-t="vsiKanali"></button>
+              <button data-kanal-vrsta="email" data-t="eposta"></button>
+              <button data-kanal-vrsta="klepet" data-t="filterKlepeti"></button>
+            </div>
+            <div class="pogovori-seznam" id="sporocilaSeznam"><p class="prazno" data-t="niPogovorov"></p></div>
+          </div>
           <div class="pogovor-okno">
-            <div class="pogovor-naslov" id="sporocilaNaslov" data-t="izberiPogovor"></div>
-            <div class="pogovor-vsebina" id="sporocilaVsebina"></div>
+            <div class="pogovor-naslov"><div class="pogovor-naslov-besedilo"><b id="sporocilaNaslov" data-t="izberiPogovor"></b><small id="sporocilaPodnaslov"></small></div>
+              <button class="gumb-ikona" id="sporocilaPano" type="button" hidden title=""><svg data-ikona="sporocilo"></svg></button></div>
+            <div class="pogovor-telo">
+              <div class="pogovor-vsebina" id="sporocilaVsebina"></div>
+              <aside class="pogovor-pano" id="sporocilaPanoVsebina" hidden>
+                <div class="pano-oseba"><span class="pano-avatar" id="panoAvatar"></span><b id="panoIme"></b><small id="panoKanal"></small></div>
+                <div class="pano-skupina"><b data-t="panoIdentitete"></b><div id="panoIdentitete"></div></div>
+                <div class="pano-skupina"><b data-t="panoPriponke"></b><div id="panoPriponke"><p class="drobno" data-t="panoNiPriponk"></p></div></div>
+              </aside>
+            </div>
             <form class="sporocila-vnos" id="sporocilaVnos">
               <textarea id="sporocilaBesedilo" rows="2" data-ph="napisiSporocilo" disabled></textarea>
               <button class="gumb glavni" type="submit" disabled><svg data-ikona="poslji"></svg><span data-t="posljiSporocilo"></span></button>
