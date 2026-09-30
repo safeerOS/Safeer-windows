@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import http.server
 import json
+import logging
 import ssl
 import threading
 import time
@@ -1649,6 +1650,17 @@ class HubStreznik:
                     streznik = None
             if streznik is None:
                 return False
+            if streznik.server_address[1] != PRIVZETA_VRATA and os.environ.get("SAFEER_HUB_DRUGI") != "1" and _na_privzetih_vratih_ze_tece_hub():
+                # Na tem racunalniku ze tece Safeer Hub (npr. Safeer Control v ozadju). Drugi Hub z lastno
+                # identiteto bi se v omrezju oglasal z istim imenom racunalnika in druge naprave bi se povezovale
+                # nanj - ta bi jih zavrnil (30. 9. 2026: Windows -> "Safeer Control (janez-...)" zavrnjen).
+                # Zato drugega Huba ne zazenemo; ta primerek uporablja obstojecega kot odjemalec.
+                logging.getLogger("safeer.link").warning("Hub na vratih %d ze tece - drugega Huba v tem procesu ne zazenem (SAFEER_HUB_DRUGI=1 za razvoj)", PRIVZETA_VRATA)
+                try:
+                    streznik.server_close()
+                except Exception:
+                    pass
+                return False
             streznik.socket = ctx.wrap_socket(streznik.socket, server_side=True, do_handshake_on_connect=False)
             streznik.hub = self.hub          # type: ignore[attr-defined]
             streznik.datoteke = lambda: self.datoteke() if callable(self.datoteke) else self.datoteke  # type: ignore[attr-defined]
@@ -1744,6 +1756,19 @@ class Oglas:
             zc.close()
         except Exception:
             pass
+
+
+def _na_privzetih_vratih_ze_tece_hub(timeout: float = 1.5) -> bool:
+    """Ali na tem racunalniku na privzetih vratih ze odgovarja Safeer Hub (pot zdravja, TLS brez preverjanja)."""
+    import ssl as _ssl
+    import urllib.request as _u
+    try:
+        ctx = _ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode = _ssl.CERT_NONE
+        with _u.urlopen(_u.Request("https://127.0.0.1:%d/cast/health" % PRIVZETA_VRATA, headers={"Accept": "application/json"}), timeout=timeout, context=ctx) as o:
+            return o.status == 200
+    except Exception as e:  # noqa: BLE001
+        # 401 = Hub zahteva zeton: se vedno Hub. Karkoli drugega (zavrnjena povezava, ni TLS) = ni Huba.
+        return getattr(e, "code", 0) == 401
 
 
 def _krajevni_ip() -> str:
