@@ -79,6 +79,8 @@ jobs:
           Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\Windows Error Reporting' -Name Disabled -Value 1 -Type DWord
       - name: Smoke test from source (real window, online checks)
         run: python windows/build_windows.py smoke-source --online --report build/windows/out/smoke-source.json --screenshot build/windows/out/start-page.png
+      - name: Fetch pinned libmpv (Safeer LGPL build, SHA-256 verified)
+        run: python windows/fetch_libmpv.py
       - name: Build SafeerBrowser.exe
         run: python windows/build_windows.py pyinstaller
       - name: Smoke test built executable

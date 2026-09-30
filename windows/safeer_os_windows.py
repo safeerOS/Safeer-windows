@@ -17,6 +17,13 @@ KOREN = os.path.dirname(KOREN_WIN)
 if KOREN not in sys.path:
     sys.path.append(KOREN)
 
+# libmpv (pravilo 6): runtime iz paketa safeer_windows/vendor/mpv/runtime PRED PySide6; brez paketa no-op.
+try:
+    from safeer_windows.safeer_mpv_pogon import predpripravi_runtime
+    predpripravi_runtime()
+except Exception:
+    pass
+
 from safeer_windows import tls_koreni
 tls_koreni.namesti()
 

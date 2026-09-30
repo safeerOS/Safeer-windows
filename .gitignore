@@ -17,3 +17,4 @@ dist/
 .flatpak-builder/
 *.flatpak
 *.AppImage
+windows/safeer_windows/vendor/

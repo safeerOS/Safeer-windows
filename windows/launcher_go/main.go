@@ -157,7 +157,7 @@ func findPython() *PythonInfo {
 
 func checkAndInstallPySide6(py *PythonInfo) error {
 	var cmd *exec.Cmd
-	checkScript := "import PySide6, qrcode, mutagen, av, zeroconf"
+	checkScript := "import PySide6, qrcode, mutagen, av, zeroconf, importlib.util; assert importlib.util.find_spec('mpv')"
 	if py.IsLauncher {
 		cmd = exec.Command(py.ExePath, "-3", "-c", checkScript)
 	} else {
@@ -168,12 +168,12 @@ func checkAndInstallPySide6(py *PythonInfo) error {
 		return nil
 	}
 
-	showMessage("Safeer OS", "Safeer OS pripravlja potrebne knjižnice (PySide6, python-vlc, mutagen, PyAV, zeroconf). Namestitev poteka v ozadju...", MB_ICONINFORMATION)
+	showMessage("Safeer OS", "Safeer OS pripravlja potrebne knjižnice (PySide6, python-vlc, python-mpv, mutagen, PyAV, zeroconf). Namestitev poteka v ozadju...", MB_ICONINFORMATION)
 	var installCmd *exec.Cmd
 	if py.IsLauncher {
-		installCmd = exec.Command(py.ExePath, "-3", "-m", "pip", "install", "PySide6", "qrcode", "python-vlc", "mutagen", "av", "truststore", "zeroconf")
+		installCmd = exec.Command(py.ExePath, "-3", "-m", "pip", "install", "PySide6", "qrcode", "python-vlc", "mutagen", "av", "truststore", "zeroconf", "python-mpv==1.0.8")
 	} else {
-		installCmd = exec.Command(py.ExePath, "-m", "pip", "install", "PySide6", "qrcode", "python-vlc", "mutagen", "av", "truststore", "zeroconf")
+		installCmd = exec.Command(py.ExePath, "-m", "pip", "install", "PySide6", "qrcode", "python-vlc", "mutagen", "av", "truststore", "zeroconf", "python-mpv==1.0.8")
 	}
 	installCmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000}
 	if err := installCmd.Run(); err != nil {
