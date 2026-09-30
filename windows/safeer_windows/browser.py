@@ -507,7 +507,8 @@ class SafeerBrowserApp(QObject):
         self.configure_profile(self.profile)
 
         # Signed Safeer threat feed: an extra, verified layer next to the built-in list.
-        self.threat_intel = policy.threat_intel.ThreatIntelService(policy.threat_intel_dir())
+        # Vgrajen v Safeer OS (dns_status "embedded"): seznam groznj se nalozi 3 s po zagonu, da okno pride prej.
+        self.threat_intel = policy.threat_intel.ThreatIntelService(policy.threat_intel_dir(), load_delay=3.0 if dns_status == "embedded" else 0.0)
         policy.adblock.register_threat_matcher(self.threat_intel.match)
         if not smoke:
             self.threat_intel.start()

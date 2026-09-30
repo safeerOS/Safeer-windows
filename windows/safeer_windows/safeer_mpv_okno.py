@@ -160,7 +160,7 @@ class SafeerMpvPredvajalnik(QWidget):
             else:
                 from .predvajalnik_mpris import SafeerMpris
                 m = SafeerMpris(self.pogon, ime=self.ime_za_sistem, okno=self.window())
-            self.mpris = m if m.aktiven else None
+            self.mpris = m if (m.aktiven or sys.platform == "win32") else None   # SMTC se prijavi kasneje (uvoz winrt v ozadju)
         except Exception as e:
             _log.debug("mpris/smtc: %s", e)
 
