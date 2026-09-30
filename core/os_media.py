@@ -1457,6 +1457,31 @@ class MediaCenter:
             self._save(data)
         return {"ok": True, "vir": {k: v for k, v in source.items() if k not in ("secret_enc", "uporabnik")}}
 
+    def _stremio_strezniki(self) -> list[dict]:
+        """Uporabnikovi Stremio dodatki (osebni strezniki s ponudnikom stremio)."""
+        with self._lock:
+            return [x for x in self._load().get("osebni_strezniki", []) if isinstance(x, dict) and x.get("ponudnik") == "stremio" and x.get("url")]
+
+    def _stremio_vnosi(self, imdb: str, tmdb_id: int, kind: str, title: str, season: int = 0, episode: int = 0) -> list[dict]:
+        """Vnosi za film/epizodo iz TMDB kataloga, ki jih zna predvajati kateri od uporabnikovih Stremio dodatkov.
+
+        Tok se poisce sele ob predvajanju (resolve): url je stremio:<koren>|<tip>|<imdb>[:S:E]. Brez IMDb ID
+        dodatek vsebine ne pozna."""
+        if not imdb:
+            return []
+        items = []
+        for server in self._stremio_strezniki():
+            koren = media_servers._stremio_koren(str(server["url"]))
+            if kind == "serija":
+                tip, ident = "series", "%s:%d:%d" % (imdb, season, episode)
+            else:
+                tip, ident = "movie", imdb
+            items.append({"id": "stremio:%s:%s:%s" % (server.get("id"), tip, ident), "naslov": title, "vrsta": kind,
+                          "url": "stremio:%s|%s|%s" % (koren, tip, ident), "vir": str(server.get("ime") or "Stremio"),
+                          "imdb_id": imdb, "tmdb_id": int(tmdb_id or 0), "sezona": season, "epizoda": episode,
+                          "kakovost": "", "slika": "", "opis": "", "leto": 0, "izvajalec": "", "stremio": {"koren": koren, "tip": tip, "id": ident}})
+        return items
+
     def _kodi_streznik(self, server_id: str = "") -> Optional[tuple]:
         """(streznik, geslo) povezanega Kodija - dolocenega ali prvega."""
         with self._lock:
@@ -2289,6 +2314,7 @@ class MediaCenter:
                        imdb_id=imdb, tmdb_id=int(tmdb_id), quality="1080p HD")
             if it:
                 items.append(it)
+        items += self._stremio_vnosi(imdb, int(tmdb_id), "serija", ep_title, s, ep)
         if not items:
             return None
         merged = merge_duplicates(items)
@@ -2310,6 +2336,7 @@ class MediaCenter:
                        kind="film", imdb_id=imdb, tmdb_id=int(tmdb_id), quality="1080p HD")
             if it:
                 items.append(it)
+        items += self._stremio_vnosi(imdb, int(tmdb_id), "film", title or "Film")
         if not items:
             return None
         merged = merge_duplicates(items)
@@ -2440,7 +2467,7 @@ class MediaCenter:
                 return dict(item, napaka="Kodi dodatka ni bilo mogoče odpreti.")
             return dict(item, sporocilo="%s se odpira na napravi s Kodijem (%s)." % (item.get("naslov"), kodi[0].get("ime")))
         stremio_url = next((u for u in posebni if u.startswith("stremio:")), "")
-        if stremio_url and not any(u.startswith(("http://", "https://")) for u in posebni):
+        if stremio_url:
             koren, tip, ident = (stremio_url[len("stremio:"):].split("|") + ["", ""])[:3]
             try:
                 tokovi = media_servers.stremio_tokovi(koren, tip, ident)
@@ -2448,10 +2475,23 @@ class MediaCenter:
                 tokovi = []
             neposredni = [t for t in tokovi if t.get("url") and not t.get("zunanje")
                           and (t["url"].startswith("https://") or media_servers.dovoljen_naslov(t["url"]))]
+            drugi_http = [v for v in (item.get("razlicice") or []) if isinstance(v, dict)
+                          and str(v.get("url") or "").startswith(("http://", "https://"))]
             if neposredni:
-                resolved = dict(item, url=neposredni[0]["url"], razlicice=neposredni[:10], stevilo_razlicic=len(neposredni[:10]))
+                if drugi_http and str(item.get("url") or "").startswith(("http://", "https://")):
+                    # Kartica ima tudi druge (vdelane) vire: tokove dodatka dodamo kot dodatne razlicice.
+                    razlicice = drugi_http + [t for t in neposredni[:10] if t["url"] not in {v.get("url") for v in drugi_http}]
+                    resolved = dict(item, razlicice=razlicice, stevilo_razlicic=len(razlicice))
+                else:
+                    resolved = dict(item, url=neposredni[0]["url"], razlicice=neposredni[:10], stevilo_razlicic=len(neposredni[:10]))
+                if neposredni[0].get("podnapisi") and not resolved.get("podnapisi"):
+                    resolved["podnapisi"] = list(neposredni[0]["podnapisi"])
+                if neposredni[0].get("glave") and not resolved.get("glave"):
+                    resolved["glave"] = dict(neposredni[0]["glave"])
                 self._dynamic_items[item_id] = resolved
                 return resolved
+            if drugi_http:
+                return dict(item, razlicice=drugi_http, stevilo_razlicic=len(drugi_http))
             zunanji = [t for t in tokovi if t.get("zunanje")]
             if zunanji:
                 return dict(item, url=zunanji[0]["url"], stran=zunanji[0]["url"])

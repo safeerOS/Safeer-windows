@@ -378,3 +378,18 @@ pošljejo `content://`.
 Odprto: Medijski center (Safeer OS) ima spletni vmesnik — ista knjižnica, vez v os_app.py je naslednji korak;
 Kodi dodatki so Python vtičniki za Kodi in jih brez Kodija ni mogoče poganjati — polje v nastavitvah ostane, a
 predvajanja prek Kodi dodatkov ne obljubljamo (zabeleži na strani/README).
+
+## 2026-09-30 15:05 — sklop (5b): Stremio dodatki v Medijskem centru (Safeer OS)
+
+Ugotovitev: Medijski center ima Stremio dodatke že od prej (core/media_servers.py: osebni strežnik »Stremio dodatek«,
+katalogi, tokovi; core/os_media.resolve). Manjkalo je: glave in podnapisi toka, epizode (vzelo je le prvo) in
+predvajanje vsebin iz TMDB kataloga prek dodatka. Dodano:
+- `stremio_tokovi`: `glave` iz behaviorHints.proxyHeaders.request (brez CR/LF), `podnapisi` [{uri, jezik}] (le http/https).
+- `MediaCenter._stremio_vnosi`: film (`stremio:<koren>|movie|<imdb>`) in epizoda (`…|series|<imdb>:S:E`) za vsak
+  uporabnikov Stremio dodatek; vključeno v `movie_item` in `episode_item` (kartice iz TMDB, sezone/epizode UI že obstaja).
+- `resolve`: tokovi dodatka postanejo dodatne različice tudi ob obstoječih vdelanih virih; glave/podnapisi na vnosu
+  (mpv_player/vlc_player jih že bereta: `glave` na različici, `podnapisi` na vnosu).
+- Testi `tests/test_os_media_stremio.py` (5; lažen `_request`): glave/podnapisi, film in epizoda prek dodatka,
+  brez IMDb ni vnosa, dodatek kot dodatna različica. Brez omrežja. (Root `tests/` ne teče v Windows CI – lokalno zeleno.)
+Kodi: dodatki so Python vtičniki za Kodi; Medijski center jih odpre na napravi s Kodijem (obstoječe `kodi_odpri_dodatek`),
+samostojni predvajalnik jih ne more poganjati – to piše v nastavitvah/README.
