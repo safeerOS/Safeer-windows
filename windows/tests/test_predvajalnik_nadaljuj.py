@@ -63,3 +63,15 @@ def test_sledilec(tmp_path, monkeypatch):
     assert pg.nadaljevanje("/a.mkv") == 0.0 and "/a.mkv" not in NJ.nalozi()
     izklop = NJ.Sledilec(vklop=False); pg2 = Pogon(); izklop.povezi(pg2)
     assert pg2.nadaljevanje is None
+
+
+def test_sledilec_ustavitev(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path)); monkeypatch.setenv("APPDATA", str(tmp_path))
+    from safeer_windows import predvajalnik_nadaljuj as NJ
+    s = NJ.Sledilec(vklop=True)
+    s.ob_podatkih({"stanje": "predvaja", "uri": "/b.mkv", "polozaj": 50.0, "trajanje": 600.0})
+    s.ob_podatkih({"stanje": "predvaja", "uri": "/b.mkv", "polozaj": 53.0, "trajanje": 600.0})   # < 5 s: le v spominu
+    s.ob_podatkih({"stanje": "ustavljeno", "uri": "/b.mkv", "polozaj": 0.0, "trajanje": 0.0})    # Stop -> zadnji znani
+    assert NJ.nalozi()["/b.mkv"]["polozaj"] == 53.0
+    s.ob_podatkih({"stanje": "ustavljeno", "uri": "/b.mkv", "polozaj": 0.0, "trajanje": 0.0})    # ponovno: nic
+    assert NJ.nalozi()["/b.mkv"]["polozaj"] == 53.0

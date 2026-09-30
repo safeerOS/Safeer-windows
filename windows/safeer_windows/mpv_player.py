@@ -160,12 +160,25 @@ class MpvPlayerWidget(QWidget):
                                         lambda s="": self._napaka.emit(str(s)))
             self.pogon.povezi_video(self.video.wid())
             self._nadaljuj = Sledilec(); self._nadaljuj.povezi(self.pogon)   # nadaljuj tam, kjer si koncal
+            self._pripravi_mpris()
             self.pogon.nastavi_glasnost(self.volume.value())
             self.player = _PlayerShim(self)
             _log.info("Medijski center: libmpv pogon povezan (wid=%s)", self.video.wid())
         except Exception as e:  # noqa: BLE001
             self.pogon = None; self.player = None
             _log.error("Medijski center: libmpv pogon ni na voljo: %s", e)
+
+    def _pripravi_mpris(self) -> None:
+        """MPRIS2 (Linux): medijske tipke in zvocni aplet upravljajo Medijski center."""
+        self.mpris = None
+        if os.environ.get("SAFEER_MPRIS", "1") == "0":
+            return
+        try:
+            from .predvajalnik_mpris import SafeerMpris
+            m = SafeerMpris(self.pogon, ime="Safeer OS — Medijski center", okno=self.window(), storitev="safeeros")
+            self.mpris = m if m.aktiven else None
+        except Exception as e:  # noqa: BLE001
+            _log.debug("mpris: %s", e)
 
     def _m(self):
         return self.pogon._zagotovi() if self.pogon else None
@@ -279,6 +292,8 @@ class MpvPlayerWidget(QWidget):
             self._nadaljuj.ob_podatkih(p)
         except Exception as e:  # noqa: BLE001
             _log.debug("nadaljuj: %s", e)
+        if getattr(self, "mpris", None):
+            self.mpris.ob_podatkih(p)
         if not self.seeking and p.get("trajanje"):
             self.position.setValue(max(0, int(1000 * float(p.get("polozaj") or 0) / float(p["trajanje"]))))
         self.time_label.setText(f"{self._format_time(p.get('polozaj', 0))} / {self._format_time(p.get('trajanje', 0))}")
@@ -442,8 +457,10 @@ class MpvPlayerWidget(QWidget):
     # ------------------------------------------------------------------ tipke (kot VLC razlicica)
     def keyPressEvent(self, event) -> None:
         k = event.key()
-        if k == Qt.Key.Key_Space:
+        if k in (Qt.Key.Key_Space, Qt.Key.Key_MediaPlay, Qt.Key.Key_MediaPause, Qt.Key.Key_MediaTogglePlayPause):
             self.toggle_play(); event.accept(); return
+        if k == Qt.Key.Key_MediaStop:
+            self.stop(); event.accept(); return
         if k in (Qt.Key.Key_Left, Qt.Key.Key_Right) and self.pogon:
             self.pogon.skok(-10 if k == Qt.Key.Key_Left else 10); event.accept(); return
         if k == Qt.Key.Key_V and not event.modifiers() & Qt.KeyboardModifier.ControlModifier:
@@ -471,6 +488,12 @@ class MpvPlayerWidget(QWidget):
             h = max(0.25, min(4.0, round(h, 2))); self.pogon.nastavi_hitrost(h); self.pogon.osd(f"Hitrost {h:g}×")
 
     def zapri_pogon(self) -> None:
+        if getattr(self, "mpris", None):
+            try:
+                self.mpris.zapri()
+            except Exception:  # noqa: BLE001
+                pass
+            self.mpris = None
         if self.pogon:
             self._shrani_polozaj()
             self.pogon.zapri(); self.pogon = None; self.player = None
