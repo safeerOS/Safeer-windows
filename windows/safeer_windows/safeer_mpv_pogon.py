@@ -231,6 +231,12 @@ class SafeerMpvPogon:
         self._mpv = None
         self._zapiranje = False
         self._konec_cakajoc = False
+        self._koncan_uri: str = ""
+        # Nadaljuj tam, kjer si koncal: gostitelj nastavi `nadaljevanje(uri) -> sekunde` (0 = od zacetka)
+        # in `ob_koncu_datoteke(uri)` (datoteka je bila predvajana do konca; polozaj se pozabi).
+        self.nadaljevanje = None
+        self.ob_koncu_datoteke = None
+        self.zacel_pri: float = 0.0   # kje se je zacelo zadnje predvajanje (0 = od zacetka)
         self._kljuc = threading.RLock()   # scitil: podatki()/_sporoci (mpv nit) proti _unici (GUI nit)
         # Instanca se ustvari lazno: ob povezi_video(wid) ali ob prvem ukazu (vo=null, brez slike).
         # Tako ni uničevanja instance sredi opazovalnih klicev (segfault 2026-09-30 na Linuxu).
@@ -289,6 +295,8 @@ class SafeerMpvPogon:
                 razlog = ""
             if str(razlog) in ("eof", "EndFile.EOF", "0"):
                 # mpv nit: samo oznacimo; GUI nit poklice obdelaj_konec() (prek sprememba-sporocila).
+                vnos = self._seznam[self._indeks] if 0 <= self._indeks < len(self._seznam) else {}
+                self._koncan_uri = vnos.get("uri", "")
                 self._konec_cakajoc = True
                 if self._cb_sprememba:
                     try:
@@ -358,13 +366,26 @@ class SafeerMpvPogon:
         except Exception:
             pass
 
-    def predvajaj(self, indeks: int) -> bool:
+    def predvajaj(self, indeks: int, zacetek: float = 0.0) -> bool:
+        """[zacetek] > 0: predvajanje se zacne pri tem casu (nadaljuj tam, kjer si koncal)."""
         if not (0 <= indeks < len(self._seznam)):
             return False
         self._indeks = indeks
+        uri = self._seznam[indeks]["uri"]
+        if (not zacetek or zacetek <= 0) and self.nadaljevanje is not None:
+            try:
+                zacetek = float(self.nadaljevanje(uri) or 0.0)
+            except Exception:
+                zacetek = 0.0
+        self.zacel_pri = float(zacetek) if zacetek and zacetek > 0 else 0.0
         try:
-            self._zagotovi().play(self._seznam[indeks]["uri"])
-            self._zagotovi().pause = False
+            m = self._zagotovi()
+            try:
+                m.start = ("%.2f" % float(zacetek)) if zacetek and zacetek > 0 else "none"
+            except Exception:
+                pass
+            m.play(self._seznam[indeks]["uri"])
+            m.pause = False
         except Exception as e:
             if self._cb_napaka:
                 self._cb_napaka(str(e))
@@ -516,6 +537,62 @@ class SafeerMpvPogon:
         self._sporoci()
         return True
 
+    # ---- zamiki (podnapisi, zvok) ----
+    def zamik_podnapisov(self, sekunde: Optional[float] = None, delta: float = 0.0) -> float:
+        """Nastavi (sekunde) ali premakne (delta) zamik podnapisov; vrne trenutni zamik v sekundah."""
+        try:
+            m = self._zagotovi()
+            z = float(sekunde) if sekunde is not None else float(m.sub_delay or 0.0) + float(delta)
+            m.sub_delay = round(z, 3)
+            return round(float(m.sub_delay or 0.0), 3)
+        except Exception:
+            return 0.0
+
+    def zamik_zvoka(self, sekunde: Optional[float] = None, delta: float = 0.0) -> float:
+        try:
+            m = self._zagotovi()
+            z = float(sekunde) if sekunde is not None else float(m.audio_delay or 0.0) + float(delta)
+            m.audio_delay = round(z, 3)
+            return round(float(m.audio_delay or 0.0), 3)
+        except Exception:
+            return 0.0
+
+    # ---- poglavja ----
+    def poglavja(self) -> list:
+        """[{"indeks", "naslov", "cas"}] iz mpv chapter-list (prazno, ce jih datoteka nima)."""
+        try:
+            sez = self._zagotovi().chapter_list or []
+        except Exception:
+            return []
+        izid = []
+        for i, c in enumerate(sez):
+            izid.append({"indeks": i, "naslov": str(c.get("title") or f"Poglavje {i + 1}"), "cas": float(c.get("time") or 0.0)})
+        return izid
+
+    def poglavje(self, indeks: int) -> bool:
+        try:
+            self._zagotovi().chapter = int(indeks)
+            self._sporoci()
+            return True
+        except Exception:
+            return False
+
+    def naslednje_poglavje(self, smer: int = 1) -> bool:
+        try:
+            self._zagotovi().command("add", "chapter", int(smer))
+            return True
+        except Exception:
+            return False
+
+    # ---- slicica po slicico ----
+    def slicica(self, smer: int = 1) -> bool:
+        try:
+            self._zagotovi().command("frame-step" if smer >= 0 else "frame-back-step")
+            self._sporoci()
+            return True
+        except Exception:
+            return False
+
     # ---- OSD ----
     def osd(self, besedilo: str, ms: int = 1200) -> None:
         """Kratko sporocilo v sliki (mpv-jev OSD prek libass; deluje tudi v LGPL gradnji brez skript)."""
@@ -546,10 +623,17 @@ class SafeerMpvPogon:
             glasnost = int(self._mpv.volume or 0)
             utisan = bool(self._mpv.mute)
             hitrost = float(self._mpv.speed or 1.0)
-            idle = bool(self._mpv.core_idle)
+            # core_idle je True tudi med premorom (napacno "ustavljeno"); keep-open po koncu datoteke = ustavljeno
+            idle = bool(self._mpv.idle_active) or bool(self._mpv.eof_reached)
         except Exception:
             pavza = True; polozaj = trajanje = 0.0; glasnost = self._glasnost; utisan = False; hitrost = 1.0; idle = True
         stanje = "ustavljeno" if idle else ("premor" if pavza else "predvaja")
+        try:
+            zamik_p = float(self._mpv.sub_delay or 0.0); zamik_z = float(self._mpv.audio_delay or 0.0)
+            poglavje = self._mpv.chapter; n_poglavij = int(self._mpv.chapters or 0)
+            poglavje = int(poglavje) if poglavje is not None else -1
+        except Exception:
+            zamik_p = zamik_z = 0.0; poglavje = -1; n_poglavij = 0
         s = self.steze()
         return {
             "stanje": stanje, "indeks": self._indeks, "nSeznam": len(self._seznam),
@@ -559,6 +643,8 @@ class SafeerMpvPogon:
             "nZvok": len(s["zvok"]), "trenutniZvok": s["trenutniZvok"],
             "nPodnapis": len(s["podnapisi"]) - 1, "trenutniPodnapis": s["trenutniPodnapis"],
             "steze": s,
+            "zamikPodnapisov": zamik_p, "zamikZvoka": zamik_z, "poglavje": poglavje, "nPoglavij": n_poglavij,
+            "uri": vnos.get("uri", ""),
         }
 
     # ---- notranje ----
@@ -581,6 +667,12 @@ class SafeerMpvPogon:
         if not self._konec_cakajoc:
             return False
         self._konec_cakajoc = False
+        if self.ob_koncu_datoteke is not None and self._koncan_uri:
+            try:
+                self.ob_koncu_datoteke(self._koncan_uri)
+            except Exception:
+                pass
+        self._koncan_uri = ""
         self._po_koncu()
         return True
 

@@ -230,3 +230,56 @@ DELUJE: H.264/HEVC/VP9, HDR zaznava (bt2020/pq), HLS, glave+piškotki, previjanj
     "Dodatki (Stremio, Kodi)" z dvema oznacenima poljema, MedijskiViri STREMIO/KODI, besedila v 6 jezikih; preverjeno
     na testnem telefonu (okno, vnos, shranjeno, prikaz med viri).
   * Android veja predvajalnik-tovarna (d7a5fbe) je loceno: skupna tovarna ExoPlayerja, meritve, zmogljivost dekoderja.
+- 12:00-12:15 Matej: "objavi kar je preverjeno" + predvajalnik naj ima predstavitev na strani Medijskega centra.
+  GitHub: Safeer-windows veja predvajalnik-libmpv (ba22ba9), Android-tv veji predvajalnik-tovarna (d7a5fbe) in
+  dodatki-stremio-kodi (c0a322d) potisnjene (brez izdaj: Windows GUI in TV nista preverjena; main nespremenjen).
+  safeer.si: v razdelku Medijski center nov pododdelek "Safeer predvajalnik" (SL/EN, preverjena dejstva, brez prenosov
+  in brez obljubljene razlicice; posnetek okna Dodatki; povezava na gradnjo libmpv na GitHubu); V=20260930-p4;
+  preverbe zelene (povezave 13 strani, brez drsnika, zasebnost); objavljeno prek izdaja --stran (Cloudflare).
+  INCIDENT: prva dva poskusa objave padla - wrangler v Dockerju brez DNS. Vzrok: moj jutranji `resolvectl revert enp1s0`
+  je odstranil DNS (192.168.0.1), ki ga NetworkManager potisne ob aktivaciji; gostitelj je delal le zato, ker glibc brez
+  nameserverja vzame 127.0.0.1 (Pi-hole), Docker pa ne. Popravek: `resolvectl dns enp1s0 192.168.0.1` (kot DHCP).
+  ODPRTO: safeer-dns-nadzor.sh ob "obnovi" naredi `resolvectl revert` -> isti izpad se bo ponovil; treba popraviti
+  (namesto revert: nastavi 192.168.0.1) - potrebuje sudo, cakam Mateja.
+- 12:26-12:36 Matej: samostojni "Safeer media player" za Android - za/proti, zmagovalec se naredi. ZA zmagal (skupna koda
+  iznici podvajanje; strosek = nov okus). Android-tv veja predvajalnik-android (e84c746, potisnjena, iz dodatki-stremio-kodi):
+  okus predvajalnik = si.safeer.player 0.1.0, manifest okusi/predvajalnik (LAUNCHER -> GlasbaActivity, VIEW video/audio/
+  HLS/DASH prek content/file/http/https, brez leanback/boot/HOME), GlasbaActivity.predvajajIzNamena (ACTION_VIEW ->
+  GlasbaStoritev + PredvajanjeActivity), build_tv_apk.sh podpise Safeer-Predvajalnik.apk. Preverjeno na testnem telefonu:
+  namestitev ob Safeer OS, "Odpri z" http naslova videa igra (posnetek), brez FATAL. Lastna ikona in izdaja sledita.
+- 12:47-13:12 Matej "Da" -> IZDAJA Safeer Predvajalnik 0.1.0 (Android). Lokalni main je bil 78 commitov za origin (2.1.130);
+  reset na origin/main, veje dodatki + predvajalnik rebasane (spori: strings x7, MedijskiViri, GlasbaActivity iskanje,
+  build_tv_apk.sh - upstream ima nov okus telefon), lastna ikona, stranska vrstica v okusu predvajalnik le Mediji/Naprave/
+  Datoteke/Nastavitve. build_tv_apk.sh (vsi okusi) OK, podpis z izdajnim kljucem (sha e7808780...), 8.3 MB, 0.1.0.
+  Preverjeno na telefonu: zagon, "Odpri z" (av1 webm prek http) PLAYING, brez FATAL. Oznaka predvajalnik-v0.1.0, izdaja
+  https://github.com/safeerOS/Android-tv/releases/tag/predvajalnik-v0.1.0 (APK + .sha256 6ca61b68...). Veja
+  predvajalnik-android potisnjena s --force-with-lease (rebase; razvojna veja). safeer.si: prenos v razdelku Safeer
+  predvajalnik (7.94 MiB, izracunano), PREVERBE/PRENOSI posodobljeni, objavljeno in preverjeno (200, sha enak).
+  Veja predvajalnik-tovarna se NI rebasana na 2.1.130 (sledi). NI v izdaji: TV/OS (nespremenjeno 2.1.130/0.5.6).
+
+## 2026-09-30 13:38 — sklop (1): napredne funkcije namiznega predvajalnika (Linux klop, preverjeno)
+
+Kaj je novo (skupna koda: samostojni predvajalnik in Medijski center):
+- **Nadaljuj tam, kjer si končal** — `predvajalnik_nadaljuj.py` (`nadaljuj.json` poleg nastavitev; pravila
+  kot v Safeer OS na Androidu: > 10 s od začetka, > 30 s do konca, največ 500 vnosov; ob koncu datoteke se
+  vnos pozabi). `Sledilec` beleži vsakih ~5 s, takoj ob premoru in zaprtju; pogonu da `nadaljevanje(uri)` in
+  `ob_koncu_datoteke(uri)`. Pogon: `predvajaj(i, zacetek)` (`start=`), `zacel_pri`; OSD "⏵ Nadaljujem od …".
+  Izklop: `SAFEER_NADALJUJ=0`.
+- **Zamik podnapisov/zvoka** (`sub-delay`/`audio-delay`): tipke Z/X in K/L (0,1 s; Shift 1 s), meniji
+  Podnapisi ▸ Zamik / Zvok ▸ Zamik (vnos, ponastavi), v `podatki()` `zamikPodnapisov`, `zamikZvoka`.
+- **Poglavja**: meni Poglavja (dinamičen iz `chapter-list`, označeno trenutno), PgUp/PgDn, `poglavje`/`nPoglavij`.
+- **Skok na čas** Ctrl+T (`razclleni_cas`: 1:23:45, 23:45, 90, 1h5m, 12,5), Home = od začetka.
+- **Hitrost** [ ] ±0,1, Backspace 1×, meni 0,5–2×; **sličica** naprej/nazaj (`.`/`,`, frame-step); **posnetek** S
+  (PNG v Slike/Safeer, `screenshot-to-file`).
+- Popravek stanja: `core-idle` je True tudi med premorom → po premoru je stanje prej kazalo "ustavljeno"
+  (in Sledilec ni beležil). Zdaj `idle_active` ali `eof_reached` = "ustavljeno"; po koncu datoteke gumb ⏵
+  predvaja znova.
+
+Preverjeno (`~/.tmp/mpvokno/test_sklop1.py A/B`, `test_media.py`, h264 120 s + mkv s 3 poglavji):
+- A: zamik podnapisov +0,5 −0,2 → 0,3 s; zvok −0,3 → 0; hitrost 1,5 → 1; skok na 15 s → položaj 16,5; premor →
+  `nadaljuj.json` {polozaj 16.5, trajanje 120.1}; posnetek PNG 294 kB.
+- B: odpre isto datoteko → začne pri 16,5 (`zacel_pri`=16.5, po 2 s 18,5); po koncu datoteke vnos izbrisan
+  (`{}`), stanje "ustavljeno"; poglavja [Uvod 0, Sredina 8, Konec 16]; PgDn → poglavje 1 (8,8 s); poglavje(2) → 16,9 s.
+- Samostojno okno: meniji Predvajanje/Poglavja/Zvok ▸ Zamik/Podnapisi ▸ Zamik zgrajeni, posnetek `12_sklop1.png`.
+- Medijski center (`test_media.py`): nespremenjeno zeleno; pytest windows/tests: 289 passed (+ test_sledilec).
+Windows GUI: še ni preverjeno (čaka prijavo; gui_r1.cmd).

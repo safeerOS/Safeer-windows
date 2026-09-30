@@ -17,6 +17,7 @@ from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (QComboBox, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QSlider,
                                QVBoxLayout, QWidget)
 
+from .predvajalnik_nadaljuj import Sledilec
 from .safeer_mpv_okno import SafeerMpvVideo
 from .vlc_player import _BESEDILA, _dovoljen_podnapis
 
@@ -47,6 +48,7 @@ class MpvPlayerWidget(QWidget):
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.pogon = None
+        self._nadaljuj = Sledilec(vklop=False)   # pravi sledilec se poveze v _init_mpv
         self.player = None            # _PlayerShim, ko je pogon ustvarjen
         self.current_item: dict = {}
         self.seeking = False
@@ -157,6 +159,7 @@ class MpvPlayerWidget(QWidget):
             self.pogon = SafeerMpvPogon(lambda p=None: self._sprememba.emit(p or {}), None,
                                         lambda s="": self._napaka.emit(str(s)))
             self.pogon.povezi_video(self.video.wid())
+            self._nadaljuj = Sledilec(); self._nadaljuj.povezi(self.pogon)   # nadaljuj tam, kjer si koncal
             self.pogon.nastavi_glasnost(self.volume.value())
             self.player = _PlayerShim(self)
             _log.info("Medijski center: libmpv pogon povezan (wid=%s)", self.video.wid())
@@ -227,8 +230,15 @@ class MpvPlayerWidget(QWidget):
         if self.pogon:
             self.pogon.premor()
 
+    def _shrani_polozaj(self) -> None:
+        try:
+            self._nadaljuj.zabelezi(getattr(self, "_zadnji_podatki", {}) or {}, takoj=True)
+        except Exception as e:  # noqa: BLE001
+            _log.debug("nadaljuj shrani: %s", e)
+
     def stop(self) -> None:
         if self.pogon:
+            self._shrani_polozaj()
             self.pogon.ustavi()
 
     def close_player(self) -> None:
@@ -264,6 +274,11 @@ class MpvPlayerWidget(QWidget):
                 p = self.pogon.podatki()
         except Exception as e:  # noqa: BLE001
             _log.debug("podatki: %s", e); return
+        self._zadnji_podatki = p
+        try:
+            self._nadaljuj.ob_podatkih(p)
+        except Exception as e:  # noqa: BLE001
+            _log.debug("nadaljuj: %s", e)
         if not self.seeking and p.get("trajanje"):
             self.position.setValue(max(0, int(1000 * float(p.get("polozaj") or 0) / float(p["trajanje"]))))
         self.time_label.setText(f"{self._format_time(p.get('polozaj', 0))} / {self._format_time(p.get('trajanje', 0))}")
@@ -433,8 +448,29 @@ class MpvPlayerWidget(QWidget):
             self.pogon.skok(-10 if k == Qt.Key.Key_Left else 10); event.accept(); return
         if k == Qt.Key.Key_V and not event.modifiers() & Qt.KeyboardModifier.ControlModifier:
             self.naslednji_podnapisi(); event.accept(); return
+        if self.pogon and k in (Qt.Key.Key_Z, Qt.Key.Key_X, Qt.Key.Key_K, Qt.Key.Key_L, Qt.Key.Key_PageUp, Qt.Key.Key_PageDown,
+                                Qt.Key.Key_BracketLeft, Qt.Key.Key_BracketRight, Qt.Key.Key_Backspace):
+            self._napredna_tipka(k, bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)); event.accept(); return
         super().keyPressEvent(event)
+
+    def _napredna_tipka(self, k, shift: bool) -> None:
+        """Z/X zamik podnapisov, K/L zamik zvoka (0,1 s; Shift 1 s), PgUp/PgDn poglavje, [ ] hitrost, Backspace 1x."""
+        korak = 1.0 if shift else 0.1
+        if k in (Qt.Key.Key_Z, Qt.Key.Key_X):
+            z = self.pogon.zamik_podnapisov(delta=korak if k == Qt.Key.Key_X else -korak); self.pogon.osd(f"Podnapisi: {z:+.1f} s")
+        elif k in (Qt.Key.Key_K, Qt.Key.Key_L):
+            z = self.pogon.zamik_zvoka(delta=korak if k == Qt.Key.Key_L else -korak); self.pogon.osd(f"Zvok: {z:+.1f} s")
+        elif k in (Qt.Key.Key_PageUp, Qt.Key.Key_PageDown):
+            p = getattr(self, "_zadnji_podatki", {}) or {}
+            if not int(p.get("nPoglavij") or 0):
+                self.pogon.osd("Ni poglavij"); return
+            self.pogon.naslednje_poglavje(1 if k == Qt.Key.Key_PageDown else -1)
+        elif k in (Qt.Key.Key_BracketLeft, Qt.Key.Key_BracketRight, Qt.Key.Key_Backspace):
+            p = getattr(self, "_zadnji_podatki", {}) or {}
+            h = 1.0 if k == Qt.Key.Key_Backspace else float(p.get("hitrost") or 1.0) + (0.1 if k == Qt.Key.Key_BracketRight else -0.1)
+            h = max(0.25, min(4.0, round(h, 2))); self.pogon.nastavi_hitrost(h); self.pogon.osd(f"Hitrost {h:g}×")
 
     def zapri_pogon(self) -> None:
         if self.pogon:
+            self._shrani_polozaj()
             self.pogon.zapri(); self.pogon = None; self.player = None
