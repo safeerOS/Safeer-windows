@@ -2124,6 +2124,8 @@ class SafeerOsWindow(QMainWindow):
             return s.nastavi_oznake(str(a[0]), str(a[1]), a[2] if len(a) > 2 else [])
         if metoda == "sporocilaOsebe":
             return s.osebe()
+        if metoda == "sporocilaIsciPri":
+            return s.isci_pri_osebi(str(a[0]), str(a[1]), str(a[2]) if len(a) > 2 else "", str(a[3]) if len(a) > 3 else "")
         raise ValueError("neznano")
 
     def koncaj_za_posodobitev(self) -> None:

@@ -218,6 +218,31 @@ class StoritevSporocil:
             po_osebi[p.oseba_id]["neprebrano"] += p.neprebrano
         return skupine
 
+    def isci_sporocila(self, niz: str, oseba_id: str = "", kanal_id: str = "", pogovor_id: str = "", najvec: int = 60) -> list:
+        """Iskanje po besedilu sporocil: znotraj ene osebe (vsi njeni pogovori po kanalih) ali enega pogovora.
+        Vrne najnovejsa najprej, z zadetkom oznacenim v 'izsek'."""
+        n = str(niz).strip()
+        if not n:
+            return []
+        sql = """SELECT s.*, p.oseba_id AS oseba_id, p.zadeva AS zadeva FROM sporocila s
+                 JOIN pogovori p ON p.id=s.pogovor_id AND p.kanal_id=s.kanal_id WHERE s.besedilo LIKE ? ESCAPE '\\'"""
+        vzorec = "%" + n.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        args: list = [vzorec]
+        if oseba_id: sql += " AND p.oseba_id=?"; args.append(str(oseba_id))
+        if kanal_id: sql += " AND s.kanal_id=?"; args.append(str(kanal_id))
+        if pogovor_id: sql += " AND s.pogovor_id=?"; args.append(str(pogovor_id))
+        sql += " ORDER BY s.cas DESC, s.rowid DESC LIMIT ?"; args.append(max(1, min(int(najvec), 200)))
+        with self._zaklep:
+            vrstice = self.db.execute(sql, args).fetchall()
+        izid = []
+        for r in vrstice:
+            b = r["besedilo"] or ""; i = b.casefold().find(n.casefold())
+            zac = max(0, i - 40) if i >= 0 else 0
+            izid.append({"id": r["id"], "pogovor_id": r["pogovor_id"], "kanal_id": r["kanal_id"], "oseba_id": r["oseba_id"],
+                         "smer": r["smer"], "cas": r["cas"], "zadeva": r["zadeva"] or "",
+                         "izsek": ("…" if zac else "") + b[zac:zac + 160] + ("…" if len(b) > zac + 160 else "")})
+        return izid
+
     def zadnje_smeri(self) -> dict:
         """(kanal_id, pogovor_id) -> smer zadnjega sporocila ('noter'/'ven'); za mapo Poslano v nabiralniku."""
         with self._zaklep:
