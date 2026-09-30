@@ -359,7 +359,7 @@ oknu, prekritje skrito, zapiranje PiP zapre predvajanje; naslov »dvazvoka_120s.
 Opomba: `file://` iz `am start` da EACCES (omejen dostop Androida) – to ni napaka aplikacije; upravitelji datotek
 pošljejo `content://`.
 
-## 2026-09-30 14:40 — sklop (5): predvajanje prek Stremio dodatkov (samostojni predvajalnik)
+## 2026-09-30 14:30 — sklop (5): predvajanje prek Stremio dodatkov (samostojni predvajalnik)
 
 - `stremio_dodatki.py`: odjemalec javnega protokola dodatkov (manifest → katalogi z iskanjem/skip in obveznimi
   filtri → meta z epizodami → tokovi). Tokovi: `url` (http/https, predvajamo), `externalUrl`/`ytId` (odpremo v
