@@ -827,7 +827,7 @@ div.vrstica { cursor: default; }
 /* Sporocila (enako kot Safeer OS za Linux) */
 .sporocila-glava { display:flex; align-items:flex-end; justify-content:space-between; gap:20px; }
 .sporocila-glava p { color:var(--medlo); font-size:18px; margin:0 0 20px; }
-.nabiralnik { display:grid; grid-template-columns:220px minmax(280px, 30%) 1fr; min-height:520px; height:calc(100vh - 230px); max-height:calc(100vh - 230px);
+.nabiralnik { display:grid; grid-template-columns:200px minmax(260px, 24%) 1fr; min-height:520px; height:calc(100vh - 230px); max-height:calc(100vh - 230px);
   border:1px solid var(--rob); border-radius:16px; background:rgba(0,0,0,.14); overflow:hidden; }
 .nabiralnik-mape { border-right:1px solid var(--rob); padding:12px 10px; overflow-y:auto; display:flex; flex-direction:column; gap:6px; }
 .mape button { width:100%; display:flex; align-items:center; gap:10px; padding:9px 12px; border-radius:10px; text-align:left; background:transparent; }
@@ -856,6 +856,8 @@ div.vrstica { cursor: default; }
 .pogovor-naslov { display:flex; align-items:center; justify-content:space-between; gap:10px; }
 .pogovor-naslov-besedilo b { display:block; } .pogovor-naslov-besedilo small { color:var(--medlo); font-weight:400; }
 .pogovor-vrstica .oznaka-kanala { display:inline-block; margin-left:6px; padding:1px 6px; border-radius:6px; background:rgba(255,255,255,.08); font-size:11px; color:var(--medlo); vertical-align:middle; }
+/* 1080p in ozje: pogovor ostane siroka sredina, pano je ozji; pod 1100 px ostaneta samo seznam in pogovor. */
+@media (max-width: 1700px) { .nabiralnik { grid-template-columns:180px minmax(240px, 22%) 1fr; } .pogovor-pano { width:230px; padding:12px; } }
 @media (max-width: 1100px) { .nabiralnik { grid-template-columns:minmax(260px, 34%) 1fr; } .nabiralnik-mape { display:none; } .pogovor-pano { display:none; } }
 .sporocila-postavitev { display:grid; grid-template-columns:minmax(280px, 36%) 1fr; min-height:520px;
   border:1px solid var(--rob); border-radius:var(--polmer); overflow:hidden; background:var(--kartica); }
