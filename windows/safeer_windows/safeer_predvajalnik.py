@@ -2,7 +2,9 @@
 
 Zagon: python -m safeer_windows --predvajalnik [datoteka|URL ...]
 Podpira: odpiranje datotek/URL-jev (meni, argumenti, povleci-in-spusti), seznam predvajanja (N/P),
-podnapise (sub-add prek pogona), celozaslon (F/dvoklik/Esc), tipke kot v Medijskem centru.
+podnapise (sub-add prek pogona), celozaslon (F/dvoklik/Esc), tipke kot v Medijskem centru,
+nadaljuj tam, kjer si koncal, skok na cas (Ctrl+T), zamik podnapisov/zvoka, poglavja, hitrost,
+slicico po slicico in posnetek zaslona (S).
 Ne vsebuje katalogov ali obvodov DRM; predvaja, kar mu uporabnik da.
 """
 from __future__ import annotations
@@ -53,13 +55,81 @@ class SafeerPredvajalnikOkno(QMainWindow):
         p = self.menuBar().addMenu("&Predvajanje")
         for ime, blz, f in (("Predvajaj/premor", "Space", self.pred.premor), ("Naslednja", "N", lambda: self.pred.pogon and self.pred.pogon.naslednja()),
                             ("Prejšnja", "P", lambda: self.pred.pogon and self.pred.pogon.prejsnja()),
+                            ("Od začetka", "Home", self.pred.od_zacetka),
+                            ("Skok na čas…", "Ctrl+T", self.skok_na_cas),
                             ("Celozaslon", "F", self.pred.preklopi_celozaslon)):
             a = QAction(ime, self); a.setShortcut(blz); a.triggered.connect(f); p.addAction(a)
+        p.addSeparator()
+        h = p.addMenu("&Hitrost")
+        for ime, blz, f in (("Počasneje (−0,1)", "[", lambda: self.pred.hitrost(delta=-0.1)), ("Hitreje (+0,1)", "]", lambda: self.pred.hitrost(delta=0.1)),
+                            ("Običajna (1×)", "Backspace", lambda: self.pred.hitrost(1.0))):
+            a = QAction(ime, self); a.setShortcut(blz); a.triggered.connect(f); h.addAction(a)
+        for v in (0.5, 0.75, 1.25, 1.5, 2.0):
+            a = QAction(f"{v:g}×", self); a.triggered.connect(lambda _c=False, v=v: self.pred.hitrost(v)); h.addAction(a)
+        for ime, blz, f in (("Sličica naprej (premor)", ".", lambda: self.pred.slicica(1)), ("Sličica nazaj (premor)", ",", lambda: self.pred.slicica(-1)),
+                            ("Posnetek zaslona (PNG)", "S", self.posnetek)):
+            a = QAction(ime, self); a.setShortcut(blz); a.triggered.connect(f); p.addAction(a)
+        self.meni_poglavja = self.menuBar().addMenu("Po&glavja")
+        self._poglavja_kljuc = None
         nast = self.menuBar().addMenu("&Nastavitve")
         a = QAction("&Dodatki (Stremio, Kodi)…", self); a.setShortcut("Ctrl+D"); a.triggered.connect(self.odpri_dodatke); nast.addAction(a)
         self.meni_zvok = self.menuBar().addMenu("&Zvok")
         self.meni_podnapisi = self.menuBar().addMenu("Pod&napisi")
         self._steze_kljuc = None
+
+    def _zamiki(self, meni, kaj: str, f) -> None:
+        """Podmeni zamika (podnapisi ali zvok): -/+ 0,1 s, -/+ 1 s, vnos, ponastavi."""
+        z = meni.addMenu("Zamik")
+        for ime, blz, d in ((f"{kaj} prej (−0,1 s)", "Z" if kaj == "Podnapisi" else "K", -0.1), (f"{kaj} pozneje (+0,1 s)", "X" if kaj == "Podnapisi" else "L", 0.1),
+                            ("−1 s", "Shift+Z" if kaj == "Podnapisi" else "Shift+K", -1.0), ("+1 s", "Shift+X" if kaj == "Podnapisi" else "Shift+L", 1.0)):
+            a = QAction(ime, self); a.setShortcut(blz); a.triggered.connect(lambda _c=False, d=d: f(delta=d)); z.addAction(a)
+        z.addSeparator()
+        a = QAction("Vnesi zamik…", self); a.triggered.connect(lambda: self._vnesi_zamik(kaj, f)); z.addAction(a)
+        a = QAction("Ponastavi (0 s)", self); a.triggered.connect(lambda: f(0.0)); z.addAction(a)
+
+    def _vnesi_zamik(self, kaj: str, f) -> None:
+        kljuc = "zamikPodnapisov" if kaj == "Podnapisi" else "zamikZvoka"
+        trenutni = float(self.pred.zadnji_podatki.get(kljuc) or 0.0)
+        v, ok = QInputDialog.getDouble(self, f"Zamik — {kaj.lower()}", "Sekunde (pozitivno = pozneje):", trenutni, -60.0, 60.0, 1)
+        if ok:
+            f(v)
+
+    def skok_na_cas(self) -> None:
+        from .predvajalnik_nadaljuj import razclleni_cas
+        t = float(self.pred.zadnji_podatki.get("trajanje") or 0)
+        if t <= 0:
+            self.statusBar().showMessage("Nič se ne predvaja", 3000); return
+        from .safeer_mpv_okno import _cas
+        b, ok = QInputDialog.getText(self, "Skok na čas", f"Čas (h:mm:ss, mm:ss ali sekunde; trajanje {_cas(t)}):",
+                                     text=_cas(float(self.pred.zadnji_podatki.get("polozaj") or 0)))
+        if not ok:
+            return
+        sek = razclleni_cas(b)
+        if sek is None:
+            QMessageBox.warning(self, "Skok na čas", "Časa ni bilo mogoče razbrati (npr. 1:23:45, 23:45, 90, 1h5m)."); return
+        self.pred.pojdi_na_cas(sek)
+
+    def posnetek(self) -> None:
+        pot = self.pred.posnetek()
+        self.statusBar().showMessage(f"Posnetek shranjen: {pot}" if pot else "Posnetek ni uspel", 5000)
+
+    def _osvezi_poglavja(self, p: dict) -> None:
+        kljuc = (p.get("uri"), int(p.get("nPoglavij") or 0), int(p.get("poglavje", -1)))
+        if kljuc == self._poglavja_kljuc:
+            return
+        self._poglavja_kljuc = kljuc
+        m = self.meni_poglavja; m.clear()
+        for ime, blz, sm in (("Prejšnje poglavje", "PgUp", -1), ("Naslednje poglavje", "PgDown", 1)):
+            a = QAction(ime, self); a.setShortcut(blz); a.triggered.connect(lambda _c=False, sm=sm: self.pred.poglavje(sm)); m.addAction(a)
+        pog = self.pred.pogon.poglavja() if (self.pred.pogon and kljuc[1]) else []
+        if not pog:
+            m.addSeparator(); a = QAction("(datoteka nima poglavij)", self); a.setEnabled(False); m.addAction(a); return
+        m.addSeparator()
+        from .safeer_mpv_okno import _cas
+        for c in pog:
+            a = QAction(f"{c['indeks'] + 1}. {c['naslov']}  ({_cas(c['cas'])})", self); a.setCheckable(True)
+            a.setChecked(c["indeks"] == kljuc[2])
+            a.triggered.connect(lambda _c=False, i=c["indeks"]: self.pred.pogon and self.pred.pogon.poglavje(i)); m.addAction(a)
 
     def _osvezi_steze(self, p: dict) -> None:
         """Meniji sledi se osvezijo le, ko se seznam sledi spremeni (ne ob vsakem tiku)."""
@@ -75,8 +145,12 @@ class SafeerPredvajalnikOkno(QMainWindow):
             for t in sledi:
                 a = QAction(str(t.get("ime", "")), self); a.setCheckable(True); a.setChecked(t.get("indeks") == trenutni)
                 a.triggered.connect(lambda _c=False, i=t.get("indeks"), f=f: f(i)); meni.addAction(a)
+            meni.addSeparator()
             if meni is self.meni_podnapisi:
-                meni.addSeparator(); a = QAction("Naloži podnapise…", self); a.triggered.connect(self.nalozi_podnapise); meni.addAction(a)
+                a = QAction("Naloži podnapise…", self); a.triggered.connect(self.nalozi_podnapise); meni.addAction(a)
+                self._zamiki(meni, "Podnapisi", self.pred.zamik_podnapisov)
+            else:
+                self._zamiki(meni, "Zvok", self.pred.zamik_zvoka)
 
     # ---- odpiranje ----
     def odpri(self, vnosi: list[str]) -> int:
@@ -138,6 +212,7 @@ class SafeerPredvajalnikOkno(QMainWindow):
     # ---- stanje ----
     def _ob_stanju(self, p: dict) -> None:
         self._osvezi_steze(p)
+        self._osvezi_poglavja(p)
         naslov = p.get("naslov") or ""
         self.setWindowTitle(f"{naslov} — Safeer Predvajalnik" if naslov else "Safeer Predvajalnik")
 

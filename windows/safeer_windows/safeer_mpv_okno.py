@@ -8,11 +8,19 @@ Vgradnja: mpv izrisuje v lastno (podrejeno) nativno okno prek rocaja `wid`. Zato
 - vsi klici v pogon so v GUI niti; sporocila iz mpv niti (sprememba/konec/napaka) se v GUI nit
   posredujejo prek Qt signalov (QueuedConnection), nikoli neposredno.
 Tipke: presledek = premor, <- -> = 5 s, Shift = 30 s, F / dvoklik = celozaslon, Esc = izhod
-iz celozaslona, M = utisaj, +/- = glasnost, N/P = naslednja/prejsnja.
+iz celozaslona, M = utisaj, +/- = glasnost, N/P = naslednja/prejsnja, Home = od zacetka,
+Z/X = podnapisi -/+ 0,1 s (Shift: 1 s), K/L = zvok -/+ 0,1 s, PgUp/PgDn = poglavje, [ ] = hitrost,
+Backspace = hitrost 1x, , . = slicica nazaj/naprej (premor), S = posnetek zaslona (PNG v Slike).
+
+Nadaljuj tam, kjer si koncal: polozaj se belezi vsakih ~5 s (predvajalnik_nadaljuj), ob zaprtju in ob
+premoru; ob ponovnem odprtju istega naslova se predvajanje zacne tam (OSD to pove). Izklop:
+SAFEER_NADALJUJ=0.
 """
 from __future__ import annotations
 
 import logging
+import os
+import time
 from typing import Optional
 
 from PySide6.QtCore import QObject, QTimer, Qt, Signal, Slot
@@ -70,6 +78,9 @@ class SafeerMpvPredvajalnik(QWidget):
         self._drsnik_vlecen = False
         self.pogon = None
         self.zadnji_podatki: dict = {}
+        from .predvajalnik_nadaljuj import Sledilec
+        self._nadaljuj = Sledilec()
+        self._zadnji_uri = ""
 
         self.video = SafeerMpvVideo(self)
         self.video.dvoklik.connect(self.preklopi_celozaslon)
@@ -118,6 +129,7 @@ class SafeerMpvPredvajalnik(QWidget):
                 self.pogon = SafeerMpvPogon(lambda p=None: self._most.sprememba.emit(p or {}), self._most.konec.emit,
                                             lambda s="": self._most.napaka.emit(str(s)))
             self.pogon.povezi_video(self.video.wid())
+            self._pripravi_nadaljevanje()
             _log.info("mpv pogon povezan z wid=%s", self.video.wid())
         except Exception as e:
             self.pogon = None
@@ -126,6 +138,17 @@ class SafeerMpvPredvajalnik(QWidget):
 
     def pogon_pripravljen(self) -> bool:
         return self.pogon is not None
+
+    # ---- nadaljuj tam, kjer si koncal (logika v predvajalnik_nadaljuj.Sledilec) ----
+    def _pripravi_nadaljevanje(self) -> None:
+        try:
+            self._nadaljuj.povezi(self.pogon)
+        except Exception as e:
+            _log.warning("nadaljevanje ni na voljo: %s", e)
+
+    def od_zacetka(self) -> None:
+        if self.pogon:
+            self.pogon.pojdi_na(0.0); self._osd("⏮ Od začetka")
 
     # ---- javni ukazi (GUI nit) ----
     def odpri(self, uri: str, naslov: str = "") -> bool:
@@ -136,8 +159,13 @@ class SafeerMpvPredvajalnik(QWidget):
 
     @Slot()
     def premor(self) -> None:
-        if self.pogon:
-            self.pogon.premor()
+        if not self.pogon:
+            return
+        p = self.zadnji_podatki
+        if p.get("stanje") == "ustavljeno" and int(p.get("indeks", -1)) >= 0 and int(p.get("nSeznam") or 0):
+            self.pogon.predvajaj(int(p["indeks"]))   # po koncu datoteke (keep-open) gumb ⏵ predvaja znova
+            return
+        self.pogon.premor()
 
     def skok(self, sekunde: float) -> None:
         if self.pogon:
@@ -202,6 +230,10 @@ class SafeerMpvPredvajalnik(QWidget):
     def zapri(self) -> None:
         if self.pogon:
             try:
+                self._nadaljuj.zabelezi(self.zadnji_podatki, takoj=True)
+            except Exception:
+                pass
+            try:
                 self.pogon.zapri()
             except Exception:
                 pass
@@ -223,9 +255,85 @@ class SafeerMpvPredvajalnik(QWidget):
             g = max(0, int(self.zadnji_podatki.get("glasnost", 80)) - 5); self.pogon.nastavi_glasnost(g); self._osd(f"🔉 {g} %")
         elif k == Qt.Key_N and self.pogon: self.pogon.naslednja()
         elif k == Qt.Key_P and self.pogon: self.pogon.prejsnja()
+        elif k == Qt.Key_Home: self.od_zacetka()
+        elif k in (Qt.Key_Z, Qt.Key_X) and self.pogon:
+            d = (1.0 if (m & Qt.ShiftModifier) else 0.1) * (1 if k == Qt.Key_X else -1); self.zamik_podnapisov(delta=d)
+        elif k in (Qt.Key_K, Qt.Key_L) and self.pogon:
+            d = (1.0 if (m & Qt.ShiftModifier) else 0.1) * (1 if k == Qt.Key_L else -1); self.zamik_zvoka(delta=d)
+        elif k == Qt.Key_PageDown and self.pogon: self.poglavje(1)
+        elif k == Qt.Key_PageUp and self.pogon: self.poglavje(-1)
+        elif k == Qt.Key_BracketRight and self.pogon: self.hitrost(delta=0.1)
+        elif k == Qt.Key_BracketLeft and self.pogon: self.hitrost(delta=-0.1)
+        elif k == Qt.Key_Backspace and self.pogon: self.hitrost(1.0)
+        elif k == Qt.Key_Period and self.pogon: self.slicica(1)
+        elif k == Qt.Key_Comma and self.pogon: self.slicica(-1)
+        elif k == Qt.Key_S and not (m & Qt.ControlModifier): self.posnetek()
         else:
             super().keyPressEvent(e); return
         e.accept()
+
+    # ---- napredni ukazi (skupni za tipke in menije) ----
+    def zamik_podnapisov(self, sekunde: Optional[float] = None, delta: float = 0.0) -> float:
+        if not self.pogon:
+            return 0.0
+        z = self.pogon.zamik_podnapisov(sekunde, delta); self._osd(f"Podnapisi: {z:+.1f} s"); return z
+
+    def zamik_zvoka(self, sekunde: Optional[float] = None, delta: float = 0.0) -> float:
+        if not self.pogon:
+            return 0.0
+        z = self.pogon.zamik_zvoka(sekunde, delta); self._osd(f"Zvok: {z:+.1f} s"); return z
+
+    def poglavje(self, smer: int) -> None:
+        if not self.pogon:
+            return
+        if not int(self.zadnji_podatki.get("nPoglavij") or 0):
+            self._osd("Ni poglavij"); return
+        self.pogon.naslednje_poglavje(smer)
+        QTimer.singleShot(150, self._osd_poglavje)
+
+    def _osd_poglavje(self) -> None:
+        p = self.zadnji_podatki; i = int(p.get("poglavje", -1)); n = int(p.get("nPoglavij") or 0)
+        if n and i >= 0:
+            pog = self.pogon.poglavja() if self.pogon else []
+            ime = pog[i]["naslov"] if 0 <= i < len(pog) else ""
+            self._osd(f"Poglavje {i + 1}/{n} {ime}".strip())
+
+    def pojdi_na_cas(self, sekunde: float) -> bool:
+        if not self.pogon:
+            return False
+        t = float(self.zadnji_podatki.get("trajanje") or 0)
+        if t <= 0:
+            return False
+        sekunde = max(0.0, min(float(sekunde), t))
+        self.pogon.pojdi_na(sekunde / t); self._osd(f"⏩ {_cas(sekunde)}"); return True
+
+    def hitrost(self, vrednost: Optional[float] = None, delta: float = 0.0) -> float:
+        if not self.pogon:
+            return 1.0
+        h = float(vrednost) if vrednost is not None else float(self.zadnji_podatki.get("hitrost") or 1.0) + delta
+        h = max(0.25, min(4.0, round(h, 2)))
+        self.pogon.nastavi_hitrost(h); self._osd(f"Hitrost {h:g}×"); return h
+
+    def slicica(self, smer: int) -> None:
+        if self.pogon:
+            self.pogon.slicica(smer); self._osd("⏭ sličica" if smer > 0 else "⏮ sličica")
+
+    def posnetek(self, pot: Optional[str] = None) -> Optional[str]:
+        """PNG trenutne slike (brez OSD) v uporabnikovo mapo Slike (ali podano pot)."""
+        if not self.pogon:
+            return None
+        if not pot:
+            try:
+                from PySide6.QtCore import QStandardPaths
+                mapa = QStandardPaths.writableLocation(QStandardPaths.PicturesLocation) or os.path.expanduser("~")
+            except Exception:
+                mapa = os.path.expanduser("~")
+            mapa = os.path.join(mapa, "Safeer")
+            os.makedirs(mapa, exist_ok=True)
+            pot = os.path.join(mapa, time.strftime("safeer-%Y%m%d-%H%M%S") + ".png")
+        if self.pogon.posnetek(pot):
+            self._osd("📷 " + os.path.basename(pot)); return pot
+        self._osd("Posnetek ni uspel"); return None
 
     def mouseMoveEvent(self, e: QMouseEvent) -> None:
         self._prikazi_vrstico()
@@ -240,9 +348,9 @@ class SafeerMpvPredvajalnik(QWidget):
         if self.je_celozaslon() and not self._drsnik_vlecen:
             self.vrstica.hide()
 
-    def _osd(self, besedilo: str) -> None:
+    def _osd(self, besedilo: str, ms: int = 1200) -> None:
         if self.pogon and hasattr(self.pogon, "osd"):
-            self.pogon.osd(besedilo)
+            self.pogon.osd(besedilo, ms)
 
     def _drsnik_spuscen(self) -> None:
         self._drsnik_vlecen = False
@@ -265,6 +373,16 @@ class SafeerMpvPredvajalnik(QWidget):
             except Exception as e:
                 _log.debug("podatki(): %s", e); return
         self.zadnji_podatki = p
+        uri = str(p.get("uri") or "")
+        if uri != self._zadnji_uri:
+            self._zadnji_uri = uri
+            zp = float(getattr(self.pogon, "zacel_pri", 0.0) or 0.0)
+            if uri and zp > 0:
+                self._osd(f"⏵ Nadaljujem od {_cas(zp)}", 2500)
+        try:
+            self._nadaljuj.ob_podatkih(p)
+        except Exception as e:
+            _log.debug("nadaljuj: %s", e)
         self.gumb_predvajaj.setText("⏸" if p.get("stanje") == "predvaja" else "⏵")
         self.oznaka_cas.setText(f"{_cas(p.get('polozaj', 0))} / {_cas(p.get('trajanje', 0))}")
         self.oznaka_naslov.setText(str(p.get("naslov", ""))[:60])
