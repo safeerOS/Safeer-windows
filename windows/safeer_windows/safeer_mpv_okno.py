@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 import time
 from typing import Optional
 
@@ -153,11 +154,15 @@ class SafeerMpvPredvajalnik(QWidget):
         if os.environ.get("SAFEER_MPRIS", "1") == "0":
             return
         try:
-            from .predvajalnik_mpris import SafeerMpris
-            m = SafeerMpris(self.pogon, ime=self.ime_za_sistem, okno=self.window())
+            if sys.platform == "win32":
+                from .predvajalnik_smtc import SafeerSmtc   # Windows: sistemske medijske kontrole (SMTC)
+                m = SafeerSmtc(self.pogon, ime=self.ime_za_sistem, okno=self.window())
+            else:
+                from .predvajalnik_mpris import SafeerMpris
+                m = SafeerMpris(self.pogon, ime=self.ime_za_sistem, okno=self.window())
             self.mpris = m if m.aktiven else None
         except Exception as e:
-            _log.debug("mpris: %s", e)
+            _log.debug("mpris/smtc: %s", e)
 
     def _seeked(self) -> None:
         if self.mpris:

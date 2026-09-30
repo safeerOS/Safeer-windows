@@ -415,3 +415,20 @@ Mejnik 1 je s tem izpolnjen tudi na GUI ravni. Odprto: Windows SMTC; končni pak
 - Testi: `tests/test_sporocila_lastni_api.py` (7: lažni urlopen za Matrix/Telegram, slab žeton, dodaj_kanal, iskanje pri osebi); vsi testi v `tests/` zeleni. Bench Safeer OS (janez, XDG seed): zavihek Lastni API, napaka pri slabem žetonu, iskanje »vizual« najde Chatwoot-sporočilo, ko je odprt e-poštni pogovor iste osebe.
 - Neprevereno v živo: pravi Matrix/Telegram strežnik (ni računa na benchu) – shema klicev je po uradni dokumentaciji, testi so z lažno mrežo.
 - **Preverjeno v živo proti pravemu Matrix strežniku** (Synapse 1.x iz PyPI, lokalno 127.0.0.1:8008, uporabnika ana/jaz): dodajanje kanala prek čarovnika Lastni API, DM soba z imenom osebe (Ana Kralj), prejem, pošiljanje iz Safeer OS (strežnik potrdi), samodejni prihod odgovora (sync 120 s), slab žeton → NapakaPrijave. Ugotovitev: Synapse začetni /sync streže iz predpomnilnika (lahko zastarel) → po začetnem syncu takoj še inkrementalni (`pogovori()`); `dodaj_kanal` dovoli `http://` samo za localhost/127.* (lokalni strežnik), sicer https. Telegram Bot ostaja brez živega preizkusa (ni Telegram računa).
+
+## 2026-09-30 17:30 — Windows SMTC (sistemske medijske kontrole) — narejeno in preverjeno v seji 1
+- `windows/safeer_windows/predvajalnik_smtc.py`: `SafeerSmtc(pogon, ime, okno)` z istim vmesnikom kot SafeerMpris
+  (`aktiven`, `ob_podatkih`, `oddaj_seeked`, `zapri`). Uradna projekcija Python/WinRT (Microsoft, MIT):
+  `winrt-runtime`, `winrt-Windows.Media`, `winrt-Windows.Media.Playback`, `winrt-Windows.Foundation(.Collections)`,
+  `winrt-Windows.Storage.Streams` — pripeto na 3.2.1 v `windows/requirements.txt`; `build_windows.py` jih priloži
+  (`--collect-submodules winrt`), brez njih zabeleži nadzorovan preskok (pravilo 7). Za Win32/Qt okno SMTC prek
+  `MediaPlayer().system_media_transport_controls` z izklopljenim CommandManagerjem (brez HWND interopa).
+  Gumbi iz sistema: WinRT nit → Qt signal (QueuedConnection) → GUI nit → pogon. Časovnica (position/duration) 1×/s.
+- `safeer_mpv_okno._pripravi_mpris` in `mpv_player._pripravi_mpris`: na win32 SafeerSmtc, sicer SafeerMpris.
+- Popravek: `safeer_predvajalnik.py` kliče `predpripravi_runtime()` PRED uvozom PySide6 (prej samo __main__/launcher;
+  neposredni zagon modula je na Windows padel z "MSVC runtime prestar" — zdaj enako kot launcher).
+- Preverjeno na Windows PC (seja 1, Python 3.14, libmpv r1 z Desktop\vendor\safeer-r1): sistemski upravljalnik sej
+  (`GlobalSystemMediaTransportControlsSessionManager`, drug proces) vidi sejo "h264_24s.mp4", Playing, položaj 15/24 s;
+  ukazi iz sistema pause→Paused(5), play→Playing(4), stop→Stopped(3); dnevnik predvajalnika: "SMTC gumb: pause/play/stop".
+  Testi: `windows/tests/test_predvajalnik_smtc.py` (2); windows/tests 301 passed.
+- Ni preverjeno: prikaz naslova na zaklenjenem zaslonu / Bluetooth slušalke (isti kanal SMTC, brez naprave za preizkus).

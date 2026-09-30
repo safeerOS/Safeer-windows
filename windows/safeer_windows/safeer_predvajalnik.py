@@ -14,6 +14,15 @@ import os
 import sys
 from typing import Optional
 
+# libmpv (pravilo 6): runtime iz paketa se mora naloziti PRED PySide6 - tudi ko je predvajalnik zagnan
+# neposredno (python -m safeer_windows.safeer_predvajalnik), ne le prek __main__/launcherja. Brez paketa no-op.
+if sys.platform == "win32":
+    try:
+        from .safeer_mpv_pogon import predpripravi_runtime as _predpripravi_runtime
+        _predpripravi_runtime()
+    except Exception:  # noqa: BLE001
+        pass
+
 from PySide6.QtCore import QTimer, QUrl, Qt
 from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent, QKeySequence
 from PySide6.QtWidgets import (QApplication, QFileDialog, QInputDialog, QMainWindow, QMessageBox, QStatusBar)

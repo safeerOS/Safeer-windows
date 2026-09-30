@@ -128,9 +128,16 @@ def mpv_vendor_args() -> list:
         raise SystemExit(f"libmpv: paket python-mpv ni namescen v gradbenem okolju ({e}); pip install python-mpv==1.0.8")
     man = json.load(open(os.path.join(VENDOR_MPV, "manifest.json"), encoding="utf-8-sig"))
     print(f"libmpv: prilozen {man.get('release')} ({man.get('arch')}), runtime {man.get('runtime', {}).get('msvcp140.dll')}", flush=True)
+    smtc = []
+    try:
+        import winrt.windows.media.playback  # noqa: F401
+        smtc = ["--hidden-import", "safeer_windows.predvajalnik_smtc", "--collect-submodules", "winrt"]
+        print("SMTC: paketi winrt prisotni -> sistemske medijske kontrole prilozene", flush=True)
+    except Exception as e:  # noqa: BLE001
+        print(f"SMTC: paketi winrt niso namesceni ({e}) -> predvajalnik brez sistemskih medijskih kontrol (nadzorovan preskok)", flush=True)
     return ["--add-data", VENDOR_MPV + os.pathsep + os.path.join("safeer_windows", "vendor", "mpv"),
             "--hidden-import", "mpv", "--hidden-import", "safeer_windows.mpv_player",
-            "--hidden-import", "safeer_windows.safeer_mpv_pogon", "--hidden-import", "safeer_windows.safeer_pogon_izbira"]
+            "--hidden-import", "safeer_windows.safeer_mpv_pogon", "--hidden-import", "safeer_windows.safeer_pogon_izbira"] + smtc
 
 
 def pyinstaller() -> None:

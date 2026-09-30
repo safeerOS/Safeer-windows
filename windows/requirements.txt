@@ -10,3 +10,10 @@ pypng>=0.20220715.0,<1  # vendored qrcode (windows/qrcode) uvozi png; brez njega
 typing_extensions>=4.7  # vendored qrcode (main.py) ga uvozi
 zeroconf>=0.130,<1  # Link Mesh: iskanje sosednjih Hubov (mDNS)
 python-mpv==1.0.8  # libmpv ovojnica (LGPL-2.1+/GPL-2.0+ dvojna licenca); knjiznica libmpv-2.dll je prilozena v windows/vendor/mpv
+# Windows SMTC (sistemske medijske kontrole za predvajalnik): uradna projekcija Python/WinRT (Microsoft, MIT); pripeto na 3.2.1
+winrt-runtime==3.2.1
+winrt-Windows.Foundation==3.2.1
+winrt-Windows.Foundation.Collections==3.2.1
+winrt-Windows.Media==3.2.1
+winrt-Windows.Media.Playback==3.2.1
+winrt-Windows.Storage.Streams==3.2.1
