@@ -567,21 +567,35 @@
 <div class="sloj" id="slojKanal"><div class="tancica"></div>
   <form class="plosca kanal-carovnik" id="obrazecKanal">
     <h3 data-t="dodajKanal"></h3>
-    <div class="filtri" id="kanalVrstaIzbira"><button type="button" class="izbran" data-vrsta="email" data-t="eposta"></button><button type="button" data-vrsta="chatwoot">Chatwoot</button></div>
+    <div class="filtri" id="kanalVrstaIzbira"><button type="button" class="izbran" data-vrsta="email" data-t="eposta"></button><button type="button" data-vrsta="chatwoot">Chatwoot</button><button type="button" data-vrsta="aplikacije" data-t="kanalAplikacije"></button></div>
     <input type="hidden" id="kanalVrsta" value="email">
-    <div id="kanalEmail">
+    <input type="hidden" id="kanalPonudnik" value="">
+    <!-- E-posta, korak 1: ponudnik s seznama (streznike pozna Safeer) -->
+    <div id="kanalPonudniki">
+      <p class="drobno" data-t="kanalKjeImas"></p>
+      <div class="ponudniki-mreza" id="kanalPonudnikiMreza"></div>
+    </div>
+    <!-- E-posta, korak 2: naslov + geslo + navodila -->
+    <div id="kanalEmail" hidden>
+      <button type="button" class="gumb kanal-nazaj" id="kanalZamenjaj" data-t="kanalDrugPonudnik"></button>
       <input id="kanalNaslov" type="email" autocomplete="username" data-ph="epostniNaslov">
-      <div class="dva"><input id="kanalImap" placeholder="IMAP"><input id="kanalSmtp" placeholder="SMTP"></div>
       <input id="kanalGeslo" type="password" autocomplete="current-password" data-ph="gesloAplikacije">
-      <p class="drobno" id="kanalNamig" hidden></p>
+      <button type="button" class="gumb" id="kanalNapredno" data-t="kanalNapredno"></button>
+      <div class="dva" id="kanalStrezniki" hidden><input id="kanalImap" placeholder="IMAP"><input id="kanalSmtp" placeholder="SMTP"></div>
+      <div class="kanal-navodila"><b data-t="kanalKajNarediti"></b><p id="kanalNavodila"></p></div>
     </div>
     <div id="kanalChatwoot" hidden>
       <input id="kanalUrl" type="url" placeholder="https://chatwoot.example">
       <input id="kanalRacun" type="number" min="1" data-ph="stevilkaRacuna">
       <input id="kanalZeton" type="password" autocomplete="off" data-ph="apiZeton">
     </div>
+    <!-- Aplikacije: ponudniki brez IMAP/SMTP in klepeti - uradna spletna aplikacija ali uradna stran za prenos -->
+    <div id="kanalAplikacijeSeznam" hidden>
+      <p class="drobno" data-t="kanalAplikacijeOpis"></p>
+      <div id="kanalAplikacijeMreza"></div>
+    </div>
     <p class="kanal-napaka" id="kanalNapaka" role="alert" hidden></p>
-    <p class="drobno" data-t="skrivnostOpis"></p>
+    <p class="drobno" id="kanalSkrivnostOpis" data-t="skrivnostOpis"></p>
     <div class="gumbi"><button type="button" class="gumb" id="kanalPreklici" data-t="preklici"></button><button class="gumb glavni" type="submit" id="kanalPovezi" data-t="povezi"></button></div>
   </form>
 </div>

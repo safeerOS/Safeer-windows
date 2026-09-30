@@ -8,6 +8,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Callable, List, Optional
 
+from .sporocila import ponudniki as _ponudniki
 from .sporocila.chatwoot import ChatwootAdapter
 from .sporocila.email import EmailAdapter
 from .sporocila.model import Kanal
@@ -89,9 +90,18 @@ class SporocilaOS:
 
     @staticmethod
     def privzeta_streznika(naslov: str) -> dict:
+        p = _ponudniki.iz_naslova(naslov)
+        if p:
+            return {"imap": p["imap"], "smtp": p["smtp"], "imap_vrata": p["imap_vrata"], "smtp_vrata": p["smtp_vrata"],
+                    "namig": "" if p["geslo"] == "navadno" else p["geslo"], "ponudnik": p["id"]}
         domena = naslov.rsplit("@", 1)[-1].lower().strip()
         imap, smtp, namig = PONUDNIKI.get(domena, ("imap." + domena, "smtp." + domena, ""))
-        return {"imap": imap, "smtp": smtp, "imap_vrata": 993, "smtp_vrata": 465, "namig": namig}
+        return {"imap": imap, "smtp": smtp, "imap_vrata": 993, "smtp_vrata": 465, "namig": namig, "ponudnik": "drug"}
+
+    @staticmethod
+    def ponudniki() -> dict:
+        """Seznam ponudnikov in aplikacij za carovnik »Dodaj kanal«."""
+        return _ponudniki.za_vmesnik()
 
     def dodaj_kanal(self, podatki: dict) -> dict:
         """Doda kanal SAMO, ce se prijava posreci - uporabnik takoj ve, ali je vse prav."""
@@ -102,6 +112,10 @@ class SporocilaOS:
             if "@" not in naslov or "." not in naslov.rsplit("@", 1)[-1]:
                 raise ValueError("Vnesi veljaven e-poštni naslov.")
             p = self.privzeta_streznika(naslov)
+            izbrani = _ponudniki.po_id(str(podatki.get("ponudnik") or ""))
+            if izbrani and izbrani["id"] != "drug":
+                p = {"imap": izbrani["imap"], "smtp": izbrani["smtp"], "imap_vrata": izbrani["imap_vrata"], "smtp_vrata": izbrani["smtp_vrata"],
+                     "namig": "" if izbrani["geslo"] == "navadno" else izbrani["geslo"], "ponudnik": izbrani["id"]}
             if p["namig"] == "oauth":
                 raise ValueError("Outlook in Hotmail ne dovolita več prijave z geslom (samo Microsoftova prijava). Ta vrsta prijave pride v naslednji različici.")
             geslo = str(podatki.get("geslo") or "")
@@ -109,16 +123,33 @@ class SporocilaOS:
                 raise ValueError("Vnesi geslo.")
             nastavitve = {"naslov": naslov, "uporabnik": str(podatki.get("uporabnik") or naslov),
                           "imap": str(podatki.get("imap") or p["imap"]), "smtp": str(podatki.get("smtp") or p["smtp"]),
-                          "imap_vrata": int(podatki.get("imap_vrata") or 993), "smtp_vrata": int(podatki.get("smtp_vrata") or 465)}
+                          "imap_vrata": int(podatki.get("imap_vrata") or p.get("imap_vrata") or 993),
+                          "smtp_vrata": int(podatki.get("smtp_vrata") or p.get("smtp_vrata") or 465)}
+            for kljuc in ("imap", "smtp"):   # "gostitelj:vrata" iz rocnega vnosa
+                g, _, vr = nastavitve[kljuc].rpartition(":")
+                if g and vr.isdigit():
+                    nastavitve[kljuc], nastavitve[kljuc + "_vrata"] = g, int(vr)
+            if p.get("ponudnik"):
+                nastavitve["ponudnik"] = p["ponudnik"]
             a = self._adapter(kid, "email", nastavitve, geslo)
             try:
                 a.povezi()
             except Exception as e:
                 ime = type(e).__name__
+                # Nekateri ponudniki hocejo uporabnisko ime brez domene: poskusimo se tako, preden obupamo.
+                brez = naslov.rsplit("@", 1)[0]
+                if ime == "NapakaPrijave" and nastavitve["uporabnik"] == naslov and brez:
+                    nastavitve["uporabnik"] = brez
+                    a = self._adapter(kid, "email", nastavitve, geslo)
+                    try:
+                        a.povezi(); ime = ""
+                    except Exception as e2:
+                        ime = type(e2).__name__; nastavitve["uporabnik"] = naslov
                 if ime == "NapakaPrijave":
                     namig = " Pri tem ponudniku potrebuješ »geslo za aplikacije« (nastaviš ga v varnostnih nastavitvah računa)." if p["namig"] == "aplikacije" else ""
                     raise ValueError("Prijava ni uspela - preveri naslov in geslo." + namig)
-                raise ValueError("Strežnika %s ni mogoče doseči." % nastavitve["imap"])
+                if ime:
+                    raise ValueError("Strežnika %s ni mogoče doseči." % nastavitve["imap"])
             a.shrani_geslo(geslo)
             ime = naslov
         elif vrsta == "chatwoot":
