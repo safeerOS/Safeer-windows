@@ -283,3 +283,26 @@ Preverjeno (`~/.tmp/mpvokno/test_sklop1.py A/B`, `test_media.py`, h264 120 s + m
 - Samostojno okno: meniji Predvajanje/Poglavja/Zvok ▸ Zamik/Podnapisi ▸ Zamik zgrajeni, posnetek `12_sklop1.png`.
 - Medijski center (`test_media.py`): nespremenjeno zeleno; pytest windows/tests: 289 passed (+ test_sledilec).
 Windows GUI: še ni preverjeno (čaka prijavo; gui_r1.cmd).
+
+## 2026-09-30 13:50 — sklop (2a): MPRIS2 (Linux) + medijske tipke; SMTC (Windows) odprto
+
+- `predvajalnik_mpris.py`: MPRIS2 prek PySide6.QtDBus (brez novih odvisnosti). Storitev
+  `org.mpris.MediaPlayer2.safeer` (samostojni) / `.safeeros` (Medijski center), ob zasedenem imenu `.instance<pid>`.
+  Vmesnika `org.mpris.MediaPlayer2` (Raise, Quit, Identity, DesktopEntry=safeer-predvajalnik, sheme, MIME) in
+  `.Player` (PlayPause/Play/Pause/Stop/Next/Previous/Seek/SetPosition/OpenUri; PlaybackStatus, Metadata
+  (trackid, title, url, length), Position, Volume (r/w), Rate (r/w, 0,25–4), Can*), signali PropertiesChanged in Seeked.
+  Vsi klici v GUI niti (QtDBus dostavlja v Qt zanko). Izklop: `SAFEER_MPRIS=0`. Ce ni D-Bus seje/QtDBus → neaktiven, brez napake.
+- Medijske tipke v oknu (Qt Key_MediaPlay/Pause/TogglePlayPause/Stop/Next/Previous) v obeh gostiteljih (Linux + Windows).
+- Pogon: `premor()` zdaj takoj sporoci stanje (med premorom ni tikov time-pos → MPRIS je kazal staro stanje).
+- Sledilec: ob ustavitvi (Stop) zapise zadnji znani polozaj iste datoteke (test_sledilec_ustavitev).
+- Omejitev: `mpris:length` je `i` (int32) pod 2^31 µs in `x` nad tem — PySide6 QDBusArgument ne zna vsiliti
+  qlonglong v QVariantMap. playerctl/Cinnamon/GNOME/KDE to prenasajo (preverjeno le z busctl).
+
+Preverjeno (Linux klop, busctl): Identity, PlaybackStatus Playing→Paused→Playing (<0,3 s), Metadata z naslovom/url/
+length, Position `x`, Volume set 0.5 → 0.5, Next/Previous menjata datoteko in CanGoNext/CanGoPrevious, SetPosition 60 s
+→ Position 60,5 s, Rate 1.5, Stop → Stopped, Play → predvaja znova (z nadaljevanjem), Raise; Medijski center
+(`test_media.py`) objavi `safeeros`, PlayPause prek D-Bus deluje, test ostaja zelen; pytest 290 passed.
+Odprto: Windows SMTC (System Media Transport Controls) — potrebuje WinRT (paket `winrt`/`winsdk` + interop za HWND);
+brez prijave na Windows PC ni preverljivo, zato ga ne dodajam na slepo. Na Windows zaenkrat delujejo medijske tipke,
+ko ima okno fokus. Link daljinec: ukazi gredo prek Safeer Control → navidezni zaslon (tipke); posebna vez s
+predvajalnikom bo v sklopu 2b, ko preverim protokol Control-a.

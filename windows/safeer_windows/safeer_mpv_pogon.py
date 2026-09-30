@@ -398,6 +398,7 @@ class SafeerMpvPogon:
             self._zagotovi().pause = not bool(self._zagotovi().pause)
         except Exception:
             pass
+        self._sporoci()   # med premorom ni tikov time-pos; stanje sporocimo takoj (MPRIS, gumbi)
 
     def skok(self, sekunde: float) -> bool:
         try:

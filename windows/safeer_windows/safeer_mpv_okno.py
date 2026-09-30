@@ -81,6 +81,8 @@ class SafeerMpvPredvajalnik(QWidget):
         from .predvajalnik_nadaljuj import Sledilec
         self._nadaljuj = Sledilec()
         self._zadnji_uri = ""
+        self.mpris = None            # predvajalnik_mpris.SafeerMpris (Linux), po _pripravi_pogon
+        self.ime_za_sistem = "Safeer Predvajalnik"   # Identity za MPRIS/SMTC; Medijski center nastavi svoje
 
         self.video = SafeerMpvVideo(self)
         self.video.dvoklik.connect(self.preklopi_celozaslon)
@@ -130,6 +132,7 @@ class SafeerMpvPredvajalnik(QWidget):
                                             lambda s="": self._most.napaka.emit(str(s)))
             self.pogon.povezi_video(self.video.wid())
             self._pripravi_nadaljevanje()
+            self._pripravi_mpris()
             _log.info("mpv pogon povezan z wid=%s", self.video.wid())
         except Exception as e:
             self.pogon = None
@@ -145,6 +148,20 @@ class SafeerMpvPredvajalnik(QWidget):
             self._nadaljuj.povezi(self.pogon)
         except Exception as e:
             _log.warning("nadaljevanje ni na voljo: %s", e)
+
+    def _pripravi_mpris(self) -> None:
+        if os.environ.get("SAFEER_MPRIS", "1") == "0":
+            return
+        try:
+            from .predvajalnik_mpris import SafeerMpris
+            m = SafeerMpris(self.pogon, ime=self.ime_za_sistem, okno=self.window())
+            self.mpris = m if m.aktiven else None
+        except Exception as e:
+            _log.debug("mpris: %s", e)
+
+    def _seeked(self) -> None:
+        if self.mpris:
+            self.mpris.oddaj_seeked()
 
     def od_zacetka(self) -> None:
         if self.pogon:
@@ -169,7 +186,7 @@ class SafeerMpvPredvajalnik(QWidget):
 
     def skok(self, sekunde: float) -> None:
         if self.pogon:
-            self.pogon.skok(sekunde)
+            self.pogon.skok(sekunde); self._seeked()
 
     @Slot()
     def preklopi_celozaslon(self) -> None:
@@ -228,6 +245,12 @@ class SafeerMpvPredvajalnik(QWidget):
         return self._celozaslon_prej is not None
 
     def zapri(self) -> None:
+        if self.mpris:
+            try:
+                self.mpris.zapri()
+            except Exception:
+                pass
+            self.mpris = None
         if self.pogon:
             try:
                 self._nadaljuj.zabelezi(self.zadnji_podatki, takoj=True)
@@ -243,7 +266,11 @@ class SafeerMpvPredvajalnik(QWidget):
     def keyPressEvent(self, e: QKeyEvent) -> None:
         k, m = e.key(), e.modifiers()
         korak = 30 if (m & Qt.ShiftModifier) else 5
-        if k == Qt.Key_Space: self.premor(); self._osd("⏸ Premor" if self.zadnji_podatki.get("stanje") == "predvaja" else "⏵ Predvajanje")
+        if k in (Qt.Key_MediaPlay, Qt.Key_MediaPause, Qt.Key_MediaTogglePlayPause): self.premor()
+        elif k == Qt.Key_MediaStop and self.pogon: self.pogon.ustavi()
+        elif k == Qt.Key_MediaNext and self.pogon: self.pogon.naslednja()
+        elif k == Qt.Key_MediaPrevious and self.pogon: self.pogon.prejsnja()
+        elif k == Qt.Key_Space: self.premor(); self._osd("⏸ Premor" if self.zadnji_podatki.get("stanje") == "predvaja" else "⏵ Predvajanje")
         elif k == Qt.Key_Right: self.skok(korak); self._osd(f"▶ +{korak} s")
         elif k == Qt.Key_Left: self.skok(-korak); self._osd(f"◀ −{korak} s")
         elif k == Qt.Key_F: self.preklopi_celozaslon()
@@ -305,7 +332,7 @@ class SafeerMpvPredvajalnik(QWidget):
         if t <= 0:
             return False
         sekunde = max(0.0, min(float(sekunde), t))
-        self.pogon.pojdi_na(sekunde / t); self._osd(f"⏩ {_cas(sekunde)}"); return True
+        self.pogon.pojdi_na(sekunde / t); self._osd(f"⏩ {_cas(sekunde)}"); self._seeked(); return True
 
     def hitrost(self, vrednost: Optional[float] = None, delta: float = 0.0) -> float:
         if not self.pogon:
@@ -355,7 +382,7 @@ class SafeerMpvPredvajalnik(QWidget):
     def _drsnik_spuscen(self) -> None:
         self._drsnik_vlecen = False
         if self.pogon:
-            self.pogon.pojdi_na(self.drsnik.value() / 1000.0)
+            self.pogon.pojdi_na(self.drsnik.value() / 1000.0); self._seeked()
 
     # ---- sporocila iz pogona (GUI nit) ----
     @Slot(dict)
@@ -383,6 +410,8 @@ class SafeerMpvPredvajalnik(QWidget):
             self._nadaljuj.ob_podatkih(p)
         except Exception as e:
             _log.debug("nadaljuj: %s", e)
+        if self.mpris:
+            self.mpris.ob_podatkih(p)
         self.gumb_predvajaj.setText("⏸" if p.get("stanje") == "predvaja" else "⏵")
         self.oznaka_cas.setText(f"{_cas(p.get('polozaj', 0))} / {_cas(p.get('trajanje', 0))}")
         self.oznaka_naslov.setText(str(p.get("naslov", ""))[:60])

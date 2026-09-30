@@ -95,6 +95,7 @@ class Sledilec:
         self._zadnjic = 0.0
         self._umazano = False
         self._zadnje_stanje = None
+        self._zadnji_p: dict = {}
 
     def povezi(self, pogon) -> None:
         if not self.vklop or pogon is None:
@@ -111,9 +112,16 @@ class Sledilec:
     def ob_podatkih(self, p: dict) -> None:
         """Klici ob vsakem sporocilu pogona (GUI nit)."""
         stanje = (p or {}).get("stanje")
-        takoj = stanje == "premor" and self._zadnje_stanje != "premor"
+        prej = self._zadnje_stanje
         self._zadnje_stanje = stanje
-        self.zabelezi(p, takoj=takoj)
+        if stanje == "ustavljeno":
+            # ustavitev (Stop, MPRIS Stop): zapisemo zadnji znani polozaj iste datoteke; konec datoteke
+            # pride prek ob_koncu_datoteke in vnos izbrise.
+            if prej in ("predvaja", "premor") and self._zadnji_p.get("uri") == (p or {}).get("uri"):
+                self.zabelezi(self._zadnji_p, takoj=True)
+            return
+        self._zadnji_p = dict(p)
+        self.zabelezi(p, takoj=(stanje == "premor" and prej != "premor"))
 
     def zabelezi(self, p: dict, takoj: bool = False) -> None:
         if not self.vklop or not p or p.get("stanje") == "ustavljeno":
