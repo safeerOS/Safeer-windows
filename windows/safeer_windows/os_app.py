@@ -2112,6 +2112,8 @@ class SafeerOsWindow(QMainWindow):
             return s.odstrani_kanal(prvi)
         if metoda == "sporocilaStreznik":
             return s.privzeta_streznika(prvi)
+        if metoda == "sporocilaPonudniki":
+            return s.ponudniki()
         raise ValueError("neznano")
 
     def koncaj_za_posodobitev(self) -> None:
