@@ -3015,7 +3015,7 @@
     $("kanalUrediGeslo").value = ""; $("kanalUrediGeslo").hidden = k.vrsta !== "email" && k.vrsta !== "chatwoot";
     $("slojKanalUredi").classList.add("viden"); $("kanalUrediGeslo").focus();
   }
-  function jeKlepet(vrsta) { return vrsta === "chatwoot" || vrsta === "safeer"; }
+  function jeKlepet(vrsta) { return vrsta === "chatwoot" || vrsta === "safeer" || vrsta === "matrix" || vrsta === "telegram_bot"; }
   function zacetnice(ime) {
     var deli = String(ime || "").split(/\s+/).map(function (x) { return x.replace(/[^\p{L}\p{N}]/gu, ""); }).filter(Boolean);
     return deli.slice(0, 2).map(function (x) { return x.charAt(0).toUpperCase(); }).join("") || "?";
@@ -3122,6 +3122,7 @@
   /* Stranski pano: oseba, njeni naslovi/racuni po kanalih in datoteke iz pogovora. */
   function narisiPano(oseba, pogovor, sporocila) {
     S.sporocilaZadnjaVsebina = sporocila || [];
+    if (S.sporocilaPanoOseba !== oseba.id) { S.sporocilaPanoOseba = oseba.id; $("panoIskanjeVnos").value = ""; $("panoZadetki").innerHTML = ""; }
     $("panoAvatar").textContent = zacetnice(oseba.ime); $("panoIme").textContent = oseba.ime;
     $("panoPrivzeto").textContent = (oseba.lastno_ime && oseba.privzeto_ime && oseba.privzeto_ime !== oseba.ime) ? t("privzetoIme", { ime: oseba.privzeto_ime }) : "";
     $("panoKanal").textContent = (pogovor.kanal || {}).ime || "";
@@ -3155,10 +3156,13 @@
     klic("sporocilaPogovor", [pogovor.kanal_id, pogovor.id]).then(function (seznam) {
       if (S.sporocilaAktivni !== pogovor) return;   // uporabnik je medtem odprl drug pogovor
       var cilj = $("sporocilaVsebina"); cilj.innerHTML = "";
+      var oznacen = null;
       (seznam || []).forEach(function (s) {
         var m = el("div", "mehurcek " + (s.smer === "ven" ? "ven" : "noter"));
         m.textContent = s.besedilo || ""; m.appendChild(el("time", "", ubezi(kratekCas(s.cas)))); cilj.appendChild(m);
+        if (S.sporocilaOznaciId && s.id === S.sporocilaOznaciId) { m.classList.add("zadetek"); oznacen = m; }
       }); cilj.scrollTop = cilj.scrollHeight;
+      if (oznacen) { oznacen.scrollIntoView({ block: "center" }); S.sporocilaOznaciId = null; }
       if (S.sporocilaOseba) narisiPano(S.sporocilaOseba, pogovor, seznam || []);
       if (pogovor.neprebrano) { pogovor.neprebrano = 0; naloziSporocila(); }
     });
@@ -3256,12 +3260,50 @@
     var v = $("kanalVrsta").value, email = v === "email", ponudnik = $("kanalPonudnik").value;
     $("kanalPonudniki").hidden = !email || !!ponudnik; $("kanalEmail").hidden = !email || !ponudnik;
     $("kanalChatwoot").hidden = v !== "chatwoot"; $("kanalAplikacijeSeznam").hidden = v !== "aplikacije";
+    $("kanalApi").hidden = v !== "api"; if (v === "api") preklopiApiProtokol();
     $("kanalPovezi").hidden = v === "aplikacije" || (email && !ponudnik);
     $("kanalSkrivnostOpis").hidden = v === "aplikacije";
     if (v !== "email" || ponudnik) $("kanalPovezi").disabled = false;
   }
+  /* Lastni API: Matrix potrebuje streznik + zeton, Telegram Bot samo zeton. Navodila povedo, kje ju dobis. */
+  function preklopiApiProtokol() {
+    var pr = $("kanalProtokol").value;
+    $("kanalApiStreznik").hidden = pr !== "matrix";
+    $("kanalApiZeton").placeholder = pr === "matrix" ? t("apiZeton") : "123456:ABC…";
+    $("kanalApiNavodila").textContent = t(pr === "matrix" ? "navMatrix" : "navTelegramBot");
+  }
+  /* Iskanje po vsebini sporocil ene osebe (vsi njeni kanali); klik na zadetek odpre tisti pogovor. */
+  function isciPriOsebi(niz) {
+    var oseba = S.sporocilaOseba, cilj = $("panoZadetki"); if (!oseba) return;
+    niz = String(niz || "").trim(); cilj.innerHTML = "";
+    if (niz.length < 2) return;
+    klic("sporocilaIsciPri", [oseba.id, niz]).then(function (zadetki) {
+      if (!S.sporocilaOseba || S.sporocilaOseba.id !== oseba.id || $("panoIskanjeVnos").value.trim() !== niz) return;
+      cilj.innerHTML = "";
+      if (!zadetki || !zadetki.length) { cilj.appendChild(el("p", "drobno", ubezi(t("panoNiZadetkov")))); return; }
+      zadetki.forEach(function (z) {
+        var b = el("button", "pano-zadetek"); b.type = "button";
+        b.appendChild(el("small", "", ubezi(((z.kanal || {}).ime || "") + " · " + kratekCas(z.cas))));
+        b.appendChild(el("span", "", ubezi(z.izsek || "")));
+        b.addEventListener("click", function () {
+          var pog = null;
+          S.sporocilaSkupine.forEach(function (s) { (s.pogovori || []).forEach(function (p) { if (p.id === z.pogovor_id && p.kanal_id === z.kanal_id) pog = p; }); });
+          if (pog) { S.sporocilaOznaciId = z.id; odpriPogovor(oseba, pog); }
+        });
+        cilj.appendChild(b);
+      });
+    }).catch(function () {});
+  }
   // ------------------------------------------------------------------ zacetek
   function poveziDogodke() {
+    $("kanalApiProtokol").querySelectorAll("button").forEach(function (b) {
+      b.addEventListener("click", function () {
+        $("kanalProtokol").value = b.getAttribute("data-protokol");
+        $("kanalApiProtokol").querySelectorAll("button").forEach(function (x) { x.classList.toggle("izbran", x === b); });
+        preklopiApiProtokol();
+      });
+    });
+    $("panoIskanjeVnos").addEventListener("input", function () { isciPriOsebi(this.value); });
     $("sporocilaDodaj").addEventListener("click", odpriCarovnikKanala);
     $("sporocilaPisi").addEventListener("click", odpriPisiNapravi);
     $("pisiPreklici").addEventListener("click", zapriSloje);
@@ -3342,12 +3384,13 @@
       var gi = gostitelj($("kanalImap").value, 993), gs = gostitelj($("kanalSmtp").value, 465);
       var p = email ? { vrsta:"email", naslov:$("kanalNaslov").value, imap:gi[0], imap_vrata:gi[1],
         smtp:gs[0], smtp_vrata:gs[1], geslo:$("kanalGeslo").value, ponudnik:$("kanalPonudnik").value } :
+        $("kanalVrsta").value === "api" ? { vrsta:$("kanalProtokol").value, streznik:$("kanalApiStreznik").value, zeton:$("kanalApiZeton").value, ime:$("kanalApiIme").value } :
         { vrsta:"chatwoot", url:$("kanalUrl").value, account_id:Number($("kanalRacun").value), zeton:$("kanalZeton").value };
       var gumb = $("kanalPovezi"); gumb.disabled = true; gumb.textContent = t("povezujem");
       $("kanalNapaka").hidden = true;
       klic("sporocilaDodaj", [p]).then(function () {
         gumb.disabled = false; gumb.textContent = t("povezi");
-        $("kanalGeslo").value = ""; $("kanalZeton").value = ""; zapriSloje(); naloziSporocila();
+        $("kanalGeslo").value = ""; $("kanalZeton").value = ""; $("kanalApiZeton").value = ""; zapriSloje(); naloziSporocila();
         setTimeout(naloziSporocila, 4000);
       }).catch(function (napaka) {
         gumb.disabled = false; gumb.textContent = t("povezi");

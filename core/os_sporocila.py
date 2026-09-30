@@ -11,6 +11,8 @@ from typing import Callable, List, Optional
 from .sporocila import ponudniki as _ponudniki
 from .sporocila.chatwoot import ChatwootAdapter
 from .sporocila.email import EmailAdapter
+from .sporocila.matrix import MatrixAdapter
+from .sporocila.telegram_bot import TelegramBotAdapter
 from .sporocila.model import Kanal
 from .sporocila.storitev import StoritevSporocil
 
@@ -77,6 +79,10 @@ class SporocilaOS:
                                 n.get("uporabnik", ""), skrivnost)
         if vrsta == "chatwoot":
             return ChatwootAdapter(kid, n.get("url", ""), int(n.get("account_id") or 0), skrivnost)
+        if vrsta == "matrix":
+            return MatrixAdapter(kid, n.get("streznik", ""), skrivnost)
+        if vrsta == "telegram_bot":
+            return TelegramBotAdapter(kid, skrivnost)
         return None
 
     def _nalozi(self):
@@ -164,6 +170,42 @@ class SporocilaOS:
                 raise ValueError("Chatwoot ni sprejel povezave - preveri naslov, račun in žeton.")
             a.shrani_zeton(zeton)
             ime = str(podatki.get("ime") or "Chatwoot")
+        elif vrsta == "matrix":
+            # Lastni API: Matrix (Element, Beeper, Synapse ...) - naslov domacega streznika + dostopni zeton.
+            streznik = str(podatki.get("streznik", "")).strip().rstrip("/")
+            if streznik and "://" not in streznik:
+                streznik = "https://" + streznik
+            zeton = str(podatki.get("zeton") or "").strip()
+            if not streznik.startswith("https://") or not zeton:
+                raise ValueError("Vnesi naslov strežnika (https://…) in dostopni žeton.")
+            nastavitve = {"streznik": streznik}
+            a = self._adapter(kid, "matrix", nastavitve, zeton)
+            try:
+                a.povezi()
+            except Exception as e:
+                if type(e).__name__ == "NapakaPrijave":
+                    raise ValueError("Matrix žetona ni sprejel - preveri, da je dostopni žeton prepisan v celoti.")
+                raise ValueError("Strežnika %s ni mogoče doseči." % streznik)
+            a.shrani_zeton(zeton)
+            nastavitve["uporabnik"] = a.uporabnik
+            ime = str(podatki.get("ime") or a.uporabnik or "Matrix")
+        elif vrsta == "telegram_bot":
+            # Lastni API: Telegram Bot API - zeton od @BotFather; sporocila ljudi, ki pisejo botu.
+            zeton = str(podatki.get("zeton") or "").strip()
+            if ":" not in zeton or len(zeton) < 20:
+                raise ValueError("Vnesi žeton bota (oblika 123456:ABC…), ki ti ga da @BotFather.")
+            nastavitve = {}
+            a = self._adapter(kid, "telegram_bot", nastavitve, zeton)
+            try:
+                a.povezi()
+            except Exception as e:
+                if type(e).__name__ == "NapakaPrijave":
+                    raise ValueError("Telegram žetona ni sprejel - preveri, da je prepisan v celoti.")
+                raise ValueError("Telegrama ni mogoče doseči.")
+            a.shrani_zeton(zeton)
+            uime = (a.bot or {}).get("username", "")
+            nastavitve["bot"] = uime
+            ime = str(podatki.get("ime") or ("Telegram @" + uime if uime else "Telegram bot"))
         else:
             raise ValueError("Nepodprta vrsta kanala")
         self.storitev.registriraj(Kanal(kid, vrsta, ime, "povezan"), a, nastavitve)
@@ -318,6 +360,14 @@ class SporocilaOS:
                 if n in (s["oseba"]["ime"] + " " + s["oseba"].get("privzeto_ime", "") + " " +
                          " ".join(p["zadnje_sporocilo"] + " " + p["zadeva"] + " " + p["id"] + " " + " ".join(p.get("oznake", []))
                                   for p in s["pogovori"])).casefold()][:20]
+
+    def isci_pri_osebi(self, oseba_id: str, niz: str, kanal_id: str = "", pogovor_id: str = "") -> list:
+        """Iskanje po vsebini sporocil ene osebe (vsi njeni kanali) ali enega pogovora; za pano v nabiralniku."""
+        kanali = {k.id: k.slovar() for k in self.storitev.kanali()}
+        izid = self.storitev.isci_sporocila(niz, str(oseba_id or ""), str(kanal_id or ""), str(pogovor_id or ""))
+        for z in izid:
+            z["kanal"] = kanali.get(z["kanal_id"], {})
+        return izid
 
     def sinhroniziraj(self) -> dict:
         self.storitev.sinhroniziraj()
