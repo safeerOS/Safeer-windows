@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 from typing import Optional
 
 from PySide6.QtCore import Qt, QTimer, Signal
@@ -177,8 +178,12 @@ class MpvPlayerWidget(QWidget):
         if os.environ.get("SAFEER_MPRIS", "1") == "0":
             return
         try:
-            from .predvajalnik_mpris import SafeerMpris
-            m = SafeerMpris(self.pogon, ime="Safeer OS — Medijski center", okno=self.window(), storitev="safeeros")
+            if sys.platform == "win32":
+                from .predvajalnik_smtc import SafeerSmtc   # Windows: sistemske medijske kontrole
+                m = SafeerSmtc(self.pogon, ime="Safeer OS — Medijski center", okno=self.window())
+            else:
+                from .predvajalnik_mpris import SafeerMpris
+                m = SafeerMpris(self.pogon, ime="Safeer OS — Medijski center", okno=self.window(), storitev="safeeros")
             self.mpris = m if m.aktiven else None
         except Exception as e:  # noqa: BLE001
             _log.debug("mpris: %s", e)
