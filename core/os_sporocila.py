@@ -199,7 +199,32 @@ class SporocilaOS:
             for p in s["pogovori"]:
                 p["kanal"] = kanali.get(p["kanal_id"], {})
                 p["zadnji_ven"] = smeri.get((p["kanal_id"], p["id"])) == "ven"
-        return {"kanali": list(kanali.values()), "skupine": skupine}
+        return {"kanali": list(kanali.values()), "skupine": skupine, "oznake": self.storitev.vse_oznake()}
+
+    # ---- osebe in oznake (uporabnikovo urejanje) ----
+    def preimenuj_osebo(self, oseba_id: str, ime: str) -> dict:
+        if not self.storitev.graf.preimenuj(str(oseba_id), str(ime)):
+            raise ValueError("Oseba ne obstaja.")
+        return self.seznam()
+
+    def zdruzi_osebi(self, cilj_id: str, drugi_id: str) -> dict:
+        if cilj_id == drugi_id:
+            raise ValueError("Izberi drugo osebo.")
+        self.storitev.zdruzi_osebi(str(cilj_id), str(drugi_id))
+        return self.seznam()
+
+    def razdruzi_osebo(self, oseba_id: str, identiteta) -> dict:
+        if not isinstance(identiteta, (list, tuple)) or len(identiteta) != 2:
+            raise ValueError("Neveljavna identiteta.")
+        self.storitev.razdruzi_osebo(str(oseba_id), (str(identiteta[0]), str(identiteta[1])))
+        return self.seznam()
+
+    def nastavi_oznake(self, kanal_id: str, pogovor_id: str, oznake) -> dict:
+        self.storitev.nastavi_oznake(str(kanal_id), str(pogovor_id), list(oznake or []))
+        return self.seznam()
+
+    def osebe(self) -> list:
+        return [o.slovar() for o in self.storitev.graf.vse()]
 
     def pogovor(self, kanal_id: str, pogovor_id: str) -> list:
         self.storitev.oznaci_prebrano(kanal_id, pogovor_id)
@@ -229,8 +254,8 @@ class SporocilaOS:
             neprebrano = (int(prej["neprebrano"] or 0) if prej else 0) + novih
             if prej and not zadnje:
                 zadnje, cas = prej["zadnje_sporocilo"] or "", prej["cas"] or cas
-            st.db.execute("INSERT OR REPLACE INTO pogovori VALUES(?,?,?,?,?,?,?)",
-                          (naprava_id, KANAL_LINKA, oseba, "", zadnje[:240], neprebrano, cas))
+            st.db.execute("INSERT OR REPLACE INTO pogovori(id,kanal_id,oseba_id,zadeva,zadnje_sporocilo,neprebrano,cas,identiteta) VALUES(?,?,?,?,?,?,?,?)",
+                          (naprava_id, KANAL_LINKA, oseba, "", zadnje[:240], neprebrano, cas, naprava_id))
 
     def prejmi_klepet(self, od: str, ime: str, besedilo: str, cas: str = "", sid: str = "") -> bool:
         """chat.send z druge naprave; vrne True, ce je sporocilo novo (ne ponovljena dostava)."""
@@ -290,8 +315,9 @@ class SporocilaOS:
         if not n:
             return []
         return [s for s in self.storitev.zdruzeni_pogovori()
-                if n in (s["oseba"]["ime"] + " " + " ".join(p["zadnje_sporocilo"] + " " + p["zadeva"] + " " + p["id"]
-                                                            for p in s["pogovori"])).casefold()][:20]
+                if n in (s["oseba"]["ime"] + " " + s["oseba"].get("privzeto_ime", "") + " " +
+                         " ".join(p["zadnje_sporocilo"] + " " + p["zadeva"] + " " + p["id"] + " " + " ".join(p.get("oznake", []))
+                                  for p in s["pogovori"])).casefold()][:20]
 
     def sinhroniziraj(self) -> dict:
         self.storitev.sinhroniziraj()
