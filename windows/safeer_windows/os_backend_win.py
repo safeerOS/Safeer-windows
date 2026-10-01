@@ -637,6 +637,129 @@ def stanje_sistema() -> dict:
     }
 
 
+# ---- zakon solidarnosti: koliko proste moci ima ta racunalnik in ali sme pomagati drugim napravam
+#: Enaka pravila kot Linux (core/link_daljinec.py) in Android (Zmogljivost.kt).
+VKLOP_BATERIJA = 40
+IZKLOP_BATERIJA = 30
+NAJVEC_CPU = 85            # % obremenitve procesorja, nad katero ne prevzame dela drugih
+NAJMANJ_RAM = 512 * 1024 * 1024
+REZERVA_DISKA = 2 * 1024 * 1024 * 1024
+_POMAGA = {"zadnje": True}
+_CPU_PREJ = {"cas": None}
+
+
+def _cpu_obremenitev_win() -> int:
+    """Obremenitev procesorja v % od zadnjega klica (GetSystemTimes); -1, ce je ni mogoce izmeriti."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+        mirovanje, jedro, uporabnik = wintypes.FILETIME(), wintypes.FILETIME(), wintypes.FILETIME()
+        if not ctypes.windll.kernel32.GetSystemTimes(ctypes.byref(mirovanje), ctypes.byref(jedro), ctypes.byref(uporabnik)):
+            return -1
+        v = lambda f: (f.dwHighDateTime << 32) | f.dwLowDateTime  # noqa: E731
+        zdaj = (v(mirovanje), v(jedro) + v(uporabnik))
+        prej = _CPU_PREJ["cas"]
+        _CPU_PREJ["cas"] = zdaj
+        if prej is None:
+            import time
+            time.sleep(0.25)
+            return _cpu_obremenitev_win()
+        skupaj = zdaj[1] - prej[1]
+        if skupaj <= 0:
+            return -1
+        return max(0, min(100, int(100 * (1 - (zdaj[0] - prej[0]) / skupaj))))
+    except Exception:
+        return -1
+
+
+def _baterija_win() -> dict:
+    """{raven, polni} prenosnika iz GetSystemPowerStatus; {} pri namiznem racunalniku."""
+    try:
+        import ctypes
+
+        class SYSTEM_POWER_STATUS(ctypes.Structure):
+            _fields_ = [("ACLineStatus", ctypes.c_ubyte), ("BatteryFlag", ctypes.c_ubyte),
+                        ("BatteryLifePercent", ctypes.c_ubyte), ("SystemStatusFlag", ctypes.c_ubyte),
+                        ("BatteryLifeTime", ctypes.c_ulong), ("BatteryFullLifeTime", ctypes.c_ulong)]
+
+        st = SYSTEM_POWER_STATUS()
+        if not ctypes.windll.kernel32.GetSystemPowerStatus(ctypes.byref(st)):
+            return {}
+        if st.BatteryFlag == 128 or st.BatteryLifePercent == 255:   # brez baterije / neznano
+            return {}
+        return {"raven": int(st.BatteryLifePercent), "polni": st.ACLineStatus == 1,
+                "varcevanje": st.SystemStatusFlag == 1}
+    except Exception:
+        return {}
+
+
+def odlocitev_pomoci(cpu: int, ram_prosto: int, disk_prosto: int, bat: dict) -> dict:
+    """{lahko, razlog} po zakonu solidarnosti; baterija: na omrezju ali >= 40 %, pod 30 % ne (vmes ostane)."""
+    if cpu >= NAJVEC_CPU:
+        return {"lahko": False, "razlog": "preobremenjen"}
+    if 0 <= ram_prosto < NAJMANJ_RAM:
+        return {"lahko": False, "razlog": "malo_pomnilnika"}
+    if 0 <= disk_prosto < REZERVA_DISKA:
+        return {"lahko": False, "razlog": "ni_prostora"}
+    if bat:
+        if bat.get("varcevanje"):
+            return {"lahko": False, "razlog": "varcevanje"}
+        if bat.get("polni"):
+            _POMAGA["zadnje"] = True
+        else:
+            raven = int(bat.get("raven", 100))
+            if raven >= VKLOP_BATERIJA:
+                _POMAGA["zadnje"] = True
+            elif raven < IZKLOP_BATERIJA:
+                _POMAGA["zadnje"] = False
+            if not _POMAGA["zadnje"]:
+                return {"lahko": False, "razlog": "baterija"}
+    return {"lahko": True, "razlog": ""}
+
+
+def zmogljivost() -> dict:
+    """host.info za Safeer Link v istem zapisu kot Linux in Android: cpu, ram, disk, gpu, baterija, pomoc."""
+    import platform
+    import shutil
+    p: dict = {"hostname": platform.node(), "sistem": "Windows " + platform.release(), "vrsta": "racunalnik"}
+    cpu = {"jedra": os.cpu_count() or 0}
+    obremenitev = _cpu_obremenitev_win() if sys.platform == "win32" else -1
+    if obremenitev >= 0:
+        cpu["odstotek"] = obremenitev
+    p["cpu"] = cpu
+    ram_prosto = -1
+    if sys.platform == "win32":
+        try:
+            import ctypes
+
+            class MEMORYSTATUSEX(ctypes.Structure):
+                _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
+                            ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
+                            ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
+                            ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong),
+                            ("sullAvailExtendedVirtual", ctypes.c_ulonglong)]
+
+            stat = MEMORYSTATUSEX()
+            stat.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat)):
+                ram_prosto = int(stat.ullAvailPhys)
+                p["ram"] = {"skupaj": int(stat.ullTotalPhys), "prosto": ram_prosto}
+        except Exception:
+            pass
+    disk_prosto = -1
+    try:
+        skupaj, _, prosto = shutil.disk_usage(os.path.expanduser("~"))
+        disk_prosto = int(prosto)
+        p["disk"] = {"skupaj": int(skupaj), "prosto": disk_prosto}
+    except Exception:
+        pass
+    bat = _baterija_win() if sys.platform == "win32" else {}
+    if bat:
+        p["baterija"] = {"raven": bat["raven"], "polni": bat["polni"]}
+    p["pomoc"] = odlocitev_pomoci(obremenitev, ram_prosto, disk_prosto, bat)
+    return p
+
+
 def _ukaz_samozagona() -> str:
     """Ukaz za HKCU Run, pravilno citiran tudi pri poteh s presledki."""
     if getattr(sys, "frozen", False):
