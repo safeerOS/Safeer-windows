@@ -1149,7 +1149,7 @@ class SafeerControlBackend:
                 izid = {"ok": True, "message": "Vnos izveden na navideznem zaslonu"}
 
             elif akcija == "host.info":
-                izid = {"ok": True, "message": "Podatki o računalniku", "data": os_backend_win.stanje_sistema()}
+                izid = {"ok": True, "message": "Podatki o računalniku", "data": os_backend_win.zmogljivost()}
 
             elif akcija == "files.list":
                 mapa = str(params.get("folder") or "")
