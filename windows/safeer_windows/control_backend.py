@@ -36,6 +36,10 @@ DEJANJA_SOLIDARNOST = ["host.info"] + DEJANJA_PRETOK
 #: Daljinec (Link) upravlja Medijski center v istem procesu (os_app nastavi ob_mediju). Tipke daljinca
 #: play_pause/play/pause/stop/next/previous gredo najprej v predvajalnik; "media" je izrecni ukaz s parametri.
 DEJANJA_MEDIJ = ["media"]
+#: »Nadaljuj z druge naprave«: telefon vprasa, kaj Medijski center tu predvaja, in nadaljuje pri isti sekundi
+#: (core/link_predvajanje.py, isti protokol kot Linux in Predaja.kt na Androidu). Samo naprava s pravico do
+#: datotek (profil polno ali izbrano) - datoteka gre le iz deljenih map, play.stop je samo premor.
+DEJANJA_PREDAJA = ["play.state", "play.stop"]
 TIPKE_MEDIJ = ("play_pause", "play", "pause", "stop", "next", "previous", "naslednja", "prejsnja")
 
 
@@ -333,7 +337,7 @@ class SafeerControlBackend:
         if profil in ("izbrano", "zaslon") and akcija in DEJANJA_SOLIDARNOST:
             return True
         if profil == "izbrano":
-            return akcija.startswith("files.")
+            return akcija.startswith("files.") or akcija in DEJANJA_PREDAJA
         if profil == "zaslon":
             return akcija in ("screenshot", "screen.capture", "screen.start", "screen.stop", "screen.status")
         return False
@@ -505,6 +509,40 @@ class SafeerControlBackend:
         except Exception as e:  # noqa: BLE001
             print(f"[SafeerSprotno] video.stream napaka: {e}", flush=True)
             return {"ok": False, "message": str(e), "code": "napaka"}
+
+    def _predaja(self, akcija: str, posiljatelj: str) -> Dict[str, Any]:
+        """play.state / play.stop: kaj Medijski center predvaja (os_app `state`) in premor na zahtevo cilja."""
+        from core import link_predvajanje
+        from safeer_windows import predvajalnik_nadaljuj
+
+        def stanje() -> Optional[dict]:
+            m = self._medij("state", {})
+            return (m.get("data") or None) if m and m.get("ok") else None
+
+        def premor() -> bool:
+            m = self._medij("pause", {})
+            return bool(m and m.get("ok") and (m.get("data") or {}).get("status") == "playing")
+
+        def zadnji() -> Optional[dict]:
+            # Nazadnje gledani video s shranjenim mestom (nadaljuj.json), ce je se na disku.
+            d = predvajalnik_nadaljuj.nalozi()
+            for uri in sorted(d, key=lambda k: int((d[k] or {}).get("cas") or 0), reverse=True):
+                pot = link_predvajanje.pot_iz_uri(uri)
+                if pot and os.path.isfile(pot) and link_predvajanje.je_video(pot):
+                    v = d[uri] or {}
+                    return {"pot": pot, "ime": os.path.splitext(os.path.basename(pot))[0], "pozicija": v.get("polozaj") or 0,
+                            "trajanje": v.get("trajanje") or 0, "zadnjic": v.get("cas") or 0}
+            return None
+
+        try:
+            datoteke = self._datoteke_za(posiljatelj)
+        except Exception:  # noqa: BLE001
+            datoteke = None
+        pr = link_predvajanje.Predvajanje(stanje, premor, datoteke, zadnji,
+                                          lambda: bool(self.nastavitve.get("predvajanje_za_naprave", True)))
+        if akcija == "play.stop":
+            return {"ok": True, "message": "Premor", "data": pr.ustavi()}
+        return {"ok": True, "message": "Predvajanje", "data": pr.stanje(posiljatelj, self.hub_url())}
 
     def _datoteke_za(self, posiljatelj: str):
         """Deljene mape za napravo: en streznik za omejen dostop in en za cel disk (dovoljenje "polno").
@@ -1140,7 +1178,7 @@ class SafeerControlBackend:
                     stanje_naprave["actions"] = list(stanje_naprave.get("actions") or []) + DEJANJA_PRETOK
                 medij = self._medij("status", {})
                 if medij is not None:
-                    stanje_naprave["actions"] = list(stanje_naprave.get("actions") or []) + DEJANJA_MEDIJ
+                    stanje_naprave["actions"] = list(stanje_naprave.get("actions") or []) + DEJANJA_MEDIJ + DEJANJA_PREDAJA
                     stanje_naprave["keys"] = list(dict.fromkeys(list(stanje_naprave.get("keys") or []) + ["next", "previous"]))
                     stanje_naprave["media"] = medij.get("data") or {}
                 izid = {
@@ -1265,6 +1303,9 @@ class SafeerControlBackend:
 
             elif akcija in DEJANJA_PRETOK:
                 izid = self._pretok(akcija, dict(params), posiljatelj)
+
+            elif akcija in DEJANJA_PREDAJA:
+                izid = self._predaja(akcija, posiljatelj)
 
             elif akcija == "files.list":
                 mapa = str(params.get("folder") or "")
