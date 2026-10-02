@@ -1697,10 +1697,12 @@ class SafeerOsWindow(QMainWindow):
             cilj = stari if stari and stari.lower().endswith(".exe") and os.path.isdir(os.path.dirname(stari)) else exe
             skripta = os.path.join(mapa, "posodobi.cmd")
             # Skripta tece brez okna in brez okolja tega procesa (PYTHONPATH aplikacije bi zaganjalniku pokvaril preverbo knjiznic).
-            vrstice = ["@echo off", 'set "PYTHONPATH="', 'set "PYTHONUNBUFFERED="', 'set "SAFEER_OS_EXE="', "ping -n 5 127.0.0.1 >nul"]
+            vrstice = ["@echo off", 'set "PYTHONPATH="', 'set "PYTHONUNBUFFERED="', 'set "SAFEER_OS_EXE="', "ping -n 5 127.0.0.1 >nul",
+                       f'set "cilj={cilj}"']
             if cilj != exe:
-                vrstice.append(f'copy /y "{exe}" "{cilj}" >nul || set "cilj={exe}"')
-            vrstice += [f'start "" "{cilj}"', "exit"]
+                # Stari exe se prepise (bliznjica na namizju ostane); ce ne gre (se tece, mapa brez pravic), se zazene prenesen exe.
+                vrstice.append(f'copy /y "{exe}" "%cilj%" >nul || set "cilj={exe}"')
+            vrstice += ['start "" "%cilj%"', "exit"]
             with open(skripta, "w", encoding="utf-8") as f:
                 f.write("\r\n".join(vrstice) + "\r\n")
             print("[SafeerOS] posodobitev:", ime, "->", cilj, flush=True)

@@ -200,3 +200,43 @@ def test_stikalo_predvajanje_za_naprave(okolje):
     assert r["ok"] and r["data"] == {"shared": False}
     assert b.nastavi_predajanje(True) is True
     assert _ukaz(b, "play.state")["data"]["playing"]
+
+
+def test_posodobitev_skripta(tmp_path, monkeypatch):
+    """Skripta za zagon nove razlicice: brez PYTHONPATH, prepise stari exe iz .zaganjalnik, sicer zazene prenesenega."""
+    import time
+    import types
+    from pathlib import Path
+    from safeer_windows import os_app, os_backend_win
+    from core import os_posodobitve
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    zagnane = []
+    monkeypatch.setattr(os_backend_win, "zazeni_skripto_v_ozadju", lambda s: zagnane.append(s))
+    def lazni_prenos(url, cilj, sha, velikost=0, napredek=None, prekini=None, agent=""):
+        os.makedirs(os.path.dirname(cilj), exist_ok=True)
+        Path(cilj).write_bytes(b"exe")
+        return cilj
+    monkeypatch.setattr(os_posodobitve, "prenesi", lazni_prenos)
+    stari = tmp_path / "Namizje" / "SafeerOS-Windows-1.0.18.exe"
+    stari.parent.mkdir(); stari.write_bytes(b"star")
+    koren = Path(os_app.__file__).resolve().parents[2]
+    zaganjalnik = koren / ".zaganjalnik"
+    zaganjalnik.write_text(str(stari), encoding="utf-8")
+    konci = []
+    app = types.SimpleNamespace(posodobitve={"izid": {"nove": [{"kljuc": "safeer-os", "ime": "Safeer OS", "nasa": "1.0.18", "razlicica": "1.0.19",
+                                                                   "datoteka": {"url": "https://x/SafeerOS-Windows-1.0.19.exe", "sha256": "", "velikost": 3}}],
+                                                          "nacin": "windows", "stran": ""}, "cas": time.time(), "napaka": ""},
+                                posodabljanje=os_posodobitve.Posodabljanje(),
+                                dispatcher=types.SimpleNamespace(dispatch=lambda f: konci.append(f)),
+                                koncaj_za_posodobitev=lambda: None)
+    app._posodobitve_stanje = lambda vsiljeno=False: os_app.SafeerOsWindow._posodobitve_stanje(app, vsiljeno)
+    try:
+        r = os_app.SafeerOsWindow._posodobi(app)
+        assert r["ok"]
+        app.posodabljanje.nit.join(10)
+    finally:
+        zaganjalnik.unlink()
+    assert app.posodabljanje.faza == "koncano", app.posodabljanje.sporocilo
+    skripta = Path(zagnane[0]).read_text(encoding="utf-8")
+    assert 'set "PYTHONPATH="' in skripta and f'set "cilj={stari}"' in skripta and 'start "" "%cilj%"' in skripta
+    assert "SafeerOS-Windows-1.0.19.exe" in skripta and "copy /y" in skripta and konci
