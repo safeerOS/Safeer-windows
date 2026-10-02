@@ -27,6 +27,10 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDia
                                QToolButton, QVBoxLayout, QWidget)
 
 from . import policy
+from . import splet_webview2
+
+# Pogled zavihka: Qt WebEngine ali WebView2 (isti vmesnik; glej splet_webview2.py).
+POGLEDI = (QWebEngineView, splet_webview2.WvView)
 
 TEXT: Dict[str, Dict[str, str]] = {
     "sl": {
@@ -398,6 +402,13 @@ class Tabs(QWidget):
     def setNavigationWidget(self, widget: QWidget) -> None:
         self._layout.insertWidget(1, widget)
 
+    def setRowVisible(self, visible: bool) -> None:
+        """Cela vrstica zavihkov (zavihki, gumb +, znacka povezave): v celozaslonskem videu je ni."""
+        for i in range(self._tab_row.count()):
+            widget = self._tab_row.itemAt(i).widget()
+            if widget is not None and (not visible or widget is self._bar or widget.property("safeer_viden") is not False):
+                widget.setVisible(visible)
+
     def setInfoWidget(self, widget: QWidget) -> None:
         """Obvestilna vrstica tik nad spletno vsebino (pod orodno vrstico)."""
         self._layout.insertWidget(self._layout.count() - 1, widget)
@@ -497,6 +508,8 @@ class SafeerBrowserApp(QObject):
         self.windows: List[BrowserWindow] = []
         self.downloads: List[QWebEngineDownloadRequest] = []
         self.blocked_log: List[Dict[str, str]] = []
+        # Splet na WebView2 (Windows): po en gostitelj za navaden in zaseben profil; None = Qt WebEngine.
+        self._wv_gostitelji: Dict[bool, splet_webview2.Gostitelj] = {}
         self._media_request_counts: Dict[int, int] = {}
         self.closed_tabs: List[str] = []
         self.cookie_filter_status = "not-set"
@@ -640,8 +653,45 @@ class SafeerBrowserApp(QObject):
         if koncano:
             self._ikone_casovnik.stop()
 
+    def wv_gostitelj(self, zasebno: bool) -> Optional[splet_webview2.Gostitelj]:
+        """Gostitelj WebView2 za okna tega profila ali None (ni WebView2 Runtime / pomoznega programa, samodejni
+        preizkus, uporabnik je izbral Qt, gostitelj je odpovedal) - takrat okno tece na Qt WebEngine."""
+        if self.smoke or str(self.settings.get("splet_pogon") or "") == "qt" or os.environ.get("SAFEER_SPLET_POGON") == "qt":
+            return None
+        gostitelj = self._wv_gostitelji.get(zasebno)
+        if gostitelj is None:
+            if not splet_webview2.na_voljo():
+                return None
+            gostitelj = splet_webview2.Gostitelj(self, zasebno)
+            if not self._wv_gostitelji:
+                self.qt_app.installEventFilter(self)
+            self._wv_gostitelji[zasebno] = gostitelj
+            gostitelj.zazeni()
+        return None if gostitelj.odpovedal else gostitelj
+
+    def fokus_v_lupino(self, widget: Optional[QWidget]) -> None:
+        """Tipkovnico vrne oknu Safeerja. Spletna stran WebView2 je okno drugega procesa: po kliku vanjo ostane
+        fokus Windows tam, tudi ko uporabnik klikne naslovno vrstico (Qt misli, da fokus ze ima) - tipke bi sle v stran."""
+        if not self._wv_gostitelji or sys.platform != "win32" or widget is None:
+            return
+        try:
+            import ctypes
+            okno = int(widget.window().winId())
+            if ctypes.windll.user32.GetFocus() != okno:
+                ctypes.windll.user32.SetFocus(okno)
+        except Exception:
+            pass
+
+    def eventFilter(self, obj, event) -> bool:
+        # Klik kamorkoli v lupino (naslovna vrstica, zavihki, stranska vrstica Safeer OS) vrne tipkovnico Safeerju.
+        if event.type() == QEvent.Type.MouseButtonPress and isinstance(obj, QWidget) and not isinstance(obj, splet_webview2.WvView):
+            self.fokus_v_lupino(obj)
+        return False
+
     def refresh_preferences(self) -> None:
         self.lang = policy.ui_language(self.settings.get("language"))
+        for gostitelj in self._wv_gostitelji.values():
+            gostitelj.nastavi()
         for profile in filter(None, (self.profile, self.private_profile)):
             self.apply_profile_preferences(profile)
         for window in self.windows:
@@ -859,6 +909,8 @@ class SafeerBrowserApp(QObject):
         self.settings.save()
         for window in list(self.windows):
             window.dispose_tabs()
+        for gostitelj in self._wv_gostitelji.values():
+            gostitelj.ustavi()
         QCoreApplication.processEvents()
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         for profile in filter(None, (self.private_profile, self.profile)):
@@ -885,6 +937,10 @@ class BrowserWindow(QMainWindow):
         self.stanje_povezave: Optional[Callable[[], Tuple[str, bool]]] = None
         self.jezik_vmesnika: Optional[Callable[[], str]] = None
         self.profile = app.get_private_profile() if private else app.profile
+        self.wv_celozaslon_cas = 0.0
+        self.wv_v_celozaslonu = False
+        # Pogon zavihkov: WebView2 (H.264/AAC, DRM - vse predvaja na mestu) ali, ce ga ni, Qt WebEngine.
+        self.wv = app.wv_gostitelj(private)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, not embedded)
         self.devtools: Optional[QWebEngineView] = None
         self.find_text = ""
@@ -1299,15 +1355,19 @@ class BrowserWindow(QMainWindow):
     # -- tabs -----------------------------------------------------------------
     def current_view(self) -> Optional[QWebEngineView]:
         widget = self.tabs.currentWidget()
-        return widget if isinstance(widget, QWebEngineView) else None
+        return widget if isinstance(widget, POGLEDI) else None
 
     def views(self) -> List[QWebEngineView]:
-        return [self.tabs.widget(i) for i in range(self.tabs.count()) if isinstance(self.tabs.widget(i), QWebEngineView)]
+        return [self.tabs.widget(i) for i in range(self.tabs.count()) if isinstance(self.tabs.widget(i), POGLEDI)]
 
-    def create_view(self) -> QWebEngineView:
-        view = QWebEngineView(self.tabs)
-        page = SafeerPage(self.profile, self, view)
-        view.setPage(page)
+    def create_view(self, wv_zahteva: str = "") -> QWebEngineView:
+        if self.wv is not None and not self.wv.odpovedal:
+            view = splet_webview2.WvView(self.tabs, self.wv, self, wv_zahteva)
+            page = view.page()
+        else:
+            view = QWebEngineView(self.tabs)
+            page = SafeerPage(self.profile, self, view)
+            view.setPage(page)
         view.titleChanged.connect(lambda title, v=view: self.on_title_changed(v, title))
         view.iconChanged.connect(lambda icon, v=view: self.tabs.setTabIcon(self.tabs.indexOf(v), icon))
         view.urlChanged.connect(lambda url, v=view: self.on_url_changed(v, url))
@@ -1317,16 +1377,19 @@ class BrowserWindow(QMainWindow):
         page.fullScreenRequested.connect(self.on_fullscreen_request)
         page.renderProcessTerminated.connect(lambda status, code, v=view: self.on_render_terminated(v, status, code))
         page.windowCloseRequested.connect(lambda v=view: self.close_tab(self.tabs.indexOf(v)))
+        if isinstance(view, splet_webview2.WvView):
+            return view      # dovoljenja (kamera, lokacija ...) vprasa WebView2 s svojim okencem
         if hasattr(page, "permissionRequested"):
             page.permissionRequested.connect(lambda permission, p=page: self.on_permission(p, permission))
         else:  # Qt < 6.8
             page.featurePermissionRequested.connect(lambda origin, feature, p=page: self.on_feature_permission(p, origin, feature))
         return view
 
-    def new_tab(self, url: Optional[str] = None, switch: bool = True, after_current: bool = False) -> QWebEngineView:
+    def new_tab(self, url: Optional[str] = None, switch: bool = True, after_current: bool = False,
+                wv_zahteva: str = "") -> QWebEngineView:
         if url is None:
             url = self.home_url
-        view = self.create_view()
+        view = self.create_view(wv_zahteva)
         index = self.tabs.currentIndex() + 1 if after_current and self.tabs.count() else self.tabs.count()
         self.tabs.insertTab(index, view, tr(self.app, "new_tab"))
         if switch:
@@ -1339,7 +1402,7 @@ class BrowserWindow(QMainWindow):
 
     def close_tab(self, index: int) -> None:
         view = self.tabs.widget(index)
-        if not isinstance(view, QWebEngineView):
+        if not isinstance(view, POGLEDI):
             return
         url = view.url().toString()
         if url.startswith(("http://", "https://")) and not self.private:
@@ -1348,6 +1411,8 @@ class BrowserWindow(QMainWindow):
         if self.devtools is not None and view.page().devToolsPage() is not None:
             view.page().setDevToolsPage(None)
         self.tabs.removeTab(index)
+        if isinstance(view, splet_webview2.WvView):
+            view.zapri()
         view.page().deleteLater()
         view.deleteLater()
         if self.tabs.count() == 0:
@@ -1368,7 +1433,9 @@ class BrowserWindow(QMainWindow):
         while self.tabs.count():
             view = self.tabs.widget(0)
             self.tabs.removeTab(0)
-            if isinstance(view, QWebEngineView):
+            if isinstance(view, splet_webview2.WvView):
+                view.zapri()
+            if isinstance(view, POGLEDI):
                 view.page().deleteLater()
                 view.deleteLater()
 
@@ -1404,7 +1471,7 @@ class BrowserWindow(QMainWindow):
     def tab_index_for_page(self, page: QWebEnginePage) -> int:
         for index in range(self.tabs.count()):
             view = self.tabs.widget(index)
-            if isinstance(view, QWebEngineView) and view.page() is page:
+            if isinstance(view, POGLEDI) and view.page() is page:
                 return index
         return -1
 
@@ -1464,6 +1531,81 @@ class BrowserWindow(QMainWindow):
         page.committed_navigation = True
         return True
 
+    # -- WebView2: dogodki gostitelja, ki jih resi okno ----------------------------
+    def wv_dogodek(self, view, m: dict) -> None:
+        ev = m.get("ev")
+        if ev == "newwindow":
+            zahteva, url = str(m.get("req") or ""), str(m.get("url") or "")
+            oglas = (url.startswith(("http://", "https://")) and self.app.settings.get("adblock_enabled")
+                     and not policy.adblock.is_passthrough_host(url) and policy.adblock.is_ad_domain(url))
+            if self.media_mode or oglas or self.wv is None:
+                self.app.note_blocked(url or view.url().toString(), "block-media-popup" if self.media_mode else "block-ad")
+                if self.wv is not None:
+                    self.wv.poslji(cmd="dropwindow", req=zahteva)
+                return
+            novi = self.new_tab("", switch=True, after_current=True, wv_zahteva=zahteva)
+            novi.page().opened_as_popup = not m.get("user")
+        elif ev == "external":
+            url = str(m.get("url") or "")
+            if url.lower().startswith("magnet:"):
+                # Samo klik uporabnika; preusmeritve iz skripte strani magneta ne odprejo (enako kot v Qt).
+                if self.na_magnet is not None and m.get("user"):
+                    self.na_magnet(url)
+            elif policy.navigation_scheme_allowed(url) == "external":
+                self.confirm_external(QUrl(url))
+        elif ev == "navblocked":
+            vrsta, cilj, razlog = (list(m.get("dejanje") or []) + ["", "", ""])[:3]
+            if razlog:
+                self.app.note_blocked(str(m.get("url") or ""), razlog)
+            if vrsta == "load" and cilj:
+                view.load(QUrl(cilj))
+            elif vrsta == "ad" and view.page().opened_as_popup and not view.page().committed_navigation:
+                self.close_tab(self.tabs.indexOf(view))
+        elif ev == "key":
+            self._wv_tipka(m)
+        elif ev == "download":
+            ime = os.path.basename(str(m.get("path") or "")) or str(m.get("url") or "")
+            kljuc = {"started": "download_started", "done": "done", "failed": "failed"}.get(str(m.get("state")), "")
+            if kljuc == "download_started":
+                self.statusBar().showMessage(tr(self.app, kljuc, name=ime), 6000)
+            elif kljuc:
+                self.statusBar().showMessage(f"{ime} · {tr(self.app, kljuc)}", 6000)
+        elif ev in ("tabfailed", "orphan"):
+            self.statusBar().showMessage(tr(self.app, "crashed"), 15000)
+
+    def _wv_tipka(self, m: dict) -> None:
+        """Bliznjice lupine, pritisnjene med tem, ko je fokus v spletni strani (kode tipk Windows)."""
+        koda = int(m.get("code") or 0)
+        ctrl, shift, alt = bool(m.get("ctrl")), bool(m.get("shift")), bool(m.get("alt"))
+        if ctrl:
+            if koda == 84:                                   # T
+                self.reopen_closed_tab() if shift else self.new_tab(self.home_url)
+            elif koda in (87, 115):                          # W, F4
+                self.close_tab(self.tabs.currentIndex())
+            elif koda == 76:                                 # L
+                self.focus_address()
+            elif koda == 68:                                 # D
+                self.add_current_to_home()
+            elif koda == 78 and not self.embedded:           # N
+                self.app.new_window(private=shift)
+            elif koda == 9:                                  # Tab
+                self.cycle_tab(-1 if shift else 1)
+            elif koda in (34, 33):                           # PgDn, PgUp
+                self.cycle_tab(1 if koda == 34 else -1)
+            elif 49 <= koda <= 56:                           # 1..8
+                self.tabs.setCurrentIndex(min(koda - 48, self.tabs.count()) - 1)
+            elif koda == 57:                                 # 9
+                self.tabs.setCurrentIndex(self.tabs.count() - 1)
+        elif alt:
+            if koda == 68:
+                self.focus_address()
+            elif koda == 36:
+                self.load_in_current(self.home_url)
+        elif koda == 117:                                    # F6
+            self.focus_address()
+        elif koda == 122 and not self.embedded:              # F11
+            self.toggle_fullscreen()
+
     def create_page_for_window(self, opener: SafeerPage, window_type) -> Optional[QWebEnginePage]:
         if self.media_mode:
             self.app.note_blocked(opener.url().toString(), "block-media-popup")
@@ -1481,7 +1623,7 @@ class BrowserWindow(QMainWindow):
         index = self.tab_index_for_page(page) if page is not None else -1
         if index >= 0 and self.tabs.count() > 1:
             view = self.tabs.widget(index)
-            if isinstance(view, QWebEngineView) and not view.history().canGoBack() and view.url().isEmpty():
+            if isinstance(view, POGLEDI) and not view.history().canGoBack() and view.url().isEmpty():
                 QTimer.singleShot(0, lambda: self.close_tab(self.tabs.indexOf(view)))
 
     def confirm_external(self, url: QUrl) -> None:
@@ -1507,8 +1649,25 @@ class BrowserWindow(QMainWindow):
             view.reload()
 
     def focus_address(self) -> None:
+        self.app.fokus_v_lupino(self)
         self.address.setFocus()
         self.address.selectAll()
+
+    def wv_zapusti_celozaslon(self) -> None:
+        """Okno Safeer OS zapusca celozaslonski nacin (Esc je dobilo okno, ne stran): tudi video v strani ga zapusti."""
+        if not self.wv_v_celozaslonu:
+            return
+        for view in self.views():
+            if isinstance(view, splet_webview2.WvView):
+                view.page().triggerAction(QWebEnginePage.WebAction.ExitFullScreen)
+
+    def wv_fokus_v_strani(self) -> None:
+        """Uporabnik je kliknil v spletno stran (WebView2): naslovna vrstica ni vec v urejanju."""
+        if self.address.hasFocus():
+            self.address.clearFocus()
+            view = self.current_view()
+            if view is not None:
+                self.address.setText(policy.display_url(view.url().toString()))
 
     # -- view events ----------------------------------------------------------
     def on_title_changed(self, view: QWebEngineView, title: str) -> None:
@@ -1719,6 +1878,22 @@ class BrowserWindow(QMainWindow):
     def on_fullscreen_request(self, request) -> None:
         request.accept()
         on = request.toggleOn()
+        if isinstance(request, splet_webview2._Celozaslon):
+            self.wv_v_celozaslonu = on
+            if on:
+                # Okno se razpne cez zaslon in pri tem vzame tipkovnico: vrnemo jo strani (Esc, presledek, puscice).
+                view = self.current_view()
+                if view is not None:
+                    QTimer.singleShot(250, view.setFocus)
+            else:
+                # Esc, s katerim stran WebView2 zapusti celozaslonski nacin, pride za tem se do okna Safeer OS:
+                # ta trenutek si zapomnimo, da okno istega Esc ne razume kot »zapri Splet«.
+                self.wv_celozaslon_cas = time.monotonic()
+            # Vrstica zavihkov v celoti izgine (v Qt jo je prekril video sam).
+            if on:
+                for w in (self.new_tab_button, self.povezava_znacka):
+                    w.setProperty("safeer_viden", w.isVisible())
+            self.tabs.setRowVisible(not on)
         if self.embedded and self.on_fullscreen_changed is not None:
             self.on_fullscreen_changed(on)
         self.toolbar.setVisible(not on)
@@ -1726,9 +1901,15 @@ class BrowserWindow(QMainWindow):
         self.statusBar().setVisible(not on)
         target = self.window() if self.embedded else self
         if on:
+            # Po videu se okno vrne v stanje pred njim (razpeto ostane razpeto, ne skrci se v majhno okno).
+            if not target.isFullScreen():
+                self._pred_celozaslonom_razpeto = target.isMaximized()
             target.showFullScreen()
         else:
-            target.showNormal()
+            if getattr(self, "_pred_celozaslonom_razpeto", False):
+                target.showMaximized()
+            else:
+                target.showNormal()
             if self.safeer_os_web_mode:
                 self.set_safeer_os_web_mode(True)
 
@@ -1829,6 +2010,9 @@ class BrowserWindow(QMainWindow):
     def toggle_devtools(self) -> None:
         view = self.current_view()
         if view is None:
+            return
+        if isinstance(view, splet_webview2.WvView):
+            view.odpri_orodja()
             return
         if self.devtools is not None and self.devtools.isVisible():
             self.devtools.close()
@@ -1951,6 +2135,9 @@ class BrowserWindow(QMainWindow):
         self.profile.clearHttpCache()
         self.profile.cookieStore().deleteAllCookies()
         self.profile.clearAllVisitedLinks()
+        wv_pogled = next((v for v in self.views() if isinstance(v, splet_webview2.WvView)), None)
+        if wv_pogled is not None:
+            wv_pogled.pocisti_podatke()     # profil WebView2 (vsi zavihki)
         self.app.closed_tabs.clear()
         QMessageBox.information(self, policy.APP_NAME, tr(self.app, "cleared"))
 
@@ -1969,6 +2156,10 @@ class BrowserWindow(QMainWindow):
         SettingsDialog(self).exec()
 
     def show_downloads(self) -> None:
+        view = self.current_view()
+        if isinstance(view, splet_webview2.WvView):
+            view.odpri_prenose()
+            return
         DownloadsDialog(self).exec()
 
     # -- close ------------------------------------------------------------------

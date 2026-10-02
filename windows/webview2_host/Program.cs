@@ -14,6 +14,12 @@ internal static class Program
         var values = args.Select(x => x.Split('=', 2))
             .Where(x => x.Length == 2 && x[0].StartsWith("--"))
             .ToDictionary(x => x[0][2..], x => x[1], StringComparer.OrdinalIgnoreCase);
+        if (args.Contains("--splet"))
+        {
+            // Splet (brskalnik Safeer OS) na WebView2: gostitelj zavihkov, pogovor po stdin/stdout (SpletHost.cs).
+            SpletHost.Run(values);
+            return;
+        }
         if (!values.TryGetValue("parent", out var parentText)
             || !long.TryParse(parentText, out var parentValue)
             || !values.TryGetValue("url", out var url)
