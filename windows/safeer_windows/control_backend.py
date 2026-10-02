@@ -203,6 +203,7 @@ class SafeerControlBackend:
             "stanje": stanje,
             "control": True,
             "zaupana": zaupana,
+            "predajanje": bool(self.nastavitve.get("predvajanje_za_naprave", True)),
             "hubi": hubi,
             "varno": True,
             "kakovost": "najvisja",
@@ -994,6 +995,13 @@ class SafeerControlBackend:
         self.shrani_nastavitve()
         self._oddaj_dogodek("stanje", self.stanje_linka())
         return True
+
+    def nastavi_predajanje(self, deli: bool) -> bool:
+        """Stikalo "Predvajanje za druge naprave" (Safeer OS, poleg Zaupaj): ali druge naprave smejo vprasati, kaj tu igra,
+        nadaljevati tukaj in poslati sem (play.state / play.stop / play.offer). Isti kljuc kot v pladnju Controla za Linux."""
+        self.nastavitve["predvajanje_za_naprave"] = bool(deli)
+        self.shrani_nastavitve()
+        return bool(deli)
 
     def nadaljuj_brez_povezave(self) -> bool:
         self.nastavitve["brez_povezave"] = True

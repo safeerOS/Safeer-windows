@@ -188,3 +188,15 @@ def test_racunalnik_kot_cilj_vleka_in_izvor_potiskanja(okolje):
     assert b.predaja_ponudi("tel") == {"ok": True, "prikaz": "later"}
     stanje.clear(); stanje["stanje"] = "ustavljeno"
     assert b.predaja_ponudi("tel")["koda"] == "ni_predvajanja"
+
+
+def test_stikalo_predvajanje_za_naprave(okolje):
+    """Stikalo v Safeer OS (poleg Zaupaj): izklop zavrne play.state s kodo izklopljeno, vklop spet dovoli."""
+    b, stanje, klici, film, zunaj = okolje
+    shranjeno = []
+    b.shrani_nastavitve = lambda: shranjeno.append(dict(b.nastavitve)) or True
+    assert b.nastavi_predajanje(False) is False and b.nastavitve["predvajanje_za_naprave"] is False and shranjeno
+    r = _ukaz(b, "play.state")
+    assert r["ok"] and r["data"] == {"shared": False}
+    assert b.nastavi_predajanje(True) is True
+    assert _ukaz(b, "play.state")["data"]["playing"]
