@@ -167,11 +167,26 @@ MOST_JS = r"""
 """
 
 
+# Stalna vrata lokalnega streznika vmesnika. Izvor strani (http://127.0.0.1:<vrata>) mora biti ob vsakem
+# zagonu isti: z nakljucnimi vrati je bil brskalniski pomnilnik (tema, skrita vrstica, podnapisi, napredek
+# glasbe, "Ne zdaj" pri novi napravi) po vsakem ponovnem zagonu prazen. Zasedena vrata -> naslednja, nato nakljucna.
+STALNA_VRATA = (47815, 47816, 47817, 47818)
+
+
 def _find_free_port() -> int:
-    """Poišče prosto TCP vrata na lokalnem vmesniku."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+    """Poišče prosta TCP vrata na lokalnem vmesniku: najprej stalna (isti izvor ob vsakem zagonu)."""
+    for vrata in STALNA_VRATA + (0,):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                # Windows: brez tega bi se smeli vezati na vrata, ki jih ze poslusa drug program.
+                izkljucno = getattr(socket, "SO_EXCLUSIVEADDRUSE", None)
+                if izkljucno is not None:
+                    s.setsockopt(socket.SOL_SOCKET, izkljucno, 1)
+                s.bind(("127.0.0.1", vrata))
+                return s.getsockname()[1]
+        except OSError:
+            continue
+    raise OSError("ni prostih vrat za lokalni streznik vmesnika")
 
 
 class _SafeerAssetHandler(BaseHTTPRequestHandler):
