@@ -503,6 +503,7 @@ class SafeerOsWindow(QMainWindow):
         self.browser_window.na_zapisek = self._izrezek_iz_spleta
         # Magnet povezava, kliknjena v Spletu, se odpre v Medijskem centru (ne v drugem programu).
         self.browser_window.na_magnet = self.odpri_magnet
+        self.browser_window.na_predvajalnik = self._predvajaj_stran_v_predvajalniku
         self.browser_window.na_zapisek_ob_strani = self._preklopi_zapisek_ob_strani
         self._zapisek_dock = None
         self.browser_app.windows.append(self.browser_window)
@@ -1211,6 +1212,18 @@ class SafeerOsWindow(QMainWindow):
         self.view.page().runJavaScript(js)
         self.setWindowTitle("Safeer OS")
         self.poslji_dogodek("fokus", None)
+
+    def _predvajaj_stran_v_predvajalniku(self, url: str) -> None:
+        """Splet: video v zapisu, ki ga Qt WebEngine nima (H.264/AAC) - ista stran v predvajalniku WebView2 v tem oknu.
+        »Nazaj« vrne v Splet na isto stran. Brez WebView2 (ni namescen) stran odpre privzeti brskalnik."""
+        if not url.startswith("https://"):
+            return
+        if self.webview2_media.available and self.webview2_media.open_url(url, stran=True):
+            self.zaslon.setCurrentWidget(self.webview2_media)
+            self.setWindowTitle("Safeer OS · Safeer predvajalnik")
+            return
+        from PySide6.QtGui import QDesktopServices
+        QDesktopServices.openUrl(QUrl(url))
 
     def _zapri_webview2_media(self) -> None:
         self.webview2_media.stop()

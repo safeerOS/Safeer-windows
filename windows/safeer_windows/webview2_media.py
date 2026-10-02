@@ -67,6 +67,9 @@ class WebView2MediaWidget(QWidget):
         self.media_detected = False
         self._last_rejection = ""
         self._failed_variants: list[str] = []
+        # Stran, ki jo je uporabnik sam poslal iz Spleta (zapis, ki ga Qt nima): brez roka za video tok in brez
+        # preklapljanja virov - uporabnik sam pritisne predvajaj, kadar stran tega ne naredi.
+        self.page_mode = False
 
         self.setStyleSheet("background:#070b12;color:#f4f7f5;")
         outer = QVBoxLayout(self)
@@ -115,10 +118,12 @@ class WebView2MediaWidget(QWidget):
     def available(self) -> bool:
         return sys.platform == "win32" and self.executable.is_file()
 
-    def open_url(self, url: str) -> bool:
+    def open_url(self, url: str, stran: bool = False) -> bool:
         if not self.available or not url.startswith("https://"):
             return False
-        self.variants = [{"url": url, "vir": "Spletni vir"}]
+        self.stop()
+        self.page_mode = bool(stran)
+        self.variants = [{"url": url, "vir": urllib.parse.urlsplit(url).hostname or "Spletni vir"}]
         self.variant_index = 0
         return self._open_variant()
 
@@ -142,6 +147,7 @@ class WebView2MediaWidget(QWidget):
         if not variants:
             return False
         self.stop()
+        self.page_mode = False
         self.variants = variants
         self.variant_index = 0
         self._failed_variants = []
@@ -226,6 +232,13 @@ class WebView2MediaWidget(QWidget):
                 provider = str(self.variants[self.variant_index].get("vir") or "Spletni vir")
                 self.status_label.setText(f"Predvaja se prek {provider}")
         exited = self.process.poll() is not None
+        if self.page_mode:
+            if exited:
+                self.watchdog.stop()
+                self.status_label.setText("Predvajalnik se je zaprl")
+            elif not self.media_detected and time.monotonic() - self.opened_at >= 6:
+                self.status_label.setText("Safeer predvajalnik · če se film ne začne sam, pritisni predvajaj")
+            return
         timed_out = not self.media_detected and time.monotonic() - self.opened_at >= 18.0
         if self._last_rejection and not self.media_detected:
             self._next_or_report_failure(self._last_rejection)
@@ -261,6 +274,7 @@ class WebView2MediaWidget(QWidget):
         self.variant_index = 0
         self.opened_at = 0.0
         self.media_detected = False
+        self.page_mode = False
 
     def close_and_home(self) -> None:
         self.stop()

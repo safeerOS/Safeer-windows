@@ -485,6 +485,59 @@ HOOKSHOT_SITES = ("pushsquare.com", "nintendolife.com", "purexbox.com", "timeext
 YOUTUBE_PATTERNS = ["*://*.youtube.com/*", "*://youtube.com/*"]
 
 
+# Qt WebEngine (uradna gradnja) nima licencnih zapisov H.264/AAC/HEVC. Stran, ki ponuja samo te (npr. arhivi televizij),
+# javi napako predvajalnika. Skripta to zazna na splosno (brez prilagoditev posameznim stranem): stran je vprasala za zapis,
+# ki ga pogon nima, in videa ni mogla zagnati -> Splet ponudi predvajanje iste strani v Safeer predvajalniku (WebView2).
+MEDIA_KODEKI_SCRIPT = r"""
+var prijavljeno = false, vprasano = false, znam = false, pregledi = 0;
+var NIMAM = /avc1|avc3|mp4a|hvc1|hev1|ec-3|ac-3/i;
+var ZNAM = /vp0?9|vp8|av01|opus|vorbis/i;
+function nalozeno() {
+  try {
+    var m = document.querySelectorAll('video,audio');
+    for (var i = 0; i < m.length; i++) if (m[i].readyState >= 2) return true;
+  } catch (e) {}
+  return false;
+}
+function napakaPredvajalnika() {
+  // Stanje napake razsirjenih knjiznic predvajalnikov (JW Player, Video.js, Shaka, Plyr) - velja za vsako stran, ki jih uporablja.
+  try { return !!document.querySelector('.jw-error, .jw-state-error, .jw-error-msg, .vjs-error, .shaka-error, .plyr--failed'); } catch (e) { return false; }
+}
+function prijavi(napaka) { if (prijavljeno) return; prijavljeno = true; __safeerPost({action: 'media_unsupported', napaka: !!napaka}); }
+function preglej() {
+  if (prijavljeno) return;
+  pregledi++;
+  if (nalozeno()) return;                       // nekaj se predvaja: stran je nasla zapis, ki ga znamo
+  if (napakaPredvajalnika()) { prijavi(true); return; }   // predvajalnik strani je obupal: Splet preklopi sam
+  if (!znam && pregledi >= 2) { prijavi(false); return; }  // samo sum: Splet ponudi gumb
+  if (pregledi < 40) setTimeout(preglej, 1500);   // napaka pride sele po kliku na predvajaj
+}
+function opazi(tip, izid) {
+  var t = String(tip || '');
+  if (izid) { if (ZNAM.test(t)) znam = true; return; }
+  if (NIMAM.test(t) && !vprasano) { vprasano = true; setTimeout(preglej, 1500); }
+}
+function ovij(objekt, ime) {
+  try {
+    if (!objekt || typeof objekt[ime] !== 'function') return;
+    var izvirna = objekt[ime];
+    objekt[ime] = function (tip) { var r = izvirna.apply(this, arguments); try { opazi(tip, !!r); } catch (e) {} return r; };
+  } catch (e) {}
+}
+ovij(window.MediaSource, 'isTypeSupported');
+ovij(window.ManagedMediaSource, 'isTypeSupported');
+ovij(window.HTMLMediaElement && HTMLMediaElement.prototype, 'canPlayType');
+// Neposreden <video src=...mp4>: napaka "zapis ni podprt" (koda 4) ali dekodiranja (3).
+document.addEventListener('error', function (e) {
+  try {
+    var el = e.target;
+    if (el && el.tagName === 'SOURCE') el = el.parentNode;
+    if (el && (el.tagName === 'VIDEO' || el.tagName === 'AUDIO') && el.error && (el.error.code === 4 || el.error.code === 3) && !nalozeno()) prijavi(true);
+  } catch (x) {}
+}, true);
+"""
+
+
 def script_specs(settings: SettingsStore) -> List[Dict[str, Any]]:
     """Script list mirroring the Linux edition (name, source, start|ready, all_frames)."""
     auth = list(adblock.AUTH_SCRIPT_EXCLUSIONS)
@@ -498,6 +551,7 @@ def script_specs(settings: SettingsStore) -> List[Dict[str, Any]]:
             "all_frames": all_frames,
         })
 
+    add("safeer-media-kodeki", MEDIA_KODEKI_SCRIPT, None, ["safeer://*"], True, True)
     if settings.get("gpc_dnt_enabled"):
         add("safeer-gpc", adblock.GPC_AND_DNT_SCRIPT, None, auth, True, True)
     if settings.get("adblock_enabled"):
