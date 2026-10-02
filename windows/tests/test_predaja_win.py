@@ -240,3 +240,16 @@ def test_posodobitev_skripta(tmp_path, monkeypatch):
     skripta = Path(zagnane[0]).read_text(encoding="utf-8")
     assert 'set "PYTHONPATH="' in skripta and f'set "cilj={stari}"' in skripta and 'start "" "%cilj%"' in skripta
     assert "SafeerOS-Windows-1.0.19.exe" in skripta and "copy /y" in skripta and konci
+
+
+def test_lokalni_streznik_ima_stalna_vrata():
+    """Izvor vmesnika mora biti ob vsakem zagonu isti (sicer tema, skrita vrstica in "Ne zdaj" po zagonu izginejo)."""
+    import socket
+    from safeer_windows import os_app
+    prva = os_app._find_free_port()
+    assert prva in os_app.STALNA_VRATA
+    assert os_app._find_free_port() == prva            # prosta vrata -> vedno ista
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as zasedeno:
+        zasedeno.bind(("127.0.0.1", prva)); zasedeno.listen(1)
+        druga = os_app._find_free_port()               # zasedena -> naslednja, nikoli ista
+        assert druga != prva and druga > 0

@@ -1897,6 +1897,12 @@
         klic("utisaj").then(function () { setTimeout(osveziStanje, 200); });
       }));
     }
+    if (!kompaktno && cilj.id === "hitreNastavitve") {
+      // Racunalnik brez zvoka, svetlosti in Wi-Fi (namizni PC): prazen razdelek skrijemo skupaj z naslovom.
+      var prazno = !cilj.children.length, naslov = cilj.previousElementSibling;
+      cilj.hidden = prazno;
+      if (naslov && naslov.tagName === "H2") naslov.hidden = prazno;
+    }
     if (kompaktno) {
       cilj.appendChild(mreza);
       var vec = el("button", "gumb", svg("drsniki") + "<span>" + ubezi(t("nastavitve")) + "</span>");
@@ -2429,6 +2435,20 @@
       else nalozPosodobitve(true);
     }).catch(function () { obvesti(t("niUspelo")); });
   }
+  // Z domacega zaslona na gumb Posodobitve v Nastavitvah. Nastavitve se narisejo v vec korakih (teme, hitre
+  // nastavitve, brskalnik, viri), zato gumb v pogled premaknemo veckrat - sicer ga pozneje nalozena vsebina
+  // odrine in uporabnik pristane sredi strani brez gumba.
+  function naPosodobitve() {
+    pojdi("nastavitve");
+    [0, 250, 700, 1500].forEach(function (ms) {
+      setTimeout(function () {
+        var g = $("gumbPosodobi");
+        if (!g || S.razdelek !== "nastavitve") return;
+        if (ms === 0) { try { g.focus({ preventScroll: true }); } catch (e) { g.focus(); } }
+        g.scrollIntoView({ block: "center" });
+      }, ms);
+    });
+  }
   function pokaziPosodobitevDoma(st) {
     // Tiha opomba na domacem zaslonu, dokler uporabnik nove razlicice ne namesti (Nastavitve -> Posodobitve).
     S.posodobitve.stanje = st;
@@ -2775,25 +2795,25 @@
     if (!n) return;
     var sloj = el("div", "sloj-koda-prijave");
     var okno = el("div", "koda-prijave-okno");
-    var h = el("h2"); h.textContent = "Nova naprava v Safeer Linku";
-    var o = el("p"); o.textContent = "Kaj sme " + (n.ime || n.id) + " na tem računalniku?";
+    var h = el("h2"); h.textContent = t("novaNapravaNaslov");
+    var o = el("p"); o.textContent = t("novaNapravaVprasanje").replace("{ime}", n.ime || n.id);
     okno.appendChild(h); okno.appendChild(o);
     function naprej() {
       sloj.remove();
       cakajocaDovoljenja.shift();
       pokaziDovoljenje();
     }
-    [["polno", "Vse: programi, datoteke in zaslon"], ["izbrano", "Samo datoteke"], ["zaslon", "Samo ogled zaslona"]].forEach(function (m) {
+    [["polno", t("dovoliVse")], ["izbrano", t("dovoliDatoteke")], ["zaslon", t("dovoliZaslon")]].forEach(function (m) {
       var g = el("button", "vrstica"); g.textContent = m[1];
       g.addEventListener("click", function () {
         klic("nastaviDovoljenje", [n.id, m[0]]).then(function (ok) {
-          obvesti(ok ? ((n.ime || "Naprava") + ": dovoljenje shranjeno.") : t("niUspelo"));
+          obvesti(ok ? t("dovoljenjeShranjeno").replace("{ime}", n.ime || t("napravaSplosno")) : t("niUspelo"));
         });
         naprej();
       });
       okno.appendChild(g);
     });
-    var z = el("button", "koda-prijave-gumb"); z.textContent = "Ne zdaj";
+    var z = el("button", "koda-prijave-gumb"); z.textContent = t("neZdaj");
     z.addEventListener("click", function () { odloziDovoljenje(n.id); naprej(); });
     okno.appendChild(z);
     sloj.appendChild(okno);
@@ -3596,7 +3616,7 @@
       klic("zaupanje", [nov]).then(function () { setTimeout(osveziPovezavo, 600); });
     });
     on("gumbPosodobi", "click", posodobi);
-    on("domPosodobitevGumb", "click", function () { pojdi("nastavitve"); var g = $("gumbPosodobi"); if (g) g.focus(); });
+    on("domPosodobitevGumb", "click", naPosodobitve);
     on("stikaloPredaja", "click", function () {
       // "Predvajanje za druge naprave": Nadaljuj z druge naprave / Pošlji na napravo proti temu računalniku.
       var b = $("stikaloPredaja");
