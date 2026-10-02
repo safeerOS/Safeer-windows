@@ -1658,7 +1658,7 @@ class SafeerOsWindow(QMainWindow):
                     s["cas"] = time.time() - os_posodobitve.PREVERBA_S + 600
         izid = s["izid"] or {"nove": [], "nacin": "windows", "stran": os_posodobitve.STRAN}
         return {"nove": izid.get("nove") or [], "opis": os_posodobitve.opis(izid), "nacin": "windows", "stran": izid.get("stran"),
-                "nasa": policy.APP_VERSION, "napaka": s["napaka"], "posodabljanje": self.posodabljanje.stanje()}
+                "novo": izid.get("novo") or {}, "nasa": policy.APP_VERSION, "napaka": s["napaka"], "posodabljanje": self.posodabljanje.stanje()}
 
     def _posodobitve_tiho(self) -> None:
         def delo() -> None:

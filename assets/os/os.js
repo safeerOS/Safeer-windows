@@ -2399,7 +2399,8 @@
     if (p && p.faza === "napaka" && p.sporocilo !== "prekinjeno") { naslov.textContent = t("posodobitevNapaka", { napaka: p.sporocilo || "" }); pod.textContent = t("posodobitevNajnovejsaPod"); return; }
     if (st && st.nove && st.nove.length) {
       naslov.textContent = t("posodobitevNaVoljo", { opis: st.opis });
-      pod.textContent = (st.nacin === "deb" || st.nacin === "windows") ? t("posodobitevNaVoljoPod") : (st.nacin === "flatpak" || st.nacin === "appimage") ? t("posodobitevNaVoljoFlatpak") : t("posodobitevRocnoPod");
+      var novo = st.novo && (st.novo[jezik] || st.novo.en) ? (st.novo[jezik] || st.novo.en) + " " : "";
+      pod.textContent = novo + ((st.nacin === "deb" || st.nacin === "windows") ? t("posodobitevNaVoljoPod") : (st.nacin === "flatpak" || st.nacin === "appimage") ? t("posodobitevNaVoljoFlatpak") : t("posodobitevRocnoPod"));
       return;
     }
     naslov.textContent = t("posodobitevNajnovejsa", { v: (st && st.nasa) || (S.zacetek && S.zacetek.razlicica) || "" });
