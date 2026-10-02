@@ -702,6 +702,7 @@ class SafeerOsWindow(QMainWindow):
             self.media_player.set_fullscreen_ui(enabled)
 
     def _zapusti_celozaslonsko(self) -> None:
+        self.browser_window.wv_zapusti_celozaslon()
         self._nastavi_predvajalnik_celozaslonsko(False)
         self._na_browser_celozaslonsko(False)
         self.showNormal()
@@ -709,6 +710,9 @@ class SafeerOsWindow(QMainWindow):
             self.showMaximized()
 
     def na_escape(self) -> None:
+        # Stran v Spletu (WebView2) je z istim Esc pravkar zapustila celozaslonski video: to ni »zapri Splet«.
+        if time.monotonic() - float(getattr(self.browser_window, "wv_celozaslon_cas", 0.0) or 0.0) < 1.2:
+            return
         if self.isFullScreen():
             self._zapusti_celozaslonsko()
             # Tudi stran izve za Esc (kino način predvajalnika odstrani svoj razred).
@@ -1577,6 +1581,9 @@ class SafeerOsWindow(QMainWindow):
                 odtis = str(podatki.get("odtis") or "").replace(":", "").lower()
                 if odtis:
                     browser.ZAUPANA_POTRDILA.add(odtis)
+                    # Splet na WebView2 dobi pripeti odtis Huba (gostitelj preverja sam).
+                    for _g in list(getattr(self.browser_app, "_wv_gostitelji", {}).values()):
+                        _g.nastavi()
                 self.poslji_dogodek("zaslonZNaprave", {"od": podatki.get("od"), "dejanje": "start"})
                 self.dispatcher.dispatch(lambda: self._odpri_notranji_splet(url))
             elif podatki.get("dejanje") == "stop":
@@ -1960,8 +1967,8 @@ class SafeerOsWindow(QMainWindow):
                 self.browser_app.closed_tabs.clear()
                 for index in range(self.browser_window.tabs.count()):
                     view = self.browser_window.tabs.widget(index)
-                    if isinstance(view, QWebEngineView):
-                        view.page().history().clear()
+                    if isinstance(view, browser.POGLEDI):
+                        view.page().history().clear() if hasattr(view.page(), "history") else None
             self.dispatcher.dispatch(clear_embedded_profile)
             return True
 

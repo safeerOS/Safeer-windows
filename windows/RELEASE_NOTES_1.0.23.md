@@ -1,0 +1,9 @@
+# Safeer OS za Windows 1.0.23
+
+- **Splet predvaja vse, na mestu:** brskalnik v Safeer OS zdaj teče na sistemskem WebView2. Video v zapisih H.264/AAC (RTV 365, arhivi televizij, pretočne storitve) se predvaja v zavihku – brez kode napake 102630 in brez preklopa v drug predvajalnik. Zavihki, naslovna vrstica, ščit pred oglasi, začetna stran in bližnjice ostanejo enaki.
+- **Rezerva ostane:** če na računalniku ni WebView2, Splet teče po starem (Qt WebEngine) in video v nepodprtem zapisu sam odpre v Safeer predvajalniku.
+- **Dodatki Stremio vseh vrst:** glasbeni dodatek gre v **Glasbo**, radijski v **Radio**, prenosi v živo v **TV v živo** – prej je Medijski center bral samo filme, serije in TV. Album se predvaja od prve skladbe.
+- **Iskanje najde vse:** tudi kanale, postaje in glasbo iz dodatkov, ki sami ne znajo iskati; brez razlikovanja naglasov (»sport tv« najde »Šport TV 1«). Zadetki, ki se z iskanim ujemajo v naslovu, so prvi – med njimi najprej tvoji dodatki in strežniki.
+- Zvezdica v naslovni vrstici ne sili več čez rob; po celozaslonskem videu se okno vrne v prejšnjo velikost.
+
+English: the built-in browser now runs on the system WebView2, so H.264/AAC video (TV archives, streaming sites) plays right in the tab; Qt WebEngine stays as a fallback. Stremio add-ons of every kind are sorted where they belong (music, radio, live TV); search covers add-on channels, stations and music, ignores accents and puts your own sources first.
