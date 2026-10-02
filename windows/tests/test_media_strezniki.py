@@ -71,6 +71,32 @@ def test_stremio_dodatek_katalog_in_tokovi():
         assert all(t.get("torrent") for t in m.stremio_tokovi("https://dodatek.primer", "movie", "tt2"))
 
 
+def test_stremio_glasba_radio_tv_gredo_v_svoj_razdelek_in_iskanje_najde_vse():
+    """Glasbeni dodatek v Glasbo, radijski v Radio, TV v zivo v TV; iskanje najde tudi kataloge brez lastnega iskanja."""
+    manifest = {"id": "a", "name": "Mediji", "catalogs": [
+        {"type": "music", "id": "albumi"}, {"type": "radio", "id": "postaje"}, {"type": "tv", "id": "kanali"},
+        {"type": "movie", "id": "top"}, {"type": "anime", "id": "novo"}]}
+    tabela = {"/manifest.json": manifest,
+              "/catalog/music/albumi.json": {"metas": [{"id": "st:alb1", "name": "Jesenski album"}]},
+              "/catalog/radio/postaje.json": {"metas": [{"id": "st:r1", "name": "Radio Preizkus"}]},
+              "/catalog/tv/kanali.json": {"metas": [{"id": "st:tv1", "name": "Šport TV 1"}, {"id": "st:tv2", "name": "Kino"}]},
+              "/catalog/movie/top.json": {"metas": [{"id": "tt1", "name": "Sport film"}]},
+              "/catalog/anime/novo.json": {"metas": [{"id": "k1", "name": "Anime"}]},
+              "/stream/music/st:alb1.json": {"streams": []},
+              "/meta/music/": {"meta": {"id": "st:alb1", "videos": [{"id": "st:alb1:1", "title": "Listje"}]}},
+              "/stream/music/st:alb1:1.json": {"streams": [{"url": "https://cdn.primer/listje.mp3", "name": "MP3"}]}}
+    with mock.patch.object(m, "_request", _odgovori(tabela)):
+        vrste = {x["naslov"]: x["vrsta"] for x in m.catalog("stremio", "https://dodatek.primer/manifest.json", SRV, "")}
+        assert vrste == {"Jesenski album": "glasba", "Radio Preizkus": "radio", "Šport TV 1": "tv-v-zivo", "Kino": "tv-v-zivo",
+                         "Sport film": "film", "Anime": "video"}
+        # Iskanje "sport": TV katalog nima lastnega iskanja - preiscemo ga po imenu (brez naglasov); film brez iskanja ne.
+        najdeno = [x["naslov"] for x in m.catalog("stremio", "https://dodatek.primer/manifest.json", SRV, "", "sport")]
+        assert najdeno == ["Šport TV 1"]
+        # Album nima toka sam: tok da njegov prvi posnetek.
+        assert [t["url"] for t in m.stremio_tokovi("https://dodatek.primer", "music", "st:alb1")] == ["https://cdn.primer/listje.mp3"]
+        assert m.stremio_vrsta("podcast") == "glasba" and m.stremio_vrsta("events") == "tv-v-zivo" and m.stremio_vrsta("") == "video"
+
+
 def test_dlna_imenik():
     opis = (b'<root xmlns="urn:schemas-upnp-org:device-1-0"><device><friendlyName>Gerbera</friendlyName>'
             b'<serviceList><service><serviceType>urn:schemas-upnp-org:service:ContentDirectory:1</serviceType>'

@@ -14,6 +14,7 @@ import json
 import re
 import secrets
 import socket
+import unicodedata
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -483,6 +484,40 @@ def catalog(kind: str, base: str, server: dict, secret: str, query: str = "") ->
 
 #: Stremio vrste -> vrste Medijskega centra.
 _STREMIO_VRSTE = {"movie": "film", "series": "serija", "tv": "tv-v-zivo", "channel": "video"}
+_STREMIO_TV = {"tv", "live", "livetv", "iptv", "events", "event", "sports", "sport"}
+_STREMIO_RADIO = {"radio", "radios"}
+_STREMIO_GLASBA = {"music", "audio", "album", "albums", "song", "songs", "track", "tracks", "playlist", "playlists",
+                   "podcast", "podcasts", "audiobook", "audiobooks"}
+
+
+def stremio_vrsta(tip: str) -> str:
+    """Kam sodi vsebina dodatka (enako kot Safeer za Android, Stremio.razred): glasbeni dodatek v Glasbo, radijski
+    v Radio, prenosi v zivo v TV v zivo; neznan tip je video - nic se ne izgubi (Matej, 2. 10. 2026)."""
+    t = str(tip or "").strip().lower()
+    if t in _STREMIO_VRSTE:
+        return _STREMIO_VRSTE[t]
+    if t in _STREMIO_TV:
+        return "tv-v-zivo"
+    if t in _STREMIO_RADIO:
+        return "radio"
+    if t in _STREMIO_GLASBA:
+        return "glasba"
+    return "video"
+
+
+def _stremio_ujema(ime: str, iskano: str) -> bool:
+    """Vse iskane besede so v imenu (brez razlikovanja velikih crk in naglasov: "sport" najde "Šport TV")."""
+    def cisto(t: str) -> str:
+        return "".join(c for c in unicodedata.normalize("NFD", str(t).casefold()) if not unicodedata.combining(c))
+    besede = cisto(iskano).split()
+    ime = cisto(ime)
+    return bool(besede) and all(b in ime for b in besede)
+
+
+def ujema_iskanje(item: dict, iskano: str) -> bool:
+    """Vnos osebnega streznika ali dodatka ustreza iskanju: vse iskane besede so v naslovu, izvajalcu, albumu ali
+    opisu - brez razlikovanja velikih crk in naglasov ("sport tv" najde "Šport TV 1")."""
+    return _stremio_ujema(" ".join(str(item.get(k) or "") for k in ("naslov", "izvajalec", "album", "opis")), iskano)
 
 
 def _stremio_koren(url: str) -> str:
@@ -508,27 +543,33 @@ def _stremio_items(base: str, server: dict, query: str) -> list[dict]:
     rezultat = []
     for katalog in (manifest.get("catalogs") or [])[:8]:
         tip, ident = str(katalog.get("type") or ""), str(katalog.get("id") or "")
-        if tip not in _STREMIO_VRSTE or not ident:
+        if not tip or not ident:
             continue
+        vrsta = stremio_vrsta(tip)
         dodatno = [e.get("name") for e in (katalog.get("extra") or []) if isinstance(e, dict)] + list(katalog.get("extraSupported") or [])
-        if query:
-            if "search" not in dodatno:
-                continue
+        obvezen = any(isinstance(e, dict) and e.get("isRequired") for e in (katalog.get("extra") or []))
+        # Katalog kanalov, postaj ali glasbe brez lastnega iskanja (vecina dodatkov TV v zivo) preiscemo sami po imenu.
+        iscem_sam = bool(query) and "search" not in dodatno
+        if iscem_sam and (obvezen or vrsta not in ("tv-v-zivo", "radio", "glasba")):
+            continue
+        if query and not iscem_sam:
             pot = "/catalog/%s/%s/search=%s.json" % (tip, urllib.parse.quote(ident, safe=""), urllib.parse.quote(query, safe=""))
         else:
-            if any(isinstance(e, dict) and e.get("isRequired") for e in (katalog.get("extra") or [])):
+            if obvezen:
                 continue
             pot = "/catalog/%s/%s.json" % (tip, urllib.parse.quote(ident, safe=""))
         try:
             metas = json.loads(_request(koren + pot)).get("metas") or []
         except Exception:
             continue
+        if iscem_sam:
+            metas = [m for m in metas if isinstance(m, dict) and _stremio_ujema(m.get("name", ""), query)]
         for meta in metas[:100]:
             mid = str(meta.get("id") or "")
             if not mid:
                 continue
             rezultat.append({"id": "stremio:%s:%s:%s" % (server["id"], tip, mid), "naslov": meta.get("name", ""),
-                             "vrsta": _STREMIO_VRSTE[tip], "url": "stremio:%s|%s|%s" % (koren, tip, mid),
+                             "vrsta": vrsta, "url": "stremio:%s|%s|%s" % (koren, tip, mid),
                              "slika": meta.get("poster") or meta.get("logo") or "",
                              "opis": str(meta.get("description") or "")[:500], "leto": int(str(meta.get("releaseInfo") or "0")[:4] or 0)
                              if str(meta.get("releaseInfo") or "")[:4].isdigit() else 0,
@@ -548,8 +589,20 @@ def stremio_tokovi(koren: str, tip: str, ident: str) -> list[dict]:
             return []
         ident = str(sorted(videi, key=lambda v: (int(v.get("season") or 0) or 999, int(v.get("episode") or 0)))[0]["id"])
     data = json.loads(_request(koren + "/stream/%s/%s.json" % (tip, urllib.parse.quote(ident, safe=":"))))
+    surovi = data.get("streams") or []
+    if not surovi and stremio_vrsta(tip) in ("glasba", "video"):
+        # Album, seznam ali kanal z videi: tokove ima posnetek (videos), ne enota sama - vzamemo prvega.
+        try:
+            meta = json.loads(_request(koren + "/meta/%s/%s.json" % (tip, urllib.parse.quote(ident, safe="")))).get("meta") or {}
+        except Exception:
+            meta = {}
+        prvi = next((v for v in (meta.get("videos") or []) if isinstance(v, dict) and v.get("id")), None)
+        if prvi:
+            surovi = prvi.get("streams") or []
+            if not surovi:
+                surovi = json.loads(_request(koren + "/stream/%s/%s.json" % (tip, urllib.parse.quote(str(prvi["id"]), safe=":")))).get("streams") or []
     tokovi = []
-    for t in data.get("streams") or []:
+    for t in surovi:
         url = str(t.get("url") or "")
         if url.startswith(("https://", "http://")):
             tok = {"url": url, "vir": (t.get("name") or t.get("title") or "Stremio").split("\n")[0][:60],

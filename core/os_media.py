@@ -1541,9 +1541,7 @@ class MediaCenter:
             if cached and now - cached[0] < 300:
                 rows = cached[1]
                 if query and provider not in ("navidrome", "funkwhale"):
-                    needle = query.casefold()
-                    rows = [item for item in rows if needle in " ".join((item.get("naslov", ""), item.get("izvajalec", ""),
-                                                                            item.get("album", ""), item.get("opis", ""))).casefold()]
+                    rows = [item for item in rows if media_servers.ujema_iskanje(item, query)]
                 result.extend(rows); continue
             try:
                 secret = self._secret_decryptor(str(server.get("secret_enc") or ""))
@@ -1552,9 +1550,7 @@ class MediaCenter:
             except Exception:
                 rows = cached[1] if cached else []
             if query and provider not in ("navidrome", "funkwhale"):
-                needle = query.casefold()
-                rows = [item for item in rows if needle in " ".join((item.get("naslov", ""), item.get("izvajalec", ""),
-                                                                        item.get("album", ""), item.get("opis", ""))).casefold()]
+                rows = [item for item in rows if media_servers.ujema_iskanje(item, query)]
             result.extend(rows)
         return result
 
@@ -2227,9 +2223,19 @@ class MediaCenter:
                                ("naslov", "izvajalec", "album", "opis", "imdb_id", "tmdb_id")).casefold()
                 if needle in hay:
                     return True
+                # Vse iskane besede, brez naglasov ("sport tv" najde "Šport TV 1").
+                if media_servers.ujema_iskanje(item, query):
+                    return True
                 return any(difflib.SequenceMatcher(None, needle, token).ratio() >= 0.72
                            for token in re.findall(r"[\wÀ-ž]{3,}", hay))
             merged = [item for item in merged if zadetek(item)]
+            if not razvrsti:
+                # Iskanje: najprej zadetki, ki se z iskanim ujemajo v naslovu, med njimi uporabnikovi viri in dodatki
+                # (prej so bili na koncu, za desetinami ohlapnih zadetkov s spleta). Vrstni red znotraj skupin ostane.
+                moji = {str(x.get("url")) for x in (personal + local) if isinstance(x, dict)}
+                merged = sorted(merged, key=lambda it: (
+                    0 if media_servers.ujema_iskanje({"naslov": it.get("naslov")}, query) else 1,
+                    0 if str(it.get("url")) in moji else 1))
         merged = self._filtriraj_jezike(merged, izklopljeni_jeziki)
         merged = self._razvrsti_vnose(merged, razvrsti)
         tmdb_strani = (self._ima_embed_vir(data) and not tmdb_izklopljen and tmdb_pages > 1
