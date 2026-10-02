@@ -21,6 +21,7 @@ import subprocess
 import threading
 import time
 import unicodedata
+import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -1153,6 +1154,7 @@ class MediaCenter:
         self.store_path = self.config_dir / "media.json"
         self.roots = [Path(path) for path in roots] if roots is not None else self._default_roots()
         self._lock = threading.RLock()
+        self._tokovi_odgovor = threading.local()   # .vsi: ali so ob zadnjem vprasanju po tokovih odgovorili vsi dodatki
         self._tmdb_cache: dict[str, tuple[float, dict]] = {}
         self._dynamic_items: dict[str, dict] = {}
         self._ping_cache: dict[str, tuple[float, float]] = {}
@@ -1749,14 +1751,25 @@ class MediaCenter:
             if k and k not in koreni:
                 koreni.append(k)
 
+        # Ali so odgovorili vsi dodatki: "tega nimam" (404) je odgovor, izpad (omrezje, 5xx, prijava) ni. Brez tega
+        # bi hip nedosegljiv dodatek film skril za ure (glej resolve).
+        izpadi: list[str] = []
+
         def vprasaj(k: str) -> list[dict]:
             try:
                 return media_servers.stremio_tokovi(k, tip, ident)
+            except urllib.error.HTTPError as napaka:
+                if not (400 <= napaka.code < 500 and napaka.code not in (401, 403, 407, 408, 425, 429)):
+                    izpadi.append(k)
+                return []
             except Exception:
+                izpadi.append(k)
                 return []
 
         if len(koreni) == 1:
-            return vprasaj(koren)
+            tokovi = vprasaj(koren)
+            self._tokovi_odgovor.vsi = not izpadi
+            return tokovi
         from concurrent.futures import ThreadPoolExecutor
         tokovi: list[dict] = []
         videni: set[str] = set()
@@ -1767,6 +1780,7 @@ class MediaCenter:
                     if kljuc not in videni:
                         videni.add(kljuc)
                         tokovi.append(t)
+        self._tokovi_odgovor.vsi = not izpadi
         return tokovi
 
     def _stremio_vnosi(self, imdb: str, tmdb_id: int, kind: str, title: str, season: int = 0, episode: int = 0) -> list[dict]:
@@ -2808,7 +2822,9 @@ class MediaCenter:
             if drugi_http:
                 return dict(item, razlicice=drugi_http, stevilo_razlicic=len(drugi_http))
             # Brez predvajljivega toka ni strani in ni seznama povezav: kratko obvestilo, vsebina izgine s seznama.
-            self.oznaci_ni_na_voljo(item)
+            # Za ure si to zapomnimo le, ce so odgovorili vsi dodatki (izpad dodatka ni "ni na voljo").
+            if getattr(self._tokovi_odgovor, "vsi", False):
+                self.oznaci_ni_na_voljo(item)
             return dict(item, napaka_koda="ni_toka")
         if item.get("tunein_id"):
             try:
