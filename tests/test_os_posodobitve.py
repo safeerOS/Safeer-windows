@@ -114,8 +114,11 @@ class Prenos(unittest.TestCase):
         finally:
             del os.environ["APPIMAGE"]
         self.assertEqual(r.returncode, 0)
-        self.assertFalse(os.path.exists(star))
-        self.assertTrue(os.access(os.path.join(self.mapa, "Safeer-OS-0.4.23-x86_64.AppImage"), os.X_OK))
+        # ista pot kot prej (bliznjice ostanejo), vsebina nova, izvedljiva
+        self.assertTrue(os.access(star, os.X_OK))
+        with open(star, "rb") as f:
+            self.assertEqual(f.read(), b"nov")
+        self.assertFalse(os.path.exists(nov))
 
     def test_posodabljanje_stanje(self):
         p = op.Posodabljanje()

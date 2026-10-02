@@ -127,18 +127,13 @@ def namesti_linux(nacin: str, poti: List[str]) -> subprocess.CompletedProcess:
     if nacin == "flatpak":
         return subprocess.run(["flatpak", "install", "--user", "-y", "--reinstall", *poti], capture_output=True, text=True, timeout=900)
     if nacin == "appimage":
+        # Nova datoteka zamenja tekoco NA ISTI POTI (ime ostane): bliznjice, meni in AppImageLauncher kazejo nanjo se naprej.
         zdajsnji = os.environ.get("APPIMAGE") or ""
         if not zdajsnji or not poti:
             raise RuntimeError("AppImage ni znan")
-        nova = os.path.join(os.path.dirname(zdajsnji), os.path.basename(poti[0]))
-        shutil.move(poti[0], nova)
-        os.chmod(nova, 0o755)
-        if os.path.abspath(nova) != os.path.abspath(zdajsnji):
-            try:
-                os.remove(zdajsnji)
-            except OSError:
-                pass
-        return subprocess.CompletedProcess(["appimage", nova], 0, nova, "")
+        shutil.move(poti[0], zdajsnji)
+        os.chmod(zdajsnji, 0o755)
+        return subprocess.CompletedProcess(["appimage", zdajsnji], 0, zdajsnji, "")
     raise RuntimeError("neznan nacin namestitve")
 
 
