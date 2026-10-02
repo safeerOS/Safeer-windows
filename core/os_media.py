@@ -31,6 +31,7 @@ from typing import Any, Iterable, Optional
 
 from . import zakoniti_viri
 from . import media_servers
+from . import tok_izbira
 from . import watch_providers
 
 AUDIO = {".mp3", ".flac", ".ogg", ".oga", ".opus", ".m4a", ".aac", ".wav", ".wma"}
@@ -2475,6 +2476,9 @@ class MediaCenter:
                 tokovi = []
             neposredni = [t for t in tokovi if t.get("url") and not t.get("zunanje")
                           and (t["url"].startswith("https://") or media_servers.dovoljen_naslov(t["url"]))]
+            # Najboljsi tok za to napravo na prvo mesto (film se zacne takoj, brez izbiranja); ostali ostanejo kot razlicice.
+            neposredni = tok_izbira.uredi(neposredni, lambda t: str(t.get("opis") or "%s %s" % (t.get("vir", ""), t.get("kakovost", ""))),
+                                          tok_izbira.Zmoznosti(visina=int(getattr(self, "visina_zaslona", 0) or 1080)))
             drugi_http = [v for v in (item.get("razlicice") or []) if isinstance(v, dict)
                           and str(v.get("url") or "").startswith(("http://", "https://"))]
             if neposredni:

@@ -553,7 +553,9 @@ def stremio_tokovi(koren: str, tip: str, ident: str) -> list[dict]:
         url = str(t.get("url") or "")
         if url.startswith(("https://", "http://")):
             tok = {"url": url, "vir": (t.get("name") or t.get("title") or "Stremio").split("\n")[0][:60],
-                   "kakovost": (t.get("title") or "").split("\n")[0][:40]}
+                   "kakovost": (t.get("title") or "").split("\n")[0][:40],
+                   # Celoten opis toka (locljivost, kodek, zvok, velikost) za izbiro najboljsega toka (core/tok_izbira).
+                   "opis": " ".join(str(t.get(k) or "") for k in ("name", "title", "description")).replace("\n", " ")[:600]}
             # behaviorHints.proxyHeaders.request: glave, ki jih tok zahteva (Referer, User-Agent ...); predvajalnik
             # jih poslje sam. subtitles: podnapisi s spleta (predvajalnik jih ponudi v meniju).
             namigi = t.get("behaviorHints") if isinstance(t.get("behaviorHints"), dict) else {}

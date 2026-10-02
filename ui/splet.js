@@ -206,20 +206,23 @@
         try { localStorage.setItem("safeer_splet_bliznjice", JSON.stringify(S.bliznjice)); } catch (e) {}
         narisiBliznjice(); } } });
     cilj.appendChild(d);
-    // Pod mrezo: Uredi bliznjice / Koncano in (ce je kaj odstranjenega) Obnovi privzete.
-    var orodja = $("bliznjiceOrodja");
-    if (orodja) {
-      orodja.innerHTML = "";
-      var u = document.createElement("button"); u.type = "button"; u.className = "bliznjice-gumb" + (S.ureja ? " dejaven" : "");
-      u.textContent = t(S.ureja ? "koncano" : "uredi");
-      u.addEventListener("click", function () { S.ureja = !S.ureja; narisiBliznjice(); try { $("bliznjiceOrodja").querySelector("button").focus({ preventScroll: true }); } catch (e) {} });
-      if (seznam.length || S.ureja) orodja.appendChild(u);
-      if (S.skrite.length && (S.ureja || !seznam.length)) {
-        var o = document.createElement("button"); o.type = "button"; o.className = "bliznjice-gumb";
-        o.textContent = t("obnovi");
-        o.addEventListener("click", function () { S.ureja = false; obnoviBliznjice(); });
-        orodja.appendChild(o);
-      }
+    // V isti mrezi (dosegljivo z dotikom, misko in daljincem): Uredi bliznjice / Koncano in, ce je kaj odstranjenega, Obnovi privzete.
+    function orodje(znak, napis, dejaven, klik) {
+      var b = document.createElement("button"); b.type = "button"; b.className = "bliznjica orodje" + (dejaven ? " dejaven" : "");
+      b.innerHTML = '<span class="znak"></span><span class="ime"></span>';
+      b.querySelector(".znak").textContent = znak; b.querySelector(".ime").textContent = napis;
+      b.addEventListener("click", klik);
+      cilj.appendChild(b);
+      return b;
+    }
+    if (seznam.length || S.ureja) {
+      orodje(S.ureja ? "\u2713" : "\u270e", t(S.ureja ? "koncano" : "uredi"), S.ureja, function () {
+        S.ureja = !S.ureja; narisiBliznjice();
+        try { $("bliznjice").querySelector(".orodje").focus({ preventScroll: true }); } catch (e) {}
+      });
+    }
+    if (S.skrite.length && (S.ureja || !seznam.length)) {
+      orodje("\u21ba", t("obnovi"), false, function () { S.ureja = false; obnoviBliznjice(); });
     }
   }
 

@@ -379,6 +379,12 @@ class SafeerOsWindow(QMainWindow):
             lambda ime, koda: self.poslji_dogodek("kodaPrijave", {"ime": ime, "koda": koda}))
         _korak("control_backend")
         self.media_center = os_media.MediaCenter(os_backend_win.CONFIG_DIR)
+        # Visina zaslona (v pravih pikah) za izbiro najboljsega toka: na zaslonu 1080p ne jemljemo 4K z 18 GB.
+        try:
+            zaslon = QApplication.primaryScreen()
+            self.media_center.visina_zaslona = int(min(zaslon.size().width(), zaslon.size().height()) * zaslon.devicePixelRatio())
+        except Exception:
+            self.media_center.visina_zaslona = 1080
         try:
             self.media_center.izbrana_drzava = str(os_backend_win.nalozi_shrambo().get("media_watch_country") or "auto")
         except Exception:
