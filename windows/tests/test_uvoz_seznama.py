@@ -182,6 +182,35 @@ class SamoPredvajljivoTest(unittest.TestCase):
             m.oznaci_ni_na_voljo({"vrsta": "serija", "tmdb_id": 7})
             self.assertFalse(m.znano_ni_na_voljo({"vrsta": "serija", "tmdb_id": 7}))
 
+    def test_izpad_dodatka_filma_ne_skrije_za_ure(self):
+        """Dodatek, ki ne odgovori (omrezje, 5xx), ni "ni na voljo": obvestilo da, zapomnimo si pa ne. 404 je odgovor."""
+        import urllib.error
+        from core import media_servers
+        with tempfile.TemporaryDirectory() as mapa:
+            m = os_media.MediaCenter(mapa, roots=[])
+            film = {"id": "stremio:s1:movie:tt9", "naslov": "Film", "vrsta": "film", "url": "stremio:https://d.example|movie|tt9", "tmdb_id": 9}
+            m._dynamic_items[film["id"]] = film
+            strezniki = [{"url": "https://d.example/manifest.json"}, {"url": "https://drugi.example/manifest.json"}]
+
+            def napaka(koda):
+                def zahteva(url, *a, **k):
+                    if url.startswith("https://drugi.example/"):
+                        if koda == 0:
+                            raise OSError("ni omrezja")
+                        raise urllib.error.HTTPError(url, koda, "x", None, None)
+                    return json.dumps(self.TOKOVI)
+                return zahteva
+
+            for koda in (0, 500, 503, 429, 403):
+                with mock.patch.object(m, "_stremio_strezniki", return_value=strezniki), \
+                        mock.patch.object(media_servers, "_request", side_effect=napaka(koda)):
+                    self.assertEqual(m.resolve(film["id"]).get("napaka_koda"), "ni_toka", koda)
+                self.assertFalse(m.znano_ni_na_voljo(film), koda)
+            with mock.patch.object(m, "_stremio_strezniki", return_value=strezniki), \
+                    mock.patch.object(media_servers, "_request", side_effect=napaka(404)):
+                self.assertEqual(m.resolve(film["id"]).get("napaka_koda"), "ni_toka")
+            self.assertTrue(m.znano_ni_na_voljo(film))
+
 
 if __name__ == "__main__":
     unittest.main()
