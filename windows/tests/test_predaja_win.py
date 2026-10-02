@@ -139,7 +139,7 @@ def test_play_offer_ponudba_caka(okolje):
     r = _ukaz(b, "play.offer", params={"item": {"id": "media:video:5", "naslov": "Film", "zvok": "https://192.168.0.87:4433/d/media%3Avideo%3A5", "video": True},
                                        "position_ms": 754000, "duration_ms": 5400000,
                                        "server": {"base_url": "https://192.168.0.87:4433", "fp": "ab", "token": "t"}, "from": "Tablica"})
-    assert r["ok"] and r["data"] == {"queued": True}
+    assert r["ok"] and r["data"] == {"queued": True, "shown": "banner"}
     ponudbe = [d for v, d in dogodki if v == "predajaPonudba"]
     assert ponudbe and ponudbe[-1]["od_ime"] == "Telefon"  # ime iz seznama naprav
     assert ponudbe[-1]["opis"] == "Film (12:34)"
@@ -183,5 +183,8 @@ def test_racunalnik_kot_cilj_vleka_in_izvor_potiskanja(okolje):
     assert (naprava, dejanje, parametri["from"], parametri["item"]["id"]) == ("tel", "play.offer", "Jaz", "share:0:film.mkv")
     assert parametri["server"]["token"] and parametri["position_ms"] == 61500
     assert b.predaja_ponudi("tv")["koda"] == "stara"
+    # Android brez dovoljenja za obvestila pove "later": uporabnik naj tam odpre Safeer OS
+    odgovori[("tel", "play.offer")] = {"ok": True, "data": {"queued": True, "shown": "later"}}
+    assert b.predaja_ponudi("tel") == {"ok": True, "prikaz": "later"}
     stanje.clear(); stanje["stanje"] = "ustavljeno"
     assert b.predaja_ponudi("tel")["koda"] == "ni_predvajanja"

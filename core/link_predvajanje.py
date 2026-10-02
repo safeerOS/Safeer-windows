@@ -205,7 +205,10 @@ class Predvajanje:
                 self.ob_ponudbi(p)
             except Exception:  # noqa: BLE001 - obvestilo ni razlog, da ponudba odpade
                 pass
-        return {"queued": True}
+        # "shown": kako jo uporabnik vidi (banner = pasica na zaslonu zdaj; Android pozna se notification in later =
+        # obvestila so izklopljena, ponudba caka na odprtje Safeer OS). Racunalnik pasico pokaze vedno.
+        return {"queued": True, "shown": "banner"}
+
 
     def vzemi_ponudbo(self) -> Optional[dict]:
         p, self.cakajoca = self.cakajoca, None
@@ -213,6 +216,19 @@ class Predvajanje:
 
     def zavrni_ponudbo(self) -> None:
         self.cakajoca = None
+
+
+def izid_ponudbe(odgovor: dict) -> dict:
+    """Izid `play.offer` za posiljatelja: ok (tam je pasica ali obvestilo) s `prikaz` ("later" = tam obvestil ni, naj
+    odpre Safeer OS), sicer koda: ni_vnosa / izklopljeno (cilj), stara (cilj dejanja ne pozna) ali napaka."""
+    r = odgovor if isinstance(odgovor, dict) else {}
+    d = r.get("data") if isinstance(r.get("data"), dict) else {}
+    if r.get("ok") and d.get("queued"):
+        return {"ok": True, "prikaz": str(d.get("shown") or "")}
+    if r.get("ok"):
+        return {"ok": False, "koda": str(d.get("reason") or "napaka")}
+    koda = str(r.get("code") or r.get("koda") or "")
+    return {"ok": False, "koda": "stara" if koda == "neznano_dejanje" else (koda or "napaka")}
 
 
 def ponudba_iz(posiljatelj: str, od_ime: str, parametri: dict) -> Optional[dict]:

@@ -556,7 +556,7 @@ class SafeerControlBackend:
                 return {"ok": True, "message": "Ponudba", "data": {"queued": False, "reason": "ni_vnosa"}}
             self.ponudba_cakajoca = p
             self._oddaj_dogodek("predajaPonudba", {"od": p["od"], "od_ime": p["od_ime"], "opis": link_predvajanje.opis_ponudbe(p)})
-            return {"ok": True, "message": "Ponudba", "data": {"queued": True}}
+            return {"ok": True, "message": "Ponudba", "data": {"queued": True, "shown": "banner"}}
         return {"ok": True, "message": "Predvajanje", "data": pr.stanje(posiljatelj, self.hub_url())}
 
     def vzemi_ponudbo(self) -> Optional[dict]:
@@ -628,14 +628,8 @@ class SafeerControlBackend:
             return {"ok": False, "koda": str(st.get("reason") or "ni_predvajanja")}
         parametri = {k: st[k] for k in ("item", "position_ms", "duration_ms", "server", "server_device") if k in st}
         parametri["from"] = str(self.device_ime or "")
-        r = self.ukaz_pocakaj(id_naprave, "play.offer", parametri, cas=8.0)
-        d = r.get("data") if isinstance(r.get("data"), dict) else {}
-        if r.get("ok") and d.get("queued"):
-            return {"ok": True}
-        if r.get("ok"):
-            return {"ok": False, "koda": str(d.get("reason") or "napaka")}
-        koda = str(r.get("koda") or r.get("code") or "")
-        return {"ok": False, "koda": "stara" if koda == "neznano_dejanje" else (koda or "napaka")}
+        from core import link_predvajanje
+        return link_predvajanje.izid_ponudbe(self.ukaz_pocakaj(id_naprave, "play.offer", parametri, cas=8.0))
 
     def _datoteke_za(self, posiljatelj: str):
         """Deljene mape za napravo: en streznik za omejen dostop in en za cel disk (dovoljenje "polno").
