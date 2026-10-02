@@ -23,7 +23,7 @@ from PySide6.QtWebEngineCore import (QWebEngineDownloadRequest, QWebEnginePage, 
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout,
                                QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
-                               QMainWindow, QMenu, QMessageBox, QPushButton, QStackedWidget, QTabBar, QToolBar,
+                               QMainWindow, QMenu, QMessageBox, QProxyStyle, QPushButton, QStackedWidget, QStyle, QTabBar, QToolBar,
                                QToolButton, QVBoxLayout, QWidget)
 
 from . import policy
@@ -50,6 +50,8 @@ TEXT: Dict[str, Dict[str, str]] = {
         "download_location": "Vprašaj, kam shraniti prenose",
         "cleared": "Podatki brskanja so počiščeni.", "clear_confirm": "Izbrišem piškotke, predpomnilnik in zgodovino obiskov?",
         "imported": "Uvoženih strani: {count}", "import_none": "Na tem računalniku nisem našel zaznamkov Chroma, Edga, Brava, Vivaldija, Opere ali Firefoxa.",
+        "video_unsupported": "Ta video je v zapisu, ki ga vgrajeni brskalnik ne predvaja (H.264).",
+        "video_play": "▶  Predvajaj v Safeer predvajalniku",
         "find_placeholder": "Najdi…", "close": "Zapri", "open_folder": "Odpri mapo", "no_downloads": "Ni prenosov.",
         "done": "končano", "failed": "prekinjeno", "download_started": "Prenos se je začel: {name}",
         "permission": "Stran {origin} želi dostop do: {what}. Dovolim?",
@@ -83,6 +85,8 @@ TEXT: Dict[str, Dict[str, str]] = {
         "download_location": "Ask where to save downloads",
         "cleared": "Browsing data cleared.", "clear_confirm": "Delete cookies, cache and visited links?",
         "imported": "Imported sites: {count}", "import_none": "No Chrome, Edge, Brave, Vivaldi, Opera or Firefox bookmarks were found on this computer.",
+        "video_unsupported": "This video uses a format the built-in browser cannot play (H.264).",
+        "video_play": "▶  Play in Safeer player",
         "find_placeholder": "Find…", "close": "Close", "open_folder": "Open folder", "no_downloads": "No downloads.",
         "done": "done", "failed": "interrupted", "download_started": "Download started: {name}",
         "permission": "{origin} wants to use your {what}. Allow?",
@@ -393,6 +397,10 @@ class Tabs(QWidget):
 
     def setNavigationWidget(self, widget: QWidget) -> None:
         self._layout.insertWidget(1, widget)
+
+    def setInfoWidget(self, widget: QWidget) -> None:
+        """Obvestilna vrstica tik nad spletno vsebino (pod orodno vrstico)."""
+        self._layout.insertWidget(self._layout.count() - 1, widget)
 
     def setDocumentMode(self, enabled: bool) -> None:
         self._bar.setDocumentMode(enabled)
@@ -761,6 +769,10 @@ class SafeerBrowserApp(QObject):
     # -- start page bridge --------------------------------------------------
     def on_bridge_message(self, page: SafeerPage, payload: Dict[str, Any]) -> None:
         action = payload.get("action")
+        if action == "media_unsupported":
+            # Katerakoli stran: pogon nima zapisa, ki ga video zahteva. Splet ponudi predvajanje v Safeer predvajalniku.
+            page.window_ref.oznaci_nepodprt_video(page, bool(payload.get("napaka")))
+            return
         if action == "increment_ads":
             try:
                 count = max(0, min(int(payload.get("count", 1)), 50))
@@ -922,6 +934,8 @@ class BrowserWindow(QMainWindow):
         self.na_zapisek = None
         # Safeer OS: magnet povezavo odpre Medijski center (samostojni brskalnik je se naprej zavrne).
         self.na_magnet = None
+        # Safeer OS: stran z videom v zapisu, ki ga Qt WebEngine nima (H.264/AAC), odpre Safeer predvajalnik (WebView2).
+        self.na_predvajalnik = None
         self.zapisek_button: Optional[QToolButton] = None
         if embedded:
             self.zapisek_button = self._tool("plus", lambda: self.na_zapisek and self.na_zapisek())
@@ -953,6 +967,15 @@ class BrowserWindow(QMainWindow):
         self._naslov_zvezdica.triggered.connect(self.add_current_to_home)
         self._naslov_kljucavnica.setVisible(False)
         self._naslov_zvezdica.setVisible(False)
+        # Ikone v naslovni vrstici (kljucavnica, zvezdica, krizec) odmaknemo od zaobljenega roba: privzeti odmik
+        # (nekaj pik) jih je postavil na sam rob in zvezdica je silila cez okvir (Matej, 2. 10. 2026).
+        metrika = getattr(QStyle.PixelMetric, "PM_LineEditIconMargin", None)
+        if metrika is not None:
+            class _OdmikIkon(QProxyStyle):
+                def pixelMetric(self, m, option=None, widget=None):
+                    return 13 if m == metrika else super().pixelMetric(m, option, widget)
+            self._slog_naslova = _OdmikIkon()
+            self.address.setStyle(self._slog_naslova)
         self.povezava_znacka = QLabel(self)
         self.povezava_znacka.setObjectName("povezavaZnacka")
         self.povezava_znacka.hide()
@@ -961,6 +984,8 @@ class BrowserWindow(QMainWindow):
         self._povezava_casovnik.setInterval(5000)
         self._povezava_casovnik.timeout.connect(self.osvezi_povezavo)
 
+        self.video_vrstica = self._build_video_bar()
+        self.tabs.setInfoWidget(self.video_vrstica)
         self.find_bar = self._build_find_bar()
         container = QWidget(self)
         container.setObjectName("chrome")
@@ -1078,6 +1103,73 @@ class BrowserWindow(QMainWindow):
         button.clicked.connect(callback)
         self.toolbar.addWidget(button)
         return button
+
+    def _build_video_bar(self) -> QWidget:
+        bar = QWidget(self)
+        bar.setObjectName("videobar")
+        bar.setStyleSheet("QWidget#videobar { background: #10242b; border-bottom: 1px solid rgba(87,214,173,.45); }"
+                          "QLabel { color: #e8f3ef; font-size: 14px; }"
+                          "QPushButton { padding: 7px 16px; border-radius: 12px; border: 1px solid #57D6AD; background: #57D6AD;"
+                          " color: #06211a; font-weight: 700; font-size: 14px; }"
+                          "QPushButton:hover { background: #7be3c2; }")
+        row = QHBoxLayout(bar)
+        row.setContentsMargins(16, 7, 10, 7)
+        row.setSpacing(12)
+        self.video_napis = QLabel(bar)
+        self.video_gumb = QPushButton(bar)
+        self.video_gumb.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.video_gumb.clicked.connect(self._predvajaj_v_predvajalniku)
+        zapri = QToolButton(bar)
+        zapri.setIcon(self.app.icons["close"])
+        zapri.setAutoRaise(True)
+        zapri.clicked.connect(self._zapri_video_vrstico)
+        row.addWidget(self.video_napis, 1)
+        row.addWidget(self.video_gumb)
+        row.addWidget(zapri)
+        bar.hide()
+        return bar
+
+    @staticmethod
+    def _brez_sidra(url: str) -> str:
+        return url.split("#", 1)[0]
+
+    def oznaci_nepodprt_video(self, page, napaka: bool = False) -> None:
+        """Stran (ali njen okvir) je javila video v zapisu, ki ga pogon nima: zapomnimo si jo za ta zavihek."""
+        view = next((v for v in self.views() if v.page() is page), None)
+        if view is None or self.na_predvajalnik is None:
+            return
+        url = view.url().toString()
+        if not url.startswith("https://") or view.property("safeer_video_zaprto") == self._brez_sidra(url):
+            return
+        view.setProperty("safeer_video", self._brez_sidra(url))
+        self._osvezi_video_vrstico()
+        # Predvajalnik strani je javil napako (ne le sum): uporabnik je prisel gledat - isto stran odpremo v Safeer
+        # predvajalniku sami, enkrat na stran. Po »Nazaj« ostane vrstica z gumbom (brez ponovnega preklopa).
+        if (napaka and view is self.current_view() and self.isVisible()
+                and view.property("safeer_video_samodejno") != self._brez_sidra(url)):
+            view.setProperty("safeer_video_samodejno", self._brez_sidra(url))
+            self.na_predvajalnik(url)
+
+    def _osvezi_video_vrstico(self) -> None:
+        view = self.current_view()
+        vidno = bool(view is not None and self.na_predvajalnik is not None and view.property("safeer_video")
+                     and view.property("safeer_video") == self._brez_sidra(view.url().toString()))
+        if vidno:
+            self.video_napis.setText(tr(self.app, "video_unsupported"))
+            self.video_gumb.setText(tr(self.app, "video_play"))
+        self.video_vrstica.setVisible(vidno)
+
+    def _zapri_video_vrstico(self) -> None:
+        view = self.current_view()
+        if view is not None:
+            view.setProperty("safeer_video_zaprto", self._brez_sidra(view.url().toString()))
+            view.setProperty("safeer_video", "")
+        self._osvezi_video_vrstico()
+
+    def _predvajaj_v_predvajalniku(self) -> None:
+        view = self.current_view()
+        if view is not None and self.na_predvajalnik is not None:
+            self.na_predvajalnik(view.url().toString())
 
     def _build_find_bar(self) -> QWidget:
         bar = QWidget(self)
@@ -1441,6 +1533,10 @@ class BrowserWindow(QMainWindow):
                 dark, False if url.scheme() == "safeer" else bool(self.app.settings.get("force_dark_mode")))
         if view is self.current_view() and not self.address.hasFocus():
             self.address.setText(policy.display_url(url.toString()))
+        # Druga stran v istem zavihku: obvestilo o videu velja samo za stran, ki ga je javila.
+        if view.property("safeer_video") and view.property("safeer_video") != self._brez_sidra(url.toString()):
+            view.setProperty("safeer_video", "")
+        self._osvezi_video_vrstico()
         self.update_nav_state()
 
     def on_load_state(self, view: QWebEngineView, loading: bool) -> None:
@@ -1567,6 +1663,7 @@ class BrowserWindow(QMainWindow):
         self.on_load_state(view, bool(view.property("loading")))
         self.on_title_changed(view, view.title())
         self.update_nav_state()
+        self._osvezi_video_vrstico()
         if self.find_bar.isVisible():
             self.find(self.find_input.text())
 
