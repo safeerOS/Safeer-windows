@@ -23,8 +23,11 @@ import time
 import urllib.parse
 from typing import Callable, Optional
 
-#: Ukaza, ki ju naprava (telefon, televizor) poslje, ko uporabnik tam izbere »Nadaljuj z druge naprave«.
-DEJANJA = ["play.state", "play.stop"]
+#: Ukaza, ki ju naprava (telefon, televizor) poslje, ko uporabnik tam izbere »Nadaljuj z druge naprave«, in ponudba
+#: »Poslji na napravo« (play.offer: izvor ponudi, kar igra; tu le tiho obvestilo Sprejmi/Zavrni - nic se ne zacne samo).
+DEJANJA = ["play.state", "play.stop", "play.offer"]
+#: Ponudba velja 10 minut; nova zamenja staro.
+PONUDBA_VELJA_S = 600.0
 
 #: D-Bus Safeer OS na Linuxu (safeer_os.py: VMESNIK_PREDVAJANJE).
 APP_ID = "io.github.memelandfaner.SafeerOS"
@@ -180,6 +183,87 @@ class Predvajanje:
             return {"stopped": bool(self.premor())}
         except Exception:  # noqa: BLE001
             return {"stopped": False}
+
+    # ------------------------------------------------------------------ cilj potiskanja (play.offer)
+
+    #: Zadnja ponudba druge naprave, ki tu caka na Sprejmi/Zavrni: {od, od_ime, item, position_ms, duration_ms,
+    #: server, server_device, cas} ali None.
+    cakajoca: Optional[dict] = None
+    #: Klicatelj (Control) jo nastavi: pokaze tiho obvestilo s Sprejmi/Zavrni.
+    ob_ponudbi: Optional[Callable[[dict], None]] = None
+
+    def ponudba(self, posiljatelj: str, od_ime: str, parametri: dict) -> dict:
+        """`play.offer`: ponudbo preveri in shrani, pokaze jo klicatelj; nic se ne predvaja, dokler uporabnik ne sprejme."""
+        if not self.deli():
+            return {"queued": False, "reason": "izklopljeno"}
+        p = ponudba_iz(posiljatelj, od_ime, parametri)
+        if p is None:
+            return {"queued": False, "reason": "ni_vnosa"}
+        self.cakajoca = p
+        if self.ob_ponudbi is not None:
+            try:
+                self.ob_ponudbi(p)
+            except Exception:  # noqa: BLE001 - obvestilo ni razlog, da ponudba odpade
+                pass
+        return {"queued": True}
+
+    def vzemi_ponudbo(self) -> Optional[dict]:
+        p, self.cakajoca = self.cakajoca, None
+        return p if p and time.time() - float(p.get("cas") or 0) < PONUDBA_VELJA_S else None
+
+    def zavrni_ponudbo(self) -> None:
+        self.cakajoca = None
+
+
+def ponudba_iz(posiljatelj: str, od_ime: str, parametri: dict) -> Optional[dict]:
+    """Ponudba `play.offer` iz parametrov ukaza: vnos (polja Skladbe), sekunda, streznik izvora (naslov, odtis, zeton
+    za ta racunalnik) ali id tretje naprave. Brez predvajljivega vnosa vrne None."""
+    if not isinstance(parametri, dict):
+        return None
+    item = parametri.get("item")
+    if not isinstance(item, dict):
+        return None
+    zvok = str(item.get("zvok") or "")
+    server = parametri.get("server") if isinstance(parametri.get("server"), dict) else None
+    server_device = str(parametri.get("server_device") or "")
+    if server is not None and not (str(server.get("base_url") or "").startswith("https://") and server.get("fp") and server.get("token")):
+        server = None
+    if not zvok.startswith(("http://", "https://")) and not server_device:
+        return None
+    if not zvok and not server_device:
+        return None
+    try:
+        position_ms = max(0, int(parametri.get("position_ms") or 0))
+        duration_ms = max(0, int(parametri.get("duration_ms") or 0))
+    except (TypeError, ValueError):
+        position_ms, duration_ms = 0, 0
+    return {"od": str(posiljatelj or ""), "od_ime": str(od_ime or posiljatelj or ""), "item": item,
+            "position_ms": position_ms, "duration_ms": duration_ms, "server": server, "server_device": server_device,
+            "cas": time.time()}
+
+
+def mapa_datoteke(oznaka: str) -> str:
+    """Mapa, v kateri je datoteka z oznako na njenem strezniku (`files.list` da naslov in zeton le za mapo z datotekami):
+    racunalnik `disk:/pot` ali `share:<i>:<pot>`, Android `media:<zbirka>:<id>` -> zbirka (isto kot Predaja.mapaDatoteke)."""
+    oznaka = str(oznaka or "")
+    if oznaka.startswith("disk:"):
+        pot = oznaka[len("disk:"):]
+        return "disk:" + (pot.rsplit("/", 1)[0] or "/")
+    if oznaka.startswith("share:"):
+        d = oznaka.split(":", 2)
+        return "share:%s:%s" % (d[1], d[2].rsplit("/", 1)[0] if "/" in d[2] else "") if len(d) == 3 else "root"
+    if oznaka.startswith("media:"):
+        d = oznaka.split(":")
+        return d[1] if len(d) > 1 and d[1] else "root"
+    return "root"
+
+
+def opis_ponudbe(p: dict) -> str:
+    """»Tablica ti posilja: Film (pri 12:34)« - naslov in sekunda za obvestilo."""
+    item = p.get("item") or {}
+    s = int(p.get("position_ms") or 0) // 1000
+    cas = "%d:%02d:%02d" % (s // 3600, (s % 3600) // 60, s % 60) if s >= 3600 else "%d:%02d" % (s // 60, s % 60)
+    return "%s (%s)" % (str(item.get("naslov") or item.get("id") or ""), cas)
 
 
 # ---------------------------------------------------------------------- Linux: Safeer OS prek D-Bus

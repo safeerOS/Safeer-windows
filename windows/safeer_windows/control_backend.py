@@ -39,7 +39,7 @@ DEJANJA_MEDIJ = ["media"]
 #: »Nadaljuj z druge naprave«: telefon vprasa, kaj Medijski center tu predvaja, in nadaljuje pri isti sekundi
 #: (core/link_predvajanje.py, isti protokol kot Linux in Predaja.kt na Androidu). Samo naprava s pravico do
 #: datotek (profil polno ali izbrano) - datoteka gre le iz deljenih map, play.stop je samo premor.
-DEJANJA_PREDAJA = ["play.state", "play.stop"]
+DEJANJA_PREDAJA = ["play.state", "play.stop", "play.offer"]
 TIPKE_MEDIJ = ("play_pause", "play", "pause", "stop", "next", "previous", "naslednja", "prejsnja")
 
 
@@ -84,6 +84,8 @@ class SafeerControlBackend:
         self.navidezni_zaslon = NavidezniZaslon()
         self.povezava: Optional[link_hub.Povezava] = None
         self.naprave: List[dict] = []
+        #: "Poslji na napravo": ponudba druge naprave, ki tu caka na Sprejmi/Zavrni (core/link_predvajanje.ponudba_iz).
+        self.ponudba_cakajoca: Optional[dict] = None
         self._prijava: Optional[dict] = None
         self._qr: Optional[dict] = None
         self._qr_rod = 0
@@ -510,8 +512,10 @@ class SafeerControlBackend:
             print(f"[SafeerSprotno] video.stream napaka: {e}", flush=True)
             return {"ok": False, "message": str(e), "code": "napaka"}
 
-    def _predaja(self, akcija: str, posiljatelj: str) -> Dict[str, Any]:
-        """play.state / play.stop: kaj Medijski center predvaja (os_app `state`) in premor na zahtevo cilja."""
+    def _predaja(self, akcija: str, posiljatelj: str, params: Optional[dict] = None) -> Dict[str, Any]:
+        """play.state / play.stop / play.offer: kaj Medijski center predvaja (os_app `state`), premor na zahtevo cilja
+        in ponudba druge naprave (core/link_predvajanje.py)."""
+        params = dict(params or {})
         from core import link_predvajanje
         from safeer_windows import predvajalnik_nadaljuj
 
@@ -538,11 +542,30 @@ class SafeerControlBackend:
             datoteke = self._datoteke_za(posiljatelj)
         except Exception:  # noqa: BLE001
             datoteke = None
-        pr = link_predvajanje.Predvajanje(stanje, premor, datoteke, zadnji,
-                                          lambda: bool(self.nastavitve.get("predvajanje_za_naprave", True)))
+        deli = lambda: bool(self.nastavitve.get("predvajanje_za_naprave", True))  # noqa: E731
+        pr = link_predvajanje.Predvajanje(stanje, premor, datoteke, zadnji, deli)
         if akcija == "play.stop":
             return {"ok": True, "message": "Premor", "data": pr.ustavi()}
+        if akcija == "play.offer":
+            # "Poslji na napravo": ponudba caka na Sprejmi/Zavrni v tihi pasici (os_app); nic se ne zacne samo.
+            if not deli():
+                return {"ok": True, "message": "Ponudba", "data": {"queued": False, "reason": "izklopljeno"}}
+            ime = next((str(n.get("ime") or "") for n in self.naprave if n.get("id") == posiljatelj), "") or str(params.get("from") or "")
+            p = link_predvajanje.ponudba_iz(posiljatelj, ime, params)
+            if p is None:
+                return {"ok": True, "message": "Ponudba", "data": {"queued": False, "reason": "ni_vnosa"}}
+            self.ponudba_cakajoca = p
+            self._oddaj_dogodek("predajaPonudba", {"od": p["od"], "od_ime": p["od_ime"], "opis": link_predvajanje.opis_ponudbe(p)})
+            return {"ok": True, "message": "Ponudba", "data": {"queued": True}}
         return {"ok": True, "message": "Predvajanje", "data": pr.stanje(posiljatelj, self.hub_url())}
+
+    def vzemi_ponudbo(self) -> Optional[dict]:
+        from core import link_predvajanje
+        p, self.ponudba_cakajoca = self.ponudba_cakajoca, None
+        return p if p and time.time() - float(p.get("cas") or 0) < link_predvajanje.PONUDBA_VELJA_S else None
+
+    def zavrni_ponudbo(self) -> None:
+        self.ponudba_cakajoca = None
 
     def _datoteke_za(self, posiljatelj: str):
         """Deljene mape za napravo: en streznik za omejen dostop in en za cel disk (dovoljenje "polno").
@@ -1305,7 +1328,7 @@ class SafeerControlBackend:
                 izid = self._pretok(akcija, dict(params), posiljatelj)
 
             elif akcija in DEJANJA_PREDAJA:
-                izid = self._predaja(akcija, posiljatelj)
+                izid = self._predaja(akcija, posiljatelj, dict(params))
 
             elif akcija == "files.list":
                 mapa = str(params.get("folder") or "")
