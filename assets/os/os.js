@@ -3046,6 +3046,16 @@
       S.magnet.gumbPrograma.textContent = t("magnetProgramPrenasam", { odstotek: Math.floor(100 * podatki.n / (podatki.vse || 1)) });
     if (vrsta === "magnetDeljen") magnetDeljen(podatki);
     if (vrsta === "mediaOsvezen" && S.razdelek === "media") naloziMedia();
+    // Seznami predvajanja so se uskladili z drugo napravo v Linku: seznam seznamov (in odprt seznam) tiho osvezimo.
+    if (vrsta === "mediaSeznamiUsklajeni") {
+      naloziSeznamePredvajanja();
+      if (media.seznam && media.seznam.ime) {
+        klic("mediaSeznam", [media.seznam.ime]).then(function (sz) {
+          if (sz && sz.vnosi && sz.vnosi.length && media.seznam && media.seznam.ime === sz.ime) { media.seznam = sz; narisiMedia(); }
+        }, function () {});
+      }
+      return;
+    }
     if (vrsta === "mediaSeznamOsvezen" && podatki && podatki.ime) {
       // Uvozene skladbe so dobile posnetke (slike): odprt seznam tiho osvezimo, seznam seznamov tudi.
       naloziSeznamePredvajanja();

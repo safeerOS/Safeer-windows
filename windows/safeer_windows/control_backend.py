@@ -40,6 +40,9 @@ DEJANJA_MEDIJ = ["media"]
 #: (core/link_predvajanje.py, isti protokol kot Linux in Predaja.kt na Androidu). Samo naprava s pravico do
 #: datotek (profil polno ali izbrano) - datoteka gre le iz deljenih map, play.stop je samo premor.
 DEJANJA_PREDAJA = ["play.state", "play.stop", "play.offer"]
+#: Seznami predvajanja so enaki na vseh uporabnikovih napravah v Linku (core/seznami_sink.py, SeznamiSink.kt na
+#: Androidu): druga naprava v Linku prebere sezname Medijskega centra (samo branje, brez posebne pravice).
+DEJANJA_SEZNAMI = ["lists.get"]
 TIPKE_MEDIJ = ("play_pause", "play", "pause", "stop", "next", "previous", "naslednja", "prejsnja")
 
 
@@ -100,6 +103,8 @@ class SafeerControlBackend:
         #: Medijski center (os_app): ob_mediju(ukaz, params) -> izid dict ali None (ni obdelano -> navidezni zaslon).
         #: Klic pride iz omrezne niti; os_app ga sam prenese v nit vmesnika.
         self.ob_mediju: Optional[Callable[[str, dict], Optional[Dict[str, Any]]]] = None
+        #: Seznami predvajanja Medijskega centra (os_app): ob_seznamih(parametri) -> podatki za `lists.get`.
+        self.ob_seznamih: Optional[Callable[[dict], dict]] = None
         self._poslusavci: List[Callable[[str, Any], None]] = []
         self._povezovanje = False
         self._zadnji_hubi: List[dict] = []
@@ -332,7 +337,9 @@ class SafeerControlBackend:
         return ok
 
     def _dejanje_dovoljeno(self, id_naprave: str, akcija: str) -> bool:
-        if akcija == "status":
+        if akcija == "status" or akcija in DEJANJA_SEZNAMI:
+            # Seznami predvajanja so na vseh napravah v Linku enaki (Android jih da vsaki napravi v Linku); branje
+            # seznamov ne odpre datotek, zaslona ali upravljanja, zato tihe uskladitve ne ustavlja vprasanje o pravicah.
             return True
         profil = self.dovoljenje_za(id_naprave)
         if profil == "polno":
@@ -572,6 +579,29 @@ class SafeerControlBackend:
     def _naprave_z_daljincem(self) -> List[dict]:
         return [n for n in self.naprave if str(n.get("id") or "") and n.get("id") != self.device_id
                 and "remote" in (n.get("zmoznosti") or n.get("capabilities") or [])]
+
+    def uskladi_sezname(self, uskladi: Callable[[Callable[[dict], Optional[dict]]], bool]) -> bool:
+        """Sezname predvajanja uskladi z vsemi napravami v Linku, ki imajo daljinec: uskladi(vprasaj) dobi funkcijo, ki
+        eni napravi poslje `lists.get` (MediaCenter.seznami_uskladi). Vrne True, ce se je tukaj kaj spremenilo. Klic iz
+        delovne niti; naprava, ki dejanja ne pozna ali ne odgovori, se preskoci."""
+        if not self.je_povezan():
+            return False
+        spremenjeno = False
+        for n in self._naprave_z_daljincem():
+            # Samo naprave, ki same povedo, da znajo sezname ("lists"): starejsa razlicica dejanja ne pozna.
+            if "lists" not in (n.get("zmoznosti") or n.get("capabilities") or []):
+                continue
+            id_naprave = str(n["id"])
+
+            def vprasaj(parametri: dict, _id: str = id_naprave) -> Optional[dict]:
+                r = self.ukaz_pocakaj(_id, "lists.get", parametri, cas=6.0)
+                return r.get("data") if isinstance(r, dict) and r.get("ok") and isinstance(r.get("data"), dict) else None
+            try:
+                if uskladi(vprasaj):
+                    spremenjeno = True
+            except Exception as e:  # noqa: BLE001
+                print(f"[SafeerSeznami] {id_naprave}: {e}", flush=True)
+        return spremenjeno
 
     def predaja_ponudbe(self) -> Dict[str, Any]:
         """"Nadaljuj z druge naprave" na tem racunalniku: vse naprave z daljincem vprasa hkrati (play.state, 3 s) in vrne,
@@ -1082,7 +1112,7 @@ class SafeerControlBackend:
                 ime=self.device_ime,
                 sinhronizira=False,
                 odtis=odtis or None,
-                dodatne_zmoznosti=["files", "remote", "desktop", "screen", "apps", "chat"]
+                dodatne_zmoznosti=["files", "remote", "desktop", "screen", "apps", "chat", "lists"]
                 # Magnet povezave z drugih naprav odpre Safeer OS na tem racunalniku.
                 + (["magnet"] if self.magnet_na_voljo() else []),
                 katalog=self.navidezni_zaslon.katalog_aplikacij,
@@ -1274,6 +1304,8 @@ class SafeerControlBackend:
                 medij = self._medij("status", {})
                 if medij is not None:
                     stanje_naprave["actions"] = list(stanje_naprave.get("actions") or []) + DEJANJA_MEDIJ + DEJANJA_PREDAJA
+                    if getattr(self, "ob_seznamih", None) is not None:
+                        stanje_naprave["actions"] = stanje_naprave["actions"] + DEJANJA_SEZNAMI
                     stanje_naprave["keys"] = list(dict.fromkeys(list(stanje_naprave.get("keys") or []) + ["next", "previous"]))
                     stanje_naprave["media"] = medij.get("data") or {}
                 izid = {
@@ -1401,6 +1433,13 @@ class SafeerControlBackend:
 
             elif akcija in DEJANJA_PREDAJA:
                 izid = self._predaja(akcija, posiljatelj, dict(params))
+
+            elif akcija in DEJANJA_SEZNAMI:
+                seznami = getattr(self, "ob_seznamih", None)
+                if seznami is None:
+                    izid = {"ok": False, "message": "Medijski center ni odprt.", "code": "ni_na_voljo"}
+                else:
+                    izid = {"ok": True, "message": "Seznami", "data": seznami(dict(params))}
 
             elif akcija == "files.list":
                 mapa = str(params.get("folder") or "")

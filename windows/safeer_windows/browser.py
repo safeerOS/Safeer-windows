@@ -42,7 +42,8 @@ TEXT: Dict[str, Dict[str, str]] = {
         "find": "Najdi na strani", "reader": "Bralni način",
         "zoom_in": "Povečaj", "zoom_out": "Pomanjšaj", "zoom_reset": "Običajna velikost", "fullscreen": "Celozaslonski način",
         "settings": "Nastavitve", "default_browser": "Nastavi kot privzeti brskalnik", "import": "Uvozi zaznamke",
-        "clear_data": "Počisti podatke brskanja", "devtools": "Orodja za razvijalce", "about": "O brskalniku",
+        "clear_data": "Počisti podatke brskanja", "reset_permissions": "Ponastavi dovoljenja te strani",
+        "permissions_reset": "Stran bo za kamero, mikrofon, lokacijo in obvestila vprašala znova.", "devtools": "Orodja za razvijalce", "about": "O brskalniku",
         "reopen_tab": "Znova odpri zaprt zavihek", "quit": "Izhod",
         "shield": "Blokirani oglasi in grožnje", "language": "Jezik", "search_engine": "Iskalnik",
         "startup": "Ob zagonu", "startup_home": "Odpri domačo stran", "startup_restore": "Obnovi zadnje zavihke",
@@ -77,7 +78,8 @@ TEXT: Dict[str, Dict[str, str]] = {
         "find": "Find on page", "reader": "Reader mode",
         "zoom_in": "Zoom in", "zoom_out": "Zoom out", "zoom_reset": "Actual size", "fullscreen": "Full screen",
         "settings": "Settings", "default_browser": "Make default browser", "import": "Import bookmarks",
-        "clear_data": "Clear browsing data", "devtools": "Developer tools", "about": "About",
+        "clear_data": "Clear browsing data", "reset_permissions": "Reset permissions for this site",
+        "permissions_reset": "The site will ask again for camera, microphone, location and notifications.", "devtools": "Developer tools", "about": "About",
         "reopen_tab": "Reopen closed tab", "quit": "Exit",
         "shield": "Blocked ads and threats", "language": "Language", "search_engine": "Search engine",
         "startup": "On startup", "startup_home": "Open the start page", "startup_restore": "Restore last tabs",
@@ -1343,6 +1345,7 @@ class BrowserWindow(QMainWindow):
             None,
             ("import", "", self.import_bookmarks),
             ("clear_data", "", self.clear_browsing_data),
+            ("reset_permissions", "", self.reset_site_permissions),
             ("default_browser", "", self.make_default_browser),
             ("settings", "", self.open_settings),
             ("devtools", "F12", self.toggle_devtools),
@@ -1359,7 +1362,14 @@ class BrowserWindow(QMainWindow):
             self.menu.addAction(action)
         if self.embedded:
             # Zapisek iz Spleta je v meniju (predloga Splet nima locenih gumbov v vrstici).
+            # Jezik Safeer OS (kot tr()), ne jezik samostojnega brskalnika - sicer sta vnosa v slovenskem meniju angleska.
             jezik = str(app.settings.get("language") or "sl")[:2]
+            vir = getattr(self, "jezik_vmesnika", None) or getattr(app, "jezik_vmesnika", None)
+            if vir is not None:
+                try:
+                    jezik = str(vir())[:2] or jezik
+                except Exception:
+                    pass
             besedila = {"sl": ("V zapisek", "Zapisek ob strani"), "en": ("Add to note", "Note beside the page"),
                         "de": ("Zur Notiz", "Notiz neben der Seite"), "es": ("A la nota", "Nota junto a la página"),
                         "fr": ("Dans une note", "Note à côté de la page"), "it": ("Nella nota", "Nota accanto alla pagina")}
@@ -2160,6 +2170,24 @@ class BrowserWindow(QMainWindow):
             wv_pogled.pocisti_podatke()     # profil WebView2 (vsi zavihki)
         self.app.closed_tabs.clear()
         QMessageBox.information(self, policy.APP_NAME, tr(self.app, "cleared"))
+
+    def reset_site_permissions(self) -> None:
+        """Kdor je strani po pomoti blokiral kamero ali mikrofon, mora imeti pot nazaj brez brisanja vseh podatkov."""
+        view = self.current_view()
+        if view is None:
+            return
+        if isinstance(view, splet_webview2.WvView):
+            view.ponastavi_dovoljenja()     # gostitelj stran po ponastavitvi nalozi znova
+        else:
+            gostitelj = view.url().host()
+            try:
+                for dovoljenje in self.profile.listAllPermissions():
+                    if dovoljenje.origin().host() == gostitelj:
+                        dovoljenje.reset()
+            except Exception:
+                pass                        # starejsi Qt si odlocitev ne zapomni - stran vprasa vsakic
+            view.reload()
+        QMessageBox.information(self, policy.APP_NAME, tr(self.app, "permissions_reset"))
 
     def make_default_browser(self) -> None:
         if sys.platform == "win32":

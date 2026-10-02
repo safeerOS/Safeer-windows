@@ -481,6 +481,10 @@ class WvView(QWidget):
     def pocisti_podatke(self) -> None:
         self.gostitelj.poslji(cmd="cleardata", tab=self.tab)
 
+    def ponastavi_dovoljenja(self) -> None:
+        """Odlocitve »Dovoli« / »Blokiraj« (kamera, mikrofon, lokacija ...) za odprto stran nazaj na »vprasaj«."""
+        self.gostitelj.poslji(cmd="resetperm", tab=self.tab)
+
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         if self._ustvarjen:
