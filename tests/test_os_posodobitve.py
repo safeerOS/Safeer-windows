@@ -19,7 +19,8 @@ MANIFEST = {
                             "flatpak": {"url": "https://safeer.si/os/Safeer-OS-0.4.23-x86_64.flatpak", "sha256": "c" * 64, "velikost": 1},
                             "appimage": {"url": "https://github.com/x/Safeer-OS-0.4.23-x86_64.AppImage", "sha256": "d" * 64, "velikost": 1}},
               "safeer-control": {"razlicica": "2.1.21", "deb": {"url": "https://safeer.si/os/safeer-control_2.1.21_all.deb", "sha256": "e" * 64, "velikost": 1}}},
-    "windows": {"safeer-os": {"razlicica": "1.0.18", "url": "https://github.com/x/SafeerOS-Windows-1.0.18.exe", "sha256": "f" * 64, "velikost": 1}},
+    "windows": {"safeer-os": {"razlicica": "1.0.18", "url": "https://github.com/x/SafeerOS-Windows-1.0.18.exe", "sha256": "f" * 64, "velikost": 1},
+                "novo": {"sl": "Posodobitve z enim pritiskom.", "en": "One-press updates."}},
     "stran": "https://safeer.si/os/",
 }
 
@@ -48,7 +49,9 @@ class Razlicice(unittest.TestCase):
         self.assertTrue(a["datoteka"]["url"].endswith(".AppImage"))
         w = op.preveri("windows", {"safeer-os": "1.0.17"}, MANIFEST, nacin="windows")
         self.assertEqual((w["nove"][0]["razlicica"], w["nove"][0]["datoteka"]["url"].rsplit("/", 1)[1]), ("1.0.18", "SafeerOS-Windows-1.0.18.exe"))
+        self.assertEqual((w["novo"]["sl"], w["novo"]["en"]), ("Posodobitve z enim pritiskom.", "One-press updates."))
         self.assertEqual(op.preveri("windows", {"safeer-os": "1.0.18"}, MANIFEST, nacin="windows")["nove"], [])
+        self.assertEqual(op.preveri("linux", {"safeer-os": "0.4.22"}, MANIFEST, nacin="deb")["novo"], {})
         # neznan nacin: nova razlicica brez datoteke (vmesnik odpre stran)
         n = op.preveri("linux", {"safeer-os": "0.4.22"}, MANIFEST, nacin="neznano")["nove"][0]
         self.assertIsNone(n["datoteka"])

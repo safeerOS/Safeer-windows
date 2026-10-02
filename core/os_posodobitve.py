@@ -82,7 +82,9 @@ def preveri(platforma: str, razlicice: Dict[str, str], manifest: Optional[dict] 
         if kljuc == "safeer-os" and nacin == "deb" and isinstance(paket.get("tema_deb"), dict):
             vnos["tema"] = paket["tema_deb"]
         nove.append(vnos)
-    return {"nove": nove, "nacin": nacin, "stran": str(m.get("stran") or STRAN), "preverjeno": int(time.time())}
+    novo = skupina.get("novo") if isinstance(skupina.get("novo"), dict) else {}
+    return {"nove": nove, "nacin": nacin, "stran": str(m.get("stran") or STRAN), "preverjeno": int(time.time()),
+            "novo": {k: str(v) for k, v in novo.items() if isinstance(v, str)}}
 
 
 def opis(izid: dict) -> str:
