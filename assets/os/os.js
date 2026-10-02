@@ -3046,6 +3046,16 @@
       S.magnet.gumbPrograma.textContent = t("magnetProgramPrenasam", { odstotek: Math.floor(100 * podatki.n / (podatki.vse || 1)) });
     if (vrsta === "magnetDeljen") magnetDeljen(podatki);
     if (vrsta === "mediaOsvezen" && S.razdelek === "media") naloziMedia();
+    if (vrsta === "mediaSeznamOsvezen" && podatki && podatki.ime) {
+      // Uvozene skladbe so dobile posnetke (slike): odprt seznam tiho osvezimo, seznam seznamov tudi.
+      naloziSeznamePredvajanja();
+      if (media.seznam && media.seznam.ime === podatki.ime) {
+        klic("mediaSeznam", [podatki.ime]).then(function (sz) {
+          if (sz && sz.vnosi && sz.vnosi.length && media.seznam && media.seznam.ime === sz.ime) { media.seznam = sz; narisiMedia(); }
+        }, function () {});
+      }
+      return;
+    }
     if (vrsta === "mediaKatalogOsvezen" && podatki && S.razdelek === "media" && podatki.kljuc && podatki.kljuc === media.kljuc) {
       prevzemiMediaKatalog(podatki, true);
     }
@@ -3777,7 +3787,9 @@
   var media = { katalog: [], viri: [], filter: "film", genre: "", query: "", page: 1, skupaj_strani: 1, aktivni: null, zahteva: 0, timer: 0,
                 // Razvrstitev in zacasno izklopljeni viri veljajo do ponovnega zagona (namenoma ne shranjujemo).
                 razvrsti: "", izklopljeni: {}, samoLokalno: false, znaniViri: {},
-                izklopljeniJeziki: {}, znaniJeziki: {} };
+                izklopljeniJeziki: {}, znaniJeziki: {},
+                // Seznami predvajanja (uvozeni z YouTuba ali Spotifyja): vsi seznami in trenutno odprt seznam.
+                seznami: [], seznam: null };
   function mediaIkona(vrsta) {
     if (vrsta === "glasba") return "glasba";
     if (vrsta === "radio") return "radio";
@@ -3820,20 +3832,24 @@
       zanriEl.style.display = prikaziZanre ? "flex" : "none";
     }
     var iskano = media.query.trim().toLocaleLowerCase();
-    var list = media.katalog.filter(function (x) {
+    // Odprt seznam predvajanja: mreza kaze njegove skladbe v vrstnem redu seznama (brez zdruzevanja po izvajalcu).
+    var izSeznama = !!media.seznam;
+    narisiSeznamePredvajanja();
+    if (izSeznama && zanriEl) zanriEl.style.display = "none";
+    var list = izSeznama ? media.seznam.vnosi.slice() : media.katalog.filter(function (x) {
       if (media.filter !== "vse" && x.vrsta !== media.filter) return false;
       if (!iskano) return true;
       return [x.naslov, x.izvajalec, x.opis].join(" ").toLocaleLowerCase().indexOf(iskano) >= 0;
     });
     $("mediaPrazno").hidden = !!list.length;
-    $("mediaPovzetek").textContent = t("mediaZadetkov", { n: media.skupaj != null ? media.skupaj : list.length }) + (media.skupaj_strani > 1 ? " · Stran " + media.page + " od " + media.skupaj_strani : "");
-    var zdruzi = !media.razvrsti && (media.filter === "radio" || media.filter === "video" || media.filter === "glasba");
+    $("mediaPovzetek").textContent = izSeznama ? "" : t("mediaZadetkov", { n: media.skupaj != null ? media.skupaj : list.length }) + (media.skupaj_strani > 1 ? " · Stran " + media.page + " od " + media.skupaj_strani : "");
+    var zdruzi = !izSeznama && !media.razvrsti && (media.filter === "radio" || media.filter === "video" || media.filter === "glasba");
     if (zdruzi) list.sort(function (a, b) {
       return (a.skupina || a.izvajalec || "").localeCompare(b.skupina || b.izvajalec || "");
     });
     var mediaZadnjaSkupina = "";
     list.forEach(function (x) {
-      var skupina = x.skupina || (media.filter === "glasba" ? x.izvajalec : "");
+      var skupina = izSeznama ? "" : (x.skupina || (media.filter === "glasba" ? x.izvajalec : ""));
       if (zdruzi && skupina && skupina !== mediaZadnjaSkupina) {
         mediaZadnjaSkupina = skupina;
         mreza.appendChild(el("h3", "media-skupina", ubezi(mediaZadnjaSkupina)));
@@ -3856,6 +3872,8 @@
         metaOznaka += " · S" + String(x.sezona || 1).padStart(2, "0") + "E" + String(x.epizoda || 1).padStart(2, "0");
       }
       if (x.leto) metaOznaka += " · " + x.leto;
+      // Skladba s seznama predvajanja: pod naslovom izvajalec (koga pricakovati), ne splosna oznaka "Glasba".
+      if (izSeznama && x.izvajalec) metaOznaka = x.izvajalec;
       meta.appendChild(el("span", "", ubezi(metaOznaka)));
       if (x.stevilo_razlicic > 1) meta.appendChild(el("span", "", ubezi(t("mediaRazlicic", { n: x.stevilo_razlicic }))));
       data.appendChild(meta); card.appendChild(data);
@@ -3876,8 +3894,115 @@
       };
       mreza.appendChild(card);
     });
-    narisiStranjevanje();
+    if (izSeznama) { var str = $("mediaStranjevanje"); if (str) str.innerHTML = ""; } else narisiStranjevanje();
     narisiMediaVire();
+  }
+  // ------------------------------------------------------------------ seznami predvajanja
+  function seznamiVidni() { return (media.filter === "glasba" || media.filter === "vse") && !media.query.trim(); }
+  function naloziSeznamePredvajanja() {
+    return klic("mediaSeznami").then(function (s) { media.seznami = s || []; narisiSeznamePredvajanja(); }, function () {});
+  }
+  function odpriSeznamPredvajanja(ime) {
+    klic("mediaSeznam", [ime]).then(function (sz) {
+      if (!sz || !sz.vnosi || !sz.vnosi.length) { obvesti(t("seznamNiUspel")); return; }
+      media.seznam = sz; narisiMedia();
+      var vsebina = $("vsebina"), c = $("mediaSeznami"); if (vsebina && c) c.scrollIntoView({ block: "start" });
+    }, function () { obvesti(t("seznamNiUspel")); });
+  }
+  function uvoziSeznamPredvajanja(povezava) {
+    povezava = String(povezava || "").trim(); if (!povezava) return;
+    obvesti(t("seznamUvazam"));
+    klic("mediaUvoziSeznam", [povezava]).then(function (r) {
+      if (!r || r.napaka) { obvesti(t(r && r.napaka === "ni_seznam" ? "seznamNiSeznam" : "seznamNiUspel")); return; }
+      obvesti(t("seznamUvozen", { ime: r.ime, n: r.stevilo }));
+      naloziSeznamePredvajanja().then(function () { odpriSeznamPredvajanja(r.ime); });
+    }, function () { obvesti(t("seznamNiUspel")); });
+  }
+  function narisiSeznamePredvajanja() {
+    var c = $("mediaSeznami"); if (!c) return; c.innerHTML = "";
+    if (media.seznam) {
+      c.hidden = false;
+      var sz = media.seznam, glava = el("div", "media-seznam-glava");
+      var nazaj = el("button", "gumb", ubezi(t("seznamNazaj")));
+      nazaj.onclick = function () { media.seznam = null; narisiMedia(); };
+      glava.appendChild(nazaj);
+      glava.appendChild(el("h3", "", ubezi(sz.ime)));
+      glava.appendChild(el("small", "", ubezi(t("seznamSkladb", { n: sz.vnosi.length }) + (sz.vir ? " · " + sz.vir : ""))));
+      var vse = el("button", "gumb glavni", ubezi("▶ " + t("seznamPredvajajVse")));
+      vse.onclick = function () { var prvi = sz.vnosi[0]; if (prvi) { nastaviVrsto(prvi); odpriMedia(prvi.id); } };
+      glava.appendChild(vse);
+      // Odstranitev v dveh korakih (prvi klik vprasa), brez sistemskega okna.
+      var odstrani = el("button", "gumb", ubezi(t("seznamOdstrani"))), potrjeno = false;
+      odstrani.onclick = function () {
+        if (!potrjeno) { potrjeno = true; odstrani.textContent = t("seznamOdstraniRes"); return; }
+        klic("mediaOdstraniSeznam", [sz.ime]).then(function () { media.seznam = null; naloziSeznamePredvajanja().then(narisiMedia); });
+      };
+      glava.appendChild(odstrani);
+      c.appendChild(glava);
+      return;
+    }
+    if (!seznamiVidni()) { c.hidden = true; return; }
+    c.hidden = false;
+    c.appendChild(el("h3", "", ubezi(t("seznamiNaslov"))));
+    var vrsta = el("div", "media-seznami-vrsta");
+    (media.seznami || []).forEach(function (sz) {
+      var k = el("button", "media-seznam-kartica");
+      if (sz.slika) {
+        var slika = document.createElement("img"); slika.alt = ""; slika.loading = "lazy"; slika.src = sz.slika;
+        slika.onerror = function () { slika.replaceWith(el("span", "media-brez-slike", svg("glasba"))); };
+        k.appendChild(slika);
+      } else k.appendChild(el("span", "media-brez-slike", svg("glasba")));
+      var opis = el("span"); opis.appendChild(el("b", "", ubezi(sz.ime)));
+      opis.appendChild(el("small", "", ubezi(t("seznamSkladb", { n: sz.stevilo }) + (sz.vir ? " · " + sz.vir : ""))));
+      k.appendChild(opis);
+      k.onclick = function () { odpriSeznamPredvajanja(sz.ime); };
+      vrsta.appendChild(k);
+    });
+    var obrazec = el("form", "media-seznam-uvoz"), polje = document.createElement("input");
+    polje.type = "text"; polje.placeholder = t("seznamUvoziNamig"); polje.autocomplete = "off";
+    var gumb = el("button", "gumb", ubezi(t("seznamUvozi"))); gumb.type = "submit";
+    obrazec.appendChild(polje); obrazec.appendChild(gumb);
+    obrazec.onsubmit = function (e) { e.preventDefault(); var v = polje.value; polje.value = ""; uvoziSeznamPredvajanja(v); };
+    vrsta.appendChild(obrazec);
+    c.appendChild(vrsta);
+  }
+  // Vgradni predvajalnik YouTuba sporoca stanje (konec posnetka, napaka) s postMessage: ob koncu naslednja iz vrste.
+  window.addEventListener("message", function (e) {
+    if (e.origin !== "https://www.youtube.com" || !media.ytSkladba) return;
+    var d; try { d = typeof e.data === "string" ? JSON.parse(e.data) : e.data; } catch (x) { return; }
+    if (!d) return;
+    var skladba = media.ytSkladba;
+    var stanje = d.event === "onStateChange" ? d.info : (d.event === "infoDelivery" && d.info && typeof d.info.playerState === "number" ? d.info.playerState : null);
+    if (stanje === 1 && !media.ytIgra) { media.ytIgra = true; osveziMini(); }
+    if (stanje === 2 && media.ytIgra) { media.ytIgra = false; media.ytZeIgral = true; osveziMini(); }
+    if (stanje === 0 && (media.ytIgra || media.ytZeIgral)) {
+      media.ytIgra = false; media.ytSkladba = null;
+      if (!predvajajIzVrste(1)) osveziMini();
+      return;
+    }
+    if (d.event === "onError" || (d.event === "infoDelivery" && d.info && d.info.videoData && d.info.videoData.errorCode)) {
+      // Lastnik posnetka vgradnje ne dovoli (ali posnetka ni vec): poiscemo drug posnetek iste skladbe, sicer naslednja.
+      media.ytSkladba = null; media.ytIgra = false;
+      klic("mediaSeznamZamenjava", [skladba.id]).then(function (nova) {
+        if (nova && nova.youtube && nova.youtube !== skladba.youtube) { media.aktivni = nova; predvajajHtml(nova, 0); return; }
+        obvesti(t("seznamBrezPosnetka", { ime: skladba.naslov || "" }));
+        predvajajIzVrste(1);
+      }, function () { predvajajIzVrste(1); });
+    }
+  });
+  function predvajajYoutube(item, iframe) {
+    media.ytSkladba = item; media.ytIgra = false; media.ytZeIgral = false;
+    // Vgradni predvajalnik mora vedeti, kdo ga vgrajuje (Referer), sicer javi napako 153.
+    iframe.setAttribute("referrerpolicy", "strict-origin-when-cross-origin");
+    iframe.hidden = false;
+    iframe.onload = function () {
+      if (media.ytSkladba !== item) return;
+      var poslji = function (o) { try { iframe.contentWindow.postMessage(JSON.stringify(o), "https://www.youtube.com"); } catch (e) {} };
+      poslji({ event: "listening", id: "safeer", channel: "widget" });
+      poslji({ event: "command", func: "addEventListener", args: ["onStateChange"], id: "safeer", channel: "widget" });
+      poslji({ event: "command", func: "addEventListener", args: ["onError"], id: "safeer", channel: "widget" });
+    };
+    iframe.src = "https://www.youtube.com/embed/" + encodeURIComponent(item.youtube) + "?autoplay=1&enablejsapi=1&rel=0&playsinline=1&origin=" + encodeURIComponent(location.origin);
   }
   function narisiMediaVire() {
     var cilj = $("mediaViri"); if (!cilj) return; cilj.innerHTML = "";
@@ -3917,7 +4042,8 @@
     if (video) { video.pause(); video.removeAttribute("src"); video.hidden = true; video.style.display = "none"; }
     pocistiPodnapiseStrani(video);
     if (playerAudio) { playerAudio.pause(); playerAudio.removeAttribute("src"); playerAudio.hidden = true; playerAudio.style.display = "none"; }
-    if (iframe) { iframe.src = "about:blank"; iframe.hidden = true; }
+    if (iframe) { iframe.onload = null; iframe.src = "about:blank"; iframe.hidden = true; }
+    media.ytSkladba = null; media.ytIgra = false;
     if (playerImage) { playerImage.removeAttribute("src"); playerImage.hidden = true; }
 
     var pl = $("mediaPredvajalnik");
@@ -3992,8 +4118,12 @@
           if (player.readyState < 2 && !poskusiNaslednjo()) $("mediaNapaka").hidden = false;
         }, 20000);
       }
+    } else if (item.youtube && iframe) {
+      predvajajYoutube(item, iframe);
+      osveziMini();
     } else {
       if (iframe && /^https?:\/\//i.test(url)) {
+        iframe.setAttribute("referrerpolicy", "no-referrer");
         iframe.hidden = false;
         napakaEl.hidden = true;
         iframe.src = url;
@@ -4034,7 +4164,9 @@
   }
   function vrstaShrani(kljuc, vrednost) { try { localStorage.setItem("safeer_glasba_" + kljuc, String(vrednost)); } catch (e) {} }
   function nastaviVrsto(zacetni) {
-    var seznam = (media.katalog || []).filter(function (x) { return x.vrsta === zacetni.vrsta && !x.stran; });
+    // Skladba z odprtega seznama predvajanja: vrsta je seznam (v njegovem vrstnem redu), ne katalog.
+    var osnova = media.seznam && media.seznam.vnosi.some(function (x) { return x.id === zacetni.id; }) ? media.seznam.vnosi : (media.katalog || []);
+    var seznam = osnova.filter(function (x) { return x.vrsta === zacetni.vrsta && !x.stran; });
     media.vrsta = seznam.map(function (x) { return x.id; });
     media.vrstaMesto = Math.max(0, media.vrsta.indexOf(zacetni.id));
     media.vrstaZgodovina = [];
@@ -4119,7 +4251,12 @@
   // Mala vrstica za glasbo v ozadju: naslov, nazaj/pavza/naprej, odpri ploščo, ustavi.
   function zvokTece() {
     var a = $("mediaAudio");
-    return !!(media.aktivni && a && a.getAttribute("src"));
+    // Skladba s seznama predvajanja igra v vgradnem predvajalniku (okvir): tudi to je zvok, ki tece v ozadju.
+    return !!(media.aktivni && ((a && a.getAttribute("src")) || media.ytSkladba));
+  }
+  function ytUkaz(func) {
+    var iframe = $("mediaIframe");
+    try { iframe.contentWindow.postMessage(JSON.stringify({ event: "command", func: func, args: [], id: "safeer", channel: "widget" }), "https://www.youtube.com"); } catch (e) {}
   }
   function osveziMini() {
     var m = $("mediaMini"); if (!m) return;
@@ -4129,7 +4266,7 @@
     if (!vidna) return;
     $("mediaMiniNaslov").textContent = (media.aktivni && media.aktivni.naslov) || "";
     $("mediaMiniMeta").textContent = (media.aktivni && (media.aktivni.izvajalec || media.aktivni.vir)) || "";
-    $("mediaMiniPremor").innerHTML = a && !a.paused ? "&#10074;&#10074;" : "&#9654;";
+    $("mediaMiniPremor").innerHTML = (media.ytSkladba ? media.ytIgra : (a && !a.paused)) ? "&#10074;&#10074;" : "&#9654;";
     var vec = (media.vrsta || []).length > 1;
     $("mediaMiniPrejsnja").disabled = !vec; $("mediaMiniNaslednja").disabled = !vec;
   }
@@ -4283,6 +4420,7 @@
 
   function naloziMedia() {
     narisiZanre();
+    naloziSeznamePredvajanja();
     var zahteva = ++media.zahteva;
     $("mediaPovzetek").textContent = "Nalagam katalog …";
     return klic("mediaKatalog", [media.query, media.filter, media.genre, media.page || 1,
@@ -4427,7 +4565,7 @@
   document.querySelectorAll("[data-media-filter]").forEach(function (b) {
     b.onclick = function () {
       media.filter = b.getAttribute("data-media-filter");
-      media.page = 1;
+      media.page = 1; media.seznam = null;
       document.querySelectorAll("[data-media-filter]").forEach(function (q) {
         q.classList.toggle("izbran", q === b);
         q.classList.toggle("izbrana", q === b);
@@ -4462,7 +4600,7 @@
     }
   });
   on("mediaIskanje", "input", function () {
-    media.query = this.value; media.page = 1; clearTimeout(media.timer); media.timer = setTimeout(naloziMedia, 350);
+    media.query = this.value; media.page = 1; media.seznam = null; clearTimeout(media.timer); media.timer = setTimeout(naloziMedia, 350);
   });
   on("mediaPodrobnostiNazaj", "click", zapriMediaPodrobnosti);
   on("mediaPodrobnostiZapri", "click", zapriMediaPodrobnosti);
@@ -4539,7 +4677,10 @@
   on("mediaMiniZapri", "click", zapriMediaHtml);
   on("mediaMiniPrejsnja", "click", function () { predvajajIzVrste(-1); });
   on("mediaMiniNaslednja", "click", function () { predvajajIzVrste(1); });
-  on("mediaMiniPremor", "click", function () { var a = $("mediaAudio"); if (!a) return; if (a.paused) a.play().catch(function () {}); else a.pause(); });
+  on("mediaMiniPremor", "click", function () {
+    if (media.ytSkladba) { ytUkaz(media.ytIgra ? "pauseVideo" : "playVideo"); return; }
+    var a = $("mediaAudio"); if (!a) return; if (a.paused) a.play().catch(function () {}); else a.pause();
+  });
   window.addEventListener("keydown", function (e) {
     if (e.key === "Escape") {
       var pl = $("mediaPredvajalnik");

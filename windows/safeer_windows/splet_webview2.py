@@ -117,7 +117,14 @@ class Gostitelj(QObject):
         profil = koren / ("WebView2SpletZasebno" if self.zasebno else "WebView2Splet")
         args = [str(izvrsljiva()), "--splet", f"--profile={profil}", f"--private={'1' if self.zasebno else '0'}"]
         # Jezik okenc WebView2 (prenosi, dovoljenja, meni desnega klika) sledi jeziku Safeerja.
-        args.append(f"--lang={self.app.lang}")
+        jezik = self.app.lang
+        vir = getattr(self.app, "jezik_vmesnika", None)
+        if vir is not None:
+            try:
+                jezik = str(vir())[:2] or jezik
+            except Exception:
+                pass
+        args.append(f"--lang={jezik}")
         zastavice = []
         if self.app.settings.get("force_dark_mode"):
             zastavice.append("--enable-features=WebContentsForceDark")

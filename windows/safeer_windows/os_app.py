@@ -20,7 +20,7 @@ from typing import Any, List, Optional
 
 from PySide6.QtCore import QObject, QTimer, QUrl, Qt, Signal, Slot
 from PySide6.QtGui import QIcon, QKeySequence, QShortcut
-from PySide6.QtWebEngineCore import (QWebEnginePage, QWebEngineProfile, QWebEngineScript,
+from PySide6.QtWebEngineCore import (QWebEnginePage, QWebEngineProfile, QWebEngineScript, QWebEngineUrlRequestInterceptor,
                                      QWebEngineSettings)
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QMainWindow, QStackedWidget, QWidget
@@ -307,6 +307,22 @@ class GuiDispatcher(QObject):
         self.signal_run.emit(fn)
 
 
+class VgradniPredvajalnikGlave(QWebEngineUrlRequestInterceptor):
+    """
+    Vgradni predvajalnik (YouTube) v Medijskem centru: izdajatelj mora vedeti, kdo ga vgrajuje. Vmesnik Safeer OS
+    tece na 127.0.0.1, kar izdajatelj za glasbene posnetke zavrne ("posnetek ni na voljo"), zato se predstavimo
+    z domaco stranjo Safeerja - samo za zahteve vgradnega predvajalnika, nic drugega se ne spremeni.
+    """
+
+    def interceptRequest(self, info) -> None:  # noqa: N802 - ime doloca Qt
+        try:
+            url = info.requestUrl()
+            if url.host() in ("www.youtube.com", "www.youtube-nocookie.com") and url.path().startswith("/embed/"):
+                info.setHttpHeader(b"Referer", b"https://safeer.si/")
+        except Exception:
+            pass
+
+
 class SafeerOsPage(QWebEnginePage):
     def __init__(self, profile: QWebEngineProfile, window: "SafeerOsWindow"):
         super().__init__(profile, window)
@@ -408,6 +424,8 @@ class SafeerOsWindow(QMainWindow):
         # Profil in nastavitve
         _korak("pred_profile")
         self.profile = QWebEngineProfile("SafeerOSProfile", self)
+        self._vgradni_glave = VgradniPredvajalnikGlave(self)
+        self.profile.setUrlRequestInterceptor(self._vgradni_glave)
         self.profile.setHttpUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
         settings = self.profile.settings()
         attr = QWebEngineSettings.WebAttribute
@@ -473,6 +491,7 @@ class SafeerOsWindow(QMainWindow):
         self.browser_app = browser.SafeerBrowserApp(
             QApplication.instance(), browser_settings or policy.SettingsStore(), "embedded"
         )
+        self.browser_app.jezik_vmesnika = _jezik_oken
         _korak("scit_in_profile")
         self.browser_window = browser.BrowserWindow(
             self.browser_app, private=True, embedded=True,
@@ -2284,6 +2303,23 @@ class SafeerOsWindow(QMainWindow):
         if metoda == "mediaOdstraniVir":
             return self.media_center.remove_source(str(a[0]) if a else "")
 
+        # Seznami predvajanja (uvoz z YouTuba ali Spotifyja).
+        if metoda == "mediaSeznami":
+            return self.media_center.seznami()
+        if metoda == "mediaSeznam":
+            return self.media_center.seznam(str(a[0]) if a else "")
+        if metoda == "mediaUvoziSeznam":
+            izid = self.media_center.uvozi_seznam(str(a[0]) if a else "")
+            if isinstance(izid, dict) and izid.get("ime"):
+                # Skladbam brez posnetka (Spotify) posnetke poiscemo v ozadju; ko so, pogled dobi slike skladb.
+                self.media_center.poisci_posnetke(
+                    izid["ime"], ob_koncu=lambda ime: self.poslji_dogodek("mediaSeznamOsvezen", {"ime": ime}))
+            return izid
+        if metoda == "mediaOdstraniSeznam":
+            return self.media_center.odstrani_seznam(str(a[0]) if a else "")
+        if metoda == "mediaSeznamZamenjava":
+            return self.media_center.seznam_posnetek(str(a[0]) if a else "", zamenjaj=True)
+
         if metoda == "mediaOsveziVir":
             source_id = str(a[0]) if a else ""
             return self.media_center.refresh_source(source_id) if source_id else self.media_center.refresh_all()
@@ -2294,6 +2330,9 @@ class SafeerOsWindow(QMainWindow):
                 print("[SafeerMedia] MEDIA_ROUTE missing_item", flush=True)
                 return None
             url = str(item.get("url") or "")
+            if item.get("youtube") and str(item.get("id") or "").startswith("seznam:"):
+                # Skladba s seznama predvajanja: igra v vgrajenem predvajalniku z vrsto (ob koncu naslednja).
+                return dict(item, native=False)
             if url.startswith("dvd:"):
                 # DVD brez zascite (ISO, mapa VIDEO_TS): zna ga samo LibVLC; zascitenih Safeer ne odklepa.
                 if not self.media_player.available:

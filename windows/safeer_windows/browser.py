@@ -189,8 +189,28 @@ def tab_close_style() -> str:
     return 'QTabBar::close-button { image: url("%s"); }\n' % path.replace("\\", "/")
 
 
+def prevedi_gumbe(browser: "SafeerBrowserApp", buttons: "QDialogButtonBox") -> "QDialogButtonBox":
+    """Gumba V redu / Preklici v jeziku vmesnika (Qt ju sam pusti v anglescini)."""
+    sl = tr(browser, "portal_title") == TEXT["sl"].get("portal_title")
+    preklici = buttons.button(QDialogButtonBox.StandardButton.Cancel)
+    if preklici is not None:
+        preklici.setText("Prekliči" if sl else "Cancel")
+    v_redu = buttons.button(QDialogButtonBox.StandardButton.Ok)
+    if v_redu is not None:
+        v_redu.setText("V redu" if sl else "OK")
+    return buttons
+
+
 def tr(browser: "SafeerBrowserApp", key: str, **values: Any) -> str:
-    text = TEXT.get(browser.lang, TEXT["en"]).get(key) or TEXT["en"].get(key, key)
+    lang = browser.lang
+    # Splet v Safeer OS: okna brskalnika (Dodaj bliznjico, vprasanja) so v jeziku Safeer OS, ne v jeziku Windows.
+    vir = getattr(browser, "jezik_vmesnika", None)
+    if vir is not None:
+        try:
+            lang = "sl" if str(vir())[:2] == "sl" else "en"
+        except Exception:
+            pass
+    text = TEXT.get(lang, TEXT["en"]).get(key) or TEXT["en"].get(key, key)
     return text.format(**values) if values else text
 
 
@@ -2054,7 +2074,7 @@ class BrowserWindow(QMainWindow):
         address.setPlaceholderText("https://")
         form.addRow(tr(self.app, "portal_title"), title)
         form.addRow(tr(self.app, "portal_url"), address)
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, dialog)
+        buttons = prevedi_gumbe(self.app, QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, dialog))
         buttons.accepted.connect(dialog.accept)
         buttons.rejected.connect(dialog.reject)
         form.addRow(buttons)
@@ -2109,7 +2129,7 @@ class BrowserWindow(QMainWindow):
             button.clicked.connect(callback)
             row_layout.addWidget(button)
         layout.addLayout(row_layout)
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, dialog)
+        buttons = prevedi_gumbe(self.app, QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, dialog))
         buttons.accepted.connect(dialog.accept)
         buttons.rejected.connect(dialog.reject)
         layout.addWidget(buttons)
@@ -2230,7 +2250,7 @@ class SettingsDialog(QDialog):
             tools.addWidget(button)
         form.addRow(tools)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self)
+        buttons = prevedi_gumbe(app, QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self))
         buttons.accepted.connect(self.save)
         buttons.rejected.connect(self.reject)
         form.addRow(buttons)

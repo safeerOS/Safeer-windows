@@ -33,6 +33,7 @@ from . import zakoniti_viri
 from . import media_servers
 from . import tok_izbira
 from . import watch_providers
+from . import uvoz_seznama
 
 AUDIO = {".mp3", ".flac", ".ogg", ".oga", ".opus", ".m4a", ".aac", ".wav", ".wma"}
 VIDEO = {".mp4", ".mkv", ".webm", ".avi", ".mov", ".m4v", ".mpeg", ".mpg", ".ts", ".m3u8"}
@@ -1396,6 +1397,169 @@ class MediaCenter:
         if self._predpomnilnik is not None:
             self.ozastari_predpomnilnik()
 
+    # --- seznami predvajanja ---------------------------------------------------
+    # Uporabnikovi seznami (uvozeni z YouTuba ali Spotifyja): svoja datoteka, da sprememba seznama ne osvezuje
+    # kataloga virov. Skladba ima id posnetka (YouTube) ali pa ga poiscemo ob predvajanju in si ga zapomnimo.
+    NAJVEC_SEZNAMOV = 30
+
+    @property
+    def pot_seznamov(self) -> Path:
+        return self.config_dir / "seznami.json"
+
+    def _seznami_beri(self) -> list[dict]:
+        try:
+            data = json.loads(self.pot_seznamov.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return []
+        return [x for x in data if isinstance(x, dict) and x.get("ime") and isinstance(x.get("skladbe"), list)] \
+            if isinstance(data, list) else []
+
+    def _seznami_pisi(self, seznami: list[dict]) -> None:
+        self.config_dir.mkdir(parents=True, exist_ok=True)
+        zacasna = self.pot_seznamov.with_suffix(".tmp")
+        zacasna.write_text(json.dumps(seznami[:self.NAJVEC_SEZNAMOV], ensure_ascii=False), encoding="utf-8")
+        os.replace(zacasna, self.pot_seznamov)
+
+    @staticmethod
+    def _seznam_vnos(ime: str, vir: str, s: dict) -> dict:
+        kljuc = "%s|%s" % (s.get("izvajalec") or "", s.get("naslov") or "")
+        yt = str(s.get("youtube") or "")
+        return {
+            "id": "seznam:" + hashlib.sha1((ime + "\n" + kljuc).encode("utf-8")).hexdigest()[:20],
+            "naslov": str(s.get("naslov") or ""), "izvajalec": str(s.get("izvajalec") or ""),
+            "slika": str(s.get("slika") or ""), "vrsta": "glasba", "vir": vir or "Seznam", "vir_id": "seznam",
+            "url": ("https://www.youtube.com/watch?v=" + yt) if yt else "", "youtube": yt,
+            "seznam": ime, "sekund": int(s.get("sekund") or 0),
+        }
+
+    def seznami(self) -> list[dict]:
+        """Seznami predvajanja za prikaz: ime, izvor, stevilo skladb in slika (ovitek prve skladbe)."""
+        with self._lock:
+            return [{"ime": x["ime"], "vir": x.get("vir") or "", "stevilo": len(x["skladbe"]),
+                     "slika": next((str(s.get("slika")) for s in x["skladbe"] if s.get("slika")), "")}
+                    for x in self._seznami_beri()]
+
+    def seznam(self, ime: str) -> dict:
+        """Skladbe seznama kot vnosi kataloga (kartice, vrsta predvajanja)."""
+        with self._lock:
+            sz = next((x for x in self._seznami_beri() if x["ime"] == ime), None)
+            if not sz:
+                return {"ime": ime, "vnosi": []}
+            vnosi = [self._seznam_vnos(sz["ime"], sz.get("vir") or "", s) for s in sz["skladbe"] if isinstance(s, dict)]
+            for v in vnosi:
+                self._dynamic_items[v["id"]] = v
+            return {"ime": sz["ime"], "vir": sz.get("vir") or "", "vnosi": vnosi}
+
+    def uvozi_seznam(self, vnos: str) -> dict:
+        """Uvozi javni seznam z YouTuba ali Spotifyja; isto ime zamenja obstojecega (ponoven uvoz = osvezitev)."""
+        povezava = uvoz_seznama.povezava_iz(vnos) or str(vnos or "").strip()
+        if not uvoz_seznama.je_povezava(povezava):
+            return {"napaka": "ni_seznam"}
+        uvoz = uvoz_seznama.uvozi(povezava)
+        if not uvoz or not uvoz.get("skladbe"):
+            return {"napaka": "ni_uspel"}
+        ime = str(uvoz.get("ime") or uvoz.get("vir") or "Seznam")[:60]
+        with self._lock:
+            ostali = [x for x in self._seznami_beri() if x["ime"] != ime]
+            self._seznami_pisi([{"ime": ime, "vir": uvoz.get("vir") or "", "skladbe": uvoz["skladbe"]}] + ostali)
+        return {"ime": ime, "stevilo": len(uvoz["skladbe"]), "vir": uvoz.get("vir") or ""}
+
+    def poisci_posnetke(self, ime: str, ob_koncu=None) -> None:
+        """
+        Uvozenim skladbam brez posnetka (Spotify) v ozadju poisce posnetke: seznam dobi slike posameznih skladb in
+        predvajanje zacne brez iskanja. Uporabnik ne caka - seznam je ze odprt in predvajljiv.
+        """
+        def delo() -> None:
+            with self._lock:
+                sz = next((x for x in self._seznami_beri() if x["ime"] == ime), None)
+            cakajo = [s for s in (sz or {}).get("skladbe", []) if isinstance(s, dict) and not s.get("youtube")]
+            if not cakajo:
+                return
+            from concurrent.futures import ThreadPoolExecutor
+
+            def ena(s: dict) -> tuple[str, str, str]:
+                try:
+                    return (str(s.get("naslov") or ""), str(s.get("izvajalec") or ""),
+                            uvoz_seznama.najdi(str(s.get("naslov") or ""), str(s.get("izvajalec") or ""), int(s.get("sekund") or 0)))
+                except Exception:
+                    return (str(s.get("naslov") or ""), str(s.get("izvajalec") or ""), "")
+
+            with ThreadPoolExecutor(max_workers=3) as bazen:
+                najdeni = {(n, i): yt for n, i, yt in bazen.map(ena, cakajo) if yt}
+            if not najdeni:
+                return
+            with self._lock:
+                vsi = self._seznami_beri()
+                for x in vsi:
+                    if x["ime"] != ime:
+                        continue
+                    for y in x["skladbe"]:
+                        yt = isinstance(y, dict) and not y.get("youtube") and najdeni.get((y.get("naslov"), y.get("izvajalec")))
+                        if yt:
+                            y["youtube"] = yt
+                            y["slika"] = "https://i.ytimg.com/vi/%s/mqdefault.jpg" % yt
+                self._seznami_pisi(vsi)
+            if ob_koncu:
+                try:
+                    ob_koncu(ime)
+                except Exception:
+                    pass
+
+        threading.Thread(target=delo, daemon=True, name="safeer-seznam-posnetki").start()
+
+    def odstrani_seznam(self, ime: str) -> bool:
+        with self._lock:
+            vsi = self._seznami_beri()
+            ostali = [x for x in vsi if x["ime"] != ime]
+            if len(ostali) == len(vsi):
+                return False
+            self._seznami_pisi(ostali)
+            return True
+
+    def seznam_posnetek(self, item_id: str, zamenjaj: bool = False) -> Optional[dict]:
+        """
+        Skladba seznama s posnetkom: uvozeni skladbi brez posnetka (Spotify) ga poiscemo in si ga zapomnimo.
+        [zamenjaj]: trenutnega posnetka ni mogoce predvajati (lastnik ne dovoli vgradnje) - poiscemo drugega.
+        """
+        with self._lock:
+            vsi = self._seznami_beri()
+            zadetek = None
+            for sz in vsi:
+                for s in sz["skladbe"]:
+                    if isinstance(s, dict) and self._seznam_vnos(sz["ime"], sz.get("vir") or "", s)["id"] == item_id:
+                        zadetek = (sz, s)
+                        break
+                if zadetek:
+                    break
+        if not zadetek:
+            return None
+        sz, s = zadetek
+        stari = str(s.get("youtube") or "")
+        if stari and not zamenjaj:
+            return self._seznam_vnos(sz["ime"], sz.get("vir") or "", s)
+        zavrnjeni = tuple(x for x in (list(s.get("zavrnjeni") or []) + ([stari] if stari else [])) if x)
+        if zamenjaj and len(zavrnjeni) > 3:
+            return None
+        novi = uvoz_seznama.najdi(str(s.get("naslov") or ""), str(s.get("izvajalec") or ""), int(s.get("sekund") or 0), zavrnjeni)
+        if not novi:
+            return None
+        with self._lock:
+            vsi = self._seznami_beri()
+            for x in vsi:
+                if x["ime"] != sz["ime"]:
+                    continue
+                for y in x["skladbe"]:
+                    if isinstance(y, dict) and y.get("naslov") == s.get("naslov") and y.get("izvajalec") == s.get("izvajalec"):
+                        y["youtube"] = novi
+                        y["slika"] = "https://i.ytimg.com/vi/%s/mqdefault.jpg" % novi
+                        if zavrnjeni:
+                            y["zavrnjeni"] = list(zavrnjeni)
+                        s = y
+            self._seznami_pisi(vsi)
+        vnos = self._seznam_vnos(sz["ime"], sz.get("vir") or "", s)
+        self._dynamic_items[vnos["id"]] = vnos
+        return vnos
+
     def sources(self) -> list[dict]:
         with self._lock:
             data = self._load()
@@ -2456,6 +2620,8 @@ class MediaCenter:
             return {"ok": True, "st_vnosov": len(items), "vir": custom_name, "vrsta": "katalog"}
 
     def resolve(self, item_id: str) -> Optional[dict]:
+        if str(item_id or "").startswith("seznam:"):
+            return self.seznam_posnetek(str(item_id))
         item = self._dynamic_items.get(item_id) or next((item for item in self.catalog()["vnosi"] if item.get("id") == item_id), None)
         if not item:
             return None
