@@ -94,6 +94,25 @@ class UvozSeznamaTest(unittest.TestCase):
             with mock.patch.object(u, "najdi", return_value="yt333333333") as najdi:
                 self.assertEqual(m.seznam_posnetek(vnosi[0]["id"], zamenjaj=True)["youtube"], "yt333333333")
                 self.assertEqual(najdi.call_args[0][3], ("yt111111111",))
+            # Svoj seznam: skladba z uvozenega seznama in skladba iz kataloga z neposrednim naslovom.
+            self.assertEqual(m.dodaj_na_seznam("Moj", vnosi[1]["id"]), {"ok": True, "ime": "Moj"})
+            self.assertEqual(m.dodaj_na_seznam("Moj", vnosi[1]["id"]), {"ze": True, "ime": "Moj"})
+            m._dynamic_items["jamendo:1"] = {"id": "jamendo:1", "naslov": "Prosta", "izvajalec": "C", "vrsta": "glasba",
+                                             "url": "https://primer.si/a.mp3", "slika": ""}
+            m._dynamic_items["film:1"] = {"id": "film:1", "naslov": "Film", "vrsta": "film", "url": "https://primer.si/f.mp4"}
+            self.assertEqual(m.dodaj_na_seznam("Moj", "jamendo:1"), {"ok": True, "ime": "Moj"})
+            self.assertEqual(m.dodaj_na_seznam("Moj", "film:1"), {"napaka": "ni_mogoce"})
+            self.assertEqual(m.dodaj_na_seznam(" ", "jamendo:1"), {"napaka": "ime"})
+            moj = m.seznam("Moj")["vnosi"]
+            self.assertEqual([(v["naslov"], v["youtube"], v["url"]) for v in moj],
+                             [("Druga", "yt222222222", "https://www.youtube.com/watch?v=yt222222222"), ("Prosta", "", "https://primer.si/a.mp3")])
+            # Skladba z neposrednim naslovom ne isce posnetka.
+            with mock.patch.object(u, "najdi", side_effect=AssertionError("ne isci")):
+                self.assertEqual(m.resolve(moj[1]["id"])["url"], "https://primer.si/a.mp3")
+            self.assertEqual([x["ime"] for x in m.seznami()], ["Moj", "Top"])
+            self.assertTrue(m.odstrani_s_seznama("Moj", moj[0]["id"]))
+            self.assertTrue(m.odstrani_s_seznama("Moj", moj[1]["id"]))
+            self.assertEqual([x["ime"] for x in m.seznami()], ["Top"])          # prazen seznam izgine
             self.assertTrue(m.odstrani_seznam("Top"))
             self.assertFalse(m.odstrani_seznam("Top"))
             self.assertEqual(m.seznami(), [])
