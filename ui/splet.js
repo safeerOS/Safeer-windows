@@ -10,7 +10,7 @@
 
   var B = {
     sl: { nov: "Nov zavihek", pod: "Varno, hitro in zasebno brskanje znotraj Safeer OS.", isci: "Išči po spletu ali vnesi spletni naslov",
-      pojdi: "Išči", bliz: "Bližnjice", dodaj: "Dodaj bližnjico", odstrani: "Odstrani bližnjico",
+      pojdi: "Išči", bliz: "Bližnjice", dodaj: "Dodaj bližnjico", odstrani: "Odstrani bližnjico", uredi: "Uredi bližnjice", koncano: "Končano", obnovi: "Obnovi privzete",
       predlogi: "Predlogi za vas", vse: "Vse", novice: "Novice", zabava: "Zabava", tehnologija: "Tehnologija", znanost: "Znanost",
       k_potovanja: ["Potovanja", "Odkrij nove kraje", "ideje za potovanja"],
       k_glasba: ["Glasba", "Najboljše vsebine", "nova glasba neodvisnih izvajalcev"],
@@ -19,7 +19,7 @@
       k_zna: ["Znanost", "Vesolje in narava", "vesolje odkritja"],
       k_film: ["Filmi", "Javni arhivi in klasike", "javno dostopni klasični filmi"] },
     en: { nov: "New tab", pod: "Safe, fast and private browsing inside Safeer OS.", isci: "Search the web or enter an address",
-      pojdi: "Search", bliz: "Shortcuts", dodaj: "Add shortcut", odstrani: "Remove shortcut",
+      pojdi: "Search", bliz: "Shortcuts", dodaj: "Add shortcut", odstrani: "Remove shortcut", uredi: "Edit shortcuts", koncano: "Done", obnovi: "Restore defaults",
       predlogi: "Suggestions for you", vse: "All", novice: "News", zabava: "Fun", tehnologija: "Technology", znanost: "Science",
       k_potovanja: ["Travel", "Discover new places", "travel ideas"],
       k_glasba: ["Music", "The best picks", "new music from independent artists"],
@@ -28,7 +28,7 @@
       k_zna: ["Science", "Space and nature", "space discoveries"],
       k_film: ["Films", "Public archives and classics", "public domain classic films"] },
     de: { nov: "Neuer Tab", pod: "Sicheres, schnelles und privates Surfen in Safeer OS.", isci: "Im Web suchen oder Adresse eingeben",
-      pojdi: "Suchen", bliz: "Verknüpfungen", dodaj: "Verknüpfung hinzufügen", odstrani: "Verknüpfung entfernen",
+      pojdi: "Suchen", bliz: "Verknüpfungen", dodaj: "Verknüpfung hinzufügen", odstrani: "Verknüpfung entfernen", uredi: "Verknüpfungen bearbeiten", koncano: "Fertig", obnovi: "Standard wiederherstellen",
       predlogi: "Vorschläge für dich", vse: "Alle", novice: "Nachrichten", zabava: "Unterhaltung", tehnologija: "Technik", znanost: "Wissenschaft",
       k_potovanja: ["Reisen", "Neue Orte entdecken", "Reiseideen"],
       k_glasba: ["Musik", "Die besten Inhalte", "neue Musik unabhängiger Künstler"],
@@ -37,7 +37,7 @@
       k_zna: ["Wissenschaft", "Weltall und Natur", "Weltall Entdeckungen"],
       k_film: ["Filme", "Öffentliche Archive und Klassiker", "gemeinfreie klassische Filme"] },
     es: { nov: "Nueva pestaña", pod: "Navegación segura, rápida y privada dentro de Safeer OS.", isci: "Busca en la web o introduce una dirección",
-      pojdi: "Buscar", bliz: "Accesos directos", dodaj: "Añadir acceso", odstrani: "Quitar acceso",
+      pojdi: "Buscar", bliz: "Accesos directos", dodaj: "Añadir acceso", odstrani: "Quitar acceso", uredi: "Editar accesos", koncano: "Listo", obnovi: "Restaurar predeterminados",
       predlogi: "Sugerencias para ti", vse: "Todo", novice: "Noticias", zabava: "Ocio", tehnologija: "Tecnología", znanost: "Ciencia",
       k_potovanja: ["Viajes", "Descubre nuevos lugares", "ideas de viaje"],
       k_glasba: ["Música", "Lo mejor", "música nueva de artistas independientes"],
@@ -46,7 +46,7 @@
       k_zna: ["Ciencia", "Espacio y naturaleza", "descubrimientos del espacio"],
       k_film: ["Películas", "Archivos públicos y clásicos", "películas clásicas de dominio público"] },
     fr: { nov: "Nouvel onglet", pod: "Navigation sûre, rapide et privée dans Safeer OS.", isci: "Rechercher sur le Web ou saisir une adresse",
-      pojdi: "Rechercher", bliz: "Raccourcis", dodaj: "Ajouter un raccourci", odstrani: "Retirer le raccourci",
+      pojdi: "Rechercher", bliz: "Raccourcis", dodaj: "Ajouter un raccourci", odstrani: "Retirer le raccourci", uredi: "Modifier les raccourcis", koncano: "Terminé", obnovi: "Rétablir par défaut",
       predlogi: "Suggestions pour vous", vse: "Tout", novice: "Actualités", zabava: "Loisirs", tehnologija: "Technologie", znanost: "Science",
       k_potovanja: ["Voyages", "Découvrez de nouveaux lieux", "idées de voyage"],
       k_glasba: ["Musique", "Le meilleur", "nouvelle musique d’artistes indépendants"],
@@ -55,7 +55,7 @@
       k_zna: ["Science", "Espace et nature", "découvertes spatiales"],
       k_film: ["Films", "Archives publiques et classiques", "films classiques du domaine public"] },
     it: { nov: "Nuova scheda", pod: "Navigazione sicura, veloce e privata in Safeer OS.", isci: "Cerca sul Web o inserisci un indirizzo",
-      pojdi: "Cerca", bliz: "Scorciatoie", dodaj: "Aggiungi scorciatoia", odstrani: "Rimuovi scorciatoia",
+      pojdi: "Cerca", bliz: "Scorciatoie", dodaj: "Aggiungi scorciatoia", odstrani: "Rimuovi scorciatoia", uredi: "Modifica scorciatoie", koncano: "Fine", obnovi: "Ripristina predefinite",
       predlogi: "Suggerimenti per te", vse: "Tutto", novice: "Notizie", zabava: "Svago", tehnologija: "Tecnologia", znanost: "Scienza",
       k_potovanja: ["Viaggi", "Scopri nuovi luoghi", "idee di viaggio"],
       k_glasba: ["Musica", "Il meglio", "nuova musica di artisti indipendenti"],
@@ -120,7 +120,24 @@
   ];
   var ZVRSTI = ["vse", "novice", "zabava", "tehnologija", "znanost"];
 
-  var S = { jezik: "sl", iskalnik: "duckduckgo", bliznjice: null, zvrst: "vse" };
+  var S = { jezik: "sl", iskalnik: "duckduckgo", bliznjice: null, zvrst: "vse", skrite: [], ureja: false };
+
+  // Odstranjene bliznjice (tudi vgrajene): nic ni vsiljeno. Kljuc je naslov brez sheme, www. in koncne posevnice.
+  function kljucBliznjice(url) { return String(url || "").replace(/^https?:\/\/(www\.)?/i, "").replace(/\/+$/, "").toLowerCase(); }
+  function jeSkrita(url) { return S.skrite.indexOf(kljucBliznjice(url)) >= 0; }
+  function shraniSkrite() { try { localStorage.setItem("safeer_splet_skrite", JSON.stringify(S.skrite)); } catch (e) {} }
+  function odstraniBliznjico(url) {
+    var k = kljucBliznjice(url);
+    if (S.skrite.indexOf(k) < 0) S.skrite.push(k);
+    shraniSkrite();
+    most({ action: "remove_portal", url: url });   // gostitelj si odstranitev zapomni (in ob zagonu poslje "hidden")
+    narisiBliznjice();
+  }
+  function obnoviBliznjice() {
+    S.skrite = []; shraniSkrite();
+    most({ action: "reset_portals" });
+    narisiBliznjice();
+  }
 
   function t(k) { var b = B[S.jezik] || B.en; return b[k] != null ? b[k] : (B.en[k] != null ? B.en[k] : k); }
   function $(id) { return document.getElementById(id); }
@@ -154,11 +171,14 @@
 
   function narisiBliznjice() {
     var cilj = $("bliznjice"); cilj.innerHTML = ""; cilj.setAttribute("aria-label", t("bliz"));
-    var seznam = (S.bliznjice && S.bliznjice.length ? S.bliznjice : PRIVZETE).slice(0, 11);
+    document.body.classList.toggle("ureja", S.ureja);
+    // Gostitelj, ki seznam vodi sam (no_defaults), lahko poslje tudi prazen seznam: takrat vgrajenih ne vsiljujemo.
+    var osnova = S.bliznjice && S.bliznjice.length ? S.bliznjice : (S.brezPrivzetih ? [] : PRIVZETE);
+    var seznam = osnova.filter(function (p) { return !jeSkrita(p.url); }).slice(0, 11);
     seznam.forEach(function (p) {
       var url = p.url || ""; if (!/^https?:/i.test(url)) return;
       var ime = (p.title || p.name || "").trim() || url.replace(/^https?:\/\/(www\.)?/i, "").split("/")[0];
-      var a = document.createElement("a"); a.className = "bliznjica"; a.href = url; a.title = url;
+      var a = document.createElement("a"); a.className = "bliznjica"; a.href = url; a.title = S.ureja ? t("odstrani") : url;
       var znak = document.createElement("span"); znak.className = "znak";
       var ikona = typeof p.favicon === "string" ? p.favicon.trim() : "";
       if (/^(data:|safeer:|file:|blob:)/i.test(ikona)) {
@@ -166,8 +186,14 @@
         znak.style.background = "rgba(255,255,255,.06)";
       } else { var cr = crka(ime); znak.textContent = cr.c; znak.style.background = cr.barva; }
       var napis = document.createElement("span"); napis.className = "ime"; napis.textContent = ime;
-      a.appendChild(znak); a.appendChild(napis);
-      a.addEventListener("click", function (e) { e.preventDefault(); odpri(url); });
+      // Krizec: z misko se pokaze nad bliznjico, na dotik in z daljincem v nacinu urejanja (takrat odstrani ze dotik bliznjice).
+      var x = document.createElement("span"); x.className = "odstrani"; x.textContent = "\u00d7"; x.title = t("odstrani");
+      x.setAttribute("role", "button"); x.setAttribute("aria-label", t("odstrani") + ": " + ime);
+      x.addEventListener("click", function (e) { e.preventDefault(); e.stopPropagation(); odstraniBliznjico(url); });
+      a.appendChild(znak); a.appendChild(napis); a.appendChild(x);
+      a.addEventListener("click", function (e) { e.preventDefault(); if (S.ureja) odstraniBliznjico(url); else odpri(url); });
+      // Dolg pritisk ali desni klik: nacin urejanja (brez sistemskega menija povezave).
+      a.addEventListener("contextmenu", function (e) { e.preventDefault(); if (!S.ureja) { S.ureja = true; narisiBliznjice(); } });
       cilj.appendChild(a);
     });
     var d = document.createElement("button"); d.type = "button"; d.className = "bliznjica dodaj";
@@ -175,10 +201,26 @@
     d.querySelector(".ime").textContent = t("dodaj");
     d.addEventListener("click", function () { if (!most({ action: "open_sidebar", service: "add_portal" })) {
       var u = window.prompt(t("dodaj"), "https://"); if (u && /^https?:\/\/\S+\.\S+/.test(u)) {
-        S.bliznjice = (S.bliznjice || PRIVZETE.slice()).concat([{ title: "", url: u }]);
+        S.bliznjice = (S.bliznjice && S.bliznjice.length ? S.bliznjice : PRIVZETE.slice()).concat([{ title: "", url: u }]);
+        S.skrite = S.skrite.filter(function (k) { return k !== kljucBliznjice(u); }); shraniSkrite();
         try { localStorage.setItem("safeer_splet_bliznjice", JSON.stringify(S.bliznjice)); } catch (e) {}
         narisiBliznjice(); } } });
     cilj.appendChild(d);
+    // Pod mrezo: Uredi bliznjice / Koncano in (ce je kaj odstranjenega) Obnovi privzete.
+    var orodja = $("bliznjiceOrodja");
+    if (orodja) {
+      orodja.innerHTML = "";
+      var u = document.createElement("button"); u.type = "button"; u.className = "bliznjice-gumb" + (S.ureja ? " dejaven" : "");
+      u.textContent = t(S.ureja ? "koncano" : "uredi");
+      u.addEventListener("click", function () { S.ureja = !S.ureja; narisiBliznjice(); try { $("bliznjiceOrodja").querySelector("button").focus({ preventScroll: true }); } catch (e) {} });
+      if (seznam.length || S.ureja) orodja.appendChild(u);
+      if (S.skrite.length && (S.ureja || !seznam.length)) {
+        var o = document.createElement("button"); o.type = "button"; o.className = "bliznjice-gumb";
+        o.textContent = t("obnovi");
+        o.addEventListener("click", function () { S.ureja = false; obnoviBliznjice(); });
+        orodja.appendChild(o);
+      }
+    }
   }
 
   function narisiCipe() {
@@ -222,6 +264,8 @@
     S.jezik = B[j] ? j : "en";
     if (stanje.engine && ISKALNIKI[stanje.engine]) S.iskalnik = stanje.engine;
     if (Array.isArray(stanje.portals)) S.bliznjice = stanje.portals;
+    if (Array.isArray(stanje.hidden)) { S.skrite = stanje.hidden.map(kljucBliznjice); shraniSkrite(); }
+    if (typeof stanje.no_defaults === "boolean") S.brezPrivzetih = stanje.no_defaults;
     if (stanje.tv) document.body.classList.add("tv");
     prevedi();
     document.documentElement.setAttribute("data-safeer-ready", "1");
@@ -238,6 +282,7 @@
 
   // Začetno stanje brez gostitelja: jezik brskalnika, shranjene bližnjice.
   try { var sh = JSON.parse(localStorage.getItem("safeer_splet_bliznjice") || "null"); if (Array.isArray(sh)) S.bliznjice = sh; } catch (e) {}
+  try { var sk = JSON.parse(localStorage.getItem("safeer_splet_skrite") || "null"); if (Array.isArray(sk)) S.skrite = sk.map(kljucBliznjice); } catch (e) {}
   // Fokus v iskalno polje brez pomika strani (autofocus je stran pomaknil navzdol).
   setTimeout(function () { try { $("vnos").focus({ preventScroll: true }); } catch (e) {} }, 60);
   var q = new URLSearchParams(location.search);

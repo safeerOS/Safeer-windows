@@ -56,9 +56,19 @@ body { overflow-x: hidden; }
 .bliznjica .ime { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bliznjica.dodaj .znak { color: #e6efec; font-size: 2rem; font-weight: 300; }
 .bliznjica .odstrani { position: absolute; top: 6px; right: 6px; width: 22px; height: 22px; border-radius: 50%;
-  border: 0; background: rgba(0, 0, 0, .45); color: #dfe8e5; font-size: 14px; line-height: 22px; cursor: pointer;
-  opacity: 0; transition: opacity .15s; }
-.bliznjica:hover .odstrani, .bliznjica:focus-within .odstrani { opacity: 1; }
+  border: 0; background: rgba(0, 0, 0, .45); color: #dfe8e5; font-size: 15px; font-weight: 700; line-height: 1; cursor: pointer;
+  display: grid; place-items: center; opacity: 0; transition: opacity .15s; }
+.bliznjica:not(.dodaj):hover .odstrani { opacity: 1; }
+.bliznjica .odstrani:hover { background: rgba(214, 87, 87, .9); color: #fff; }
+/* Urejanje bližnjic: križec je viden, dotik bližnjice jo odstrani (dotik, miška in daljinec enako). */
+body.ureja .bliznjica:not(.dodaj) { border-color: rgba(214, 87, 87, .55); }
+body.ureja .bliznjica:not(.dodaj) .odstrani { opacity: 1; background: rgba(214, 87, 87, .9); color: #fff; }
+body.ureja .bliznjica.dodaj { opacity: .45; }
+.bliznjice-orodja { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; max-width: 1080px; margin: 12px auto 0; min-height: 34px; }
+.bliznjice-gumb { padding: 7px 14px; border-radius: 999px; border: 1px solid var(--rob); background: transparent; color: var(--b);
+  font: inherit; font-size: .85rem; opacity: .75; cursor: pointer; transition: opacity .15s, border-color .15s; }
+.bliznjice-gumb:hover, .bliznjice-gumb:focus-visible, .bliznjice-gumb.dejaven { opacity: 1; border-color: rgba(87, 214, 173, .6); outline: none; }
+body.tv .bliznjice-gumb:focus { outline: 3px solid var(--z); outline-offset: 3px; opacity: 1; }
 
 /* Predlogi */
 .predlogi { max-width: 1080px; margin: clamp(30px, 6vh, 56px) auto 0; }
