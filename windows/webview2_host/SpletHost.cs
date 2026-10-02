@@ -373,6 +373,7 @@ internal sealed class SpletTab : Form
             case "mute": core.IsMuted = SpletHost.Bool(msg, "on"); break;
             case "downloads": try { core.OpenDefaultDownloadDialog(); } catch { } break;
             case "cleardata": _ = ClearDataAsync(core); break;
+            case "resetperm": _ = ResetPermissionsAsync(core); break;
             case "exec":
                 _ = ExecAsync(core, SpletHost.Str(msg, "id"), SpletHost.Str(msg, "js"));
                 break;
@@ -383,6 +384,27 @@ internal sealed class SpletTab : Form
     {
         // Piskotki, predpomnilnik, zgodovina, shramba strani - za ves profil (vsi zavihki).
         try { await core.Profile.ClearBrowsingDataAsync(); } catch { }
+    }
+
+    private async Task ResetPermissionsAsync(CoreWebView2 core)
+    {
+        // WebView2 si odgovor »Dovoli« / »Blokiraj« (kamera, mikrofon, lokacija, obvestila ...) zapomni v profilu in
+        // strani ne vprasa vec. Tukaj se odlocitve za odprto stran vrnejo na »vprasaj«, stran pa se nalozi znova.
+        int n = 0;
+        try
+        {
+            var origin = new Uri(core.Source).GetLeftPart(UriPartial.Authority);
+            var settings = await core.Profile.GetNonDefaultPermissionSettingsAsync();
+            foreach (var s in settings)
+            {
+                if (!string.Equals(s.PermissionOrigin.TrimEnd('/'), origin, StringComparison.OrdinalIgnoreCase)) continue;
+                await core.Profile.SetPermissionStateAsync(s.PermissionKind, s.PermissionOrigin, CoreWebView2PermissionState.Default);
+                n++;
+            }
+        }
+        catch { }
+        SpletHost.Send(new { ev = "permreset", tab = id, count = n });
+        if (n > 0) { try { core.Reload(); } catch { } }
     }
 
     private async Task ExecAsync(CoreWebView2 core, string execId, string js)

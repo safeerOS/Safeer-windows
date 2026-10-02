@@ -517,6 +517,10 @@ class SafeerOsWindow(QMainWindow):
         if hasattr(self.media_player, "stanje_spremenjeno"):
             self.media_player.stanje_spremenjeno.connect(self._media_zabelezi_stanje)
         self.control_backend.ob_mediju = self._link_medij
+        # Seznami predvajanja so enaki na vseh napravah v Linku: druge naprave berejo nase, mi njihove (ob odprtju Glasbe).
+        self.control_backend.ob_seznamih = self.media_center.seznami_izvoz
+        self._seznami_usklajeni = 0.0
+        self._seznami_usklajujem = False
         # Zacasni profili predvajalnika iz prejsnjih zagonov; v ozadju, da zagon ni pocasnejsi.
         threading.Thread(target=webview2_media.pocisti_seje, kwargs={"starejse_od_s": 120}, daemon=True).start()
         self.browser_window.na_zapisek = self._izrezek_iz_spleta
@@ -1032,6 +1036,25 @@ class SafeerOsWindow(QMainWindow):
             "count": int(p.get("nSeznam") or 0),
             "engine": "mpv" if hasattr(mp, "pogon") else "vlc",
         }
+
+    def _uskladi_sezname(self) -> None:
+        """Sezname predvajanja v ozadju uskladi z napravami v Safeer Linku (najvec enkrat na 45 s); ce se kaj spremeni,
+        vmesnik dobi dogodek in seznam seznamov osvezi sam."""
+        if self._seznami_usklajujem or time.time() - self._seznami_usklajeni < 45:
+            return
+        self._seznami_usklajujem = True
+        self._seznami_usklajeni = time.time()
+
+        def delo() -> None:
+            try:
+                if self.control_backend.uskladi_sezname(self.media_center.seznami_uskladi):
+                    self.poslji_dogodek("mediaSeznamiUsklajeni", {})
+            except Exception as e:  # noqa: BLE001
+                print(f"[SafeerSeznami] usklajevanje: {e}", flush=True)
+            finally:
+                self._seznami_usklajujem = False
+
+        threading.Thread(target=delo, daemon=True, name="safeer-seznami-sink").start()
 
     def _link_medij(self, ukaz: str, params: dict) -> Optional[dict]:
         """Ukaz daljinca (omrezna nit). Izvedba gre v nit vmesnika; odgovor je takojsen z zadnjim znanim stanjem.
@@ -2315,6 +2338,7 @@ class SafeerOsWindow(QMainWindow):
 
         # Seznami predvajanja (uvoz z YouTuba ali Spotifyja).
         if metoda == "mediaSeznami":
+            self._uskladi_sezname()
             return self.media_center.seznami()
         if metoda == "mediaSeznam":
             return self.media_center.seznam(str(a[0]) if a else "")

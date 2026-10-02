@@ -35,6 +35,7 @@ from . import media_servers
 from . import tok_izbira
 from . import watch_providers
 from . import uvoz_seznama
+from . import seznami_sink
 
 AUDIO = {".mp3", ".flac", ".ogg", ".oga", ".opus", ".m4a", ".aac", ".wav", ".wma"}
 VIDEO = {".mp4", ".mkv", ".webm", ".avi", ".mov", ".m4v", ".mpeg", ".mpg", ".ts", ".m3u8"}
@@ -1579,6 +1580,82 @@ class MediaCenter:
         return [x for x in data if isinstance(x, dict) and x.get("ime") and isinstance(x.get("skladbe"), list)] \
             if isinstance(data, list) else []
 
+    @staticmethod
+    def _zdaj_ms() -> int:
+        return int(time.time() * 1000)
+
+    def _nov_cas(self, ime: str, prej: int = 0) -> int:
+        """Cas krajevne spremembe seznama (seznami_sink.nov_cas): ne starejsi od prejsnjega stanja in znanega izbrisa."""
+        return seznami_sink.nov_cas(self._zdaj_ms(), prej, self._izbrisani_beri().get(ime) or 0)
+
+    # Izbrisani seznami (ime -> cas izbrisa, ms): da se seznam ne vrne z naprave, ki ga se ima (core/seznami_sink.py).
+    def _izbrisani_beri(self) -> dict:
+        try:
+            data = json.loads((self.config_dir / "seznami_izbrisani.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        return {str(k): int(v) for k, v in data.items() if isinstance(v, (int, float)) and v > 0} if isinstance(data, dict) else {}
+
+    def _izbrisani_pisi(self, izbrisani: dict) -> None:
+        zadnji = dict(sorted(izbrisani.items(), key=lambda kv: kv[1], reverse=True)[:100])
+        try:
+            self.config_dir.mkdir(parents=True, exist_ok=True)
+            (self.config_dir / "seznami_izbrisani.json").write_text(json.dumps(zadnji, ensure_ascii=False), encoding="utf-8")
+        except OSError:
+            pass
+
+    def _zapomni_izbris(self, ime: str, cas: int = 0) -> None:
+        """cas > 0: seznam je izbrisan (kasnejsi cas zmaga); cas == 0: seznam je spet ustvarjen, izbris pozabimo."""
+        izbrisani = self._izbrisani_beri()
+        if cas <= 0:
+            if izbrisani.pop(ime, None) is None:
+                return
+        else:
+            if int(izbrisani.get(ime) or 0) >= cas:
+                return
+            izbrisani[ime] = cas
+        self._izbrisani_pisi(izbrisani)
+
+    def seznami_izvoz(self, parametri: Optional[dict] = None) -> dict:
+        """Odgovor na `lists.get` druge naprave v Safeer Linku: kazalo seznamov ali ena stran skladb seznama."""
+        parametri = parametri if isinstance(parametri, dict) else {}
+        ime = str(parametri.get("ime") or "")
+        with self._lock:
+            vsi = self._seznami_beri()
+            if not ime:
+                return {"lists": [{"ime": x["ime"], "vir": x.get("vir") or "", "cas": int(x.get("cas") or 0),
+                                   "stevilo": len(x["skladbe"])} for x in vsi],
+                        "deleted": self._izbrisani_beri()}
+            sz = next((x for x in vsi if x["ime"] == ime), None)
+        if not sz:
+            return {"ime": ime, "stevilo": 0, "skladbe": []}
+        try:
+            od = max(0, int(parametri.get("od") or 0))
+        except (TypeError, ValueError):
+            od = 0
+        polja = ("naslov", "izvajalec", "youtube", "sekund", "slika", "url", "video", "android")
+        skladbe = [{k: s[k] for k in polja if k in s} for s in sz["skladbe"][od:od + seznami_sink.STRAN] if isinstance(s, dict)]
+        return {"ime": sz["ime"], "vir": sz.get("vir") or "", "cas": int(sz.get("cas") or 0), "stevilo": len(sz["skladbe"]),
+                "od": od, "skladbe": skladbe}
+
+    def seznami_uskladi(self, vprasaj) -> bool:
+        """Prevzame novejse sezname in izbrise ene naprave v Linku (vprasaj(parametri) -> data ukaza `lists.get` ali
+        None). Vrne True, ce se je tukaj kaj spremenilo."""
+        with self._lock:
+            moji, izbrisani = self._seznami_beri(), self._izbrisani_beri()
+        # Omrezje brez zaklepa (naprava lahko odgovarja pocasi); zapis nazaj le, ce se seznami vmes niso spremenili.
+        novi, novi_izbrisani, spremenjeno = seznami_sink.prevzemi_od(vprasaj, moji, izbrisani, uvoz_seznama.NAJVEC)
+        if not spremenjeno and novi_izbrisani == izbrisani:
+            return False
+        with self._lock:
+            if self._seznami_beri() != moji:
+                return False        # uporabnik je vmes sam spremenil seznam: uskladimo ob naslednji priloznosti
+            if spremenjeno:
+                self._seznami_pisi(novi)
+            if novi_izbrisani != izbrisani:
+                self._izbrisani_pisi(novi_izbrisani)
+        return spremenjeno
+
     def _seznami_pisi(self, seznami: list[dict]) -> None:
         self.config_dir.mkdir(parents=True, exist_ok=True)
         zacasna = self.pot_seznamov.with_suffix(".tmp")
@@ -1626,8 +1703,11 @@ class MediaCenter:
             return {"napaka": "ni_uspel"}
         ime = str(uvoz.get("ime") or uvoz.get("vir") or "Seznam")[:60]
         with self._lock:
-            ostali = [x for x in self._seznami_beri() if x["ime"] != ime]
-            self._seznami_pisi([{"ime": ime, "vir": uvoz.get("vir") or "", "skladbe": uvoz["skladbe"]}] + ostali)
+            vsi = self._seznami_beri()
+            prej = next((int(x.get("cas") or 0) for x in vsi if x["ime"] == ime), 0)
+            ostali = [x for x in vsi if x["ime"] != ime]
+            self._seznami_pisi([{"ime": ime, "vir": uvoz.get("vir") or "", "cas": self._nov_cas(ime, prej), "skladbe": uvoz["skladbe"]}] + ostali)
+            self._zapomni_izbris(ime)
         return {"ime": ime, "stevilo": len(uvoz["skladbe"]), "vir": uvoz.get("vir") or ""}
 
     def poisci_posnetke(self, ime: str, ob_koncu=None) -> None:
@@ -1664,6 +1744,7 @@ class MediaCenter:
                         if yt:
                             y["youtube"] = yt
                             y["slika"] = "https://i.ytimg.com/vi/%s/mqdefault.jpg" % yt
+                    x["cas"] = self._nov_cas(ime, int(x.get("cas") or 0))      # najdeni posnetki so sprememba: druge naprave jih dobijo z usklajevanjem
                 self._seznami_pisi(vsi)
             if ob_koncu:
                 try:
@@ -1696,14 +1777,18 @@ class MediaCenter:
         with self._lock:
             vsi = self._seznami_beri()
             cilj = next((x for x in vsi if x["ime"] == ime), None)
-            if cilj is None:
+            nov = cilj is None
+            if nov:
                 cilj = {"ime": ime, "vir": "", "skladbe": []}
                 vsi.insert(0, cilj)
             if any(isinstance(y, dict) and y.get("naslov") == zapis["naslov"] and y.get("izvajalec") == zapis.get("izvajalec")
                    for y in cilj["skladbe"]):
                 return {"ze": True, "ime": ime}
             cilj["skladbe"] = (cilj["skladbe"] + [zapis])[-uvoz_seznama.NAJVEC:]
+            cilj["cas"] = self._nov_cas(ime, int(cilj.get("cas") or 0))
             self._seznami_pisi(vsi)
+            if nov:
+                self._zapomni_izbris(ime)
         return {"ok": True, "ime": ime}
 
     def odstrani_s_seznama(self, ime: str, item_id: str) -> bool:
@@ -1718,8 +1803,13 @@ class MediaCenter:
                           if not (isinstance(s, dict) and self._seznam_vnos(sz["ime"], sz.get("vir") or "", s)["id"] == item_id)]
                 spremenjeno = len(ostale) != len(sz["skladbe"])
                 sz["skladbe"] = ostale
+                if spremenjeno:
+                    sz["cas"] = self._nov_cas(ime, int(sz.get("cas") or 0))
             if spremenjeno:
                 self._seznami_pisi([x for x in vsi if x["skladbe"]])
+                for x in vsi:
+                    if not x["skladbe"]:        # prazen seznam izgine: to je izbris, ki ga dobijo tudi druge naprave
+                        self._zapomni_izbris(x["ime"], int(x.get("cas") or 0) or self._zdaj_ms())
             return spremenjeno
 
     def odstrani_seznam(self, ime: str) -> bool:
@@ -1728,7 +1818,9 @@ class MediaCenter:
             ostali = [x for x in vsi if x["ime"] != ime]
             if len(ostali) == len(vsi):
                 return False
+            prej = max(int(x.get("cas") or 0) for x in vsi if x["ime"] == ime)
             self._seznami_pisi(ostali)
+            self._zapomni_izbris(ime, self._nov_cas(ime, prej))
             return True
 
     def seznam_posnetek(self, item_id: str, zamenjaj: bool = False) -> Optional[dict]:
@@ -1771,6 +1863,7 @@ class MediaCenter:
                         if zavrnjeni:
                             y["zavrnjeni"] = list(zavrnjeni)
                         s = y
+                        x["cas"] = self._nov_cas(x["ime"], int(x.get("cas") or 0))
             self._seznami_pisi(vsi)
         vnos = self._seznam_vnos(sz["ime"], sz.get("vir") or "", s)
         self._dynamic_items[vnos["id"]] = vnos
