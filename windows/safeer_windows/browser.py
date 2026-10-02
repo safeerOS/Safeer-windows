@@ -782,6 +782,21 @@ class SafeerBrowserApp(QObject):
                 self.refresh_preferences()
         elif action == "set_default_browser":
             window.make_default_browser()
+        elif action == "remove_portal":
+            # The user removed a shortcut on the start page: delete it from the list and remember it as removed,
+            # so a built-in shortcut does not come back. Nothing is forced on the user.
+            key = policy.portal_key(str(payload.get("url") or ""))
+            if key:
+                portals = [dict(p) for p in self.settings.get("custom_portals") or [] if policy.portal_key(p.get("url")) != key]
+                self.settings.set("custom_portals", portals, save=False)
+                hidden = [k for k in (self.settings.get("splet_skrite_bliznjice") or []) if k != key]
+                self.settings.set("splet_skrite_bliznjice", hidden + [key])
+        elif action == "reset_portals":
+            # Restore defaults: bring back the built-in shortcuts that were removed (the user's own ones stay).
+            portals, _ = policy.merge_portals(list(self.settings.get("custom_portals") or []), [dict(p) for p in policy.DEFAULT_PORTALS])
+            self.settings.set("custom_portals", portals, save=False)
+            self.settings.set("splet_skrite_bliznjice", [])
+            window.refresh_all_home_tabs()
         elif action == "open_sidebar":
             service = payload.get("service")
             targets = {"messenger": "https://www.messenger.com", "gmail": "https://mail.google.com/mail/"}
@@ -1769,7 +1784,10 @@ class BrowserWindow(QMainWindow):
             QMessageBox.warning(self, policy.APP_NAME, tr(self.app, "invalid_url"))
             return
         portals, _ = policy.merge_portals(list(self.app.settings.get("custom_portals") or []), [portal])
-        self.app.settings.set("custom_portals", portals)
+        self.app.settings.set("custom_portals", portals, save=False)
+        # A shortcut that is added again is no longer on the removed list.
+        key = policy.portal_key(portal.get("url"))
+        self.app.settings.set("splet_skrite_bliznjice", [k for k in (self.app.settings.get("splet_skrite_bliznjice") or []) if k != key])
         self.refresh_all_home_tabs()
 
     def edit_portals(self) -> None:

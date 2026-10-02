@@ -951,7 +951,15 @@ def home_state(settings: SettingsStore) -> Dict[str, Any]:
         "ads": int(settings.get("total_ads_blocked") or 0),
         "threats": int(settings.get("total_threats_blocked") or 0),
         "portals": list(settings.get("custom_portals") or []),
+        # Shortcuts the user removed from the start page (also built-in ones): the page must not show them again.
+        "hidden": list(settings.get("splet_skrite_bliznjice") or []),
+        "no_defaults": True,   # the list lives in settings (seeded with DEFAULT_PORTALS); an empty list stays empty
     }
+
+
+def portal_key(url: str) -> str:
+    """Shortcut key (same as ui/splet.js): the address without scheme, www. and trailing slash, lower-case."""
+    return re.sub(r"^https?://(www\.)?", "", str(url or "").strip(), flags=re.I).rstrip("/").lower()
 
 
 # ---------------------------------------------------------------------------
