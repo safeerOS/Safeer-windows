@@ -856,6 +856,15 @@ class SafeerOsWindow(QMainWindow):
         stanje = self._media_stanje_za_daljinec()
         if ukaz == "status":
             return {"ok": True, "message": "Medijski center", "data": stanje}
+        if ukaz == "state":
+            # »Nadaljuj z druge naprave« (control_backend play.state): stanje pogona z naslovom datoteke ali toka.
+            with self._media_kljuc:
+                p = dict(self._media_stanje)
+            return {"ok": True, "message": "Stanje predvajalnika", "data": {
+                "stanje": {"playing": "predvaja", "paused": "premor"}.get(stanje["status"], "ustavljeno"),
+                "uri": str(p.get("uri") or mp.current_item.get("url") or ""), "naslov": stanje["title"],
+                "vrsta": str(p.get("vrsta") or mp.current_item.get("vrsta") or ""),
+                "pozicija": float(p.get("polozaj") or 0), "trajanje": float(p.get("trajanje") or 0)}}
         if not stanje["active"] and ukaz not in ("status",):
             return {"ok": False, "message": "Nič se ne predvaja", "code": "ni_predvajanja", "data": stanje}
         pogon = getattr(mp, "pogon", None)
