@@ -5,7 +5,7 @@ kljuc, krog je seznam javnih kljucev vseh seznanjenih naprav in ga hrani vsaka n
 kroga je lahko hub; hub preveri podpis naprave, ne zetona.
 
 Kljuc naprave je kljuc EC P-256, ki ga Control ze dela za svoje TLS potrdilo (core/link_datoteke.py,
-`zagotovi_potrdilo`, openssl). Podpisujemo z openssl, zato ni nove odvisnosti.
+`zagotovi_potrdilo`). Podpisujemo prek core.link_kripto (cryptography, openssl le rezerva).
 
 Zapis kroga (samo objekti, brez seznamov - tako ga bere tudi JsonLahki na Androidu):
   {"v": 1,
@@ -136,6 +136,11 @@ def _veljaven_kljuc(b64: str) -> bool:
     return 60 <= len(der) <= 200 and der[:1] == b"\x30"
 
 
+#: Clan, ki ga ni bilo toliko dni, se umakne iz kroga (pospravi); stiki se na disk zapisejo najvec vsakih 10 min.
+DNI_BREZ_STIKA = 90
+STIKI_ZAPIS_S = 600.0
+
+
 class Krog:
     """Krog zaupanja te naprave; ob vsaki spremembi se zapise na disk (0600)."""
 
@@ -143,6 +148,9 @@ class Krog:
         self.pot = pot
         self.clani: Dict[str, dict] = {}
         self.umiki: Dict[str, dict] = {}
+        #: Zadnji stik s clanom (id -> cas): naprava se je prijavila, bila sosed ali na seznamu soseda.
+        self.stiki: Dict[str, float] = {}
+        self._stiki_zapisani = 0.0
         self._zaklep = threading.RLock()
         if pot:
             try:
@@ -150,6 +158,63 @@ class Krog:
                     self.zdruzi(json.load(d), shrani=False)
             except Exception:
                 pass
+            try:
+                with open(self._pot_stikov(), "r", encoding="utf-8") as d:
+                    self.stiki = {str(k): float(v) for k, v in (json.load(d) or {}).items()}
+            except Exception:
+                self.stiki = {}
+
+    # -- stiki in pospravljanje
+
+    def _pot_stikov(self) -> str:
+        return (self.pot or "") + "-stiki.json"
+
+    def zabelezi_stik(self, idji, zdaj: Optional[float] = None) -> None:
+        """Clan(i) se je/so oglasil(i): zapomnimo si cas (na disk najvec vsakih 10 min)."""
+        zdaj = zdaj if zdaj is not None else time.time()
+        with self._zaklep:
+            for i in ([idji] if isinstance(idji, str) else list(idji or [])):
+                if i and i in self.clani:
+                    self.stiki[i] = zdaj
+            if self.pot and zdaj - self._stiki_zapisani >= STIKI_ZAPIS_S:
+                self._stiki_zapisani = zdaj
+                try:
+                    zacasna = self._pot_stikov() + ".tmp"
+                    with open(zacasna, "w", encoding="utf-8") as d:
+                        json.dump(self.stiki, d)
+                    os.replace(zacasna, self._pot_stikov())
+                except Exception:
+                    pass
+
+    def zadnji_stik(self, device_id: str) -> float:
+        """Zadnji stik z napravo (vsi id-ji z istim kljucem stejejo): najvec od stika, vpisa in imenovanja."""
+        c = self.clani.get(device_id)
+        if not c:
+            return 0.0
+        kljuc = c.get("kljuc")
+        with self._zaklep:
+            sorodniki = [x for x in self.clani.values() if x.get("kljuc") == kljuc] if kljuc else [c]
+            return max([self.stiki.get(x["id"], 0.0) for x in sorodniki] +
+                       [float(x.get("dodano") or 0.0) for x in sorodniki] +
+                       [float(x.get("imenovano") or 0.0) for x in sorodniki])
+
+    def pospravi(self, kdo: str, zdaj: Optional[float] = None, meja_s: float = DNI_BREZ_STIKA * 86400.0) -> list:
+        """Umakne clane, ki jih ni bilo vec kot [meja_s] (privzeto 90 dni): stare identitete naprav po ponovni
+        namestitvi (nov kljuc) bi sicer ostale v krogu za vedno. Naprava z istim kljucem kot kateri koli zivi clan
+        ostane; nase naprave ne umikamo. Vrne umaknjene id-je; umik podpisemo, da ga sosedje sprejmejo."""
+        zdaj = zdaj if zdaj is not None else time.time()
+        umaknjeni = []
+        with self._zaklep:
+            # Ce MI nismo videli nikogar zadnjih 7 dni (racunalnik je bil ugasnjen), smo bili odsotni mi, ne oni.
+            if not self.stiki or zdaj - max(self.stiki.values()) > 7 * 86400.0:
+                return []
+            kandidati = [c for c in self.clani.values() if self._veljaven(c) and not self._smo_mi(c["id"])]
+        for c in kandidati:
+            if zdaj - self.zadnji_stik(c["id"]) <= meja_s:
+                continue
+            if self.umakni(c["id"], kdo, zdaj):
+                umaknjeni.append(c["id"])
+        return umaknjeni
 
     # -- branje
 
