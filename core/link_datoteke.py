@@ -426,6 +426,15 @@ class _Obravnava(http.server.BaseHTTPRequestHandler):
     def _datoteka(self, samo_glava: bool) -> None:
         streznik: StreznikDatotek = self.server.streznik  # type: ignore[attr-defined]
         u = urllib.parse.urlparse(self.path)
+        if u.path.startswith("/live/"):
+            # Sprotno pretvorjeni tok za napravo, ki izvirnika ne zna predvajati (link_sprotno): zeton kot pri datotekah.
+            z = self.headers.get("X-Safeer-Token")
+            if not streznik.zeton_velja(z.strip() if z else None):
+                self._napaka(401, "manjka ali napacen zeton")
+                return
+            from core import link_sprotno
+            (getattr(streznik, "sprotno", None) or link_sprotno.sprotno()).postrezi(self, u.path[6:].split("/")[0], samo_glava)
+            return
         if not u.path.startswith("/d/"):
             self._napaka(404, "ni take poti")
             return

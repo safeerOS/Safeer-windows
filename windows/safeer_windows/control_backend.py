@@ -28,6 +28,11 @@ CONFIG_DIR = os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~/.co
 CONFIG_FILE = os.path.join(CONFIG_DIR, "link.json")
 #: Magnet povezava z druge naprave v krogu: odpre jo Safeer OS (Medijski center), kot na Linuxu.
 DEJANJA_MAGNET = ["magnet.open"]
+#: Sprotno pretvarjanje za napravo, ki videa ne zna predvajati (core/link_sprotno.py, isti protokol kot Linux/Android).
+DEJANJA_PRETOK = ["video.stream", "video.stream_stop", "video.stream_status"]
+#: Zakon solidarnosti: naprava z dolocenimi pravicami (tudi samo zaslon) sme prositi za moc racunalnika - s tem ne
+#: dobi njegovih datotek ali zaslona, le pretvorjen svoj video in podatek, koliko moci ima racunalnik.
+DEJANJA_SOLIDARNOST = ["host.info"] + DEJANJA_PRETOK
 #: Daljinec (Link) upravlja Medijski center v istem procesu (os_app nastavi ob_mediju). Tipke daljinca
 #: play_pause/play/pause/stop/next/previous gredo najprej v predvajalnik; "media" je izrecni ukaz s parametri.
 DEJANJA_MEDIJ = ["media"]
@@ -238,11 +243,44 @@ class SafeerControlBackend:
             "dovoljenja": dict(self.nastavitve.get("dovoljenja_naprav") or {}),
         }
 
+    @staticmethod
+    def _osnova_id(id_naprave: str) -> str:
+        """Id brez pripone sorodnika (`n-<16 hex>-os` -> `n-<16 hex>`); drugi id-ji ostanejo."""
+        i = str(id_naprave or "")
+        return i[:-3] if i.endswith("-os") and len(i) == 21 and i.startswith("n-") else i
+
+    def fizicna_naprava(self, id_naprave: str) -> str:
+        """Fizicna naprava za id: polje `naprava` iz seznama huba (isti kljuc v krogu = ista naprava), sicer osnova id-ja.
+
+        Telefon ali televizor je v Linku z dvema identitetama (zaslon/sredisce `n-…` in Safeer OS `n-…-os`);
+        za uporabnika je to ENA naprava in pravice veljajo zanjo, ne za vsako identiteto posebej."""
+        i = str(id_naprave or "")
+        for n in self.naprave:
+            if str(n.get("id") or "") == i and n.get("naprava"):
+                return str(n["naprava"])
+        return self._osnova_id(i)
+
+    def sorodniki(self, id_naprave: str) -> List[str]:
+        """Vsi znani id-ji iste fizicne naprave (vkljucno s tem)."""
+        f = self.fizicna_naprava(id_naprave)
+        ids = [str(n.get("id") or "") for n in self.naprave if str(n.get("id") or "") and self.fizicna_naprava(str(n.get("id"))) == f]
+        for i in [str(id_naprave or "")] + [k for k in (self.nastavitve.get("dovoljenja_naprav") or {}) if self._osnova_id(k) == f]:
+            if i and i not in ids:
+                ids.append(i)
+        return ids
+
     def dovoljenje_za(self, id_naprave: str) -> str:
-        """Vrne profil dostopa naprave: polno, izbrano, zaslon ali vprasaj."""
+        """Vrne profil dostopa naprave: polno, izbrano, zaslon ali vprasaj. Velja za fizicno napravo:
+        izbira za eno identiteto telefona velja tudi za drugo (sicer bi isti telefon vprasal dvakrat)."""
         dovoljenja = self.nastavitve.get("dovoljenja_naprav") or {}
         profil = str(dovoljenja.get(str(id_naprave or "")) or "")
-        if profil in ("polno", "izbrano", "zaslon", "vprasaj"):
+        if profil in ("polno", "izbrano", "zaslon"):
+            return profil
+        izbrani = [str(dovoljenja.get(s) or "") for s in self.sorodniki(id_naprave)]
+        for kandidat in ("polno", "izbrano", "zaslon"):
+            if kandidat in izbrani:
+                return kandidat
+        if profil == "vprasaj":
             return profil
         # Stare namestitve ohranijo delovanje do prvega seznama naprav. Vsaka dejansko
         # odkrita nova naprava pa spodaj dobi profil `vprasaj` in nima dostopa brez izbire.
@@ -269,14 +307,19 @@ class SafeerControlBackend:
             return False
         dovoljenja = dict(self.nastavitve.get("dovoljenja_naprav") or {})
         prej = self.dovoljenje_za(id_naprave)
-        dovoljenja[id_naprave] = profil
+        # Pravica velja za fizicno napravo: vse njene identitete (zaslon in Safeer OS) dobijo isti profil.
+        sorodniki = self.sorodniki(id_naprave)
+        for s in sorodniki:
+            dovoljenja[s] = profil
         self.nastavitve["dovoljenja_naprav"] = dovoljenja
         ok = self.shrani_nastavitve()
         if ok and profil != prej and profil != "polno":
             # Manj pravic kot prej: stari zetoni ne smejo veljati se do 12 h (pregled 29. 9. 2026, tocka 12).
-            self._preklici_zetone(id_naprave)
+            for s in sorodniki:
+                self._preklici_zetone(s)
         if ok:
-            self._opozorjena_dovoljenja.discard(id_naprave)
+            for s in sorodniki:
+                self._opozorjena_dovoljenja.discard(s)
             self._oddaj_dogodek("dovoljenja", dovoljenja)
             self._oddaj_dogodek("stanje", self.stanje_linka())
         return ok
@@ -286,6 +329,8 @@ class SafeerControlBackend:
             return True
         profil = self.dovoljenje_za(id_naprave)
         if profil == "polno":
+            return True
+        if profil in ("izbrano", "zaslon") and akcija in DEJANJA_SOLIDARNOST:
             return True
         if profil == "izbrano":
             return akcija.startswith("files.")
@@ -424,6 +469,42 @@ class SafeerControlBackend:
             return izbrani
         self._oddaj_dogodek("hub", {"najden": False, "naslov": "", "isce_naprej": False})
         return None
+
+    def _sprotno(self):
+        from core import link_sprotno
+        return link_sprotno.sprotno()
+
+    def _sprotni_streznik(self):
+        """Streznik datotek samo za /live/ tokove (brez deljenih map): zeton naprave ni vezan na pravico do datotek."""
+        from core import link_datoteke
+        s = getattr(self, "_streznik_pretoka", None)
+        if s is None:
+            s = self._streznik_pretoka = link_datoteke.Datoteke(poti=[], tls_mapa=self.navidezni_zaslon.tls_mapa, ves_disk=False).streznik
+        return s
+
+    def _pretok(self, akcija: str, params: dict, posiljatelj: str) -> Dict[str, Any]:
+        """video.stream / video.stream_stop / video.stream_status (core/link_sprotno.py)."""
+        from core import link_sprotno
+        sp = self._sprotno()
+        if akcija == "video.stream_stop":
+            return ({"ok": True, "message": "Ustavljeno"} if sp.ustavi_ukaz(str(params.get("id") or ""))
+                    else {"ok": False, "message": "Ni takega toka", "code": "ni_opravila"})
+        if akcija == "video.stream_status":
+            st = sp.stanje(str(params.get("id") or ""))
+            return {"ok": True, "message": "Stanje", "data": st} if st else {"ok": False, "message": "Ni takega toka", "code": "ni_opravila"}
+        pomoc = (os_backend_win.zmogljivost().get("pomoc") or {})
+        if pomoc.get("lahko") is False:
+            return {"ok": False, "message": "Računalnik ta trenutek ne more pomagati", "code": str(pomoc.get("razlog") or "zaseden")}
+        try:
+            d = sp.zacni(params, posiljatelj, self._sprotni_streznik())
+            print(f"[SafeerSprotno] video.stream za {posiljatelj}: {params.get('name')} -> {d.get('url')}", flush=True)
+            return {"ok": True, "message": "Pretvarjam sproti", "data": d}
+        except link_sprotno.NapakaPretoka as e:
+            print(f"[SafeerSprotno] video.stream za {posiljatelj} zavrnjen: {e}", flush=True)
+            return {"ok": False, "message": "Sprotno pretvarjanje ni mogoče", "code": str(e)}
+        except Exception as e:  # noqa: BLE001
+            print(f"[SafeerSprotno] video.stream napaka: {e}", flush=True)
+            return {"ok": False, "message": str(e), "code": "napaka"}
 
     def _datoteke_za(self, posiljatelj: str):
         """Deljene mape za napravo: en streznik za omejen dostop in en za cel disk (dovoljenje "polno").
@@ -830,6 +911,12 @@ class SafeerControlBackend:
             vrata=lambda s=lokalni: s.vrata if s.tece() else 0)
         self._mesh.zazeni()
         print(f"[ControlBackend] Link Mesh: vozlisce {nas_id} na vratih {lokalni.vrata}")
+        # Pomocnik sprotnega pretvarjanja potrebuje ffmpeg: ce ga ni, ga prenesemo v ozadju (pripeta LGPL gradnja).
+        try:
+            from safeer_windows import ffmpeg_win
+            ffmpeg_win.zagotovi_v_ozadju()
+        except Exception as e:  # noqa: BLE001
+            print(f"[SafeerSprotno] ffmpeg: priprava ni uspela ({e})")
 
     # ------------------------------------------------------------------ Trajna WebSocket povezava
     def povezi_se(self) -> bool:
@@ -910,6 +997,22 @@ class SafeerControlBackend:
                 })
                 id_n = str(d.get("id") or "")
                 if id_n and id_n != self.device_id and id_n not in dovoljenja:
+                    # Druga identiteta ze znane fizicne naprave (telefon: zaslon + Safeer OS) podeduje
+                    # njeno izbiro - uporabnika za isti telefon ne vprasamo dvakrat.
+                    fizicna = str(d.get("device") or "") or self._osnova_id(id_n)
+                    podedovano = ""
+                    for drug_id, drug_profil in dovoljenja.items():
+                        if drug_id != id_n and drug_profil in ("polno", "izbrano", "zaslon") and (
+                                self._osnova_id(drug_id) == fizicna or any(
+                                    str(e.get("id") or "") == drug_id and str(e.get("device") or "") == fizicna
+                                    for e in (sporocilo.get("devices") or []))):
+                            podedovano = drug_profil
+                            break
+                    if podedovano:
+                        dovoljenja[id_n] = podedovano
+                        self.nastavitve["dovoljenja_naprav"] = dovoljenja
+                        self.shrani_nastavitve()
+                        continue
                     dovoljenja[id_n] = "vprasaj"
                     nova_brez_dovoljenja.append({"id": id_n, "ime": d.get("name") or id_n})
             if nova_brez_dovoljenja:
@@ -1033,6 +1136,8 @@ class SafeerControlBackend:
                 stanje_naprave = dict(self.navidezni_zaslon.stanje_naprave())
                 if self.magnet_na_voljo():
                     stanje_naprave["actions"] = list(stanje_naprave.get("actions") or []) + DEJANJA_MAGNET
+                if self._sprotno().ffmpeg():
+                    stanje_naprave["actions"] = list(stanje_naprave.get("actions") or []) + DEJANJA_PRETOK
                 medij = self._medij("status", {})
                 if medij is not None:
                     stanje_naprave["actions"] = list(stanje_naprave.get("actions") or []) + DEJANJA_MEDIJ
@@ -1149,7 +1254,17 @@ class SafeerControlBackend:
                 izid = {"ok": True, "message": "Vnos izveden na navideznem zaslonu"}
 
             elif akcija == "host.info":
-                izid = {"ok": True, "message": "Podatki o računalniku", "data": os_backend_win.zmogljivost()}
+                podatki = os_backend_win.zmogljivost()
+                try:
+                    k = self._sprotno().kodirniki()
+                    if k:
+                        podatki["gpu"] = dict(podatki.get("gpu") or {}, **k)
+                except Exception:  # noqa: BLE001
+                    pass
+                izid = {"ok": True, "message": "Podatki o računalniku", "data": podatki}
+
+            elif akcija in DEJANJA_PRETOK:
+                izid = self._pretok(akcija, dict(params), posiljatelj)
 
             elif akcija == "files.list":
                 mapa = str(params.get("folder") or "")

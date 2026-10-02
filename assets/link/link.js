@@ -2151,25 +2151,48 @@
     });
   }
 
-  /** Nova naprava ne dobi tihega dostopa: uporabnik izbere enega od treh razumljivih profilov. */
+  /** Fizicna naprava za vnos v seznamu: kljuc iz kroga (`naprava`), sicer id brez pripone sorodnika (-os). */
+  function fizicnaNaprava(n) {
+    if (n.naprava) return n.naprava;
+    var id = n.id || "";
+    return /^n-[0-9a-f]{16}-os$/.test(id) ? id.slice(0, -3) : id;
+  }
+
+  /**
+   * Nova naprava ne dobi tihega dostopa: uporabnik izbere enega od treh razumljivih profilov.
+   * Telefon ali televizor je v Linku z dvema identitetama (zaslon in Safeer OS): tu je ENA kartica
+   * na fizicno napravo, izbira velja za obe identiteti (zaledje jo zapise obema).
+   */
   function narisiDovoljenja() {
     var cilj = el("dovoljenjaNaprav");
     if (!cilj) return;
     cilj.innerHTML = "";
     var naprave = (stanje.naprave || []).filter(function (n) { return n.id && n.id !== stanje.idNaprave; });
-    pokazi("opombaDovoljenja", naprave.length === 0);
+    var skupine = [];
+    var poKljucu = {};
+    naprave.forEach(function (n) {
+      var k = fizicnaNaprava(n);
+      if (!poKljucu[k]) { poKljucu[k] = { kljuc: k, clani: [] }; skupine.push(poKljucu[k]); }
+      poKljucu[k].clani.push(n);
+    });
+    pokazi("opombaDovoljenja", skupine.length === 0);
     var polni = el("gumbPolniDostop");
     if (polni) {
-      polni.disabled = naprave.length === 0;
+      polni.disabled = skupine.length === 0;
       polni.hidden = false;
     }
-    naprave.forEach(function (n) {
-      var profil = (stanje.dovoljenja || {})[n.id] || "vprasaj";
+    skupine.forEach(function (sk) {
+      // Ime in profil skupine: identiteta z vec zmoznostmi (zaslon) ima lepse ime; profil je tisti, ki ga je uporabnik ze izbral.
+      var glavni = sk.clani.slice().sort(function (a, b) { return ((b.zmoznosti || []).length) - ((a.zmoznosti || []).length); })[0];
+      var profil = "vprasaj";
+      ["polno", "izbrano", "zaslon"].some(function (p) {
+        return sk.clani.some(function (n) { if ((stanje.dovoljenja || {})[n.id] === p) { profil = p; return true; } return false; });
+      });
       var kartica = document.createElement("article");
       kartica.className = "dovoljenje-kartica" + (profil === "vprasaj" ? " zahteva-izbiro" : "");
       var glava = document.createElement("div");
       glava.className = "dovoljenje-glava";
-      glava.innerHTML = "<b>" + ubezi(prijaznoIme(n)) + "</b><span>" +
+      glava.innerHTML = "<b>" + ubezi(prijaznoIme(glavni)) + "</b><span>" +
         ubezi(profil === "vprasaj" ? t("pravicaVprasaj") : "✓") + "</span>";
       kartica.appendChild(glava);
       var izbire = document.createElement("div");
@@ -2180,8 +2203,10 @@
         gumb.innerHTML = "<b>" + ubezi(t(p[1])) + "</b><small>" + ubezi(t(p[2])) + "</small>";
         gumb.addEventListener("click", function () {
           if (!most || !most.nastaviDovoljenje) return;
-          most.nastaviDovoljenje(n.id, p[0]);
-          stanje.dovoljenja[n.id] = p[0];
+          sk.clani.forEach(function (n) {
+            most.nastaviDovoljenje(n.id, p[0]);
+            stanje.dovoljenja[n.id] = p[0];
+          });
           narisiDovoljenja();
         });
         izbire.appendChild(gumb);
