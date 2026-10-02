@@ -150,3 +150,38 @@ def test_play_offer_ponudba_caka(okolje):
     assert _ukaz(b, "play.offer", params={"item": {"id": "x", "zvok": "https://primer.si/a"}})["data"]["reason"] == "izklopljeno"
     b.nastavitve["predvajanje_za_naprave"] = True
     assert _ukaz(b, "play.offer", posiljatelj="tv", params={"item": {"id": "x", "zvok": "https://primer.si/a"}})["code"] == "dovoljenje_potrebno"
+
+
+def test_racunalnik_kot_cilj_vleka_in_izvor_potiskanja(okolje):
+    b, stanje, klici, film, _ = okolje
+    b.device_id = "n-jaz-control"; b.device_ime = "Jaz"
+    b.naprave = [{"id": "n-jaz-control", "ime": "Jaz", "zmoznosti": ["remote"]}, {"id": "tel", "ime": "Telefon", "zmoznosti": ["remote", "files"]},
+                 {"id": "tv", "ime": "TV", "zmoznosti": ["remote"]}, {"id": "brez", "ime": "Brez", "zmoznosti": ["files"]}]
+    ukazi = []
+    odgovori = {("tv", "play.state"): {"ok": True, "data": {"shared": True, "playing": True, "is_playing": True, "position_ms": 754000, "duration_ms": 5400000,
+                                                              "item": {"id": "x", "naslov": "Sintel", "zvok": "https://a/b", "video": True}}},
+                ("tel", "play.state"): {"ok": True, "data": {"shared": True, "playing": False, "last": True, "position_ms": 1000, "duration_ms": 2000,
+                                                               "item": {"id": "share:0:a.mkv", "naslov": "Datoteka brez streznika", "zvok": "https://a/c"}}},
+                ("tel", "play.offer"): {"ok": True, "data": {"queued": True}}, ("tv", "play.offer"): {"ok": False, "koda": "neznano_dejanje"}}
+
+    def ukaz_pocakaj(naprava, dejanje, parametri=None, cas=15.0):
+        ukazi.append((naprava, dejanje, parametri))
+        return odgovori.get((naprava, dejanje), {"ok": False, "koda": "cas"})
+    b.ukaz_pocakaj = ukaz_pocakaj
+    dogodki = []
+    b._oddaj_dogodek = lambda v, d: dogodki.append((v, d))
+    r = b.predaja_ponudbe()
+    assert [p["naprava"]["id"] for p in r["ponudbe"]] == ["tv"]  # datoteka brez streznika odpade, sebe in brez daljinca ne vprasa
+    assert sorted(n for n, d, _ in ukazi if d == "play.state") == ["tel", "tv"]
+    r = b.predaja_prevzemi("tv", r["ponudbe"][0]["podatki"], True)
+    assert r["ok"] and ("tv", "play.stop", {}) in ukazi and dogodki[-1][0] == "predajaSprejmi"
+    assert b.vzemi_ponudbo()["od_ime"] == "TV"
+    # potiskanje: kar igra tu, napravi z zetonom zanjo
+    r = b.predaja_ponudi("tel")
+    assert r["ok"]
+    naprava, dejanje, parametri = ukazi[-1]
+    assert (naprava, dejanje, parametri["from"], parametri["item"]["id"]) == ("tel", "play.offer", "Jaz", "share:0:film.mkv")
+    assert parametri["server"]["token"] and parametri["position_ms"] == 61500
+    assert b.predaja_ponudi("tv")["koda"] == "stara"
+    stanje.clear(); stanje["stanje"] = "ustavljeno"
+    assert b.predaja_ponudi("tel")["koda"] == "ni_predvajanja"

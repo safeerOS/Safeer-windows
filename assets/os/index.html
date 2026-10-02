@@ -160,6 +160,7 @@
           </div>
           <div class="media-glava-akcije">
             <button class="gumb" id="medijiDisk" hidden><svg data-ikona="video"></svg><span id="medijiDiskIme" data-t="predvajajDisk">Predvajaj disk</span></button>
+            <button class="gumb" id="medijiPredaja"><svg data-ikona="naprave"></svg><span data-t="mediaPredaja">Nadaljuj z druge naprave</span></button>
             <button class="gumb" id="medijiMagnet"><svg data-ikona="povezava"></svg><span data-t="magnet">Magnet povezava</span></button>
             <button class="gumb-ikona" id="mediaOsvezi" data-naslov="mediaOsvezi" title="Osveži vire"><svg data-ikona="ponovno"></svg></button>
           </div>
@@ -561,6 +562,16 @@
 </div>
 
 <!-- Safeer Media: magnet povezave (BitTorrent) - prikaz vsebine, predvajanje med prenosom, prenosi, deljenje -->
+<div class="sloj" id="slojPredaja"><div class="tancica"></div>
+  <div class="plosca magnet-plosca" role="dialog" aria-modal="true" aria-labelledby="predajaNaslov">
+    <span class="magnet-kicker">SAFEER MEDIA · SAFEER LINK</span>
+    <h3 id="predajaNaslov" data-t="mediaPredaja"></h3>
+    <p class="drobno" data-t="mediaPredajaOpis"></p>
+    <div class="magnet-seznam" id="predajaSeznam" aria-live="polite"></div>
+    <div class="gumbi"><button type="button" class="gumb" id="predajaZapri" data-t="zapri"></button></div>
+  </div>
+</div>
+
 <div class="sloj" id="slojMagnet"><div class="tancica"></div>
   <div class="plosca magnet-plosca" role="dialog" aria-modal="true" aria-labelledby="magnetNaslov">
     <span class="magnet-kicker">SAFEER MEDIA · MAGNET</span>

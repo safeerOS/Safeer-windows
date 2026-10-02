@@ -105,9 +105,13 @@ class MpvPlayerWidget(QWidget):
         header.addLayout(labels, 1)
         dodatki = QPushButton("⚙  Dodatki"); dodatki.setToolTip("Stremio in Kodi dodatki — vnesi naslove svojih dodatkov")
         dodatki.clicked.connect(self.odpri_dodatke)
+        # "Poslji na napravo": kar igra tu, drugi napravi v Linku - tam caka tiho Sprejmi/Zavrni, tu igra naprej.
+        self.poslji = QPushButton("📤  Pošlji na napravo"); self.poslji.clicked.connect(self._poslji_meni)
+        self.ob_posiljanju = None   # os_app: (id naprave) -> {"ok", "koda"} (v niti)
+        self.naprave_za_posiljanje = None   # os_app: () -> [{"id", "ime"}]
         back = QPushButton("←  Nazaj v Safeer OS"); back.clicked.connect(self.close_player)
         fullscreen = QPushButton("⛶  Celozaslonsko"); fullscreen.clicked.connect(lambda: self.window().preklopi_celozaslonsko())
-        header.addWidget(dodatki); header.addWidget(fullscreen); header.addWidget(back); root.addLayout(header)
+        header.addWidget(dodatki); header.addWidget(self.poslji); header.addWidget(fullscreen); header.addWidget(back); root.addLayout(header)
         self._fullscreen_header_widgets = [brand, self.title, self.meta, dodatki, fullscreen, back]
 
         # Nativna povrsina za mpv (brez zaobljenih robov: nativno okno jih ne pozna).
@@ -251,6 +255,40 @@ class MpvPlayerWidget(QWidget):
     def toggle_play(self) -> None:
         if self.pogon:
             self.pogon.premor()
+
+    def _poslji_meni(self) -> None:
+        from PySide6.QtWidgets import QMenu
+        naprave = []
+        try:
+            naprave = list(self.naprave_za_posiljanje() or []) if self.naprave_za_posiljanje else []
+        except Exception as e:  # noqa: BLE001
+            _log.debug("naprave za posiljanje: %s", e)
+        if not naprave:
+            self.meta.setText("V Safeer Linku ni druge naprave.")
+            return
+        meni = QMenu(self)
+        for n in naprave:
+            dejanje = meni.addAction(str(n.get("ime") or n.get("id") or ""))
+            dejanje.triggered.connect(lambda _c=False, nap=n: self._poslji(nap))
+        meni.exec(self.poslji.mapToGlobal(self.poslji.rect().bottomLeft()))
+
+    def _poslji(self, naprava: dict) -> None:
+        import threading
+        ime = str(naprava.get("ime") or naprava.get("id") or "")
+        self.meta.setText("Pošiljam na " + ime + " …")
+
+        def delo() -> None:
+            try:
+                r = self.ob_posiljanju(str(naprava.get("id") or "")) if self.ob_posiljanju else {"ok": False, "koda": "napaka"}
+            except Exception as e:  # noqa: BLE001
+                r = {"ok": False, "koda": str(e)}
+            koda = str(r.get("koda") or "")
+            b = ("Poslano na " + ime + " – tam potrdi s Sprejmi." if r.get("ok") else
+                 ime + " tega še ne zna – tam posodobi Safeer OS." if koda == "stara" else
+                 "Tega ni mogoče poslati (datoteka ni v deljeni mapi)." if koda == "ni_deljeno" else
+                 ime + " ne sprejema predvajanja z drugih naprav." if koda == "izklopljeno" else ime + " ne odgovarja.")
+            QTimer.singleShot(0, lambda: self.meta.setText(b))
+        threading.Thread(target=delo, name="SafeerPosljiNaNapravo", daemon=True).start()
 
     def nadaljuj_od(self, uri: str, sekunde: float, trajanje: float = 0.0) -> None:
         """"Nadaljuj z druge naprave": naslednje predvajanje tega naslova se zacne pri `sekunde` (pogon vprasa

@@ -567,6 +567,76 @@ class SafeerControlBackend:
     def zavrni_ponudbo(self) -> None:
         self.ponudba_cakajoca = None
 
+    # ------------------------------------------------------------------ ta racunalnik kot cilj vleka in izvor potiskanja
+    def _naprave_z_daljincem(self) -> List[dict]:
+        return [n for n in self.naprave if str(n.get("id") or "") and n.get("id") != self.device_id
+                and "remote" in (n.get("zmoznosti") or n.get("capabilities") or [])]
+
+    def predaja_ponudbe(self) -> Dict[str, Any]:
+        """"Nadaljuj z druge naprave" na tem racunalniku: vse naprave z daljincem vprasa hkrati (play.state, 3 s) in vrne,
+        kar igrajo ali so nazadnje gledale (najprej, kar igra) - isti zapis kot Linux Control (Predaja)."""
+        from core import link_predvajanje
+        naprave = self._naprave_z_daljincem()
+        izidi: Dict[str, dict] = {}
+
+        def vprasaj(n: dict) -> None:
+            try:
+                izidi[n["id"]] = self.ukaz_pocakaj(str(n["id"]), "play.state", {}, cas=3.0)
+            except Exception as e:  # noqa: BLE001
+                izidi[n["id"]] = {"ok": False, "message": str(e)}
+        niti = [threading.Thread(target=vprasaj, args=(n,), daemon=True) for n in naprave]
+        for t in niti:
+            t.start()
+        for t in niti:
+            t.join(4.0)
+        ponudbe = []
+        for n in naprave:
+            r = izidi.get(n["id"]) or {}
+            d = r.get("data") if r.get("ok") and isinstance(r.get("data"), dict) else None
+            if not d or not isinstance(d.get("item"), dict) or not (d.get("playing") or d.get("last")):
+                continue
+            if link_predvajanje.ponudba_iz(n["id"], "", d) is None:
+                continue
+            ponudbe.append({"naprava": {"id": n["id"], "ime": n.get("ime") or n["id"]},
+                            "naslov": str(d["item"].get("naslov") or ""), "igra": bool(d.get("playing")) and bool(d.get("is_playing", True)),
+                            "nazadnje": bool(d.get("last")), "position_ms": int(d.get("position_ms") or 0),
+                            "duration_ms": int(d.get("duration_ms") or 0),
+                            "opis": link_predvajanje.opis_ponudbe({"item": d["item"], "position_ms": d.get("position_ms") or 0}), "podatki": d})
+        ponudbe.sort(key=lambda p: (not p["igra"], p["nazadnje"]))
+        return {"ok": True, "ponudbe": ponudbe}
+
+    def predaja_prevzemi(self, id_naprave: str, podatki: dict, ustavi_tam: bool) -> Dict[str, Any]:
+        """Izbrana ponudba igra tu (kot sprejeto "Poslji na napravo"); izvor igra naprej, razen ce uporabnik izbere "ustavi tam"."""
+        from core import link_predvajanje
+        ime = next((str(n.get("ime") or "") for n in self.naprave if n.get("id") == id_naprave), id_naprave)
+        p = link_predvajanje.ponudba_iz(id_naprave, ime, podatki if isinstance(podatki, dict) else {})
+        if p is None:
+            return {"ok": False, "koda": "ni_vnosa"}
+        if ustavi_tam:
+            try:
+                self.ukaz_pocakaj(id_naprave, "play.stop", {}, cas=5.0)
+            except Exception:  # noqa: BLE001
+                pass
+        self.ponudba_cakajoca = p
+        self._oddaj_dogodek("predajaSprejmi", {})
+        return {"ok": True}
+
+    def predaja_ponudi(self, id_naprave: str) -> Dict[str, Any]:
+        """"Poslji na napravo" s tega racunalnika: kar Medijski center igra, napravi (zeton streznika datotek zanjo)."""
+        st = self._predaja("play.state", id_naprave).get("data") or {}
+        if not st.get("playing"):
+            return {"ok": False, "koda": str(st.get("reason") or "ni_predvajanja")}
+        parametri = {k: st[k] for k in ("item", "position_ms", "duration_ms", "server", "server_device") if k in st}
+        parametri["from"] = str(self.device_ime or "")
+        r = self.ukaz_pocakaj(id_naprave, "play.offer", parametri, cas=8.0)
+        d = r.get("data") if isinstance(r.get("data"), dict) else {}
+        if r.get("ok") and d.get("queued"):
+            return {"ok": True}
+        if r.get("ok"):
+            return {"ok": False, "koda": str(d.get("reason") or "napaka")}
+        koda = str(r.get("koda") or r.get("code") or "")
+        return {"ok": False, "koda": "stara" if koda == "neznano_dejanje" else (koda or "napaka")}
+
     def _datoteke_za(self, posiljatelj: str):
         """Deljene mape za napravo: en streznik za omejen dostop in en za cel disk (dovoljenje "polno").
 

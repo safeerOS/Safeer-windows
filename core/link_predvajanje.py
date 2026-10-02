@@ -232,6 +232,9 @@ def ponudba_iz(posiljatelj: str, od_ime: str, parametri: dict) -> Optional[dict]
         return None
     if not zvok and not server_device:
         return None
+    # Datoteka naprave (oznaka strezniku datotek) brez streznika ali id-ja naprave: naslov z zetonom izvora tu ne velja.
+    if str(item.get("id") or "").startswith(("share:", "disk:", "media:")) and server is None and not server_device:
+        return None
     try:
         position_ms = max(0, int(parametri.get("position_ms") or 0))
         duration_ms = max(0, int(parametri.get("duration_ms") or 0))

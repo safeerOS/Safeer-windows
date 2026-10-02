@@ -437,6 +437,11 @@ class SafeerOsWindow(QMainWindow):
         self.zaslon.addWidget(self.os_vsebnik)
         self.media_player = self._ustvari_medijski_center()
         self.media_player.jezik_vmesnika = _jezik_oken
+        # "Poslji na napravo" iz predvajalnika: naprave z daljincem in posiljanje prek Controla (play.offer).
+        if hasattr(self.media_player, "poslji"):
+            self.media_player.naprave_za_posiljanje = lambda: [{"id": n.get("id"), "ime": n.get("ime") or n.get("id")}
+                                                               for n in self.control_backend._naprave_z_daljincem()]
+            self.media_player.ob_posiljanju = self.control_backend.predaja_ponudi
         self.media_player.nazaj.connect(self._zapri_media)
         self.media_player.ozadje.connect(self._media_v_ozadju)
         self.zaslon.addWidget(self.media_player)
@@ -1551,6 +1556,9 @@ class SafeerOsWindow(QMainWindow):
         if vrsta == "predajaPonudba" and isinstance(podatki, dict):
             # "Poslji na napravo": tiha pasica Sprejmi/Zavrni (pravila 28. 9.) - nic se ne predvaja, dokler ne sprejmes.
             self.dispatcher.dispatch(lambda: self._pokazi_ponudbo(dict(podatki)))
+        if vrsta == "predajaSprejmi":
+            # "Nadaljuj z druge naprave" na tem racunalniku: uporabnik je ponudbo izbral sam - igraj takoj.
+            self.dispatcher.dispatch(self._sprejmi_ponudbo)
         if vrsta == "prejetaDatoteka" and isinstance(podatki, dict):
             self.poslji_dogodek("prejetaDatoteka", podatki)
         if vrsta == "deljenje" and isinstance(podatki, dict) and not podatki.get("tece"):
@@ -1963,6 +1971,13 @@ class SafeerOsWindow(QMainWindow):
 
         if metoda == "napraveSDatoteki":
             return self.control_backend.naprave_s_datotekami()
+
+        if metoda == "predajaPoizvedi":
+            return self.control_backend.predaja_ponudbe()
+
+        if metoda == "predajaPrevzemi":
+            return bool(self.control_backend.predaja_prevzemi(str(a[0]) if a else "", a[1] if len(a) > 1 and isinstance(a[1], dict) else {},
+                                                             bool(a[2]) if len(a) > 2 else False).get("ok"))
 
         if metoda == "datotekeNaprave":
             id_n = str(a[0]) if a else ""
