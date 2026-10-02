@@ -1,0 +1,7 @@
+# Safeer OS za Windows 1.0.16
+
+- **Nadaljuj z druge naprave – na računalniku:** v glavi Medijskega centra je gumb »Nadaljuj z druge naprave«. Vpraša naprave v Safeer Linku, kaj predvajajo ali so nazadnje gledale, in jih našteje (»Tablica lastnik · His Girl Friday (0:18) · nazadnje«); »Nadaljuj tukaj« predvaja tukaj pri isti sekundi (datoteka pošiljatelja prek njegovega strežnika, datoteka tretje naprave z lastnim žetonom, lastna datoteka z diska ali spletni tok), pri tekočem predvajanju tudi »Nadaljuj tukaj in ustavi tam«.
+- **Pošlji na napravo – z računalnika:** v predvajalniku je gumb »Pošlji na napravo«; izbereš telefon, tablico, televizor ali drug računalnik in tam se pokaže tiha pasica Sprejmi/Zavrni, nadaljuje šele po Sprejmi, tukaj igra naprej.
+- **Jasno sporočilo, če cilj ne more pokazati obvestila:** če ima telefon ali tablica obvestila za Safeer OS izklopljena, pošiljatelj vidi »obvestila so tam izklopljena, zato tam odpri Safeer OS in potrdi s Sprejmi«; ponudba tam počaka in se pokaže ob odprtju Safeer OS.
+
+English: Continue from another device (a button in the media centre header asks your Link devices what they play or last watched and continues here at the same second, optionally stopping there) and Send to device (a button in the player; a quiet Accept/Decline prompt on the target). The sender is told when the target has notifications switched off. Same behaviour as Safeer Control for Linux 2.1.19.
