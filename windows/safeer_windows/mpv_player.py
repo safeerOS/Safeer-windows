@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 import sys
 from typing import Optional
 
@@ -250,6 +251,14 @@ class MpvPlayerWidget(QWidget):
     def toggle_play(self) -> None:
         if self.pogon:
             self.pogon.premor()
+
+    def nadaljuj_od(self, uri: str, sekunde: float, trajanje: float = 0.0) -> None:
+        """"Nadaljuj z druge naprave": naslednje predvajanje tega naslova se zacne pri `sekunde` (pogon vprasa
+        `nadaljevanje(uri)` ob zagonu - isti mehanizem kot nadaljuj.json, le brez zapisa na disk)."""
+        if not uri or sekunde <= 0:
+            return
+        self._nadaljuj.d[uri] = {"polozaj": round(float(sekunde), 1), "trajanje": round(float(trajanje or sekunde + 1), 1),
+                                 "cas": int(time.time())}
 
     def _shrani_polozaj(self) -> None:
         try:

@@ -130,3 +130,23 @@ def test_brez_medijskega_centra(okolje):
     d = _ukaz(b, "play.state")["data"]
     assert d == {"shared": True, "playing": False}
     assert _ukaz(b, "play.stop")["data"] == {"stopped": False}
+
+
+def test_play_offer_ponudba_caka(okolje):
+    b, stanje, klici, film, _ = okolje
+    dogodki = []
+    b._oddaj_dogodek = lambda v, d: dogodki.append((v, d))
+    r = _ukaz(b, "play.offer", params={"item": {"id": "media:video:5", "naslov": "Film", "zvok": "https://192.168.0.87:4433/d/media%3Avideo%3A5", "video": True},
+                                       "position_ms": 754000, "duration_ms": 5400000,
+                                       "server": {"base_url": "https://192.168.0.87:4433", "fp": "ab", "token": "t"}, "from": "Tablica"})
+    assert r["ok"] and r["data"] == {"queued": True}
+    ponudbe = [d for v, d in dogodki if v == "predajaPonudba"]
+    assert ponudbe and ponudbe[-1]["od_ime"] == "Telefon"  # ime iz seznama naprav
+    assert ponudbe[-1]["opis"] == "Film (12:34)"
+    p = b.vzemi_ponudbo()
+    assert p["od"] == "tel" and p["server"]["token"] == "t" and b.vzemi_ponudbo() is None
+    # izklopljeno deljenje -> ponudba odpade; naprava samo z zaslonom je ne sme poslati
+    b.nastavitve["predvajanje_za_naprave"] = False
+    assert _ukaz(b, "play.offer", params={"item": {"id": "x", "zvok": "https://primer.si/a"}})["data"]["reason"] == "izklopljeno"
+    b.nastavitve["predvajanje_za_naprave"] = True
+    assert _ukaz(b, "play.offer", posiljatelj="tv", params={"item": {"id": "x", "zvok": "https://primer.si/a"}})["code"] == "dovoljenje_potrebno"

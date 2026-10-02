@@ -822,6 +822,138 @@ class SafeerOsWindow(QMainWindow):
         else:
             self.poslji_dogodek("mediaFallback", item)
 
+    # ------------------------------------------------------------------ "Poslji na napravo": ta racunalnik kot cilj
+    _PONUDBA_BESEDILA = {
+        "sl": ("{naprava} ti pošilja: {kaj}", "Sprejmi", "Zavrni"),
+        "en": ("{naprava} is sending you: {kaj}", "Accept", "Decline"),
+        "de": ("{naprava} sendet dir: {kaj}", "Annehmen", "Ablehnen"),
+        "es": ("{naprava} te envía: {kaj}", "Aceptar", "Rechazar"),
+        "fr": ("{naprava} t'envoie : {kaj}", "Accepter", "Refuser"),
+        "it": ("{naprava} ti invia: {kaj}", "Accetta", "Rifiuta"),
+    }
+    _pasica_ponudbe = None
+
+    def _pokazi_ponudbo(self, podatki: dict) -> None:
+        """Majhno okno brez okvirja v spodnjem desnem kotu zaslona, ki ne vzame fokusa: besedilo + Sprejmi/Zavrni.
+        Po minuti se umakne (ponudba velja se 10 minut); brez zvoka in brez celozaslonskega okna."""
+        from PySide6.QtWidgets import QLabel, QPushButton, QVBoxLayout
+        self._umakni_pasico()
+        try:
+            telo, da, ne = self._PONUDBA_BESEDILA.get(_jezik_oken()[:2], self._PONUDBA_BESEDILA["en"])
+            okno = QWidget(None, Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.WindowDoesNotAcceptFocus)
+            okno.setAttribute(Qt.WA_ShowWithoutActivating, True)
+            okno.setStyleSheet("QWidget { background: #0f1a26; color: #f0f4f3; border-radius: 12px; }"
+                               "QLabel { font-size: 14px; border: none; }"
+                               "QPushButton { background: #152129; color: #f0f4f3; border: 1px solid #26364a; border-radius: 10px; padding: 6px 14px; }"
+                               "QPushButton:hover { border-color: #57d6ad; }")
+            okvir = QVBoxLayout(okno)
+            okvir.setContentsMargins(16, 12, 12, 12)
+            napis = QLabel(telo.format(naprava=str(podatki.get("od_ime") or podatki.get("od") or ""), kaj=str(podatki.get("opis") or "")))
+            napis.setWordWrap(True)
+            napis.setMaximumWidth(420)
+            okvir.addWidget(napis)
+            gumbi = QHBoxLayout()
+            gumbi.addStretch(1)
+            sprejmi = QPushButton(da)
+            sprejmi.setFocusPolicy(Qt.NoFocus)
+            sprejmi.clicked.connect(lambda: (self._umakni_pasico(), self._sprejmi_ponudbo()))
+            zavrni = QPushButton(ne)
+            zavrni.setFocusPolicy(Qt.NoFocus)
+            zavrni.clicked.connect(lambda: (self._umakni_pasico(), self.control_backend.zavrni_ponudbo()))
+            gumbi.addWidget(sprejmi)
+            gumbi.addWidget(zavrni)
+            okvir.addLayout(gumbi)
+            okno.adjustSize()
+            zaslon = QApplication.primaryScreen()
+            if zaslon is not None:
+                g = zaslon.availableGeometry()
+                okno.move(g.x() + g.width() - okno.width() - 24, g.y() + g.height() - okno.height() - 24)
+            okno.show()
+            self._pasica_ponudbe = okno
+            QTimer.singleShot(60_000, lambda o=okno: self._umakni_pasico(o))
+        except Exception as e:  # noqa: BLE001
+            print(f"[SafeerOS] pasica ponudbe: {e}", flush=True)
+
+    def _umakni_pasico(self, okno=None) -> None:
+        o = self._pasica_ponudbe
+        if o is None or (okno is not None and okno is not o):
+            return
+        self._pasica_ponudbe = None
+        try:
+            o.close()
+            o.deleteLater()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _sprejmi_ponudbo(self) -> None:
+        """Sprejmi: predvajamo, kar je ponudila druga naprava, pri isti sekundi - datoteko izvora prek njenega streznika
+        (zeton za ta racunalnik), datoteko tretje naprave z lastnim zetonom (files.list z mapo), datoteko tega racunalnika
+        z diska, spletni tok s svojim naslovom. Delo z omrezjem gre v nit, predvajanje nazaj v nit vmesnika."""
+        from core import link_predvajanje
+        p = self.control_backend.vzemi_ponudbo()
+        if p is None:
+            return
+        item = p.get("item") or {}
+        naslov = str(item.get("naslov") or "")
+        video = bool(item.get("video"))
+        mime = str(item.get("mime") or "")
+        zacetek = max(0.0, float(int(p.get("position_ms") or 0)) / 1000.0)
+        trajanje = max(0.0, float(int(p.get("duration_ms") or 0)) / 1000.0)
+        oznaka = str(item.get("id") or "")
+        od = str(p.get("od") or "")
+        naprava = str(p.get("server_device") or "")
+        streznik = p.get("server") if isinstance(p.get("server"), dict) else None
+
+        def zacni(item_predvajalnika: dict) -> None:
+            url = str(item_predvajalnika.get("url") or "")
+            try:
+                self.media_player.nadaljuj_od(url, zacetek, trajanje)
+            except Exception as e:  # noqa: BLE001
+                print(f"[SafeerOS] ponudba nadaljuj_od: {e}", flush=True)
+            self._odpri_media(item_predvajalnika)
+
+        def delo() -> None:
+            try:
+                s = streznik
+                moj = str(getattr(self.control_backend, "device_id", "") or "")
+                if naprava and s is None and moj and self.control_backend.fizicna_naprava(naprava) == self.control_backend.fizicna_naprava(moj):
+                    # Datoteka tega racunalnika, ki se vraca: z diska.
+                    pot = None
+                    for d in list((getattr(self.control_backend, "_datoteke", None) or {}).values()):
+                        r = d.mape.razresi(oznaka)
+                        if r is not None and os.path.isfile(r[1]):
+                            pot = r[1]
+                            break
+                    if pot:
+                        it = {"id": "lokalno:" + pot, "naslov": naslov or os.path.splitext(os.path.basename(pot))[0], "url": pot,
+                              "vrsta": "video" if video else "glasba", "mime": mime, "neposredni": True}
+                        self.dispatcher.dispatch(lambda: zacni(it))
+                        return
+                if naprava and s is None:
+                    r = self.control_backend.ukaz_pocakaj(naprava, "files.list", {"folder": link_predvajanje.mapa_datoteke(oznaka)}, cas=12.0)
+                    d = (r.get("data") or {}) if r.get("ok") else {}
+                    s = d.get("server") if isinstance(d.get("server"), dict) else None
+                if s is not None:
+                    it = self._predvajaj_z_naprave(naprava or od, oznaka, naslov or oznaka, s, "video" if video else "audio", mime)
+                    if not it.get("ok", True):
+                        print(f"[SafeerOS] ponudba: {it.get('napaka')}", flush=True)
+                        return
+                    url = str(it.get("url") or "")
+                    if url:
+                        try:
+                            self.media_player.nadaljuj_od(url, zacetek, trajanje)
+                        except Exception:  # noqa: BLE001
+                            pass
+                    return
+                zvok = str(item.get("zvok") or "")
+                if zvok.startswith(("http://", "https://")):
+                    vrsta = "tv" if item.get("kanal") else "radio" if item.get("radio") else "video" if video else "glasba"
+                    it = {"id": "ponudba:" + zvok, "naslov": naslov or zvok, "url": zvok, "vrsta": vrsta, "mime": mime, "neposredni": True}
+                    self.dispatcher.dispatch(lambda: zacni(it))
+            except Exception as e:  # noqa: BLE001
+                print(f"[SafeerOS] ponudba: {e}", flush=True)
+        threading.Thread(target=delo, name="SafeerPonudba", daemon=True).start()
+
     # ------------------------------------------------------------------ daljinec (Link) -> Medijski center
     def _media_zabelezi_stanje(self, p: dict) -> None:
         """Nit vmesnika: zadnje stanje pogona za daljinec (bere ga omrezna nit Linka)."""
@@ -1416,6 +1548,9 @@ class SafeerOsWindow(QMainWindow):
                 self.poslji_dogodek("zaslonZNaprave", {"od": podatki.get("od"), "dejanje": "stop"})
         if vrsta == "dovoljenjeZahtevano" and isinstance(podatki, dict):
             self.poslji_dogodek("dovoljenjeZahtevano", {"id": podatki.get("id"), "ime": podatki.get("ime")})
+        if vrsta == "predajaPonudba" and isinstance(podatki, dict):
+            # "Poslji na napravo": tiha pasica Sprejmi/Zavrni (pravila 28. 9.) - nic se ne predvaja, dokler ne sprejmes.
+            self.dispatcher.dispatch(lambda: self._pokazi_ponudbo(dict(podatki)))
         if vrsta == "prejetaDatoteka" and isinstance(podatki, dict):
             self.poslji_dogodek("prejetaDatoteka", podatki)
         if vrsta == "deljenje" and isinstance(podatki, dict) and not podatki.get("tece"):
