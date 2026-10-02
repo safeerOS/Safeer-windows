@@ -2233,10 +2233,18 @@ class SafeerOsWindow(QMainWindow):
             samo_lokalno = bool(a[6]) if len(a) > 6 else False
             izklopljeni_jeziki = [str(x) for x in a[7]][:100] if len(a) > 7 and isinstance(a[7], list) else []
             # Filmov, za katere vemo, da jih noben vir ne predvaja, ne kazemo (brez_nerazpolozljivih).
+            # Ostale filme in serije iz dodatkov preverimo v ozadju; cesar noben dodatek nima, izgine (dogodek mediaNiNaVoljo).
             mc = self.media_center
-            return mc.brez_nerazpolozljivih(mc.catalog_hitro(
+
+            def prikazi(rezultat):
+                rezultat = mc.brez_nerazpolozljivih(rezultat)
+                if isinstance(rezultat, dict):
+                    mc.preveri_razpolozljivost(rezultat.get("vnosi"), lambda idji: self.poslji_dogodek("mediaNiNaVoljo", {"idji": idji}))
+                return rezultat
+
+            return prikazi(mc.catalog_hitro(
                 query, kind, genre, page,
-                ob_osvezitvi=lambda kljuc, rezultat: self.poslji_dogodek("mediaKatalogOsvezen", mc.brez_nerazpolozljivih(rezultat)),
+                ob_osvezitvi=lambda kljuc, rezultat: self.poslji_dogodek("mediaKatalogOsvezen", prikazi(rezultat)),
                 razvrsti=razvrsti, izklopljeni=izklopljeni, samo_lokalno=samo_lokalno,
                 izklopljeni_jeziki=izklopljeni_jeziki))
 

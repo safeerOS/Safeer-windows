@@ -211,6 +211,50 @@ class SamoPredvajljivoTest(unittest.TestCase):
                 self.assertEqual(m.resolve(film["id"]).get("napaka_koda"), "ni_toka")
             self.assertTrue(m.znano_ni_na_voljo(film))
 
+    def test_preverjanje_v_ozadju_skrije_filme_in_serije(self):
+        """Mreza se ocisti sama (kot na Androidu): film/serija samo iz dodatkov brez toka izgine, izpad in drugi viri ne."""
+        import threading
+        import urllib.error
+        from core import media_servers
+        with tempfile.TemporaryDirectory() as mapa:
+            m = os_media.MediaCenter(mapa, roots=[])
+            K = "https://d.example"
+            def film(i, **dodatno):
+                return dict({"id": "stremio:s1:movie:tt%d" % i, "naslov": "F%d" % i, "vrsta": "film", "url": "stremio:%s|movie|tt%d" % (K, i)}, **dodatno)
+            vnosi = [film(1), film(2), film(3), film(4, razlicice=[{"url": "https://archive.example/f4.mp4"}]),
+                     {"id": "stremio:s1:series:tt50", "naslov": "S", "vrsta": "serija", "url": "stremio:%s|series|tt50" % K},
+                     {"id": "stremio:s1:series:tt60", "naslov": "S2", "vrsta": "serija", "url": "stremio:%s|series|tt60" % K},
+                     {"id": "kodi:x:e1", "naslov": "Epizoda", "vrsta": "serija", "url": "http://kodi.local/vfs/e1"}]
+            tok = json.dumps({"streams": [{"name": "HD", "title": "F.1080p.mkv", "url": "https://cdn.example/f.mkv"}]})
+            def zahteva(url, *a, **k):
+                if "/meta/series/tt50" in url:
+                    return json.dumps({"meta": {"videos": [{"id": "tt50:1:1", "season": 1, "episode": 1}, {"id": "tt50:2:1", "season": 2, "episode": 1}]}})
+                if "/meta/series/tt60" in url:
+                    return json.dumps({"meta": {"videos": [{"id": "tt60:1:1", "season": 1, "episode": 1}, {"id": "tt60:1:2", "season": 1, "episode": 2}]}})
+                if "/stream/movie/tt1" in url or "/stream/series/tt60%3A1%3A2" in url or "/stream/series/tt60:1:2" in url:
+                    return tok
+                if "/stream/movie/tt3" in url:
+                    raise OSError("ni omrezja")
+                if "/stream/" in url:
+                    raise urllib.error.HTTPError(url, 404, "x", None, None)
+                raise OSError(url)
+            koncano = threading.Event(); skriti = []
+            def ob_ni(idji):
+                skriti.extend(idji)
+            with mock.patch.object(m, "_stremio_strezniki", return_value=[{"url": K + "/manifest.json"}]), \
+                    mock.patch.object(media_servers, "_request", side_effect=zahteva):
+                self.assertEqual(m.preveri_razpolozljivost(vnosi, ob_ni), 5)      # film 4 ima drug vir, epizoda Kodija ni iz dodatka
+                for _ in range(100):
+                    if not m.__dict__.get("_preverjam"):
+                        break
+                    koncano.wait(0.05)
+            self.assertEqual(sorted(skriti), ["stremio:s1:movie:tt2", "stremio:s1:series:tt50"])
+            self.assertEqual([v["id"] for v in m.brez_nerazpolozljivih({"vnosi": vnosi})["vnosi"]],
+                             ["stremio:s1:movie:tt1", "stremio:s1:movie:tt3", "stremio:s1:movie:tt4", "stremio:s1:series:tt60", "kodi:x:e1"])
+            # Kartice dodatkov Kodija iz starega predpomnilnika ne kazemo vec.
+            star = {"vnosi": [{"id": "kodi:s:aplugin", "vrsta": "video", "url": "kodi-dodatek:s|plugin.video.x"}, vnosi[0]]}
+            self.assertEqual([v["id"] for v in m.brez_nerazpolozljivih(star)["vnosi"]], ["stremio:s1:movie:tt1"])
+
 
 if __name__ == "__main__":
     unittest.main()

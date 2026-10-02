@@ -1,9 +1,10 @@
 """Nastavitve Safeer predvajalnika — skupne za samostojno aplikacijo (Windows, Linux) in Medijski center.
 
-Dodatki: uporabnik SAM vnese naslove svojih Stremio in Kodi dodatkov. Safeer ne prilaga nobenega
-kataloga in nobenega dodatka; polja so orodje, kaj vanje vnese uporabnik, je njegova stvar.
+Dodatki: uporabnik SAM vnese naslove svojih Stremio dodatkov. Safeer ne prilaga nobenega
+kataloga in nobenega dodatka; polje je orodje, kaj vanj vnese uporabnik, je njegova stvar.
 - Stremio dodatek: naslov manifesta (https://.../manifest.json; tudi oblika stremio://... se pretvori).
-- Kodi dodatek: naslov repozitorija ali dodatka (https://... .zip) ali naslov repozitorijske strani.
+Dodatkov Kodi ne ponujamo: Safeer jih ne more poganjati (pravilo: cesar ne moremo poganjati, ne ponujamo).
+Prej shranjeni vnosi "kodi_dodatki" se ob naslednjem shranjevanju opustijo.
 Datoteka: Windows %APPDATA%\\Safeer\\predvajalnik.json, Linux $XDG_CONFIG_HOME/safeer/predvajalnik.json.
 """
 from __future__ import annotations
@@ -16,15 +17,12 @@ from urllib.parse import urlsplit, urlunsplit
 
 PRIVZETO: dict = {
     "stremio_dodatki": [],   # [{"naslov": "https://.../manifest.json", "ime": "..."}]
-    "kodi_dodatki": [],      # [{"naslov": "https://.../repository.zip", "ime": "..."}]
     "pogon": "samodejno",    # samodejno | mpv | qt
 }
 
 BESEDILA = {
     "stremio_naslov": "Stremio dodatek — sem vnesi naslov dodatka (konča se z /manifest.json)",
     "stremio_namig": "Primer: https://primer.si/moj-dodatek/manifest.json  ali  stremio://primer.si/moj-dodatek/manifest.json",
-    "kodi_naslov": "Kodi dodatek — sem vnesi naslov repozitorija ali dodatka (.zip)",
-    "kodi_namig": "Primer: https://primer.si/repository.moj-dodatek-1.0.0.zip  ali naslov repozitorija (https://…)",
     "opomba": "Safeer ne prilaga katalogov ali dodatkov. Vneseš svoje; naslovi se shranijo samo na tej napravi.",
 }
 
@@ -50,7 +48,6 @@ def nalozi(p: Optional[str] = None) -> dict:
     except (OSError, ValueError):
         pass
     n["stremio_dodatki"] = [x for x in n["stremio_dodatki"] if isinstance(x, dict) and x.get("naslov")]
-    n["kodi_dodatki"] = [x for x in n["kodi_dodatki"] if isinstance(x, dict) and x.get("naslov")]
     return n
 
 
@@ -83,25 +80,11 @@ def normaliziraj_stremio(vnos: str) -> tuple[Optional[str], str]:
     return urlunsplit((d.scheme, d.netloc, d.path, d.query, "")), ""
 
 
-def normaliziraj_kodi(vnos: str) -> tuple[Optional[str], str]:
-    """(naslov, napaka). Sprejme https naslov .zip (repozitorij ali dodatek) ali naslov repozitorijske strani."""
-    v = (vnos or "").strip()
-    if not v:
-        return None, "Vnesi naslov."
-    d = urlsplit(v)
-    if d.scheme not in ("http", "https") or not d.netloc:
-        return None, "Naslov mora biti http(s)."
-    return urlunsplit((d.scheme, d.netloc, d.path or "/", d.query, "")), ""
-
-
 def dodaj(n: dict, vrsta: str, vnos: str, ime: str = "") -> tuple[bool, str]:
-    """vrsta: 'stremio' | 'kodi'. Vrne (uspeh, sporocilo). Podvojene naslove zavrne."""
-    if vrsta == "stremio":
-        naslov, napaka = normaliziraj_stremio(vnos); kljuc = "stremio_dodatki"
-    elif vrsta == "kodi":
-        naslov, napaka = normaliziraj_kodi(vnos); kljuc = "kodi_dodatki"
-    else:
+    """vrsta: 'stremio'. Vrne (uspeh, sporocilo). Podvojene naslove zavrne."""
+    if vrsta != "stremio":
         return False, "Neznana vrsta dodatka."
+    naslov, napaka = normaliziraj_stremio(vnos); kljuc = "stremio_dodatki"
     if not naslov:
         return False, napaka
     if any(x.get("naslov") == naslov for x in n[kljuc]):
@@ -111,7 +94,9 @@ def dodaj(n: dict, vrsta: str, vnos: str, ime: str = "") -> tuple[bool, str]:
 
 
 def odstrani(n: dict, vrsta: str, naslov: str) -> bool:
-    kljuc = "stremio_dodatki" if vrsta == "stremio" else "kodi_dodatki"
+    if vrsta != "stremio":
+        return False
+    kljuc = "stremio_dodatki"
     prej = len(n[kljuc])
     n[kljuc] = [x for x in n[kljuc] if x.get("naslov") != naslov]
     return len(n[kljuc]) != prej
