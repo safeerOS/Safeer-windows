@@ -862,3 +862,10 @@ def odpri_drm_storitev(url: str) -> dict:
         return {"zunanje": True, "brskalnik": "privzeti brskalnik"}
     except (OSError, AttributeError):
         return {"zunanje": False}
+
+
+def zazeni_skripto_v_ozadju(skripta: str) -> None:
+    """Posodobitev: .cmd skripta tece loceno od tega procesa (pocaka, da se Safeer OS zapre, in zazene nov zaganjalnik)."""
+    import subprocess
+    subprocess.Popen(["cmd", "/c", skripta], creationflags=0x00000008 | 0x00000200, close_fds=True)   # DETACHED | NEW_PROCESS_GROUP
+

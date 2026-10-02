@@ -25,7 +25,7 @@ from PySide6.QtWebEngineCore import (QWebEnginePage, QWebEngineProfile, QWebEngi
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QMainWindow, QStackedWidget, QWidget
 
-from core import os_dvd, os_media, os_scit, os_sporocila, os_torrent, podnapisi
+from core import os_dvd, os_media, os_posodobitve, os_scit, os_sporocila, os_torrent, podnapisi
 
 from . import en_primerek
 from . import (browser, control_backend, control_window, magnet_win, os_backend_win, policy, vlc_player,
@@ -529,6 +529,10 @@ class SafeerOsWindow(QMainWindow):
         self.nalozi_vmesnik()
         print("[SafeerOS] DIAG home_page_requested", flush=True)
         QTimer.singleShot(0, self._osvezi_media_v_ozadju)
+        # Posodobitve s safeer.si: tiha preverba 90 s po zagonu in nato na 6 ur (os/razlicice.json).
+        self.posodobitve: dict = {"izid": None, "cas": 0.0, "napaka": ""}
+        self.posodabljanje = os_posodobitve.Posodabljanje()
+        QTimer.singleShot(90_000, self._posodobitve_tiho)
 
         # Ce je dolocen zacetni razdelek (npr. 'control', 'daljinec', 'novaNaprava', 'media', 'nastavitve'),
         # odpri ustrezen vgrajen razdelek!
@@ -1640,6 +1644,70 @@ class SafeerOsWindow(QMainWindow):
         cmd = f"window.__safeerOsOdgovor && window.__safeerOsOdgovor({klic_id}, {ok_js}, {payload_js});"
         self.dispatcher.dispatch(lambda: self.view.page().runJavaScript(cmd))
 
+    # ------------------------------------------------------------------ posodobitve (safeer.si/os/razlicice.json)
+    def _posodobitve_stanje(self, vsiljeno: bool = False) -> dict:
+        """Stanje za vmesnik (v niti): izid zadnje preverbe (do 6 ur stare ali sveze ob vsiljeno) + tekoce posodabljanje."""
+        s = self.posodobitve
+        if vsiljeno or s["izid"] is None or time.time() - s["cas"] > os_posodobitve.PREVERBA_S:
+            try:
+                s["izid"] = os_posodobitve.preveri("windows", {"safeer-os": policy.APP_VERSION})
+                s["cas"], s["napaka"] = time.time(), ""
+            except Exception as e:  # noqa: BLE001 - brez omrezja ostane prejsnji izid
+                s["napaka"] = str(e)
+                if s["izid"] is None:
+                    s["cas"] = time.time() - os_posodobitve.PREVERBA_S + 600
+        izid = s["izid"] or {"nove": [], "nacin": "windows", "stran": os_posodobitve.STRAN}
+        return {"nove": izid.get("nove") or [], "opis": os_posodobitve.opis(izid), "nacin": "windows", "stran": izid.get("stran"),
+                "nasa": policy.APP_VERSION, "napaka": s["napaka"], "posodabljanje": self.posodabljanje.stanje()}
+
+    def _posodobitve_tiho(self) -> None:
+        def delo() -> None:
+            try:
+                st = self._posodobitve_stanje()
+                if st["nove"]:
+                    self.poslji_dogodek("posodobitev", st)
+            except Exception as e:  # noqa: BLE001
+                print("[SafeerOS] posodobitve:", e, flush=True)
+        threading.Thread(target=delo, name="SafeerPosodobitve", daemon=True).start()
+        QTimer.singleShot(os_posodobitve.PREVERBA_S * 1000, self._posodobitve_tiho)
+
+    def _posodobi(self) -> dict:
+        """Prenese nov SafeerOS-Windows-<ver>.exe (SHA-256), ga po koncu tega procesa zazene (zaganjalnik razpakira novo
+        razlicico) in - ce zaganjalnik pozna svojo pot (.zaganjalnik) - najprej prepise stari exe, da bliznjica ostane."""
+        st = self._posodobitve_stanje()
+        nove = [n for n in st["nove"] if n.get("datoteka")]
+        if not nove:
+            return {"ok": False, "koda": "ni_novih"}
+        d = nove[0]["datoteka"]
+
+        def delo(p: os_posodobitve.Posodabljanje) -> None:
+            koren = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+            mapa = os.path.join(koren, "SafeerOS", "posodobitve")
+            ime = str(d["url"]).rsplit("/", 1)[-1]
+            p.sporocilo = ime
+            exe = os_posodobitve.prenesi(str(d["url"]), os.path.join(mapa, ime), str(d.get("sha256") or ""), int(d.get("velikost") or 0),
+                                         lambda a, b: setattr(p, "odstotek", int(a * 100 / b) if b else 0), lambda: p.prekinjeno,
+                                         agent="SafeerOS/" + policy.APP_VERSION)
+            p.faza, p.odstotek = "namescanje", 100
+            stari = ""
+            try:
+                stari = (Path(__file__).resolve().parents[2] / ".zaganjalnik").read_text(encoding="utf-8").strip()
+            except OSError:
+                pass
+            cilj = stari if stari and stari.lower().endswith(".exe") and os.path.isdir(os.path.dirname(stari)) else exe
+            skripta = os.path.join(mapa, "posodobi.cmd")
+            vrstice = ["@echo off", "timeout /t 4 /nobreak >nul"]
+            if cilj != exe:
+                vrstice.append(f'copy /y "{exe}" "{cilj}" >nul || set "cilj={exe}"')
+            vrstice += [f'start "" "{cilj}"', "exit"]
+            with open(skripta, "w", encoding="utf-8") as f:
+                f.write("\r\n".join(vrstice) + "\r\n")
+            print("[SafeerOS] posodobitev:", ime, "->", cilj, flush=True)
+            os_backend_win.zazeni_skripto_v_ozadju(skripta)
+            p.sporocilo = os_posodobitve.opis(st)
+            self.dispatcher.dispatch(lambda: QTimer.singleShot(800, self.koncaj_za_posodobitev))
+        return {"ok": self.posodabljanje.zacni(delo)}
+
     def obdelaj_klic(self, sporocilo: dict) -> None:
         klic_id = sporocilo.get("id", 0)
         metoda = sporocilo.get("m", "")
@@ -1958,6 +2026,12 @@ class SafeerOsWindow(QMainWindow):
 
         if metoda == "zaupanje":
             return self.control_backend.nastavi_zaupanje(bool(a[0]) if a else False)
+
+        if metoda == "posodobitveStanje":
+            return self._posodobitve_stanje(bool(a[0]) if a else False)
+
+        if metoda == "posodobi":
+            return self._posodobi()
 
         if metoda == "predajanje":
             return self.control_backend.nastavi_predajanje(bool(a[0]) if a else False)

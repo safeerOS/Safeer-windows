@@ -256,6 +256,8 @@ func main() {
 	selfExe, err := os.Executable()
 	if err == nil {
 		createDesktopShortcut(selfExe)
+		// Pot zaganjalnika za samodejno posodobitev (Safeer OS prepise ta exe z novim in ga zazene).
+		_ = os.WriteFile(filepath.Join(targetDir, ".zaganjalnik"), []byte(selfExe), 0644)
 	}
 
 	baseName := strings.ToLower(filepath.Base(os.Args[0]))

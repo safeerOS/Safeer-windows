@@ -58,6 +58,9 @@
           <div class="domov-hero-vsebina">
             <h1 id="pozdrav">Dober večer, User!</h1>
             <p data-t="pozdravPodWin">Vse tvoje naprave, mediji in programi – na enem mestu.</p>
+            <div class="hitre" id="domPosodobitev" hidden>
+              <button class="stikalo" id="domPosodobitevGumb"><svg data-ikona="ponovno"></svg><div><span id="domPosodobitevNaslov"></span><small data-t="posodobitevDomPod"></small></div></button>
+            </div>
           </div>
           <div class="domov-hero-link">
             <div class="hero-link-kartica" data-pojdi="naprave">
@@ -514,6 +517,10 @@
           <button class="stikalo" id="gumbNamizje"><svg data-ikona="namizje"></svg><div><span data-t="pokaziNamizje"></span><small data-t="pokaziNamizjePod"></small></div></button>
           <button class="stikalo" id="stikaloSamozagon" role="switch" aria-checked="false"><svg data-ikona="ponovno"></svg><div><span data-t="samozagon"></span><small data-t="samozagonPod"></small></div><i></i></button>
           <button class="stikalo" id="gumbNazajVMint"><svg data-ikona="odjava"></svg><div><span data-t="nazajVMint"></span><small data-t="nazajVMintPod"></small></div></button>
+        </div>
+        <h2 data-t="posodobitve"></h2>
+        <div class="hitre">
+          <button class="stikalo" id="gumbPosodobi"><svg data-ikona="ponovno"></svg><div><span id="posodobitveNaslov"></span><small id="posodobitvePod"></small></div></button>
         </div>
         <div class="media-viri-glava"><div><h2 data-t="mediaViri">Viri medijskega centra</h2><p data-t="mediaViriOpis">Spletno stran, javni API, RSS ali M3U dodaš samo enkrat.</p></div></div>
         <form class="media-dodaj-vir" id="mediaDodajVir">
