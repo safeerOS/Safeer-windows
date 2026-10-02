@@ -90,7 +90,7 @@ class StremioOkno(QDialog):
         if self.dodatki.count():
             self._nalozi_dodatek(0)
         else:
-            self.stanje.setText("Ni dodatkov. Vnesi jih v Nastavitve ▸ Dodatki (Stremio, Kodi)… (Ctrl+D).")
+            self.stanje.setText("Ni dodatkov. Vnesi jih v Nastavitve ▸ Dodatki (Stremio)… (Ctrl+D).")
 
     # ---- pomocniki ----
     def _v_niti(self, f, *a, po=None) -> None:

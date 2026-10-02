@@ -104,7 +104,7 @@ class MpvPlayerWidget(QWidget):
         self.meta = QLabel(""); self.meta.setObjectName("meta")
         labels.addWidget(brand); labels.addWidget(self.title); labels.addWidget(self.meta)
         header.addLayout(labels, 1)
-        dodatki = QPushButton("⚙  Dodatki"); dodatki.setToolTip("Stremio in Kodi dodatki — vnesi naslove svojih dodatkov")
+        dodatki = QPushButton("⚙  Dodatki"); dodatki.setToolTip("Stremio dodatki — vnesi naslove svojih dodatkov")
         dodatki.clicked.connect(self.odpri_dodatke)
         # "Poslji na napravo": kar igra tu, drugi napravi v Linku - tam caka tiho Sprejmi/Zavrni, tu igra naprej.
         self.poslji = QPushButton("📤  Pošlji na napravo"); self.poslji.clicked.connect(self._poslji_meni)

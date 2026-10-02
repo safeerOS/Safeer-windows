@@ -26,7 +26,7 @@ def test_http_samo_v_domacem_omrezju():
     assert not m.dovoljen_naslov("http://8.8.8.8/")
 
 
-def test_kodi_knjiznica_in_dodatki():
+def test_kodi_knjiznica_brez_dodatkov():
     def rpc(url, body, raw):
         metoda = body["method"]
         if metoda == "VideoLibrary.GetMovies":
@@ -45,7 +45,8 @@ def test_kodi_knjiznica_in_dodatki():
     assert film["url"].startswith("http://kodi:geslo@192.168.0.5:8080/vfs/")
     assert urllib.parse.unquote(film["url"].split("/vfs/")[1]) == "/filmi/a b.mkv"
     assert any(x["vrsta"] == "glasba" and x["zanri"] == "Rock" for x in izid)
-    assert any(x["url"] == "kodi-dodatek:s1|plugin.video.arte" for x in izid)
+    # Dodatkov Kodija ne kazemo: tecejo samo v Kodiju, Safeer jih ne more poganjati.
+    assert not any(str(x["url"]).startswith("kodi-dodatek:") or x.get("skupina") == "Kodi dodatki" for x in izid)
 
 
 def test_tvheadend_kanali_so_tv_v_zivo():

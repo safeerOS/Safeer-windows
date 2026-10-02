@@ -165,23 +165,7 @@ def _kodi_items(base: str, server: dict, geslo: str) -> list[dict]:
                                                          int(e.get("episode") or 0), e.get("label", "")),
                          "vrsta": "serija", "url": vfs(e.get("file", "")), "slika": slika(e.get("thumbnail", "")),
                          "opis": str(e.get("plot") or "")[:500], "skupina": e.get("showtitle", ""), "vir": server["ime"]})
-    # Dodatki (vticniki), namesceni v Kodi: tecejo v Kodiju, zato jih odpremo na napravi s Kodijem.
-    try:
-        dodatki = _kodi(base, uporabnik, geslo, "Addons.GetAddons",
-                        {"type": "xbmc.python.pluginsource", "enabled": True,
-                         "properties": ["name", "thumbnail", "summary", "extrainfo"]})
-    except Exception:
-        dodatki = {}
-    for d in dodatki.get("addons", []):
-        ident = str(d.get("addonid") or "")
-        if not ident:
-            continue
-        ponuja = " ".join(str(x.get("value") or "") for x in (d.get("extrainfo") or []) if isinstance(x, dict))
-        rezultat.append({"id": "kodi:%s:a%s" % (server["id"], ident), "naslov": d.get("name") or ident,
-                         "vrsta": "glasba" if "audio" in ponuja and "video" not in ponuja else "video",
-                         "url": "kodi-dodatek:%s|%s" % (server["id"], ident), "slika": slika(d.get("thumbnail", "")),
-                         "opis": "Kodi dodatek · " + str(d.get("summary") or "")[:300], "vir": server["ime"],
-                         "skupina": "Kodi dodatki"})
+    # Dodatkov (vticnikov) Kodija ne kazemo: tecejo samo v Kodiju, Safeer jih ne more poganjati.
     pesmi = _kodi(base, uporabnik, geslo, "AudioLibrary.GetSongs",
                   {"properties": ["file", "artist", "album", "duration", "thumbnail", "genre"], "limits": omejitev})
     for p in pesmi.get("songs", []):
@@ -570,7 +554,7 @@ def _stremio_items(base: str, server: dict, query: str) -> list[dict]:
                 continue
             rezultat.append({"id": "stremio:%s:%s:%s" % (server["id"], tip, mid), "naslov": meta.get("name", ""),
                              "vrsta": vrsta, "url": "stremio:%s|%s|%s" % (koren, tip, mid),
-                             "slika": meta.get("poster") or meta.get("logo") or "",
+                             "slika": meta.get("poster") or meta.get("logo") or meta.get("background") or meta.get("thumbnail") or "",
                              "opis": str(meta.get("description") or "")[:500], "leto": int(str(meta.get("releaseInfo") or "0")[:4] or 0)
                              if str(meta.get("releaseInfo") or "")[:4].isdigit() else 0,
                              "imdb_id": mid if mid.startswith("tt") else "", "vir": server["ime"],
@@ -608,6 +592,22 @@ def stremio_prva_epizoda(koren: str, ident: str) -> str:
     if not videi:
         return ""
     return str(sorted(videi, key=lambda v: (int(v.get("season") or 0) or 999, int(v.get("episode") or 0)))[0]["id"])
+
+
+def stremio_poskusne_epizode(koren: str, ident: str) -> list[str]:
+    """Id-ji epizod, po katerih presodimo, ali je serija na voljo: prva, prva epizoda zadnje sezone in zadnja
+    (kot Safeer OS za Android). Prazno, ce dodatek epizod ne navaja."""
+    meta = json.loads(_request(koren + "/meta/series/%s.json" % urllib.parse.quote(ident, safe=""))).get("meta") or {}
+    videi = [v for v in (meta.get("videos") or []) if isinstance(v, dict) and v.get("id") and int(v.get("season") or 0) >= 1]
+    if not videi:
+        return []
+    videi.sort(key=lambda v: (int(v.get("season") or 0), int(v.get("episode") or 0)))
+    zadnja = int(videi[-1].get("season") or 0)
+    izbor: list[str] = []
+    for v in (videi[0], next(v for v in videi if int(v.get("season") or 0) == zadnja), videi[-1]):
+        if str(v["id"]) not in izbor:
+            izbor.append(str(v["id"]))
+    return izbor
 
 
 def stremio_tokovi(koren: str, tip: str, ident: str) -> list[dict]:
@@ -699,12 +699,6 @@ def stremio_preveri(base: str) -> str:
         return ("Ta dodatek ponuja samo torrent povezave. Safeer predvaja samo neposredne tokove, "
                 "zato dodatka nismo dodali.")
     return ""
-
-
-def kodi_odpri_dodatek(base: str, uporabnik: str, geslo: str, dodatek: str, glasba: bool = False) -> None:
-    """Odpre dodatek na zaslonu naprave s Kodijem (dodatki tecejo samo v Kodiju)."""
-    _kodi(base, uporabnik, geslo, "GUI.ActivateWindow",
-          {"window": "music" if glasba else "videos", "parameters": ["plugin://%s/" % dodatek, "return"]})
 
 
 def kodi_predvajaj(base: str, uporabnik: str, geslo: str, url: str) -> None:

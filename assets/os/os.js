@@ -3059,6 +3059,15 @@
     if (vrsta === "mediaKatalogOsvezen" && podatki && S.razdelek === "media" && podatki.kljuc && podatki.kljuc === media.kljuc) {
       prevzemiMediaKatalog(podatki, true);
     }
+    // Preverjanje v ozadju: naslovi, ki jih noben dodatek ne predvaja, izginejo iz mreze (brez obvestila).
+    if (vrsta === "mediaNiNaVoljo" && podatki && podatki.idji && media.katalog) {
+      var prejKartic = media.katalog.length;
+      media.katalog = media.katalog.filter(function (x) { return podatki.idji.indexOf(x.id) < 0; });
+      if (media.katalog.length !== prejKartic) {
+        if (typeof media.skupaj === "number") media.skupaj = Math.max(media.katalog.length, media.skupaj - (prejKartic - media.katalog.length));
+        if (S.razdelek === "media") narisiMedia();
+      }
+    }
     if (vrsta === "kodaPrijave" && podatki) pokaziKodoPrijave(podatki);
     if (vrsta === "sporocilaNova") {
       if (S.razdelek === "sporocila") naloziSporocila();

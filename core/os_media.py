@@ -1402,10 +1402,27 @@ class MediaCenter:
     # --- razpolozljivost: prikazemo samo, kar se da predvajati -----------------
     NI_NA_VOLJO_VELJA = 6 * 3600        # dodatki dobivajo nove vsebine: "ni na voljo" velja nekaj ur
 
+    JE_NA_VOLJO_VELJA = 24 * 3600       # preverjeno "je na voljo" v tem zagonu ne sprasujemo znova
+
     @staticmethod
-    def _kljuc_razpolozljivosti(item: dict) -> str:
-        """Film po TMDB/IMDb; epizode in drugih vrst ne skrivamo (ostale epizode so morda na voljo)."""
-        if str(item.get("vrsta") or "") != "film":
+    def _stremio_naslov_vnosa(item: dict) -> Optional[tuple]:
+        """(koren, tip, ident) filma ali serije iz dodatka Stremio (tudi med razlicicami zdruzene kartice)."""
+        for u in [str(item.get("url") or "")] + [str(v.get("url") or "") for v in (item.get("razlicice") or []) if isinstance(v, dict)]:
+            if u.startswith("stremio:"):
+                koren, tip, ident = (u[len("stremio:"):].split("|") + ["", ""])[:3]
+                if koren and tip in ("movie", "series") and ident:
+                    return koren, tip, ident
+        return None
+
+    @classmethod
+    def _kljuc_razpolozljivosti(cls, item: dict) -> str:
+        """Film po TMDB/IMDb; serija iz dodatka po svojem id-ju. Posamezne epizode in drugih vrst ne skrivamo
+        (ostale epizode so morda na voljo)."""
+        vrsta = str(item.get("vrsta") or "")
+        if vrsta == "serija":
+            naslov = cls._stremio_naslov_vnosa(item)
+            return "serija:" + naslov[2] if naslov and naslov[1] == "series" and ":" not in naslov[2] else ""
+        if vrsta != "film":
             return ""
         ident = str(item.get("tmdb_id") or "") if int(item.get("tmdb_id") or 0) else str(item.get("imdb_id") or item.get("id") or "")
         return "film:" + ident if ident else ""
@@ -1442,10 +1459,102 @@ class MediaCenter:
         cas = self._ni_na_voljo_beri().get(kljuc)
         return cas is not None and time.time() - cas <= self.NI_NA_VOLJO_VELJA
 
+    @staticmethod
+    def _predvajljivi(tokovi: list) -> bool:
+        return any(t.get("url") and not t.get("zunanje")
+                   and (str(t["url"]).startswith("https://") or media_servers.dovoljen_naslov(str(t["url"]))) for t in tokovi)
+
+    def _na_voljo(self, koren: str, tip: str, ident: str) -> Optional[bool]:
+        """True = kateri od dodatkov ima tok, False = vsi so odgovorili in nobeden nima, None = ne vemo (izpad)."""
+        if tip == "series" and ":" not in ident:
+            try:
+                poskusi = media_servers.stremio_poskusne_epizode(koren, ident)
+            except Exception:
+                return None
+            if not poskusi:
+                return None
+            neznano = False
+            for epizoda in poskusi:
+                if self._predvajljivi(self._stremio_tokovi_vseh(koren, tip, epizoda)):
+                    return True
+                if not getattr(self._tokovi_odgovor, "vsi", False):
+                    neznano = True
+            return None if neznano else False
+        if self._predvajljivi(self._stremio_tokovi_vseh(koren, tip, ident)):
+            return True
+        return False if getattr(self._tokovi_odgovor, "vsi", False) else None
+
+    @staticmethod
+    def _ima_drug_vir(item: dict) -> bool:
+        """Kartica ima tudi vir, ki ni dodatek (splet, javna last, osebni streznik): take ne preverjamo in ne skrivamo."""
+        naslovi = [str(item.get("url") or "")] + [str(v.get("url") or "") for v in (item.get("razlicice") or []) if isinstance(v, dict)]
+        return any(u.startswith(("http://", "https://", "file:", "/", "\\\\")) or (len(u) > 2 and u[1:3] == ":\\") for u in naslovi)
+
+    def preveri_razpolozljivost(self, vnosi: Any, ob_ni=None, najvec: int = 40) -> int:
+        """V ozadju preveri filme in serije, ki jih ponujajo samo dodatki Stremio (kot Safeer OS za Android):
+        cesar noben dodatek ne predvaja, si zapomnimo in sporocimo z ob_ni(seznam id-jev kartic). Vrne stevilo
+        naslovov, ki jih je dala v preverjanje."""
+        if not isinstance(vnosi, list):
+            return 0
+        with self._lock:
+            znano_je = self.__dict__.setdefault("_je_na_voljo", {})
+            v_teku = self.__dict__.setdefault("_preverjam", set())
+        zdaj = time.time()
+        kandidati = []
+        for item in vnosi:
+            if not isinstance(item, dict):
+                continue
+            kljuc = self._kljuc_razpolozljivosti(item)
+            if not kljuc or kljuc in v_teku or self.znano_ni_na_voljo(item) or zdaj - znano_je.get(kljuc, 0) < self.JE_NA_VOLJO_VELJA:
+                continue
+            naslov = self._stremio_naslov_vnosa(item)
+            if not naslov or self._ima_drug_vir(item):
+                continue
+            kandidati.append((kljuc, item, naslov))
+            if len(kandidati) >= najvec:
+                break
+        if not kandidati:
+            return 0
+        for kljuc, _, _ in kandidati:
+            v_teku.add(kljuc)
+
+        def eden(kandidat):
+            kljuc, item, (koren, tip, ident) = kandidat
+            try:
+                return kljuc, item, self._na_voljo(koren, tip, ident)
+            except Exception:
+                return kljuc, item, None
+
+        def delo():
+            from concurrent.futures import ThreadPoolExecutor
+            ni: list[str] = []
+            zadnje = time.time()
+            try:
+                with ThreadPoolExecutor(max_workers=3) as bazen:
+                    for kljuc, item, izid in bazen.map(eden, kandidati):
+                        v_teku.discard(kljuc)
+                        if izid is True:
+                            znano_je[kljuc] = time.time()
+                        elif izid is False:
+                            self.oznaci_ni_na_voljo(item)
+                            ni.append(str(item.get("id") or ""))
+                        if ni and ob_ni is not None and time.time() - zadnje > 1.5:
+                            ob_ni(ni); ni = []; zadnje = time.time()
+            finally:
+                for kljuc, _, _ in kandidati:
+                    v_teku.discard(kljuc)
+            if ni and ob_ni is not None:
+                ob_ni(ni)
+
+        threading.Thread(target=delo, name="safeer-razpolozljivost", daemon=True).start()
+        return len(kandidati)
+
     def brez_nerazpolozljivih(self, rezultat: Any) -> Any:
-        """Katalog brez filmov, za katere vemo, da jih noben vir ne predvaja."""
-        if isinstance(rezultat, dict) and isinstance(rezultat.get("vnosi"), list) and self._ni_na_voljo_beri():
-            vnosi = [v for v in rezultat["vnosi"] if not self.znano_ni_na_voljo(v)]
+        """Katalog brez filmov in serij, za katere vemo, da jih noben vir ne predvaja, in brez kartic dodatkov
+        Kodija iz starega predpomnilnika (Safeer jih ne more poganjati, zato jih ne ponuja)."""
+        if isinstance(rezultat, dict) and isinstance(rezultat.get("vnosi"), list):
+            vnosi = [v for v in rezultat["vnosi"] if not (isinstance(v, dict) and (
+                self.znano_ni_na_voljo(v) or str(v.get("url") or "").startswith("kodi-dodatek:")))]
             if len(vnosi) != len(rezultat["vnosi"]):
                 novo = dict(rezultat, vnosi=vnosi)
                 if isinstance(rezultat.get("skupaj"), int):  # stevec nad mrezo naj se ujema s prikazanim
@@ -2781,20 +2890,11 @@ class MediaCenter:
         item = self._dynamic_items.get(item_id) or next((item for item in self.catalog()["vnosi"] if item.get("id") == item_id), None)
         if not item:
             return None
-        # Posebni naslovi (Kodi dodatek, Stremio dodatek) so lahko tudi med razlicicami zdruzene kartice.
+        # Posebni naslovi (Stremio dodatek) so lahko tudi med razlicicami zdruzene kartice.
         posebni = [str(item.get("url") or "")] + [str(v.get("url") or "") for v in (item.get("razlicice") or []) if isinstance(v, dict)]
-        kodi_url = next((u for u in posebni if u.startswith("kodi-dodatek:")), "")
-        if kodi_url:
-            server_id, _, dodatek = kodi_url[len("kodi-dodatek:"):].partition("|")
-            kodi = self._kodi_streznik(server_id)
-            if not kodi:
-                return dict(item, napaka="Kodi ni več povezan.")
-            try:
-                media_servers.kodi_odpri_dodatek(kodi[0]["url"], kodi[0].get("uporabnik", ""), kodi[1],
-                                                 dodatek, item.get("vrsta") == "glasba")
-            except Exception:
-                return dict(item, napaka="Kodi dodatka ni bilo mogoče odpreti.")
-            return dict(item, sporocilo="%s se odpira na napravi s Kodijem (%s)." % (item.get("naslov"), kodi[0].get("ime")))
+        if any(u.startswith("kodi-dodatek:") for u in posebni):
+            # Kartica iz starega predpomnilnika: dodatkov Kodija ne ponujamo vec (Safeer jih ne more poganjati).
+            return dict(item, napaka_koda="ni_toka")
         stremio_url = next((u for u in posebni if u.startswith("stremio:")), "")
         if stremio_url:
             koren, tip, ident = (stremio_url[len("stremio:"):].split("|") + ["", ""])[:3]
@@ -2824,7 +2924,11 @@ class MediaCenter:
             # Brez predvajljivega toka ni strani in ni seznama povezav: kratko obvestilo, vsebina izgine s seznama.
             # Za ure si to zapomnimo le, ce so odgovorili vsi dodatki (izpad dodatka ni "ni na voljo").
             if getattr(self._tokovi_odgovor, "vsi", False):
-                self.oznaci_ni_na_voljo(item)
+                if tip == "series" and ":" not in ident:
+                    # Serija: ena epizoda brez toka se ni "serije ni" - presodimo po vec epizodah (v ozadju).
+                    self.preveri_razpolozljivost([item])
+                else:
+                    self.oznaci_ni_na_voljo(item)
             return dict(item, napaka_koda="ni_toka")
         if item.get("tunein_id"):
             try:

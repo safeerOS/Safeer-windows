@@ -83,7 +83,7 @@ class SafeerPredvajalnikOkno(QMainWindow):
         self.meni_poglavja = self.menuBar().addMenu("Po&glavja")
         self._poglavja_kljuc = None
         nast = self.menuBar().addMenu("&Nastavitve")
-        a = QAction("&Dodatki (Stremio, Kodi)…", self); a.setShortcut("Ctrl+D"); a.triggered.connect(self.odpri_dodatke); nast.addAction(a)
+        a = QAction("&Dodatki (Stremio)…", self); a.setShortcut("Ctrl+D"); a.triggered.connect(self.odpri_dodatke); nast.addAction(a)
         self.meni_kakovost = self.menuBar().addMenu("&Kakovost")
         self.meni_kakovost.menuAction().setVisible(False)   # le pri HLS/DASH z vec razlicicami
         self.meni_zvok = self.menuBar().addMenu("&Zvok")
@@ -205,7 +205,7 @@ class SafeerPredvajalnikOkno(QMainWindow):
         okno = DodatkiOkno(self)
         if okno.exec():
             n = okno.nastavitve
-            self.statusBar().showMessage(f"Dodatki shranjeni: Stremio {len(n['stremio_dodatki'])}, Kodi {len(n['kodi_dodatki'])}", 4000)
+            self.statusBar().showMessage(f"Dodatki shranjeni: Stremio {len(n['stremio_dodatki'])}", 4000)
 
     def brskaj_dodatke(self) -> None:
         """Stremio dodatki, ki jih je uporabnik vnesel: katalog → vnos → tok → predvajanje v tem oknu."""
