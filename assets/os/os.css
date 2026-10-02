@@ -1036,3 +1036,11 @@ body.vrstica-skrita.nacin-splet .rocaj-vrstice { display: block; }
 .media-seznam-glava { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 .media-seznam-glava h3 { margin: 0; font-size: 20px; }
 .media-seznam-glava small { color: var(--medlo); flex: 1; }
+.media-seznam-meni { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0; padding: 10px 12px;
+  border: 1px solid var(--rob); border-radius: 12px; background: var(--kartica); }
+.media-seznam-meni input { height: 40px; min-width: 200px; padding: 0 12px; border: 1px solid var(--rob); border-radius: 10px;
+  background: transparent; color: inherit; }
+.media-kartica .media-odstrani { position: absolute; left: 9px; top: 9px; width: 26px; height: 26px; display: grid; place-items: center;
+  border-radius: 50%; background: rgba(3,7,10,.86); color: #fff; font-size: 14px; opacity: 0; }
+.media-kartica:hover .media-odstrani, .media-kartica:focus-visible .media-odstrani { opacity: 1; }
+.media-kartica .media-odstrani:hover { background: #b3261e; }

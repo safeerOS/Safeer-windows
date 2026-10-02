@@ -3881,6 +3881,18 @@
       var znacka = x.kakovost || (x.vrsta === "tv-v-zivo" ? "V živo" : x.vrsta === "radio" ? "Radio" : x.vrsta === "glasba" ? "Glasba" : "");
       if (znacka) card.appendChild(el("span", "media-kakovost", ubezi(znacka)));
       if (Number(x.ocena || 0) > 0) card.appendChild(el("span", "media-ocena", "★ " + Number(x.ocena).toFixed(1)));
+      if (izSeznama) {
+        var odstraniSkladbo = el("span", "media-odstrani", "✕"); odstraniSkladbo.title = t("seznamOdstraniSkladbo");
+        odstraniSkladbo.onclick = function (e) {
+          e.stopPropagation();
+          var ime = media.seznam.ime;
+          klic("mediaOdstraniSSeznama", [ime, x.id]).then(function () {
+            naloziSeznamePredvajanja();
+            klic("mediaSeznam", [ime]).then(function (sz) { media.seznam = sz && sz.vnosi && sz.vnosi.length ? sz : null; narisiMedia(); });
+          });
+        };
+        card.appendChild(odstraniSkladbo);
+      }
       card.onclick = function () {
         if (x.tmdb_id || x.vrsta === "serija" || (x.vrsta === "film" && !x.peertube_uuid)) {
           odpriMediaPodrobnosti(x.id);
@@ -3898,6 +3910,18 @@
     narisiMediaVire();
   }
   // ------------------------------------------------------------------ seznami predvajanja
+  // "1 skladba, 2 skladbi, 3 skladbe, 5 skladb" (slovenska dvojina in mnozina); drugi jeziki ednina in mnozina.
+  function stSkladb(n) {
+    n = Number(n) || 0;
+    if (n === 1) return t("seznamSkladba");
+    if (jezik === "sl") {
+      var o = n % 100;
+      if (o === 2) return t("seznamSkladbi").replace("2", String(n));
+      if (o === 3 || o === 4) return t("seznamSkladbe", { n: n });
+      if (o === 1) return t("seznamSkladba").replace("1", String(n));
+    }
+    return t("seznamSkladb", { n: n });
+  }
   function seznamiVidni() { return (media.filter === "glasba" || media.filter === "vse") && !media.query.trim(); }
   function naloziSeznamePredvajanja() {
     return klic("mediaSeznami").then(function (s) { media.seznami = s || []; narisiSeznamePredvajanja(); }, function () {});
@@ -3927,7 +3951,7 @@
       nazaj.onclick = function () { media.seznam = null; narisiMedia(); };
       glava.appendChild(nazaj);
       glava.appendChild(el("h3", "", ubezi(sz.ime)));
-      glava.appendChild(el("small", "", ubezi(t("seznamSkladb", { n: sz.vnosi.length }) + (sz.vir ? " · " + sz.vir : ""))));
+      glava.appendChild(el("small", "", ubezi(stSkladb(sz.vnosi.length) + (sz.vir ? " · " + sz.vir : ""))));
       var vse = el("button", "gumb glavni", ubezi("▶ " + t("seznamPredvajajVse")));
       vse.onclick = function () { var prvi = sz.vnosi[0]; if (prvi) { nastaviVrsto(prvi); odpriMedia(prvi.id); } };
       glava.appendChild(vse);
@@ -3953,7 +3977,7 @@
         k.appendChild(slika);
       } else k.appendChild(el("span", "media-brez-slike", svg("glasba")));
       var opis = el("span"); opis.appendChild(el("b", "", ubezi(sz.ime)));
-      opis.appendChild(el("small", "", ubezi(t("seznamSkladb", { n: sz.stevilo }) + (sz.vir ? " · " + sz.vir : ""))));
+      opis.appendChild(el("small", "", ubezi(stSkladb(sz.stevilo) + (sz.vir ? " · " + sz.vir : ""))));
       k.appendChild(opis);
       k.onclick = function () { odpriSeznamPredvajanja(sz.ime); };
       vrsta.appendChild(k);
@@ -3965,6 +3989,31 @@
     obrazec.onsubmit = function (e) { e.preventDefault(); var v = polje.value; polje.value = ""; uvoziSeznamPredvajanja(v); };
     vrsta.appendChild(obrazec);
     c.appendChild(vrsta);
+  }
+  // "Na seznam": trenutno skladbo dodas na obstojec seznam predvajanja ali na novega (svoj seznam nastaja med poslusanjem).
+  function pokaziSeznamMeni() {
+    var m = $("mediaSeznamMeni"), item = media.aktivni; if (!m || !item) return;
+    if (!m.hidden) { m.hidden = true; return; }
+    m.innerHTML = "";
+    var dodaj = function (ime) {
+      ime = String(ime || "").trim(); if (!ime) return;
+      klic("mediaDodajNaSeznam", [ime, item.id]).then(function (r) {
+        m.hidden = true;
+        obvesti(r && r.ok ? t("seznamDodano", { ime: ime }) : (r && r.ze ? t("seznamZe", { ime: ime }) : t("seznamNiMogoce")));
+        naloziSeznamePredvajanja();
+      }, function () { obvesti(t("seznamNiMogoce")); });
+    };
+    (media.seznami || []).forEach(function (sz) {
+      var g = el("button", "gumb", ubezi(sz.ime)); g.onclick = function () { dodaj(sz.ime); }; m.appendChild(g);
+    });
+    var obrazec = document.createElement("form"), polje = document.createElement("input");
+    polje.type = "text"; polje.maxLength = 60; polje.placeholder = t("seznamNovIme");
+    var nov = el("button", "gumb", ubezi(t("seznamNov"))); nov.type = "submit";
+    obrazec.style.display = "flex"; obrazec.style.gap = "8px";
+    obrazec.appendChild(polje); obrazec.appendChild(nov);
+    obrazec.onsubmit = function (e) { e.preventDefault(); if (!polje.value.trim()) { polje.focus(); return; } dodaj(polje.value); };
+    m.appendChild(obrazec);
+    m.hidden = false;
   }
   // Vgradni predvajalnik YouTuba sporoca stanje (konec posnetka, napaka) s postMessage: ob koncu naslednja iz vrste.
   window.addEventListener("message", function (e) {
@@ -4232,6 +4281,8 @@
       if (item.stran) { otvoriSpletnoStran(item.stran, item.naslov); return; }
       media.aktivni = item;
       klic("mediaImaKodi").then(function (ima) { var g = $("mediaNaKodi"); if (g) g.hidden = !ima; });
+      var gs = $("mediaNaSeznam"); if (gs) gs.hidden = !(item.vrsta === "glasba" || item.vrsta === "podcast");
+      var ms = $("mediaSeznamMeni"); if (ms) ms.hidden = true;
       var gz = $("mediaNaZvocnik"); if (gz) gz.hidden = !!(item.native || item.vrsta === "film" || item.vrsta === "serija" || item.vrsta === "video");
       var pz = $("mediaZvocnikPlosca"); if (pz) pz.hidden = true;
       if (!item.native) predvajajHtml(item, 0);
@@ -4675,6 +4726,7 @@
   on("mediaPredvajalnikNazaj", "click", nazajIzPredvajalnika);
   on("mediaMiniOdpri", "click", odpriIzMini);
   on("mediaMiniZapri", "click", zapriMediaHtml);
+  on("mediaNaSeznam", "click", pokaziSeznamMeni);
   on("mediaMiniPrejsnja", "click", function () { predvajajIzVrste(-1); });
   on("mediaMiniNaslednja", "click", function () { predvajajIzVrste(1); });
   on("mediaMiniPremor", "click", function () {

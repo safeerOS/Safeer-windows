@@ -2317,6 +2317,10 @@ class SafeerOsWindow(QMainWindow):
             return izid
         if metoda == "mediaOdstraniSeznam":
             return self.media_center.odstrani_seznam(str(a[0]) if a else "")
+        if metoda == "mediaDodajNaSeznam":
+            return self.media_center.dodaj_na_seznam(str(a[0]) if a else "", str(a[1]) if len(a) > 1 else "")
+        if metoda == "mediaOdstraniSSeznama":
+            return self.media_center.odstrani_s_seznama(str(a[0]) if a else "", str(a[1]) if len(a) > 1 else "")
         if metoda == "mediaSeznamZamenjava":
             return self.media_center.seznam_posnetek(str(a[0]) if a else "", zamenjaj=True)
 

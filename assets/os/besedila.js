@@ -1,6 +1,8 @@
 /* Besedila Safeer OS za racunalnik: sl, en, de, es, fr, it (isti nabor kot drugje v Safeerju). */
 var BESEDILA_OS = {
   sl: {
+    seznamSkladba:"1 skladba", seznamSkladbi:"2 skladbi", seznamSkladbe:"{n} skladbe",
+    seznamDodaj:"＋ Na seznam", seznamNov:"Nov seznam …", seznamNovIme:"Ime novega seznama", seznamDodano:"Dodano na seznam {ime}", seznamZe:"Že na seznamu {ime}", seznamNiMogoce:"Te vsebine ni mogoče dati na seznam.", seznamOdstraniSkladbo:"Odstrani s seznama",
     seznamiNaslov:"Seznami predvajanja", seznamUvozi:"Uvozi", seznamUvoziNamig:"Prilepi povezavo seznama iz YouTuba ali Spotifyja …", seznamUvazam:"Uvažam seznam …", seznamUvozen:"Uvoženo: {ime} ({n})", seznamNiSeznam:"To ni povezava seznama predvajanja. V YouTubu ali Spotifyju odpri seznam in izberi Deli > Kopiraj povezavo.", seznamNiUspel:"Seznama ni bilo mogoče prebrati. Biti mora javen ali nenaveden – zasebnih seznamov (Všečki, Liked Songs) brez prijave ni mogoče brati.", seznamOdstrani:"Odstrani seznam", seznamOdstraniRes:"Res odstrani?", seznamPredvajajVse:"Predvajaj vse", seznamSkladb:"{n} skladb", seznamNazaj:"← Vsi seznami", seznamBrezPosnetka:"Posnetka za »{ime}« ni bilo mogoče predvajati – naslednja.",
     oznakeNaslov:"Oznake", panoOznake:"Oznake pogovora", panoNovaOznaka:"Dodaj oznako …", panoPreimenuj:"Preimenuj", panoZdruzi:"Združi z …", osebaPreimenujNaslov:"Ime osebe", osebaPreimenujOpis:"Ime velja povsod, kjer se ta oseba pojavi. Prazno = ime iz kanala ({privzeto}).", osebaZdruziNaslov:"Združi z drugo osebo", osebaZdruziOpis:"Vsi pogovori izbrane osebe se preselijo k »{ime}«. Razdružiš lahko kadar koli (pano › naslovi).", osebaRazdruzi:"Razdruži", shrani:"Shrani", privzetoIme:"iz kanala: {ime}",
     mapaPrejeto:"Prejeto", mapaNeprebrano:"Neprebrano", mapaPoslano:"Poslano", mapaVsiPogovori:"Vsi pogovori", kanaliNaslov:"Kanali", isciSporocila:"Išči po imenu, zadevi ali besedilu …", filterKlepeti:"Klepeti", panoIdentitete:"Naslovi in računi", panoPriponke:"Datoteke v pogovoru", panoNiPriponk:"Še ni datotek.", pokaziPano:"Podatki o osebi", niZadetkov:"Ni zadetkov.",
@@ -75,6 +77,8 @@ var BESEDILA_OS = {
     odstrani: "Odstrani", wifiIzklopljen: "Wi-Fi je izklopljen"
   },
   en: {
+    seznamSkladba:"1 track",
+    seznamDodaj:"＋ Add to playlist", seznamNov:"New playlist …", seznamNovIme:"Name of the new playlist", seznamDodano:"Added to {ime}", seznamZe:"Already in {ime}", seznamNiMogoce:"This item cannot be added to a playlist.", seznamOdstraniSkladbo:"Remove from playlist",
     seznamiNaslov:"Playlists", seznamUvozi:"Import", seznamUvoziNamig:"Paste a playlist link from YouTube or Spotify …", seznamUvazam:"Importing playlist …", seznamUvozen:"Imported: {ime} ({n})", seznamNiSeznam:"This is not a playlist link. Open the playlist in YouTube or Spotify and choose Share > Copy link.", seznamNiUspel:"The playlist could not be read. It must be public or unlisted – private lists (Liked videos, Liked Songs) cannot be read without signing in.", seznamOdstrani:"Remove playlist", seznamOdstraniRes:"Really remove?", seznamPredvajajVse:"Play all", seznamSkladb:"{n} tracks", seznamNazaj:"← All playlists", seznamBrezPosnetka:"“{ime}” could not be played – next one.",
     oznakeNaslov:"Labels", panoOznake:"Conversation labels", panoNovaOznaka:"Add a label…", panoPreimenuj:"Rename", panoZdruzi:"Merge with…", osebaPreimenujNaslov:"Person's name", osebaPreimenujOpis:"The name applies everywhere this person appears. Empty = name from the channel ({privzeto}).", osebaZdruziNaslov:"Merge with another person", osebaZdruziOpis:"All conversations of the chosen person move to “{ime}”. You can split them again any time (panel › addresses).", osebaRazdruzi:"Split", shrani:"Save", privzetoIme:"from channel: {ime}",
     mapaPrejeto:"Inbox", mapaNeprebrano:"Unread", mapaPoslano:"Sent", mapaVsiPogovori:"All conversations", kanaliNaslov:"Channels", isciSporocila:"Search by name, subject or text…", filterKlepeti:"Chats", panoIdentitete:"Addresses and accounts", panoPriponke:"Files in this conversation", panoNiPriponk:"No files yet.", pokaziPano:"Person details", niZadetkov:"No results.",
@@ -149,6 +153,8 @@ var BESEDILA_OS = {
     odstrani: "Remove", wifiIzklopljen: "Wi-Fi is off"
   },
   de: {
+    seznamSkladba:"1 Titel",
+    seznamDodaj:"＋ Zur Playlist", seznamNov:"Neue Playlist …", seznamNovIme:"Name der neuen Playlist", seznamDodano:"Zu {ime} hinzugefügt", seznamZe:"Bereits in {ime}", seznamNiMogoce:"Dieser Inhalt kann keiner Playlist hinzugefügt werden.", seznamOdstraniSkladbo:"Aus Playlist entfernen",
     seznamiNaslov:"Playlists", seznamUvozi:"Importieren", seznamUvoziNamig:"Playlist-Link von YouTube oder Spotify einfügen …", seznamUvazam:"Playlist wird importiert …", seznamUvozen:"Importiert: {ime} ({n})", seznamNiSeznam:"Das ist kein Playlist-Link. Öffne die Playlist in YouTube oder Spotify und wähle Teilen > Link kopieren.", seznamNiUspel:"Die Playlist konnte nicht gelesen werden. Sie muss öffentlich oder nicht gelistet sein – private Listen lassen sich ohne Anmeldung nicht lesen.", seznamOdstrani:"Playlist entfernen", seznamOdstraniRes:"Wirklich entfernen?", seznamPredvajajVse:"Alle abspielen", seznamSkladb:"{n} Titel", seznamNazaj:"← Alle Playlists", seznamBrezPosnetka:"„{ime}“ konnte nicht abgespielt werden – weiter.",
     vrsticaSkrij: "Seitenleiste ausblenden", vrsticaPokazi: "Seitenleiste einblenden (Strg+B)", vrsticaSkrci: "Seitenleiste einklappen (Strg+B)", vrsticaRazsiri: "Seitenleiste ausklappen (Strg+B)",
     pisiNapravi: "Einem Gerät schreiben", niNapravKlepet: "Noch kein anderes Gerät im Safeer Link kann chatten.", klepetCaka: "Das Gerät ist offline – es erhält die Nachricht, sobald es sich verbindet.",
@@ -219,6 +225,8 @@ var BESEDILA_OS = {
     odstrani: "Entfernen", wifiIzklopljen: "WLAN ist aus"
   },
   es: {
+    seznamSkladba:"1 canción",
+    seznamDodaj:"＋ A una lista", seznamNov:"Lista nueva …", seznamNovIme:"Nombre de la lista nueva", seznamDodano:"Añadido a {ime}", seznamZe:"Ya está en {ime}", seznamNiMogoce:"Este contenido no se puede añadir a una lista.", seznamOdstraniSkladbo:"Quitar de la lista",
     seznamiNaslov:"Listas de reproducción", seznamUvozi:"Importar", seznamUvoziNamig:"Pega el enlace de una lista de YouTube o Spotify …", seznamUvazam:"Importando la lista …", seznamUvozen:"Importada: {ime} ({n})", seznamNiSeznam:"Esto no es un enlace de lista. Abre la lista en YouTube o Spotify y elige Compartir > Copiar enlace.", seznamNiUspel:"No se pudo leer la lista. Debe ser pública u oculta: las listas privadas no se pueden leer sin iniciar sesión.", seznamOdstrani:"Quitar lista", seznamOdstraniRes:"¿Quitar de verdad?", seznamPredvajajVse:"Reproducir todo", seznamSkladb:"{n} canciones", seznamNazaj:"← Todas las listas", seznamBrezPosnetka:"No se pudo reproducir «{ime}»: siguiente.",
     vrsticaSkrij: "Ocultar barra lateral", vrsticaPokazi: "Mostrar barra lateral (Ctrl+B)", vrsticaSkrci: "Contraer barra lateral (Ctrl+B)", vrsticaRazsiri: "Expandir barra lateral (Ctrl+B)",
     pisiNapravi: "Escribir a un dispositivo", niNapravKlepet: "Aún no hay otro dispositivo en Safeer Link que pueda chatear.", klepetCaka: "El dispositivo no está conectado: recibirá el mensaje cuando se conecte.",
@@ -289,6 +297,8 @@ var BESEDILA_OS = {
     odstrani: "Quitar", wifiIzklopljen: "El Wi-Fi está apagado"
   },
   fr: {
+    seznamSkladba:"1 titre",
+    seznamDodaj:"＋ À une playlist", seznamNov:"Nouvelle playlist …", seznamNovIme:"Nom de la nouvelle playlist", seznamDodano:"Ajouté à {ime}", seznamZe:"Déjà dans {ime}", seznamNiMogoce:"Ce contenu ne peut pas être ajouté à une playlist.", seznamOdstraniSkladbo:"Retirer de la playlist",
     seznamiNaslov:"Playlists", seznamUvozi:"Importer", seznamUvoziNamig:"Colle le lien d’une playlist YouTube ou Spotify …", seznamUvazam:"Importation de la playlist …", seznamUvozen:"Importée : {ime} ({n})", seznamNiSeznam:"Ce n’est pas un lien de playlist. Ouvre la playlist dans YouTube ou Spotify et choisis Partager > Copier le lien.", seznamNiUspel:"Impossible de lire la playlist. Elle doit être publique ou non répertoriée – les listes privées ne sont pas lisibles sans connexion.", seznamOdstrani:"Supprimer la playlist", seznamOdstraniRes:"Vraiment supprimer ?", seznamPredvajajVse:"Tout lire", seznamSkladb:"{n} titres", seznamNazaj:"← Toutes les playlists", seznamBrezPosnetka:"« {ime} » n’a pas pu être lu – suivant.",
     vrsticaSkrij: "Masquer la barre latérale", vrsticaPokazi: "Afficher la barre latérale (Ctrl+B)", vrsticaSkrci: "Réduire la barre latérale (Ctrl+B)", vrsticaRazsiri: "Développer la barre latérale (Ctrl+B)",
     pisiNapravi: "Écrire à un appareil", niNapravKlepet: "Aucun autre appareil de Safeer Link ne peut encore discuter.", klepetCaka: "L’appareil est hors ligne – il recevra le message à sa connexion.",
@@ -359,6 +369,8 @@ var BESEDILA_OS = {
     odstrani: "Retirer", wifiIzklopljen: "Le Wi-Fi est désactivé"
   },
   it: {
+    seznamSkladba:"1 brano",
+    seznamDodaj:"＋ A una playlist", seznamNov:"Nuova playlist …", seznamNovIme:"Nome della nuova playlist", seznamDodano:"Aggiunto a {ime}", seznamZe:"Già in {ime}", seznamNiMogoce:"Questo contenuto non può essere aggiunto a una playlist.", seznamOdstraniSkladbo:"Rimuovi dalla playlist",
     seznamiNaslov:"Playlist", seznamUvozi:"Importa", seznamUvoziNamig:"Incolla il link di una playlist di YouTube o Spotify …", seznamUvazam:"Importazione della playlist …", seznamUvozen:"Importata: {ime} ({n})", seznamNiSeznam:"Questo non è il link di una playlist. Apri la playlist in YouTube o Spotify e scegli Condividi > Copia link.", seznamNiUspel:"Impossibile leggere la playlist. Deve essere pubblica o non in elenco: le liste private non si possono leggere senza accesso.", seznamOdstrani:"Rimuovi playlist", seznamOdstraniRes:"Rimuovere davvero?", seznamPredvajajVse:"Riproduci tutto", seznamSkladb:"{n} brani", seznamNazaj:"← Tutte le playlist", seznamBrezPosnetka:"Impossibile riprodurre «{ime}» – prossimo.",
     vrsticaSkrij: "Nascondi barra laterale", vrsticaPokazi: "Mostra barra laterale (Ctrl+B)", vrsticaSkrci: "Comprimi barra laterale (Ctrl+B)", vrsticaRazsiri: "Espandi barra laterale (Ctrl+B)",
     pisiNapravi: "Scrivi a un dispositivo", niNapravKlepet: "Nessun altro dispositivo in Safeer Link può ancora chattare.", klepetCaka: "Il dispositivo non è connesso: riceverà il messaggio quando si connette.",

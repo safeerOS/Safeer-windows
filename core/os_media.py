@@ -1428,7 +1428,8 @@ class MediaCenter:
             "id": "seznam:" + hashlib.sha1((ime + "\n" + kljuc).encode("utf-8")).hexdigest()[:20],
             "naslov": str(s.get("naslov") or ""), "izvajalec": str(s.get("izvajalec") or ""),
             "slika": str(s.get("slika") or ""), "vrsta": "glasba", "vir": vir or "Seznam", "vir_id": "seznam",
-            "url": ("https://www.youtube.com/watch?v=" + yt) if yt else "", "youtube": yt,
+            # Posnetek z YouTuba ali (skladba, dodana iz kataloga) njen neposredni naslov.
+            "url": ("https://www.youtube.com/watch?v=" + yt) if yt else str(s.get("url") or ""), "youtube": yt,
             "seznam": ime, "sekund": int(s.get("sekund") or 0),
         }
 
@@ -1472,7 +1473,7 @@ class MediaCenter:
         def delo() -> None:
             with self._lock:
                 sz = next((x for x in self._seznami_beri() if x["ime"] == ime), None)
-            cakajo = [s for s in (sz or {}).get("skladbe", []) if isinstance(s, dict) and not s.get("youtube")]
+            cakajo = [s for s in (sz or {}).get("skladbe", []) if isinstance(s, dict) and not s.get("youtube") and not s.get("url")]
             if not cakajo:
                 return
             from concurrent.futures import ThreadPoolExecutor
@@ -1507,6 +1508,55 @@ class MediaCenter:
 
         threading.Thread(target=delo, daemon=True, name="safeer-seznam-posnetki").start()
 
+    def dodaj_na_seznam(self, ime: str, item_id: str) -> dict:
+        """Skladbo (s seznama ali iz kataloga) doda na konec seznama [ime]; seznam ustvari, ce ga se ni."""
+        ime = str(ime or "").strip()[:60]
+        if not ime:
+            return {"napaka": "ime"}
+        zapis: Optional[dict] = None
+        if str(item_id).startswith("seznam:"):
+            with self._lock:
+                for sz in self._seznami_beri():
+                    for s in sz["skladbe"]:
+                        if isinstance(s, dict) and self._seznam_vnos(sz["ime"], sz.get("vir") or "", s)["id"] == item_id:
+                            zapis = {k: s[k] for k in ("naslov", "izvajalec", "youtube", "slika", "sekund", "url") if k in s}
+        else:
+            vnos = self._dynamic_items.get(item_id)
+            url = str((vnos or {}).get("url") or "")
+            if vnos and str(vnos.get("vrsta") or "") in ("glasba", "podcast", "podkast") and url.startswith(("http://", "https://", "file:")):
+                zapis = {"naslov": str(vnos.get("naslov") or ""), "izvajalec": str(vnos.get("izvajalec") or ""),
+                         "youtube": "", "slika": str(vnos.get("slika") or ""), "sekund": 0, "url": url}
+        if not zapis or not zapis.get("naslov"):
+            return {"napaka": "ni_mogoce"}
+        with self._lock:
+            vsi = self._seznami_beri()
+            cilj = next((x for x in vsi if x["ime"] == ime), None)
+            if cilj is None:
+                cilj = {"ime": ime, "vir": "", "skladbe": []}
+                vsi.insert(0, cilj)
+            if any(isinstance(y, dict) and y.get("naslov") == zapis["naslov"] and y.get("izvajalec") == zapis.get("izvajalec")
+                   for y in cilj["skladbe"]):
+                return {"ze": True, "ime": ime}
+            cilj["skladbe"] = (cilj["skladbe"] + [zapis])[-uvoz_seznama.NAJVEC:]
+            self._seznami_pisi(vsi)
+        return {"ok": True, "ime": ime}
+
+    def odstrani_s_seznama(self, ime: str, item_id: str) -> bool:
+        """Odstrani skladbo s seznama; prazen seznam izgine."""
+        with self._lock:
+            vsi = self._seznami_beri()
+            spremenjeno = False
+            for sz in vsi:
+                if sz["ime"] != ime:
+                    continue
+                ostale = [s for s in sz["skladbe"]
+                          if not (isinstance(s, dict) and self._seznam_vnos(sz["ime"], sz.get("vir") or "", s)["id"] == item_id)]
+                spremenjeno = len(ostale) != len(sz["skladbe"])
+                sz["skladbe"] = ostale
+            if spremenjeno:
+                self._seznami_pisi([x for x in vsi if x["skladbe"]])
+            return spremenjeno
+
     def odstrani_seznam(self, ime: str) -> bool:
         with self._lock:
             vsi = self._seznami_beri()
@@ -1535,7 +1585,8 @@ class MediaCenter:
             return None
         sz, s = zadetek
         stari = str(s.get("youtube") or "")
-        if stari and not zamenjaj:
+        if (stari and not zamenjaj) or (s.get("url") and not stari):
+            # Posnetek je znan (ali pa ima skladba svoj neposredni naslov): nic ne iscemo.
             return self._seznam_vnos(sz["ime"], sz.get("vir") or "", s)
         zavrnjeni = tuple(x for x in (list(s.get("zavrnjeni") or []) + ([stari] if stari else [])) if x)
         if zamenjaj and len(zavrnjeni) > 3:
