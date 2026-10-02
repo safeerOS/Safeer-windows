@@ -69,6 +69,9 @@ body.ureja .bliznjica.dodaj { opacity: .45; }
 .bliznjica.orodje .znak { color: #cfe3dc; font-size: 1.5rem; font-weight: 400; }
 .bliznjica.orodje.dejaven { border-style: solid; border-color: rgba(87, 214, 173, .7); }
 .bliznjica.orodje.dejaven .znak { color: var(--z); }
+/* Napisi dejanj (Dodaj bližnjico, Uredi bližnjice ...) se prelomijo v dve vrstici namesto odrezanega "Dodaj bližn…". */
+.bliznjica.dodaj .ime, .bliznjica.orodje .ime { white-space: normal; text-align: center; line-height: 1.15; font-size: .85rem; }
+.bliznjica.dodaj, .bliznjica.orodje { gap: 6px; padding-top: 12px; padding-bottom: 10px; }
 
 /* Predlogi */
 .predlogi { max-width: 1080px; margin: clamp(30px, 6vh, 56px) auto 0; }
