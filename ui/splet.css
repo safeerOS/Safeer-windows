@@ -61,14 +61,14 @@ body { overflow-x: hidden; }
 .bliznjica:not(.dodaj):hover .odstrani { opacity: 1; }
 .bliznjica .odstrani:hover { background: rgba(214, 87, 87, .9); color: #fff; }
 /* Urejanje bližnjic: križec je viden, dotik bližnjice jo odstrani (dotik, miška in daljinec enako). */
-body.ureja .bliznjica:not(.dodaj) { border-color: rgba(214, 87, 87, .55); }
-body.ureja .bliznjica:not(.dodaj) .odstrani { opacity: 1; background: rgba(214, 87, 87, .9); color: #fff; }
+body.ureja .bliznjica:not(.dodaj):not(.orodje) { border-color: rgba(214, 87, 87, .55); }
+body.ureja .bliznjica:not(.dodaj):not(.orodje) .odstrani { opacity: 1; background: rgba(214, 87, 87, .9); color: #fff; }
 body.ureja .bliznjica.dodaj { opacity: .45; }
-.bliznjice-orodja { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; max-width: 1080px; margin: 12px auto 0; min-height: 34px; }
-.bliznjice-gumb { padding: 7px 14px; border-radius: 999px; border: 1px solid var(--rob); background: transparent; color: var(--b);
-  font: inherit; font-size: .85rem; opacity: .75; cursor: pointer; transition: opacity .15s, border-color .15s; }
-.bliznjice-gumb:hover, .bliznjice-gumb:focus-visible, .bliznjice-gumb.dejaven { opacity: 1; border-color: rgba(87, 214, 173, .6); outline: none; }
-body.tv .bliznjice-gumb:focus { outline: 3px solid var(--z); outline-offset: 3px; opacity: 1; }
+/* Uredi bližnjice / Končano / Obnovi privzete: ploščice v isti mreži, a umirjene (črtkan rob). */
+.bliznjica.orodje { background: rgba(8, 18, 24, .55); border-style: dashed; font-weight: 500; }
+.bliznjica.orodje .znak { color: #cfe3dc; font-size: 1.5rem; font-weight: 400; }
+.bliznjica.orodje.dejaven { border-style: solid; border-color: rgba(87, 214, 173, .7); }
+.bliznjica.orodje.dejaven .znak { color: var(--z); }
 
 /* Predlogi */
 .predlogi { max-width: 1080px; margin: clamp(30px, 6vh, 56px) auto 0; }
