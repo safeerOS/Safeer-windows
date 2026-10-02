@@ -683,7 +683,26 @@ class Hub:
                 stara.zapri(1000, "nova povezava iste naprave")
             except Exception:
                 pass
+        self._stik(device_id)
         return "accepted", ""
+
+    def _stik(self, idji) -> None:
+        """Clan se je oglasil (prijava, sosed, seznam soseda): zabelezi za pospravljanje kroga (link_krog.pospravi)."""
+        try:
+            link_krog.krog().zabelezi_stik(idji, self.ura())
+        except Exception:
+            pass
+
+    def pospravi_krog(self) -> list:
+        """Umakne clane brez stika vec kot DNI_BREZ_STIKA (stare identitete po ponovni namestitvi); umik gre vsem."""
+        try:
+            umaknjeni = link_krog.krog().pospravi(self.nas_id or IDENTITETA_HUBA, self.ura())
+        except Exception:
+            return []
+        if umaknjeni:
+            logging.getLogger("safeer.link").info("Krog: umaknjeni clani brez stika %d dni: %s", link_krog.DNI_BREZ_STIKA, ", ".join(umaknjeni))
+            self._po_spremembi_kroga()
+        return umaknjeni
 
     def odklopi(self, povezava) -> None:
         sosed = self._sosed_povezave(povezava)
@@ -801,6 +820,7 @@ class Hub:
                 self.ob_sosedu(sosed_id, str(getattr(povezava, "naslov", "") or ""))
             except Exception:
                 pass
+        self._stik(sosed_id)
         # Novemu sosedu takoj nase naprave in nas krog.
         self._objavi_sosedom(samo=povezava)
         try:
@@ -942,6 +962,7 @@ class Hub:
             # Cez mejo Huba gredo samo clani kroga (sosed ne more pripeljati tujca) in nikoli mi sami.
             if did and did != self.nas_id and self._je_clan(did):
                 novi[did] = z
+        self._stik(list(novi))
         dodani = []
         with self._zaklep:
             if self._sosedje.get(sosed_id) is not povezava:
@@ -1673,7 +1694,22 @@ class HubStreznik:
             self._streznik = streznik
             self._nit = threading.Thread(target=streznik.serve_forever, name="safeer-hub", daemon=True)
             self._nit.start()
+            threading.Thread(target=self._pospravljanje, name="safeer-hub-pospravljanje", daemon=True).start()
             return True
+
+    def _pospravljanje(self) -> None:
+        """Enkrat na dan (prvic uro po zagonu) pospravi krog (Hub.pospravi_krog); tece, dokler tece streznik."""
+        cakaj = 3600.0
+        while True:
+            time.sleep(cakaj)
+            with self._zaklep:
+                if self._streznik is None:
+                    return
+            try:
+                self.hub.pospravi_krog()
+            except Exception:
+                pass
+            cakaj = 86400.0
 
     def ustavi(self) -> None:
         with self._zaklep:
