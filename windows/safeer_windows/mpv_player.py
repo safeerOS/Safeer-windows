@@ -283,7 +283,9 @@ class MpvPlayerWidget(QWidget):
             except Exception as e:  # noqa: BLE001
                 r = {"ok": False, "koda": str(e)}
             koda = str(r.get("koda") or "")
-            b = ("Poslano na " + ime + " – tam potrdi s Sprejmi." if r.get("ok") else
+            b = ("Poslano na " + ime + " – obvestila so tam izklopljena, zato tam odpri Safeer OS in potrdi s Sprejmi."
+                 if r.get("ok") and r.get("prikaz") == "later" else
+                 "Poslano na " + ime + " – tam potrdi s Sprejmi." if r.get("ok") else
                  ime + " tega še ne zna – tam posodobi Safeer OS." if koda == "stara" else
                  "Tega ni mogoče poslati (datoteka ni v deljeni mapi)." if koda == "ni_deljeno" else
                  ime + " ne sprejema predvajanja z drugih naprav." if koda == "izklopljeno" else ime + " ne odgovarja.")
