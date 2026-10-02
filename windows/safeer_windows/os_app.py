@@ -1959,6 +1959,9 @@ class SafeerOsWindow(QMainWindow):
         if metoda == "zaupanje":
             return self.control_backend.nastavi_zaupanje(bool(a[0]) if a else False)
 
+        if metoda == "predajanje":
+            return self.control_backend.nastavi_predajanje(bool(a[0]) if a else False)
+
         if metoda == "vseNaprave":
             return self.control_backend.vse_naprave()
 
