@@ -4275,6 +4275,19 @@
     if (znan && znan.stran) { otvoriSpletnoStran(znan.stran, znan.naslov); return; }
     klic("mediaPredvajaj", [id]).then(function (item) {
       if (!item) { obvesti(t("mediaVirNapaka")); return; }
+      if (item.napaka_koda === "ni_toka") {
+        // Noben vir tega ne predvaja: brez okna in brez strani - kratko obvestilo, film izgine iz mreze.
+        obvesti(t("mediaNapaka_ni_toka", { ime: item.naslov || "" }));
+        if (item.vrsta === "film") {
+          var prej = (media.katalog || []).length;
+          media.katalog = (media.katalog || []).filter(function (x) {
+            return !(x.vrsta === "film" && (x.id === item.id || x.id === id || (item.tmdb_id && x.tmdb_id === item.tmdb_id)));
+          });
+          if (typeof media.skupaj === "number") media.skupaj = Math.max(media.katalog.length, media.skupaj - (prej - media.katalog.length));
+          zapriMediaPodrobnosti(); narisiMedia();
+        }
+        return;
+      }
       if (item.napaka_koda) { obvesti(t("mediaNapaka_" + item.napaka_koda)); return; }
       if (item.napaka) { obvesti(item.napaka); return; }
       if (item.sporocilo) { obvesti(item.sporocilo); return; }
@@ -4517,8 +4530,11 @@
     target.innerHTML = "";
     var data = item.kje_gledati || {};
     var countryName = mediaWatchCountryName(data.drzava, data.ime_drzave);
-    target.appendChild(el("h3", "", t("mediaWatchTitle", {country:countryName})));
     var groups = data.skupine || [];
+    // Brez drzave in brez ponudnikov (npr. vsebina iz dodatka brez podatkov TMDB) okvirja ne kazemo.
+    target.hidden = !groups.length && !String(countryName || "").replace(/[\s,()]/g, "");
+    if (target.hidden) return;
+    target.appendChild(el("h3", "", t("mediaWatchTitle", {country:countryName})));
     if (!groups.length) target.appendChild(el("p", "", t("mediaWatchNone", {country:countryName})));
     var groupLabels = {"naročnina":"mediaWatchSubscription", "brezplačno":"mediaWatchFree", "izposoja":"mediaWatchRent", "nakup":"mediaWatchBuy"};
     groups.forEach(function (group) {

@@ -84,8 +84,9 @@ class MpvPlayerWidget(QWidget):
         self.setObjectName("safeerMediaPlayer")
         self.setStyleSheet("""
             QWidget#safeerMediaPlayer { background: #090d15; color: #f0f4f3; }
+            QLabel { color: #b0bdc4; }
             QLabel#brand { color: #54d6a5; font-weight: 700; font-size: 15px; }
-            QLabel#title { font-size: 24px; font-weight: 650; }
+            QLabel#title { color: #f2f6f8; font-size: 24px; font-weight: 650; }
             QLabel#meta { color: #b0bdc4; font-size: 13px; }
             QLabel#audioVisual { background: qradialgradient(cx:.5, cy:.45, radius:.7,
                 stop:0 #203f3a, stop:.55 #111d24, stop:1 #090d15); color: #54d6a5;

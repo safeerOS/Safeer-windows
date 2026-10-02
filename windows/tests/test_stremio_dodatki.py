@@ -34,6 +34,10 @@ class _H(BaseHTTPRequestHandler):
             d = {"streams": [{"name": "HD", "title": "1080p", "url": "https://primer.si/v.m3u8", "behaviorHints": {"proxyHeaders": {"request": {"Referer": "https://primer.si/"}}},
                               "subtitles": [{"url": "https://primer.si/sl.srt", "lang": "slv"}]},
                              {"name": "Zunanji", "externalUrl": "https://primer.si/stran"},
+                             {"name": "🌟 Donation needed", "title": "Click here to donate to keep the project alive", "externalUrl": "https://ko-fi.com/x"},
+                             {"name": "💬 Join the Discord server", "url": "https://discord.gg/abc"},
+                             {"name": "❌ No streams found", "title": "No streams found for this title", "url": "https://primer.si/info"},
+                             {"name": "Discord.2012.1080p", "title": "Discord.2012.1080p.mkv", "url": "https://primer.si/d.mkv"},
                              {"name": "Torrent", "infoHash": "abc123", "fileIdx": 0},
                              {"name": "YT", "ytId": "xyz"},
                              {"name": "Čuden", "url": "ftp://primer.si/x"}]}
@@ -68,10 +72,14 @@ def test_manifest_katalogi_tokovi(streznik):
     m = d.meta("series", "s1")
     assert m["opis"] == "O seriji" and [(e["sezona"], e["epizoda"], e["ime"]) for e in m["videi"]] == [(1, 1, "Pilot"), (1, 2, "Druga")]
     t = d.tokovi("movie", "tt1")
-    assert [x["vrsta"] for x in t] == ["url", "zunanji", "torrent", "zunanji", "neznano"]
+    # Zunanje povezave in obvestila dodatka (donacije, Discord, "No streams found") niso tokovi; film z imenom
+    # "Discord" s pravo datoteko ostane.
+    assert [x["vrsta"] for x in t] == ["url", "url", "torrent", "napovednik", "neznano"]
     assert t[0]["glave"] == {"Referer": "https://primer.si/"} and t[0]["podnapisi"] == [{"url": "https://primer.si/sl.srt", "jezik": "slv"}]
+    assert t[1]["url"] == "https://primer.si/d.mkv"
     assert t[2]["url"] == "magnet:?xt=urn:btih:abc123" and t[3]["url"].endswith("v=xyz")
-    assert [S.predvajljiv(x) for x in t] == [True, False, False, False, False]
+    assert [S.predvajljiv(x) for x in t] == [True, True, False, False, False]
+    assert not any("discord.gg" in x["url"] or "ko-fi" in x["url"] or "primer.si/info" in x["url"] or "primer.si/stran" in x["url"] for x in t)
 
 
 def test_zavrne_ne_http():

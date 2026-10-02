@@ -118,5 +118,70 @@ class UvozSeznamaTest(unittest.TestCase):
             self.assertEqual(m.seznami(), [])
 
 
+class SamoPredvajljivoTest(unittest.TestCase):
+    """Obvestil dodatkov (donacije, Discord, "No streams found") ni nikjer; brez toka ni strani, film izgine iz kataloga."""
+
+    TOKOVI = {"streams": [
+        {"name": "🌟 Donation needed", "title": "Click here to donate to hdhub", "externalUrl": "https://ko-fi.com/hdhub"},
+        {"name": "💬 Join the Discord server", "title": "Get latest updates", "externalUrl": "https://discord.gg/abc"},
+        {"name": "❌ No streams found", "title": "No streams found for this title on hdhub", "externalUrl": "https://hdhub.example"},
+        {"name": "Join our Discord", "url": "https://discord.gg/xyz"},
+        {"name": "Support us", "title": "Donate to keep the project alive", "url": "https://hdhub.example/donate"}]}
+
+    def test_obvestila_niso_tokovi(self):
+        from core import media_servers
+        with mock.patch.object(media_servers, "_request", return_value=json.dumps(self.TOKOVI)):
+            self.assertEqual(media_servers.stremio_tokovi("https://d.example", "movie", "tt1"), [])
+        pravi = {"streams": self.TOKOVI["streams"] + [
+            {"name": "HDHub 1080p", "title": "Film.2020.1080p.mkv", "url": "https://cdn.example/f.mkv"},
+            {"name": "Donation.2019.720p", "title": "Donation.2019.720p.mp4", "url": "https://cdn.example/x", "behaviorHints": {"filename": "Donation.2019.720p.mp4"}}]}
+        with mock.patch.object(media_servers, "_request", return_value=json.dumps(pravi)):
+            self.assertEqual([t["url"] for t in media_servers.stremio_tokovi("https://d.example", "movie", "tt1")],
+                             ["https://cdn.example/f.mkv", "https://cdn.example/x"])
+
+    def test_tokove_vprasamo_vse_dodatke(self):
+        """Katalog (Cinemeta) pozna naslov, tok ima drug dodatek: film se predvaja, ne izgine."""
+        from core import media_servers
+        with tempfile.TemporaryDirectory() as mapa:
+            m = os_media.MediaCenter(mapa, roots=[])
+            film = {"id": "stremio:kat:movie:tt2", "naslov": "Film", "vrsta": "film", "url": "stremio:https://katalog.example|movie|tt2", "tmdb_id": 5}
+            m._dynamic_items[film["id"]] = film
+
+            def zahteva(url, *a, **k):
+                if url.startswith("https://tokovi.example/stream/movie/tt2"):
+                    return json.dumps({"streams": [{"name": "HD", "title": "Film.1080p.mkv", "url": "https://cdn.example/film.mkv"}]})
+                if url.startswith("https://katalog.example/stream/"):
+                    return json.dumps(self.TOKOVI)
+                raise OSError(url)
+
+            with mock.patch.object(m, "_stremio_strezniki", return_value=[{"url": "https://katalog.example/manifest.json"}, {"url": "https://tokovi.example/manifest.json"}]), \
+                    mock.patch.object(media_servers, "_request", side_effect=zahteva):
+                izid = m.resolve(film["id"])
+            self.assertEqual(izid.get("url"), "https://cdn.example/film.mkv")
+            self.assertFalse(m.znano_ni_na_voljo(film))
+
+    def test_brez_toka_ni_strani_in_film_izgine(self):
+        from core import media_servers
+        with tempfile.TemporaryDirectory() as mapa:
+            m = os_media.MediaCenter(mapa, roots=[])
+            film = {"id": "stremio:s1:movie:tt1", "naslov": "Film", "vrsta": "film", "url": "stremio:https://d.example|movie|tt1",
+                    "tmdb_id": 42, "imdb_id": "tt1"}
+            m._dynamic_items[film["id"]] = film
+            with mock.patch.object(media_servers, "_request", return_value=json.dumps(self.TOKOVI)):
+                izid = m.resolve(film["id"])
+            self.assertEqual(izid.get("napaka_koda"), "ni_toka")
+            self.assertNotIn("stran", izid)
+            self.assertNotIn("ko-fi", json.dumps(izid))
+            katalog = {"vnosi": [{"id": "tmdb:42", "vrsta": "film", "tmdb_id": 42}, {"id": "tmdb:43", "vrsta": "film", "tmdb_id": 43},
+                                 {"id": "tmdb:s42", "vrsta": "serija", "tmdb_id": 42}]}
+            self.assertEqual([v["id"] for v in m.brez_nerazpolozljivih(katalog)["vnosi"]], ["tmdb:43", "tmdb:s42"])
+            # Po preteku veljavnosti se film spet pokaze (dodatki dobivajo nove vsebine).
+            m._ni_na_voljo["film:42"] -= m.NI_NA_VOLJO_VELJA + 1
+            self.assertEqual(len(m.brez_nerazpolozljivih(katalog)["vnosi"]), 3)
+            # Epizode ne skrivamo (ostale so morda na voljo).
+            m.oznaci_ni_na_voljo({"vrsta": "serija", "tmdb_id": 7})
+            self.assertFalse(m.znano_ni_na_voljo({"vrsta": "serija", "tmdb_id": 7}))
+
+
 if __name__ == "__main__":
     unittest.main()

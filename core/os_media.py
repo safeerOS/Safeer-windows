@@ -1397,6 +1397,60 @@ class MediaCenter:
         if self._predpomnilnik is not None:
             self.ozastari_predpomnilnik()
 
+    # --- razpolozljivost: prikazemo samo, kar se da predvajati -----------------
+    NI_NA_VOLJO_VELJA = 6 * 3600        # dodatki dobivajo nove vsebine: "ni na voljo" velja nekaj ur
+
+    @staticmethod
+    def _kljuc_razpolozljivosti(item: dict) -> str:
+        """Film po TMDB/IMDb; epizode in drugih vrst ne skrivamo (ostale epizode so morda na voljo)."""
+        if str(item.get("vrsta") or "") != "film":
+            return ""
+        ident = str(item.get("tmdb_id") or "") if int(item.get("tmdb_id") or 0) else str(item.get("imdb_id") or item.get("id") or "")
+        return "film:" + ident if ident else ""
+
+    def _ni_na_voljo_beri(self) -> dict:
+        if getattr(self, "_ni_na_voljo", None) is None:
+            try:
+                data = json.loads((self.config_dir / "ni_na_voljo.json").read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                data = {}
+            self._ni_na_voljo = {str(k): float(v) for k, v in data.items()} if isinstance(data, dict) else {}
+        return self._ni_na_voljo
+
+    def oznaci_ni_na_voljo(self, item: dict) -> None:
+        kljuc = self._kljuc_razpolozljivosti(item)
+        if not kljuc:
+            return
+        with self._lock:
+            stanje = self._ni_na_voljo_beri()
+            zdaj = time.time()
+            for k in [k for k, v in stanje.items() if zdaj - v > self.NI_NA_VOLJO_VELJA]:
+                stanje.pop(k, None)
+            stanje[kljuc] = zdaj
+            try:
+                self.config_dir.mkdir(parents=True, exist_ok=True)
+                (self.config_dir / "ni_na_voljo.json").write_text(json.dumps(stanje), encoding="utf-8")
+            except OSError:
+                pass
+
+    def znano_ni_na_voljo(self, item: dict) -> bool:
+        kljuc = self._kljuc_razpolozljivosti(item) if isinstance(item, dict) else ""
+        if not kljuc:
+            return False
+        cas = self._ni_na_voljo_beri().get(kljuc)
+        return cas is not None and time.time() - cas <= self.NI_NA_VOLJO_VELJA
+
+    def brez_nerazpolozljivih(self, rezultat: Any) -> Any:
+        """Katalog brez filmov, za katere vemo, da jih noben vir ne predvaja."""
+        if isinstance(rezultat, dict) and isinstance(rezultat.get("vnosi"), list) and self._ni_na_voljo_beri():
+            vnosi = [v for v in rezultat["vnosi"] if not self.znano_ni_na_voljo(v)]
+            if len(vnosi) != len(rezultat["vnosi"]):
+                novo = dict(rezultat, vnosi=vnosi)
+                if isinstance(rezultat.get("skupaj"), int):  # stevec nad mrezo naj se ujema s prikazanim
+                    novo["skupaj"] = max(len(vnosi), rezultat["skupaj"] - (len(rezultat["vnosi"]) - len(vnosi)))
+                return novo
+        return rezultat
+
     # --- seznami predvajanja ---------------------------------------------------
     # Uporabnikovi seznami (uvozeni z YouTuba ali Spotifyja): svoja datoteka, da sprememba seznama ne osvezuje
     # kataloga virov. Skladba ima id posnetka (YouTube) ali pa ga poiscemo ob predvajanju in si ga zapomnimo.
@@ -1677,6 +1731,43 @@ class MediaCenter:
         """Uporabnikovi Stremio dodatki (osebni strezniki s ponudnikom stremio)."""
         with self._lock:
             return [x for x in self._load().get("osebni_strezniki", []) if isinstance(x, dict) and x.get("ponudnik") == "stremio" and x.get("url")]
+
+    def _stremio_tokovi_vseh(self, koren: str, tip: str, ident: str) -> list[dict]:
+        """
+        Tokovi za vsebino iz VSEH uporabnikovih dodatkov, ne le iz tistega, ki jo je pokazal: katalog (npr. Cinemeta)
+        pozna naslove, tokove ima pogosto drug dodatek - kot v Stremiu in kot v Safeer OS za Android.
+        """
+        if tip == "series" and ":" not in ident:
+            # Serija brez izbrane epizode: prvo epizodo doloci dodatek, ki serijo pozna; z njenim id-jem vprasamo vse.
+            try:
+                ident = media_servers.stremio_prva_epizoda(koren, ident) or ident
+            except Exception:
+                pass
+        koreni = [koren]
+        for streznik in self._stremio_strezniki():
+            k = media_servers._stremio_koren(str(streznik.get("url") or ""))
+            if k and k not in koreni:
+                koreni.append(k)
+
+        def vprasaj(k: str) -> list[dict]:
+            try:
+                return media_servers.stremio_tokovi(k, tip, ident)
+            except Exception:
+                return []
+
+        if len(koreni) == 1:
+            return vprasaj(koren)
+        from concurrent.futures import ThreadPoolExecutor
+        tokovi: list[dict] = []
+        videni: set[str] = set()
+        with ThreadPoolExecutor(max_workers=min(6, len(koreni))) as bazen:
+            for izid in bazen.map(vprasaj, koreni[:10]):
+                for t in izid:
+                    kljuc = str(t.get("url") or "") or ("torrent" if t.get("torrent") else "")
+                    if kljuc not in videni:
+                        videni.add(kljuc)
+                        tokovi.append(t)
+        return tokovi
 
     def _stremio_vnosi(self, imdb: str, tmdb_id: int, kind: str, title: str, season: int = 0, episode: int = 0) -> list[dict]:
         """Vnosi za film/epizodo iz TMDB kataloga, ki jih zna predvajati kateri od uporabnikovih Stremio dodatkov.
@@ -2693,10 +2784,7 @@ class MediaCenter:
         stremio_url = next((u for u in posebni if u.startswith("stremio:")), "")
         if stremio_url:
             koren, tip, ident = (stremio_url[len("stremio:"):].split("|") + ["", ""])[:3]
-            try:
-                tokovi = media_servers.stremio_tokovi(koren, tip, ident)
-            except Exception:
-                tokovi = []
+            tokovi = self._stremio_tokovi_vseh(koren, tip, ident)
             neposredni = [t for t in tokovi if t.get("url") and not t.get("zunanje")
                           and (t["url"].startswith("https://") or media_servers.dovoljen_naslov(t["url"]))]
             # Najboljsi tok za to napravo na prvo mesto (film se zacne takoj, brez izbiranja); ostali ostanejo kot razlicice.
@@ -2719,12 +2807,9 @@ class MediaCenter:
                 return resolved
             if drugi_http:
                 return dict(item, razlicice=drugi_http, stevilo_razlicic=len(drugi_http))
-            zunanji = [t for t in tokovi if t.get("zunanje")]
-            if zunanji:
-                return dict(item, url=zunanji[0]["url"], stran=zunanji[0]["url"])
-            if any(t.get("torrent") for t in tokovi):
-                return dict(item, napaka="Ta dodatek ponuja samo torrent povezave; Safeer predvaja neposredne tokove.")
-            return dict(item, napaka="Dodatek za to vsebino ni vrnil predvajalne povezave.")
+            # Brez predvajljivega toka ni strani in ni seznama povezav: kratko obvestilo, vsebina izgine s seznama.
+            self.oznaci_ni_na_voljo(item)
+            return dict(item, napaka_koda="ni_toka")
         if item.get("tunein_id"):
             try:
                 resolved = self._zakoniti_viri.resolve_tunein(item)

@@ -579,9 +579,40 @@ def _stremio_items(base: str, server: dict, query: str) -> list[dict]:
     return rezultat
 
 
+# Strani prosenj in skupnosti: povezava tja ni tok, tudi ce jo dodatek poda kot `url`.
+_GOSTITELJI_OBVESTIL = ("discord.gg", "discord.com", "discordapp.com", "ko-fi.com", "patreon.com", "buymeacoffee.com",
+                        "paypal.com", "paypal.me", "t.me", "telegram.me", "opencollective.com", "liberapay.com", "boosty.to")
+_RX_OBVESTILO = re.compile(r"(?i)\bdonat(e|ion)s?\b|discord|no streams? found|buy me a coffee|\bko-?fi\b|patreon")
+_RX_MEDIJ = re.compile(r"(?i)\.(m3u8|mpd|mp4|mkv|webm|avi|mov|m4v|ts|mp3|m4a|aac|flac|ogg|opus|wav)(\?|$)")
+
+
+def stremio_je_obvestilo(t: dict) -> bool:
+    """Vnos med tokovi, ki je obvestilo dodatka (prosnja za donacijo, vabilo v Discord, "No streams found"): povezava
+    na stran skupnosti ali besedilo obvestila brez znakov pravega toka. Tega uporabniku nikoli ne kazemo."""
+    url = str(t.get("url") or "")
+    gostitelj = (urllib.parse.urlsplit(url).hostname or "").lower()
+    if any(gostitelj == g or gostitelj.endswith("." + g) for g in _GOSTITELJI_OBVESTIL) or gostitelj.startswith("donate."):
+        return True
+    besedilo = " ".join(str(t.get(k) or "") for k in ("name", "title", "description"))
+    if not _RX_OBVESTILO.search(besedilo):
+        return False
+    namigi = t.get("behaviorHints") if isinstance(t.get("behaviorHints"), dict) else {}
+    prav_tok = bool(_RX_MEDIJ.search(url)) or any(k in namigi for k in ("filename", "videoSize", "videoHash", "proxyHeaders"))
+    return not prav_tok
+
+
+def stremio_prva_epizoda(koren: str, ident: str) -> str:
+    """Id prve epizode serije (iz metapodatkov dodatka, ki serijo pozna); prazno, ce je ni."""
+    meta = json.loads(_request(koren + "/meta/series/%s.json" % urllib.parse.quote(ident, safe=""))).get("meta") or {}
+    videi = [v for v in (meta.get("videos") or []) if isinstance(v, dict) and v.get("id")]
+    if not videi:
+        return ""
+    return str(sorted(videi, key=lambda v: (int(v.get("season") or 0) or 999, int(v.get("episode") or 0)))[0]["id"])
+
+
 def stremio_tokovi(koren: str, tip: str, ident: str) -> list[dict]:
-    """Predvajalne povezave dodatka. Uporabimo samo neposredne tokove HTTP(S) in uradne zunanje
-    povezave; torrentov (infoHash/magnet) Safeer ne predvaja."""
+    """Predvajalne povezave dodatka: samo neposredni tokovi HTTP(S). Zunanjih povezav (`externalUrl`) in obvestil
+    dodatka (donacije, Discord, "No streams found") ni med njimi; torrentov (infoHash/magnet) Safeer ne predvaja."""
     if tip == "series" and ":" not in ident:
         meta = json.loads(_request(koren + "/meta/series/%s.json" % urllib.parse.quote(ident, safe=""))).get("meta") or {}
         videi = [v for v in (meta.get("videos") or []) if v.get("id")]
@@ -605,6 +636,8 @@ def stremio_tokovi(koren: str, tip: str, ident: str) -> list[dict]:
     for t in surovi:
         url = str(t.get("url") or "")
         if url.startswith(("https://", "http://")):
+            if stremio_je_obvestilo(t):
+                continue
             tok = {"url": url, "vir": (t.get("name") or t.get("title") or "Stremio").split("\n")[0][:60],
                    "kakovost": (t.get("title") or "").split("\n")[0][:40],
                    # Celoten opis toka (locljivost, kodek, zvok, velikost) za izbiro najboljsega toka (core/tok_izbira).
@@ -620,8 +653,8 @@ def stremio_tokovi(koren: str, tip: str, ident: str) -> list[dict]:
             if podnapisi:
                 tok["podnapisi"] = podnapisi[:24]
             tokovi.append(tok)
-        elif str(t.get("externalUrl") or "").startswith("https://"):
-            tokovi.append({"url": t["externalUrl"], "vir": (t.get("name") or "Stremio")[:60], "zunanje": True})
+        # `externalUrl` ni tok, ampak povezava na stran (prosnja za donacijo, Discord, "No streams found", trgovina):
+        # tega ne kazemo in ne odpiramo nikoli.
         elif t.get("infoHash"):
             tokovi.append({"url": "", "torrent": True})
     return tokovi
