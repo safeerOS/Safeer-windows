@@ -1,0 +1,103 @@
+"""Uvoz seznamov predvajanja (YouTube, Spotify): prepoznava povezav, razclenjevanje in shramba v Medijskem centru."""
+import json
+import os
+import sys
+import tempfile
+import unittest
+from unittest import mock
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+
+from core import os_media, uvoz_seznama as u  # noqa: E402
+
+
+LOCKUP = {"lockupViewModel": {
+    "contentId": "abcDEF12345", "contentType": "LOCKUP_CONTENT_TYPE_VIDEO",
+    "contentImage": {"thumbnailViewModel": {"overlays": [{"x": {"icon": {"sources": [{"clientResource": {"imageName": "MUSIC"}}]}}}]}},
+    "metadata": {"lockupMetadataViewModel": {
+        "title": {"content": "Siddharta - Ledena (Official Video)"},
+        "metadata": {"contentMetadataViewModel": {"metadataRows": [{"metadataParts": [{"text": {"content": "SiddhartaVEVO"}}]}]}}}}}}
+STARI = {"playlistVideoRenderer": {"videoId": "zzz99988877", "title": {"runs": [{"text": "Predavanje 1"}]},
+                                   "shortBylineText": {"runs": [{"text": "Univerza"}]}}}
+STRAN = {"contents": [{"a": [LOCKUP, STARI]}, {"playlistMetadataRenderer": {"title": "Moj seznam"}},
+                      {"continuationCommand": {"token": "ZETON", "request": "CONTINUATION_REQUEST_TYPE_BROWSE"}}]}
+SPOTIFY = ('<html><script id="__NEXT_DATA__" type="application/json">' + json.dumps({"props": {"pageProps": {"state": {"data": {"entity": {
+    "type": "playlist", "name": "Top", "coverArt": {"sources": [{"url": "https://i.scdn.co/image/x"}]},
+    "trackList": [{"title": "Pesem", "subtitle": "Izvajalec A", "duration": 201500}, {"title": "", "subtitle": "x"}]}}}}}}) + "</script></html>")
+
+
+class UvozSeznamaTest(unittest.TestCase):
+    def test_prepozna_povezave(self):
+        self.assertEqual(u.youtube_id("https://www.youtube.com/playlist?list=PL4fGSI1pDJn6puJdseH2Rt9sMvt9E2M4i"), "PL4fGSI1pDJn6puJdseH2Rt9sMvt9E2M4i")
+        self.assertEqual(u.youtube_id("https://music.youtube.com/watch?v=abc&list=PL4fGSI1pDJn6puJdseH2Rt9sMvt9E2M4i"), "PL4fGSI1pDJn6puJdseH2Rt9sMvt9E2M4i")
+        # Posamezen posnetek, zasebni "Vsecki" (LL) in tuja stran niso seznam.
+        self.assertEqual(u.youtube_id("https://www.youtube.com/watch?v=abc"), "")
+        self.assertEqual(u.youtube_id("https://www.youtube.com/playlist?list=LL"), "")
+        self.assertEqual(u.youtube_id("https://primer.si/playlist?list=PL4fGSI1pDJn6puJdseH2Rt9sMvt9E2M4i"), "")
+        self.assertEqual(u.spotify_id("https://open.spotify.com/intl-de/playlist/37i9dQZF1DXcBWIGoYBM5M?si=x"), ("playlist", "37i9dQZF1DXcBWIGoYBM5M"))
+        self.assertEqual(u.spotify_id("spotify:album:4aawyAB9vmqN3uQ7FjRGTy"), ("album", "4aawyAB9vmqN3uQ7FjRGTy"))
+        self.assertIsNone(u.spotify_id("https://open.spotify.com/track/11dFghVXANMlKmJXsNCbNl"))
+        self.assertEqual(u.povezava_iz("Poslusaj: https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M."),
+                         "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M")
+
+    def test_razcleni_youtube_obe_obliki(self):
+        html = "<script>var ytInitialData = " + json.dumps(STRAN) + ";</script>"
+        stran = u.iz_youtube(u.json_za(html, "ytInitialData"))
+        self.assertEqual(stran["ime"], "Moj seznam")
+        self.assertEqual(stran["nadaljevanje"], "ZETON")
+        self.assertEqual([v["id"] for v in stran["vnosi"]], ["abcDEF12345", "zzz99988877"])
+        self.assertTrue(stran["vnosi"][0]["glasba"])
+        s = u._youtube_skladba(stran["vnosi"][0])
+        self.assertEqual((s["izvajalec"], s["naslov"], s["youtube"]), ("Siddharta", "Ledena (Official Video)", "abcDEF12345"))
+        self.assertEqual(u._youtube_skladba(stran["vnosi"][1])["izvajalec"], "Univerza")
+
+    def test_razcleni_spotify(self):
+        izid = u.iz_spotify(SPOTIFY)
+        self.assertEqual(izid["ime"], "Top")
+        self.assertEqual(izid["skladbe"], [{"naslov": "Pesem", "izvajalec": "Izvajalec A", "youtube": "",
+                                           "slika": "https://i.scdn.co/image/x", "sekund": 201}])
+
+    def test_izbira_posnetka_po_dolzini(self):
+        z = [("uradni", 315), ("besedilo", 297), ("koncert", 600)]
+        self.assertEqual(u.izberi_zadetek(z, 297), "besedilo")
+        self.assertEqual(u.izberi_zadetek(z, 0), "uradni")
+        self.assertEqual(u.izberi_zadetek(z, 100), "uradni")            # nic blizu: prvi zadetek
+        # Zamenjava zavrnjenega: samo posnetek z ujemajoco dolzino, sicer raje nic.
+        self.assertEqual(u.izberi_zadetek(z + [("drugi", 299)], 297, ("besedilo",)), "drugi")
+        self.assertEqual(u.izberi_zadetek(z, 297, ("besedilo",)), "")
+
+    def test_shramba_seznamov(self):
+        with tempfile.TemporaryDirectory() as mapa:
+            m = os_media.MediaCenter(mapa, roots=[])
+            self.assertEqual(m.uvozi_seznam("https://www.youtube.com/watch?v=abc"), {"napaka": "ni_seznam"})
+            uvoz = {"ime": "Top", "vir": "Spotify", "skladbe": [
+                {"naslov": "Pesem", "izvajalec": "A", "youtube": "", "slika": "", "sekund": 200},
+                {"naslov": "Druga", "izvajalec": "B", "youtube": "yt222222222", "slika": "s", "sekund": 0}]}
+            with mock.patch.object(u, "uvozi", return_value=uvoz):
+                self.assertEqual(m.uvozi_seznam("https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M"),
+                                 {"ime": "Top", "stevilo": 2, "vir": "Spotify"})
+            with mock.patch.object(u, "uvozi", return_value=None):
+                self.assertEqual(m.uvozi_seznam("https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M"), {"napaka": "ni_uspel"})
+            self.assertEqual(m.seznami(), [{"ime": "Top", "vir": "Spotify", "stevilo": 2, "slika": "s"}])
+            vnosi = m.seznam("Top")["vnosi"]
+            self.assertEqual([v["vrsta"] for v in vnosi], ["glasba", "glasba"])
+            self.assertEqual(vnosi[1]["youtube"], "yt222222222")
+            # Skladba brez posnetka: poiscemo ga ob predvajanju in si ga zapomnimo.
+            with mock.patch.object(u, "najdi", return_value="yt111111111") as najdi:
+                razresen = m.resolve(vnosi[0]["id"])
+                self.assertEqual(razresen["youtube"], "yt111111111")
+                self.assertEqual(razresen["id"], vnosi[0]["id"])
+                najdi.assert_called_once()
+            with mock.patch.object(u, "najdi", side_effect=AssertionError("ze shranjeno")):
+                self.assertEqual(m.resolve(vnosi[0]["id"])["youtube"], "yt111111111")
+            # Zamenjava (lastnik ne dovoli vgradnje): novega isce brez zavrnjenega.
+            with mock.patch.object(u, "najdi", return_value="yt333333333") as najdi:
+                self.assertEqual(m.seznam_posnetek(vnosi[0]["id"], zamenjaj=True)["youtube"], "yt333333333")
+                self.assertEqual(najdi.call_args[0][3], ("yt111111111",))
+            self.assertTrue(m.odstrani_seznam("Top"))
+            self.assertFalse(m.odstrani_seznam("Top"))
+            self.assertEqual(m.seznami(), [])
+
+
+if __name__ == "__main__":
+    unittest.main()
