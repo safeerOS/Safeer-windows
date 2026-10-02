@@ -1,0 +1,5 @@
+# Safeer OS za Windows 1.0.14
+
+- **Nadaljuj z druge naprave – računalnik kot vir:** telefon ali televizor vpraša, kaj Medijski center na tem računalniku predvaja, in nadaljuje pri isti sekundi (»Nadaljuj z druge naprave« v Medijskem centru na Androidu). Nič se ne zgodi samo od sebe: računalnik odgovori le napravi s pravico do datotek (profil polno ali izbrano) in predvaja naprej, razen če na cilju izbereš »nadaljuj tukaj in ustavi tam« (takrat le premor). Datoteka gre ven le iz deljenih map (isti strežnik, žeton in potrdilo kot pri Datotekah), spletni tok s svojim naslovom; ko nič ne igra, ponudi nazadnje gledani video. Enako kot Safeer Control za Linux 2.1.17.
+
+English: Continue on another device – the computer as the source. Your phone or TV can ask what the media centre on this computer is playing and continue at the same second; the computer answers only devices with file rights, keeps playing unless you choose "continue here and stop there" (then it just pauses), and shares files from shared folders only. Same behaviour as Safeer Control for Linux 2.1.17.
