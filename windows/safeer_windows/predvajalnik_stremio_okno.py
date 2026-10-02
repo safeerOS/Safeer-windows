@@ -192,22 +192,25 @@ class StremioOkno(QDialog):
     def _tokovi_nalozeni(self, tokovi: list) -> None:
         self._tokovi = tokovi; self.tokovi.clear()
         for t in tokovi:
-            oznaka = {"url": "▶", "zunanji": "↗", "torrent": "⇣", "neznano": "?"}.get(t["vrsta"], "?")
+            oznaka = {"url": "▶", "napovednik": "↗", "torrent": "⇣", "neznano": "?"}.get(t["vrsta"], "?")
             it = QListWidgetItem(f"{oznaka} {t['ime']}  {t['naslov']}".strip()); it.setToolTip(t["url"])
             if not predvajljiv(t):
                 it.setForeground(Qt.gray)
             self.tokovi.addItem(it)
-        self._sporoci(f"{len(tokovi)} tokov (▶ predvajljivi tukaj; ↗ zunanja povezava; ⇣ torrent — tu ni podprt)")
+        if not any(predvajljiv(t) for t in tokovi):
+            self._sporoci("Te vsebine trenutno ni na voljo v tem dodatku.")
+            return
+        self._sporoci(f"{len(tokovi)} tokov (▶ predvajljivi tukaj; ↗ napovednik; ⇣ torrent — tu ni podprt)")
 
     def _izbran_tok(self, vrstica: int) -> None:
-        self.gumb_predvajaj.setEnabled(0 <= vrstica < len(self._tokovi) and self._tokovi[vrstica]["vrsta"] in ("url", "zunanji"))
+        self.gumb_predvajaj.setEnabled(0 <= vrstica < len(self._tokovi) and self._tokovi[vrstica]["vrsta"] in ("url", "napovednik"))
 
     def _predvajaj(self) -> None:
         r = self.tokovi.currentRow()
         if not (0 <= r < len(self._tokovi)):
             return
         t = self._tokovi[r]
-        if t["vrsta"] == "zunanji":
+        if t["vrsta"] == "napovednik":
             from PySide6.QtCore import QUrl
             from PySide6.QtGui import QDesktopServices
             QDesktopServices.openUrl(QUrl(t["url"])); return

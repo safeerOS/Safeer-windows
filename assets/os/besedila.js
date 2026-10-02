@@ -1,6 +1,7 @@
 /* Besedila Safeer OS za racunalnik: sl, en, de, es, fr, it (isti nabor kot drugje v Safeerju). */
 var BESEDILA_OS = {
   sl: {
+    mediaNapaka_ni_toka:"»{ime}« trenutno ni na voljo v tvojih virih.",
     seznamSkladba:"1 skladba", seznamSkladbi:"2 skladbi", seznamSkladbe:"{n} skladbe",
     seznamDodaj:"＋ Na seznam", seznamNov:"Nov seznam …", seznamNovIme:"Ime novega seznama", seznamDodano:"Dodano na seznam {ime}", seznamZe:"Že na seznamu {ime}", seznamNiMogoce:"Te vsebine ni mogoče dati na seznam.", seznamOdstraniSkladbo:"Odstrani s seznama",
     seznamiNaslov:"Seznami predvajanja", seznamUvozi:"Uvozi", seznamUvoziNamig:"Prilepi povezavo seznama iz YouTuba ali Spotifyja …", seznamUvazam:"Uvažam seznam …", seznamUvozen:"Uvoženo: {ime} ({n})", seznamNiSeznam:"To ni povezava seznama predvajanja. V YouTubu ali Spotifyju odpri seznam in izberi Deli > Kopiraj povezavo.", seznamNiUspel:"Seznama ni bilo mogoče prebrati. Biti mora javen ali nenaveden – zasebnih seznamov (Všečki, Liked Songs) brez prijave ni mogoče brati.", seznamOdstrani:"Odstrani seznam", seznamOdstraniRes:"Res odstrani?", seznamPredvajajVse:"Predvajaj vse", seznamSkladb:"{n} skladb", seznamNazaj:"← Vsi seznami", seznamBrezPosnetka:"Posnetka za »{ime}« ni bilo mogoče predvajati – naslednja.",
@@ -77,6 +78,7 @@ var BESEDILA_OS = {
     odstrani: "Odstrani", wifiIzklopljen: "Wi-Fi je izklopljen"
   },
   en: {
+    mediaNapaka_ni_toka:"“{ime}” is not available in your sources right now.",
     seznamSkladba:"1 track",
     seznamDodaj:"＋ Add to playlist", seznamNov:"New playlist …", seznamNovIme:"Name of the new playlist", seznamDodano:"Added to {ime}", seznamZe:"Already in {ime}", seznamNiMogoce:"This item cannot be added to a playlist.", seznamOdstraniSkladbo:"Remove from playlist",
     seznamiNaslov:"Playlists", seznamUvozi:"Import", seznamUvoziNamig:"Paste a playlist link from YouTube or Spotify …", seznamUvazam:"Importing playlist …", seznamUvozen:"Imported: {ime} ({n})", seznamNiSeznam:"This is not a playlist link. Open the playlist in YouTube or Spotify and choose Share > Copy link.", seznamNiUspel:"The playlist could not be read. It must be public or unlisted – private lists (Liked videos, Liked Songs) cannot be read without signing in.", seznamOdstrani:"Remove playlist", seznamOdstraniRes:"Really remove?", seznamPredvajajVse:"Play all", seznamSkladb:"{n} tracks", seznamNazaj:"← All playlists", seznamBrezPosnetka:"“{ime}” could not be played – next one.",
@@ -153,6 +155,7 @@ var BESEDILA_OS = {
     odstrani: "Remove", wifiIzklopljen: "Wi-Fi is off"
   },
   de: {
+    mediaNapaka_ni_toka:"„{ime}“ ist in deinen Quellen derzeit nicht verfügbar.",
     seznamSkladba:"1 Titel",
     seznamDodaj:"＋ Zur Playlist", seznamNov:"Neue Playlist …", seznamNovIme:"Name der neuen Playlist", seznamDodano:"Zu {ime} hinzugefügt", seznamZe:"Bereits in {ime}", seznamNiMogoce:"Dieser Inhalt kann keiner Playlist hinzugefügt werden.", seznamOdstraniSkladbo:"Aus Playlist entfernen",
     seznamiNaslov:"Playlists", seznamUvozi:"Importieren", seznamUvoziNamig:"Playlist-Link von YouTube oder Spotify einfügen …", seznamUvazam:"Playlist wird importiert …", seznamUvozen:"Importiert: {ime} ({n})", seznamNiSeznam:"Das ist kein Playlist-Link. Öffne die Playlist in YouTube oder Spotify und wähle Teilen > Link kopieren.", seznamNiUspel:"Die Playlist konnte nicht gelesen werden. Sie muss öffentlich oder nicht gelistet sein – private Listen lassen sich ohne Anmeldung nicht lesen.", seznamOdstrani:"Playlist entfernen", seznamOdstraniRes:"Wirklich entfernen?", seznamPredvajajVse:"Alle abspielen", seznamSkladb:"{n} Titel", seznamNazaj:"← Alle Playlists", seznamBrezPosnetka:"„{ime}“ konnte nicht abgespielt werden – weiter.",
@@ -225,6 +228,7 @@ var BESEDILA_OS = {
     odstrani: "Entfernen", wifiIzklopljen: "WLAN ist aus"
   },
   es: {
+    mediaNapaka_ni_toka:"«{ime}» no está disponible ahora en tus fuentes.",
     seznamSkladba:"1 canción",
     seznamDodaj:"＋ A una lista", seznamNov:"Lista nueva …", seznamNovIme:"Nombre de la lista nueva", seznamDodano:"Añadido a {ime}", seznamZe:"Ya está en {ime}", seznamNiMogoce:"Este contenido no se puede añadir a una lista.", seznamOdstraniSkladbo:"Quitar de la lista",
     seznamiNaslov:"Listas de reproducción", seznamUvozi:"Importar", seznamUvoziNamig:"Pega el enlace de una lista de YouTube o Spotify …", seznamUvazam:"Importando la lista …", seznamUvozen:"Importada: {ime} ({n})", seznamNiSeznam:"Esto no es un enlace de lista. Abre la lista en YouTube o Spotify y elige Compartir > Copiar enlace.", seznamNiUspel:"No se pudo leer la lista. Debe ser pública u oculta: las listas privadas no se pueden leer sin iniciar sesión.", seznamOdstrani:"Quitar lista", seznamOdstraniRes:"¿Quitar de verdad?", seznamPredvajajVse:"Reproducir todo", seznamSkladb:"{n} canciones", seznamNazaj:"← Todas las listas", seznamBrezPosnetka:"No se pudo reproducir «{ime}»: siguiente.",
@@ -297,6 +301,7 @@ var BESEDILA_OS = {
     odstrani: "Quitar", wifiIzklopljen: "El Wi-Fi está apagado"
   },
   fr: {
+    mediaNapaka_ni_toka:"« {ime} » n’est pas disponible actuellement dans tes sources.",
     seznamSkladba:"1 titre",
     seznamDodaj:"＋ À une playlist", seznamNov:"Nouvelle playlist …", seznamNovIme:"Nom de la nouvelle playlist", seznamDodano:"Ajouté à {ime}", seznamZe:"Déjà dans {ime}", seznamNiMogoce:"Ce contenu ne peut pas être ajouté à une playlist.", seznamOdstraniSkladbo:"Retirer de la playlist",
     seznamiNaslov:"Playlists", seznamUvozi:"Importer", seznamUvoziNamig:"Colle le lien d’une playlist YouTube ou Spotify …", seznamUvazam:"Importation de la playlist …", seznamUvozen:"Importée : {ime} ({n})", seznamNiSeznam:"Ce n’est pas un lien de playlist. Ouvre la playlist dans YouTube ou Spotify et choisis Partager > Copier le lien.", seznamNiUspel:"Impossible de lire la playlist. Elle doit être publique ou non répertoriée – les listes privées ne sont pas lisibles sans connexion.", seznamOdstrani:"Supprimer la playlist", seznamOdstraniRes:"Vraiment supprimer ?", seznamPredvajajVse:"Tout lire", seznamSkladb:"{n} titres", seznamNazaj:"← Toutes les playlists", seznamBrezPosnetka:"« {ime} » n’a pas pu être lu – suivant.",
@@ -369,6 +374,7 @@ var BESEDILA_OS = {
     odstrani: "Retirer", wifiIzklopljen: "Le Wi-Fi est désactivé"
   },
   it: {
+    mediaNapaka_ni_toka:"«{ime}» al momento non è disponibile nelle tue fonti.",
     seznamSkladba:"1 brano",
     seznamDodaj:"＋ A una playlist", seznamNov:"Nuova playlist …", seznamNovIme:"Nome della nuova playlist", seznamDodano:"Aggiunto a {ime}", seznamZe:"Già in {ime}", seznamNiMogoce:"Questo contenuto non può essere aggiunto a una playlist.", seznamOdstraniSkladbo:"Rimuovi dalla playlist",
     seznamiNaslov:"Playlist", seznamUvozi:"Importa", seznamUvoziNamig:"Incolla il link di una playlist di YouTube o Spotify …", seznamUvazam:"Importazione della playlist …", seznamUvozen:"Importata: {ime} ({n})", seznamNiSeznam:"Questo non è il link di una playlist. Apri la playlist in YouTube o Spotify e scegli Condividi > Copia link.", seznamNiUspel:"Impossibile leggere la playlist. Deve essere pubblica o non in elenco: le liste private non si possono leggere senza accesso.", seznamOdstrani:"Rimuovi playlist", seznamOdstraniRes:"Rimuovere davvero?", seznamPredvajajVse:"Riproduci tutto", seznamSkladb:"{n} brani", seznamNazaj:"← Tutte le playlist", seznamBrezPosnetka:"Impossibile riprodurre «{ime}» – prossimo.",

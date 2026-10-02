@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import urllib.parse
 import urllib.request
 from typing import Optional
@@ -101,7 +102,10 @@ class StremioDodatek:
 
     # ---- tokovi ----
     def tokovi(self, tip: str, id_vnosa: str) -> list:
-        """[{"vrsta": "url"|"zunanji"|"torrent"|"neznano", "url", "ime", "naslov", "glave": {...}, "podnapisi": [...]}]"""
+        """[{"vrsta": "url"|"napovednik"|"torrent"|"neznano", "url", "ime", "naslov", "glave": {...}, "podnapisi": [...]}]
+
+        Obvestil dodatka (prosnja za donacijo, vabilo v Discord, "No streams found") in zunanjih povezav (`externalUrl`)
+        ni med tokovi - uporabnik jih ne vidi nikoli."""
         d = _json(self.osnova + f"/stream/{urllib.parse.quote(tip)}/{urllib.parse.quote(id_vnosa, safe='')}.json")
         izid = []
         for s in d.get("streams") or []:
@@ -118,16 +122,36 @@ class StremioDodatek:
             podnapisi = [{"url": str(p.get("url")), "jezik": str(p.get("lang") or "")} for p in (s.get("subtitles") or []) if isinstance(p, dict) and p.get("url")]
             if s.get("url"):
                 u = str(s["url"])
+                if je_obvestilo(s):
+                    continue
                 vrsta = "url" if u.lower().startswith(("http://", "https://")) else "neznano"
                 izid.append({"vrsta": vrsta, "url": u, "ime": ime, "naslov": naslov, "glave": glave, "podnapisi": podnapisi})
             elif s.get("externalUrl"):
-                izid.append({"vrsta": "zunanji", "url": str(s["externalUrl"]), "ime": ime, "naslov": naslov, "glave": {}, "podnapisi": []})
+                continue          # povezava na stran (donacije, Discord, trgovina): ni tok
             elif s.get("infoHash"):
                 izid.append({"vrsta": "torrent", "url": "magnet:?xt=urn:btih:" + str(s["infoHash"]), "ime": ime, "naslov": naslov, "glave": {}, "podnapisi": [],
                              "fileIdx": s.get("fileIdx")})
             elif s.get("ytId"):
-                izid.append({"vrsta": "zunanji", "url": "https://www.youtube.com/watch?v=" + str(s["ytId"]), "ime": ime, "naslov": naslov, "glave": {}, "podnapisi": []})
+                izid.append({"vrsta": "napovednik", "url": "https://www.youtube.com/watch?v=" + str(s["ytId"]), "ime": ime, "naslov": naslov, "glave": {}, "podnapisi": []})
         return izid
+
+
+_GOSTITELJI_OBVESTIL = ("discord.gg", "discord.com", "discordapp.com", "ko-fi.com", "patreon.com", "buymeacoffee.com",
+                        "paypal.com", "paypal.me", "t.me", "telegram.me", "opencollective.com", "liberapay.com", "boosty.to")
+_RX_OBVESTILO = re.compile(r"(?i)\bdonat(e|ion)s?\b|discord|no streams? found|buy me a coffee|\bko-?fi\b|patreon")
+_RX_MEDIJ = re.compile(r"(?i)\.(m3u8|mpd|mp4|mkv|webm|avi|mov|m4v|ts|mp3|m4a|aac|flac|ogg|opus|wav)(\?|$)")
+
+
+def je_obvestilo(s: dict) -> bool:
+    """Vnos med tokovi, ki je obvestilo dodatka: povezava na stran skupnosti ali besedilo obvestila brez znakov pravega toka."""
+    url = str(s.get("url") or "")
+    gostitelj = (urllib.parse.urlsplit(url).hostname or "").lower()
+    if any(gostitelj == g or gostitelj.endswith("." + g) for g in _GOSTITELJI_OBVESTIL) or gostitelj.startswith("donate."):
+        return True
+    if not _RX_OBVESTILO.search(" ".join(str(s.get(k) or "") for k in ("name", "title", "description"))):
+        return False
+    namigi = s.get("behaviorHints") if isinstance(s.get("behaviorHints"), dict) else {}
+    return not (bool(_RX_MEDIJ.search(url)) or any(k in namigi for k in ("filename", "videoSize", "videoHash", "proxyHeaders")))
 
 
 def _vnos(m: dict) -> dict:
