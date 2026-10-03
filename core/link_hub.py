@@ -233,9 +233,10 @@ def poisci_hube_mdns(cas: float = 2.0) -> List[dict]:
             pass
 
     zc = None
+    brskalnik = None
     try:
         zc = Zeroconf()
-        ServiceBrowser(zc, "_safeercast._tcp.local.", Poslusalec())
+        brskalnik = ServiceBrowser(zc, "_safeercast._tcp.local.", Poslusalec())
         konec = time.time() + cas
         # Pocakamo cel cas: vec Hubov se oglasa vsak ob svojem casu, izbrati hocemo pravega.
         while time.time() < konec:
@@ -243,6 +244,13 @@ def poisci_hube_mdns(cas: float = 2.0) -> List[dict]:
     except Exception:
         return []
     finally:
+        # Brskalnik ima svojo nit, ki je zc.close() NE ustavi (zeroconf 0.151): brez cancel() je vsako iskanje
+        # pustilo eno nit za vedno - Control, ki isce sosede vsakih 15 s, jih je v enem dnevu nabral vec tisoc.
+        if brskalnik is not None:
+            try:
+                brskalnik.cancel()
+            except Exception:
+                pass
         if zc is not None:
             try:
                 zc.close()
