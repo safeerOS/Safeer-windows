@@ -142,7 +142,7 @@ class TokTorrenta(unittest.TestCase):
         t = _Torrenti(self.lokalni.server_address[1])
         o = self.d.tok_torrenta(MAGNET, "tv-1", torrenti=t, zmogljivost=lambda m, v: "")
         self.assertEqual(self.d.prenosi_za_naprave(t)["items"], [{"id": 7, "name": "Film", "size": 9100, "done": 4550,
-                         "finished": False, "speed_mibs": 1.5, "magnet": MAGNET, "file": 1}])
+                         "finished": False, "speed_mibs": 1.5, "magnet": MAGNET, "file": 1, "keep": False}])
         self.assertTrue(self.d.odstrani_prenos(7, t))
         self.assertEqual(t.odstranjen, (7, True))  # z datotekami: na racunalniku ne ostane nic
         z = {"X-Safeer-Token": o["server"]["token"]}

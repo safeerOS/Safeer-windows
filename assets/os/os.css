@@ -1055,3 +1055,10 @@ body.vrstica-skrita.nacin-splet .rocaj-vrstice { display: block; }
 .media-knjiznica-vrsta .media-kartica .media-meta span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .media-kartica .media-odstrani.potrdi { width: auto; padding: 0 10px; border-radius: 13px; background: #b3261e; opacity: 1; font-size: 12px; font-weight: 700; }
 .media-kartica.media-caka { opacity: .55; pointer-events: none; }
+/* Izbris vira, ki je enak na vseh napravah v Linku: prvi klik vprasa. */
+.media-vir .gumb-ikona.potrdi { width: auto; padding: 0 12px; border-radius: 12px; background: #b3261e; color: #fff; font-size: 12px; font-weight: 700; white-space: nowrap; }
+/* »Obdrži«: zaznamek v desnem zgornjem kotu plakata; pri obdrzanem prenosu je vedno viden. */
+.media-kartica .media-obdrzi { position: absolute; right: 9px; top: 9px; width: 26px; height: 26px; display: grid; place-items: center; border-radius: 50%; background: rgba(3,7,10,.86); color: #fff; opacity: 0; }
+.media-kartica:hover .media-obdrzi, .media-kartica:focus-visible .media-obdrzi, .media-kartica .media-obdrzi.je { opacity: 1; }
+.media-kartica .media-obdrzi.je, .media-kartica .media-obdrzi:hover { background: var(--zelena, #54d6a5); color: #06110d; }
+.media-knjiznica-vrsta .media-kartica .media-meta .media-obdrzano { color: var(--zelena, #54d6a5); }

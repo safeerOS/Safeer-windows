@@ -92,6 +92,9 @@ def pocisti(torrenti, pot: Optional[str] = None, zdaj: Optional[float] = None,
         return []
     po_hashu = {link_datoteke._hash_torrenta(torrenti, t): t for t in vsi}
     odstranjeni: List[str] = []
+    # Kar je uporabnik na polici oznacil z »Obdrži« (opisi-gledanje.json ob zapisu rabe), ne potece in ne gre niti ob
+    # pomanjkanju prostora - odstrani ga samo uporabnik.
+    drzimo = link_datoteke.obdrzani(os.path.join(os.path.dirname(pot), "opisi-gledanje.json"))
     with link_datoteke._RABA_ZAKLEP:
         raba = link_datoteke._beri_rabo(pot)
         spremenjeno = False
@@ -118,13 +121,13 @@ def pocisti(torrenti, pot: Optional[str] = None, zdaj: Optional[float] = None,
 
         vrsta = sorted(raba.items(), key=lambda p: p[1])
         for h, cas in vrsta:
-            if h != obdrzi_hash and (zdaj - cas > RABA_VELJA_S or h not in po_hashu):
+            if h != obdrzi_hash and (h not in po_hashu or (zdaj - cas > RABA_VELJA_S and h not in drzimo)):
                 odstrani(h)
         if dovolj is not None:
             for h, cas in vrsta:
                 if dovolj():
                     break
-                if h in odstranjeni or h not in raba or h == obdrzi_hash or zdaj - cas < RABA_V_TEKU_S:
+                if h in odstranjeni or h not in raba or h == obdrzi_hash or h in drzimo or zdaj - cas < RABA_V_TEKU_S:
                     continue
                 odstrani(h)
         if spremenjeno:

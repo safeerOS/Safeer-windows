@@ -28,7 +28,7 @@ import xml.etree.ElementTree as ET
 from datetime import date as _date
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any, Callable, Iterable, Optional
 
 from . import zakoniti_viri
 from . import media_servers
@@ -38,6 +38,7 @@ from . import knjiznica_kroga
 from . import watch_providers
 from . import uvoz_seznama
 from . import seznami_sink
+from . import viri_sink
 
 AUDIO = {".mp3", ".flac", ".ogg", ".oga", ".opus", ".m4a", ".aac", ".wav", ".wma"}
 VIDEO = {".mp4", ".mkv", ".webm", ".avi", ".mov", ".m4v", ".mpeg", ".mpg", ".ts", ".m3u8"}
@@ -1162,6 +1163,11 @@ class MediaCenter:
         self._dynamic_items: dict[str, dict] = {}
         #: koren dodatka -> ali je zaseben (manifest behaviorHints.adult); velja do konca tega zagona.
         self._zasebni_koreni: dict[str, bool] = {}
+        #: Moji viri so se z usklajevanjem v Linku spremenili (core/viri_sink.py): klicatelj osvezi zaslon.
+        self.ob_virih: Optional[Callable[[], None]] = None
+        self._spoznavam_dodatke = False
+        self._dodatki_vprasani: dict[str, float] = {}
+        self._izvoz_virov_zapisan = False
         self._ping_cache: dict[str, tuple[float, float]] = {}
         self._ping_lock = threading.Lock()
         self._zakoniti_viri = zakoniti_viri.ZakonitiViri()
@@ -1733,9 +1739,9 @@ class MediaCenter:
         with self._lock:
             vsi = self._seznami_beri()
             if not ime:
-                return {"lists": [{"ime": x["ime"], "vir": x.get("vir") or "", "cas": int(x.get("cas") or 0),
-                                   "stevilo": len(x["skladbe"])} for x in vsi],
-                        "deleted": self._izbrisani_beri()}
+                return dict({"lists": [{"ime": x["ime"], "vir": x.get("vir") or "", "cas": int(x.get("cas") or 0),
+                                        "stevilo": len(x["skladbe"])} for x in vsi],
+                             "deleted": self._izbrisani_beri()}, **self.viri_izvoz())
             sz = next((x for x in vsi if x["ime"] == ime), None)
         if not sz:
             return {"ime": ime, "stevilo": 0, "skladbe": []}
@@ -1749,8 +1755,27 @@ class MediaCenter:
                 "od": od, "skladbe": skladbe}
 
     def seznami_uskladi(self, vprasaj) -> bool:
-        """Prevzame novejse sezname in izbrise ene naprave v Linku (vprasaj(parametri) -> data ukaza `lists.get` ali
-        None). Vrne True, ce se je tukaj kaj spremenilo."""
+        """Prevzame novejse sezname, izbrise in Moje vire ene naprave v Linku (vprasaj(parametri) -> data ukaza
+        `lists.get` ali None). Vrne True, ce se je tukaj kaj spremenilo."""
+        zajeto: dict = {}
+
+        def vprasaj_in_zajemi(parametri):
+            r = vprasaj(parametri)
+            if not parametri and isinstance(r, dict):
+                zajeto["kazalo"] = r        # kazalo nosi tudi vire (sources, sources_deleted): ne vprasamo dvakrat
+            return r
+        if not self._izvoz_virov_zapisan:
+            self._izvoz_virov_zapisan = True
+            self._viri_zapisi_izvoz()       # za Safeer Control (Linux), ki napravam odgovarja namesto Safeer OS
+        spremenjeno = self._seznami_uskladi(vprasaj_in_zajemi)
+        try:
+            if self.viri_uskladi(zajeto.get("kazalo")):
+                spremenjeno = True
+        except Exception as e:  # noqa: BLE001 - viri ne smejo ustaviti usklajevanja seznamov
+            print("[SafeerMedia] viri z naprave:", type(e).__name__, flush=True)
+        return spremenjeno
+
+    def _seznami_uskladi(self, vprasaj) -> bool:
         with self._lock:
             moji, izbrisani = self._seznami_beri(), self._izbrisani_beri()
         # Omrezje brez zaklepa (naprava lahko odgovarja pocasi); zapis nazaj le, ce se seznami vmes niso spremenili.
@@ -1994,7 +2019,9 @@ class MediaCenter:
                 if vir.get("vrsta") == "streznik" or int(vir.get("stevilo") or 0) > 0
                 or (vir.get("tip") == "predvajalni_vir" and not vir.get("napaka"))]
 
-    def add_server(self, provider: str, name: str, url: str, username: str, secret: str) -> dict:
+    def add_server(self, provider: str, name: str, url: str, username: str, secret: str,
+                   prevzet: Optional[dict] = None) -> dict:
+        """`prevzet`: vir je prisel z druge naprave v Linku ({"tip", "naslov", "cas"}, core/viri_sink.py)."""
         provider = _text(provider, 20).lower()
         url = _text(url, 1024)
         if url.startswith("stremio://"):
@@ -2032,13 +2059,22 @@ class MediaCenter:
                   "ime": _text(name, 80) or urllib.parse.urlsplit(base).hostname,
                   "url": base, "uporabnik": username, "user_id": auth.get("user_id", ""),
                   "secret_enc": encrypted}
+        if provider == "stremio":
+            # Zaseben dodatek ostane na tem racunalniku (ne gre drugim napravam v Linku); ce ne vemo, velja kot zaseben.
+            zaseben = self._koren_zaseben(base)
+            if zaseben is not None:
+                source["zaseben"] = bool(zaseben)
         with self._lock:
             data = self._load()
             sources = data.setdefault("osebni_strezniki", [])
             if any(item.get("id") == source_id for item in sources):
                 return {"ok": False, "napaka": "Ta strežnik je že dodan."}
+            if provider == "stremio":
+                self._vir_dodan(source, viri_sink.STREMIO, base, prevzet)
             sources.append(source)
             self._save(data)
+        if provider == "stremio":
+            self._vir_potrjen(viri_sink.STREMIO, base)
         return {"ok": True, "vir": {k: v for k, v in source.items() if k not in ("secret_enc", "uporabnik")}}
 
     def _stremio_strezniki(self) -> list[dict]:
@@ -2199,7 +2235,8 @@ class MediaCenter:
             result.extend(rows)
         return result
 
-    def add_source(self, url: str, name: str = "") -> dict:
+    def add_source(self, url: str, name: str = "", prevzet: Optional[dict] = None) -> dict:
+        """`prevzet`: vir je prisel z druge naprave v Linku ({"tip", "naslov", "cas"}, core/viri_sink.py)."""
         canonical = canonical_url(url)
         with self._lock:
             data = self._load()
@@ -2218,6 +2255,7 @@ class MediaCenter:
             }
             if _je_predvajalni_vir(canonical):
                 source["tip"] = "predvajalni_vir"
+            self._vir_dodan(source, viri_sink.URL, canonical, prevzet)
             data.setdefault("viri", []).append(source)
             self._save(data)
         # Odziv vira začnemo meriti takoj ob dodajanju, da je meritev navadno
@@ -2228,6 +2266,9 @@ class MediaCenter:
         # Vir predvajalnika (TMDB katalog + vdelani predvajalnik) nima lastnih vnosov, a je predvajljiv.
         if rezultat.get("ok") and (int(vir.get("stevilo") or 0) > 0 or source.get("tip") == "predvajalni_vir"
                                    or vir.get("tip") in ("predvajalni_vir", "uradni_vdelani_predvajalnik")):
+            self._vir_potrjen(viri_sink.URL, canonical)
+            if prevzet and prevzet.get("naslov"):
+                self._vir_potrjen(str(prevzet.get("tip") or viri_sink.URL), str(prevzet["naslov"]))
             return rezultat
         # Vira, iz katerega ne moremo nicesar predvajati, ne pustimo v medijskem centru - in povemo zakaj.
         with self._lock:
@@ -2239,10 +2280,12 @@ class MediaCenter:
                      + (" (" + razlog + ")" if razlog and razlog != "ni_vira" else ""))
         return {"ok": False, "napaka": razlog or "nepredvajljiv", "nepredvajljiv": True, "sporocilo": sporocilo}
 
-    def remove_source(self, source_id: str) -> bool:
+    def remove_source(self, source_id: str, cas: int = 0, kljuc: str = "") -> bool:
+        """`cas`, `kljuc`: izbris je prisel z druge naprave v Linku (njen cas in njen kljuc vira, core/viri_sink.py)."""
         with self._lock:
             data = self._load()
             servers_before = len(data.get("osebni_strezniki", []))
+            odstranjen = next((s for s in data.get("osebni_strezniki", []) if s.get("id") == source_id), None)
             data["osebni_strezniki"] = [server for server in data.get("osebni_strezniki", [])
                                         if server.get("id") != source_id]
             if len(data["osebni_strezniki"]) != servers_before:
@@ -2250,14 +2293,279 @@ class MediaCenter:
                                       if not key.startswith(source_id + ":")}
                 self._save(data)
                 self.ozastari_predpomnilnik(izbrisi=True)  # odstranjen vir ne sme vec kazati svojih vnosov
+                if isinstance(odstranjen, dict) and odstranjen.get("ponudnik") == "stremio":
+                    self._vir_izbrisan(odstranjen, cas, kljuc)
                 return True
             before = len(data.get("viri", []))
+            odstranjen = next((s for s in data.get("viri", []) if s.get("id") == source_id), None)
             data["viri"] = [source for source in data.get("viri", []) if source.get("id") != source_id]
             if len(data["viri"]) == before:
                 return False
             self._save(data)
             self.ozastari_predpomnilnik(izbrisi=True)
+            if isinstance(odstranjen, dict):
+                self._vir_izbrisan(odstranjen, cas, kljuc)
             return True
+
+    # --- Moji viri so enaki na vseh napravah v Safeer Linku (core/viri_sink.py) ---------------------------------
+    def _viri_stanje(self) -> dict:
+        """{"izbrisani": {"tip|naslov": cas}, "zavrnjeni": {istovetnost: [cas poskusa, koliko velja]}}."""
+        try:
+            data = json.loads((self.config_dir / "viri_sink.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            data = {}
+        data = data if isinstance(data, dict) else {}
+        izbrisani = data.get("izbrisani") if isinstance(data.get("izbrisani"), dict) else {}
+        zavrnjeni = data.get("zavrnjeni") if isinstance(data.get("zavrnjeni"), dict) else {}
+        return {"izbrisani": {str(k): int(v) for k, v in izbrisani.items() if isinstance(v, (int, float)) and v > 0},
+                "zavrnjeni": {str(k): [int(v[0]), int(v[1])] for k, v in zavrnjeni.items()
+                              if isinstance(v, list) and len(v) == 2 and all(isinstance(x, (int, float)) for x in v)}}
+
+    def _viri_stanje_pisi(self, stanje: dict) -> None:
+        zavrnjeni = dict(sorted(stanje.get("zavrnjeni", {}).items(), key=lambda kv: kv[1][0], reverse=True)[:400])
+        try:
+            self.config_dir.mkdir(parents=True, exist_ok=True)
+            zacasna = self.config_dir / "viri_sink.tmp"
+            zacasna.write_text(json.dumps({"izbrisani": viri_sink.obrezi_izbrisane(stanje.get("izbrisani", {})),
+                                           "zavrnjeni": zavrnjeni}, ensure_ascii=False), encoding="utf-8")
+            os.replace(zacasna, self.config_dir / "viri_sink.json")
+        except OSError:
+            pass
+
+    @staticmethod
+    def _vir_kljuc(source: dict) -> tuple:
+        """(vrsta, naslov) vira za druge naprave: kar je prislo z naprave, obdrzi njen zapis; dodatek je naslov
+        manifesta (kot na Androidu); naslov, dodan na racunalniku, ima vrsto "url"."""
+        if source.get("ponudnik") == "stremio":
+            return viri_sink.STREMIO, str(source.get("link_naslov") or "") or viri_sink.stremio_naslov(str(source.get("url") or ""))
+        return str(source.get("link_tip") or viri_sink.URL), str(source.get("link_naslov") or source.get("url") or "")
+
+    def _vir_dodan(self, source: dict, tip: str, naslov: str, prevzet: Optional[dict]) -> None:
+        """Ob dodajanju (klic pod zaklepom): cas dodajanja za usklajevanje in - pri viru z naprave - njen zapis."""
+        stanje = self._viri_stanje()
+        if prevzet:
+            source["dodan"] = int(prevzet.get("cas") or 0) or 1
+            if tip != viri_sink.STREMIO:
+                source["link_tip"] = str(prevzet.get("tip") or viri_sink.URL)
+            source["link_naslov"] = str(prevzet.get("naslov") or naslov)
+        else:
+            source["dodan"] = viri_sink.nov_cas(self._zdaj_ms(), 0, viri_sink.cas_izbrisa(stanje["izbrisani"], tip, naslov) or 0)
+
+    def _vir_potrjen(self, tip: str, naslov: str) -> None:
+        """Vir je res dodan (predvajljiv): znan izbris in zavrnitev istega vira pozabimo, izvoz za naprave osvezimo."""
+        with self._lock:
+            stanje = self._viri_stanje()
+            self._vir_potrjen_pod_zaklepom(stanje, tip, naslov)
+        self._viri_zapisi_izvoz()
+
+    def _vir_potrjen_pod_zaklepom(self, stanje: dict, tip: str, naslov: str) -> None:
+        i = viri_sink.istovetnost(tip, naslov)
+        ostali = {k: v for k, v in stanje["izbrisani"].items() if viri_sink.istovetnost_kljuca(k) != i}
+        if len(ostali) != len(stanje["izbrisani"]) or i in stanje["zavrnjeni"]:
+            stanje["izbrisani"] = ostali
+            stanje["zavrnjeni"].pop(i, None)
+            self._viri_stanje_pisi(stanje)
+
+    def _vir_izbrisan(self, source: dict, cas: int = 0, kljuc: str = "") -> None:
+        """Izbris si zapomnimo s casom: druge naprave v Linku vir izbrisejo tudi pri sebi in ga ne vrnejo sem."""
+        tip, naslov = self._vir_kljuc(source)
+        if not naslov:
+            return
+        stanje = self._viri_stanje()
+        stanje["izbrisani"][kljuc or viri_sink.kljuc(tip, naslov)] = \
+            int(cas) if cas else viri_sink.nov_cas(self._zdaj_ms(), int(source.get("dodan") or 0), 0)
+        self._viri_stanje_pisi(stanje)
+        self._viri_zapisi_izvoz()
+
+    def _stremio_zaseben_znano(self, server: dict) -> Optional[bool]:
+        """Ali je dodatek zaseben - brez omrezja: iz zapisa streznika ali iz tega zagona. None = se ne vemo."""
+        if isinstance(server.get("zaseben"), bool):
+            return server["zaseben"]
+        return self._zasebni_koreni.get(media_servers._stremio_koren(str(server.get("url") or "")))
+
+    @staticmethod
+    def _vir_za_naprave(source: dict) -> bool:
+        """Naslov, dodan na racunalniku, gre napravam, ce je tu predvajljiv in ni predloga predvajalnika (te pozna
+        samo racunalnik)."""
+        url = str(source.get("url") or "")
+        if source.get("tip") == "predvajalni_vir" or "{" in url or source.get("napaka"):
+            return False
+        return int(source.get("stevilo") or 0) > 0
+
+    def viri_izvoz(self) -> dict:
+        """Moji viri za druge naprave v Linku (del odgovora `lists.get {}`): brez omrezja. Zasebnega dodatka in
+        dodatka, za katerega se ne vemo, ali je zaseben, ne povemo (tega spoznamo v ozadju)."""
+        with self._lock:
+            data = self._load()
+            stanje = self._viri_stanje()
+        viri, neznani = [], []
+        for s in data.get("osebni_strezniki", []):
+            if not isinstance(s, dict) or s.get("ponudnik") != "stremio" or not s.get("url"):
+                continue
+            zaseben = self._stremio_zaseben_znano(s)
+            if zaseben is None:
+                neznani.append(str(s.get("id") or ""))
+            if zaseben is not False:
+                continue
+            tip, naslov = self._vir_kljuc(s)
+            viri.append({"tip": tip, "ime": str(s.get("ime") or "")[:200], "naslov": naslov, "cas": int(s.get("dodan") or 0)})
+        for v in data.get("viri", []):
+            if not isinstance(v, dict) or not v.get("url") or not (v.get("link_tip") or self._vir_za_naprave(v)):
+                continue
+            tip, naslov = self._vir_kljuc(v)
+            viri.append({"tip": tip, "ime": str(v.get("ime") or "")[:200], "naslov": naslov, "cas": int(v.get("dodan") or 0)})
+        if neznani:
+            self._spoznaj_dodatke(neznani)
+        return {"sources": [v for v in viri if viri_sink.cist_vir(v)][:viri_sink.NAJVEC_VIROV],
+                "sources_deleted": stanje["izbrisani"]}
+
+    def _viri_zapisi_izvoz(self) -> None:
+        """Na Linuxu drugim napravam odgovarja Safeer Control (tudi ko Safeer OS ni odprt, core/link_seznami.py): vire
+        zanj zapisemo v datoteko ob seznamih. Zapis je ze prefiltriran - zasebnih dodatkov v njem ni."""
+        try:
+            izvoz = self.viri_izvoz()
+            self.config_dir.mkdir(parents=True, exist_ok=True)
+            zacasna = self.config_dir / "viri_za_naprave.tmp"
+            zacasna.write_text(json.dumps(izvoz, ensure_ascii=False), encoding="utf-8")
+            os.replace(zacasna, self.config_dir / "viri_za_naprave.json")
+        except Exception:  # noqa: BLE001 - izvoz za naprave ne sme ustaviti Medijskega centra
+            pass
+
+    def _spoznaj_dodatke(self, idji: list) -> None:
+        """Dodatke, dodane pred usklajevanjem, v ozadju vprasa po manifestu (ali so zasebni) in to zapise k strezniku;
+        vsakega najvec enkrat na 10 minut."""
+        zdaj = time.monotonic()
+        idji = [i for i in idji if i and zdaj - self._dodatki_vprasani.get(i, -1e9) > 600]
+        if not idji or self._spoznavam_dodatke:
+            return
+        self._spoznavam_dodatke = True
+        for i in idji:
+            self._dodatki_vprasani[i] = zdaj
+
+        def delo() -> None:
+            try:
+                spoznani = {}
+                with self._lock:
+                    strezniki = [dict(s) for s in self._load().get("osebni_strezniki", []) if s.get("id") in idji]
+                for s in strezniki:
+                    zaseben = self._koren_zaseben(str(s.get("url") or ""))
+                    if zaseben is not None:
+                        spoznani[s["id"]] = bool(zaseben)
+                if spoznani:
+                    with self._lock:
+                        data = self._load()
+                        for s in data.get("osebni_strezniki", []):
+                            if s.get("id") in spoznani:
+                                s["zaseben"] = spoznani[s["id"]]
+                        self._save(data)
+            finally:
+                self._spoznavam_dodatke = False
+            if spoznani:
+                self._viri_zapisi_izvoz()
+        threading.Thread(target=delo, name="safeer-viri-dodatki", daemon=True).start()
+
+    def _viri_moji(self, data: dict) -> list:
+        """[(istovetnost, cas dodajanja, id vira)] - vir z naprave ima dve istovetnosti (njen naslov in nas)."""
+        izid = []
+        for s in data.get("osebni_strezniki", []):
+            if isinstance(s, dict) and s.get("ponudnik") == "stremio" and s.get("url"):
+                izid.append((viri_sink.istovetnost(viri_sink.STREMIO, str(s["url"])), int(s.get("dodan") or 0), str(s.get("id") or "")))
+        for v in data.get("viri", []):
+            if isinstance(v, dict) and v.get("url"):
+                for naslov in dict.fromkeys((str(v["url"]), str(v.get("link_naslov") or v["url"]))):
+                    izid.append((viri_sink.istovetnost(viri_sink.URL, naslov), int(v.get("dodan") or 0), str(v.get("id") or "")))
+        return izid
+
+    #: Najvec toliko novih virov poskusimo prevzeti ob enem usklajevanju (vsak prevzem je omrezno preverjanje).
+    NAJVEC_PREVZEMOV = 6
+
+    def viri_uskladi(self, kazalo: object) -> bool:
+        """Moji viri z ene naprave v Linku (kazalo odgovora `lists.get {}`): izbrisi, nato novi viri. Racunalnik
+        prevzame samo, kar zna predvajati; zasebnega dodatka nikoli. Klic iz delovne niti (omrezje). Vrne True, ce
+        se je tukaj kaj spremenilo."""
+        if not isinstance(kazalo, dict):
+            return False
+        tuji_izbrisi = viri_sink.cisti_izbrisi(kazalo.get("sources_deleted"))
+        surovi = kazalo.get("sources") if isinstance(kazalo.get("sources"), list) else []
+        tuji = [c for c in (viri_sink.cist_vir(o) for o in surovi[:viri_sink.NAJVEC_VIROV]) if c]
+        if not tuji_izbrisi and not tuji:
+            return False
+        spremenjeno = False
+        # 1) Izbrisi: vir, izbrisan na drugi napravi, izgine tudi tukaj, ce ga tu nismo dodali pozneje.
+        za_izbris = []
+        with self._lock:
+            moji = self._viri_moji(self._load())
+            stanje = self._viri_stanje()
+            zapisi = False
+            for k, cas in tuji_izbrisi.items():
+                i = viri_sink.istovetnost_kljuca(k)
+                moj = next((m for m in moji if m[0] == i), None)
+                if moj is None:
+                    if int(stanje["izbrisani"].get(k) or 0) < cas:
+                        stanje["izbrisani"][k] = cas
+                        zapisi = True
+                elif viri_sink.izbris_vira_velja(moj[1], cas):
+                    za_izbris.append((moj[2], cas, k))
+            if zapisi:
+                self._viri_stanje_pisi(stanje)
+        for source_id, cas, k in za_izbris:
+            if self.remove_source(source_id, cas=cas, kljuc=k):
+                spremenjeno = True
+        # 2) Novi viri.
+        poskusov = 0
+        for v in tuji:
+            if v["tip"] not in viri_sink.PREVZEMLJIVE or poskusov >= self.NAJVEC_PREVZEMOV:
+                continue
+            i = viri_sink.istovetnost(v["tip"], v["naslov"])
+            zdaj = self._zdaj_ms()
+            with self._lock:
+                stanje = self._viri_stanje()
+                if any(m[0] == i for m in self._viri_moji(self._load())):
+                    continue
+                if not viri_sink.vir_prevzamemo(False, viri_sink.cas_izbrisa(stanje["izbrisani"], v["tip"], v["naslov"]), v["cas"]):
+                    continue
+                zavrnjen = stanje["zavrnjeni"].get(i)
+                if zavrnjen and zdaj - zavrnjen[0] < zavrnjen[1]:
+                    continue
+            poskusov += 1
+            ok, velja = self._prevzemi_vir(v)
+            if ok:
+                spremenjeno = True
+            elif velja:
+                with self._lock:
+                    stanje = self._viri_stanje()
+                    stanje["zavrnjeni"][i] = [zdaj, velja]
+                    self._viri_stanje_pisi(stanje)
+        if spremenjeno:
+            self._viri_zapisi_izvoz()
+            if self.ob_virih is not None:
+                try:
+                    self.ob_virih()
+                except Exception:  # noqa: BLE001
+                    pass
+        return spremenjeno
+
+    def _prevzemi_vir(self, v: dict) -> tuple:
+        """Doda vir z druge naprave, ce ga ta racunalnik zna predvajati. Vrne (dodan, koliko ms ne poskusamo znova)."""
+        try:
+            if v["tip"] == viri_sink.STREMIO:
+                try:
+                    manifest = media_servers.stremio_manifest(v["naslov"])
+                except Exception:
+                    return False, viri_sink.NEDOSEGLJIV_VELJA_MS
+                # Zasebnega dodatka ne prevzamemo - tudi ce ga ponudi naprava s starejso razlicico.
+                if media_servers.stremio_je_zaseben(manifest):
+                    return False, viri_sink.ZAVRNJEN_VELJA_MS
+                self._zasebni_koreni[media_servers._stremio_koren(v["naslov"])] = False
+                r = self.add_server("stremio", _text(manifest.get("name"), 80) or v["ime"], v["naslov"], "", "", prevzet=v)
+            else:
+                r = self.add_source(v["naslov"], v["ime"], prevzet=v)
+        except Exception:  # noqa: BLE001 - neveljaven naslov, omrezje ...
+            return False, viri_sink.ZAVRNJEN_VELJA_MS
+        if isinstance(r, dict) and r.get("ok"):
+            print("[SafeerMedia] vir z naprave: %s" % v["tip"], flush=True)
+            return True, 0
+        return False, viri_sink.ZAVRNJEN_VELJA_MS
 
     def _download(self, url: str) -> tuple[bytes, str, str]:
         request = urllib.request.Request(url, headers={
