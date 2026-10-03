@@ -122,18 +122,18 @@ class SamoPredvajljivoTest(unittest.TestCase):
     """Obvestil dodatkov (donacije, Discord, "No streams found") ni nikjer; brez toka ni strani, film izgine iz kataloga."""
 
     TOKOVI = {"streams": [
-        {"name": "🌟 Donation needed", "title": "Click here to donate to hdhub", "externalUrl": "https://ko-fi.com/hdhub"},
+        {"name": "🌟 Donation needed", "title": "Click here to donate to this add-on", "externalUrl": "https://ko-fi.com/primer"},
         {"name": "💬 Join the Discord server", "title": "Get latest updates", "externalUrl": "https://discord.gg/abc"},
-        {"name": "❌ No streams found", "title": "No streams found for this title on hdhub", "externalUrl": "https://hdhub.example"},
+        {"name": "❌ No streams found", "title": "No streams found for this title on this add-on", "externalUrl": "https://dodatek.example"},
         {"name": "Join our Discord", "url": "https://discord.gg/xyz"},
-        {"name": "Support us", "title": "Donate to keep the project alive", "url": "https://hdhub.example/donate"}]}
+        {"name": "Support us", "title": "Donate to keep the project alive", "url": "https://dodatek.example/donate"}]}
 
     def test_obvestila_niso_tokovi(self):
         from core import media_servers
         with mock.patch.object(media_servers, "_request", return_value=json.dumps(self.TOKOVI)):
             self.assertEqual(media_servers.stremio_tokovi("https://d.example", "movie", "tt1"), [])
         pravi = {"streams": self.TOKOVI["streams"] + [
-            {"name": "HDHub 1080p", "title": "Film.2020.1080p.mkv", "url": "https://cdn.example/f.mkv"},
+            {"name": "Dodatek 1080p", "title": "Film.2020.1080p.mkv", "url": "https://cdn.example/f.mkv"},
             {"name": "Donation.2019.720p", "title": "Donation.2019.720p.mp4", "url": "https://cdn.example/x", "behaviorHints": {"filename": "Donation.2019.720p.mp4"}}]}
         with mock.patch.object(media_servers, "_request", return_value=json.dumps(pravi)):
             self.assertEqual([t["url"] for t in media_servers.stremio_tokovi("https://d.example", "movie", "tt1")],

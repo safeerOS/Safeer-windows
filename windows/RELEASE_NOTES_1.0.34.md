@@ -1,0 +1,6 @@
+# Safeer OS za Windows 1.0.34
+
+- **Film se začne z virom, ki dela.** Nekateri dodatki ponudijo časovno omejene povezave in jih hranijo tudi, ko so že potekle; strežnik jih takrat zavrne. Tak vir je bil doslej lahko prvi na vrsti. Safeer OS rok zdaj prebere iz same povezave: potekla gre na konec, med enakovrednima viroma ima prednost trajna povezava – ista pravila kot Safeer OS za Android 0.5.45 in Linux 0.4.38.
+- **Prvi vir mora res odgovoriti.** Medijski center pred začetkom tri najboljše vire hkrati vpraša za prve bajte in začne z najboljšim, ki odgovori. Mrtva povezava (izbrisana, zavrnjena, spletna stran namesto posnetka) ne pride več do predvajalnika.
+
+English: **A film starts with a source that works** – some add-ons hand out time-limited links and keep serving them after they have expired; Safeer OS now reads the expiry from the link itself, puts an expired link last and prefers the permanent link between two equal sources (the same rules as Safeer OS for Android 0.5.45 and Linux 0.4.38). **The first source must actually respond** – before the player starts, the Media Centre asks the three best sources for their first bytes at the same time and starts with the best one that answers, so a dead link no longer reaches the player.

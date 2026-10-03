@@ -76,6 +76,21 @@ def _request(url: str, headers: dict | None = None, body: dict | None = None, ra
         return response.read(5 * 1024 * 1024 + 1)
 
 
+def tok_odgovarja(url: str, glave: dict | None = None, rok: float = 4.0) -> bool:
+    """Ali streznik toka na zahtevo prvih bajtov odgovori z vsebino. Mrtva povezava (potekla, izbrisana, zavrnjena:
+    4xx/5xx), stran HTML namesto posnetka in neodziven streznik ne stejejo. Telesa ne beremo."""
+    if not dovoljen_naslov(url):
+        return False
+    zahteva = urllib.request.Request(url, headers={"User-Agent": "SafeerOS/1.0", "Accept": "*/*", "Range": "bytes=0-1",
+                                                   **{str(k): str(v) for k, v in (glave or {}).items()}})
+    try:
+        with urllib.request.build_opener(_HTTPSOnlyRedirect()).open(zahteva, timeout=rok) as odgovor:
+            vrsta = str(odgovor.headers.get("Content-Type") or "").lower()
+            return odgovor.status in (200, 206) and not vrsta.startswith("text/html")
+    except Exception:  # noqa: BLE001 - vsaka napaka pomeni "ne odgovarja"
+        return False
+
+
 def authenticate(kind: str, base: str, username: str, secret: str) -> dict:
     if kind in ("jellyfin", "emby"):
         auth = 'MediaBrowser Client="Safeer OS", Device="Windows", DeviceId="safeer-os", Version="1.0"'
