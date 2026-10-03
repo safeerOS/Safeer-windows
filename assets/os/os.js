@@ -3863,6 +3863,14 @@
     $("mediaPrazno").hidden = !!list.length;
     $("mediaPovzetek").textContent = izSeznama ? "" : t("mediaZadetkov", { n: media.skupaj != null ? media.skupaj : list.length }) + (media.skupaj_strani > 1 ? " · Stran " + media.page + " od " + media.skupaj_strani : "");
     var zdruzi = !izSeznama && !media.razvrsti && (media.filter === "radio" || media.filter === "video" || media.filter === "glasba");
+    if (zdruzi) {
+      // Naslov skupine ima smisel, ko skupine res združujejo. Kjer ima skoraj vsak izvajalec eno samo skladbo, bi
+      // bila v vsaki vrstici ena kartica in ob njej prazen prostor – takrat ostane navadna mreža.
+      var skupine = {};
+      list.forEach(function (x) { var s = x.skupina || (media.filter === "glasba" ? x.izvajalec : ""); if (s) skupine[s] = 1; });
+      var stSkupin = Object.keys(skupine).length;
+      if (!stSkupin || list.length / stSkupin < 2) zdruzi = false;
+    }
     if (zdruzi) list.sort(function (a, b) {
       return (a.skupina || a.izvajalec || "").localeCompare(b.skupina || b.izvajalec || "");
     });
