@@ -122,6 +122,13 @@ class LazniRqbit(http.server.BaseHTTPRequestHandler):
             f = [dict(d, included=i in self.server.vkljucene) for i, d in enumerate(self.DATOTEKE)]
             return self._odgovor(200, json.dumps({"info_hash": HASH, "name": "Big Buck Bunny", "files": f}).encode())
         if self.path == "/torrents/0/stream/1":
+            if getattr(self.server, "pripravlja", 0) > 0:
+                # rqbit med pripravo torrenta: 500 z opisom stanja (izmerjeno na Windows, 3. 10. 2026).
+                self.server.pripravlja -= 1
+                return self._odgovor(500, json.dumps({"error_kind": "internal_error", "status": 500, "human_readable":
+                                                      "with_storage_and_file: invalid state: initializing"}).encode())
+            if getattr(self.server, "pokvarjen", False):
+                return self._odgovor(500, b'{"human_readable":"disk error"}')
             p = self.PODATKI
             r = self.headers.get("Range")
             if r:
@@ -200,6 +207,31 @@ class Motor(unittest.TestCase):
         self.assertEqual(e.exception.code, 404)
         with self.assertRaises(ot.NapakaTorrenta):
             self.t.tok(0, 2)                             # program se ne predvaja nikoli
+
+    def test_tok_pocaka_da_je_torrent_pripravljen(self):
+        self.t.dodaj(MAGNET, [1])
+        url = self.t.tok(0, 1)
+        ot.PRIPRAVA_TOKA_RAZMIK_S = 0.01
+        self.s.pripravlja = 3            # rqbit trikrat odgovori 500 "initializing", nato tok
+        with urllib.request.urlopen(urllib.request.Request(url, headers={"Range": "bytes=0-99"}), timeout=10) as r:
+            self.assertEqual((r.status, r.read()), (206, LazniRqbit.PODATKI[:100]))
+        self.assertEqual(self.s.pripravlja, 0)
+        # Druga napaka (ne priprava) gre naprej takoj in z izvirnim opisom - ne cakamo 45 s.
+        self.s.pokvarjen = True
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            urllib.request.urlopen(url, timeout=10)
+        self.assertEqual((e.exception.code, e.exception.read()), (500, b'{"human_readable":"disk error"}'))
+        # Priprava, ki se ne konca, po roku vrne napako (ne visi v nedogled).
+        self.s.pokvarjen = False
+        self.s.pripravlja = 10 ** 6
+        ot.PRIPRAVA_TOKA_S = 0.2
+        try:
+            with self.assertRaises(urllib.error.HTTPError) as e:
+                urllib.request.urlopen(url, timeout=10)
+            self.assertEqual(e.exception.code, 500)
+        finally:
+            ot.PRIPRAVA_TOKA_S = 45.0
+            ot.PRIPRAVA_TOKA_RAZMIK_S = 0.3
 
     def test_podnapisi_iz_istega_torrenta(self):
         self.s.dodan = True

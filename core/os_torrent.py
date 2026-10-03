@@ -56,6 +56,9 @@ SLEDILNIKI = (
 )
 NAJDALJSI_MAGNET = 8192
 KOS = 256 * 1024
+#: Toliko casa posrednik toka caka, da rqbit torrent pripravi (500 "initializing"), preden napako poslje naprej.
+PRIPRAVA_TOKA_S = 45.0
+PRIPRAVA_TOKA_RAZMIK_S = 0.3
 
 VIDEO = {".mp4", ".mkv", ".webm", ".avi", ".mov", ".m4v", ".ts", ".m2ts", ".mpg", ".mpeg", ".wmv", ".flv", ".3gp", ".ogv"}
 ZVOK = {".mp3", ".flac", ".m4a", ".aac", ".ogg", ".oga", ".opus", ".wav", ".wma", ".alac", ".ape"}
@@ -766,8 +769,23 @@ class _Obravnava(http.server.BaseHTTPRequestHandler):
         povezava = http.client.HTTPConnection("127.0.0.1", torrenti.vrata, timeout=120)
         try:
             glave["Authorization"] = "Basic " + base64.b64encode(("safeer:" + torrenti._geslo).encode()).decode()
-            povezava.request("HEAD" if samo_glava else "GET", "/torrents/%d/stream/%d" % (tid, i), headers=glave)
-            r = povezava.getresponse()
+            # rqbit prve sekunde po dodajanju torrent pripravlja (datoteke na disku; na pocasnem disku dlje) in na
+            # tok odgovori 500 "invalid state: initializing". Predvajalnik bi to vzel za napako in filma ne bi bilo:
+            # pocakamo, da je torrent pripravljen, in sele potem odgovorimo.
+            konec = time.monotonic() + PRIPRAVA_TOKA_S
+            zacetek = b""
+            while True:
+                povezava.request("HEAD" if samo_glava else "GET", "/torrents/%d/stream/%d" % (tid, i), headers=glave)
+                r = povezava.getresponse()
+                if r.status != 500:
+                    break
+                zacetek = r.read(4096)
+                if (zacetek and b"initializing" not in zacetek) or time.monotonic() > konec:
+                    break
+                povezava.close()
+                time.sleep(PRIPRAVA_TOKA_RAZMIK_S)
+                zacetek = b""
+                povezava = http.client.HTTPConnection("127.0.0.1", torrenti.vrata, timeout=120)
             self.send_response(r.status)
             for ime in ("Content-Length", "Content-Range", "Accept-Ranges"):
                 if r.getheader(ime):
@@ -783,6 +801,8 @@ class _Obravnava(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             if samo_glava:
                 return
+            if zacetek:
+                self.wfile.write(zacetek)
             while True:
                 kos = r.read(KOS)
                 if not kos:

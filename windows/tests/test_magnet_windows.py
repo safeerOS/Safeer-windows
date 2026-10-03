@@ -95,6 +95,88 @@ class LinkMagnet(unittest.TestCase):
         self.assertEqual((r["n"], r["d"], r["p"]), ("tv-1", "magnet.open", {"uri": CIST}))
 
 
+class LinkTokTorrenta(unittest.TestCase):
+    """magnet.stream / magnet.list / magnet.remove: Windows Control pomaga napravam pri torrentih kot Linux Control."""
+
+    def setUp(self):
+        self.td = tempfile.mkdtemp()
+        self.backend = control_backend.SafeerControlBackend(config_pot=os.path.join(self.td, "link.json"))
+        self.backend.povezava = _Povezava()
+
+    def tearDown(self):
+        shutil.rmtree(self.td, ignore_errors=True)
+
+    def _ukaz(self, dejanje, parametri, posiljatelj="tv-1", cakaj=True):
+        prej = len(self.backend.povezava.poslana)
+        self.backend._na_sporocilo({"id": "u-" + dejanje, "type": "control.command", "sender": posiljatelj,
+                                    "payload": {"action": dejanje, "params": parametri}})
+        for _ in range(200 if cakaj else 1):          # odgovor pride iz svoje niti
+            if len(self.backend.povezava.poslana) > prej:
+                break
+            import time
+            time.sleep(0.02)
+        self.assertGreater(len(self.backend.povezava.poslana), prej, "ni odgovora na " + dejanje)
+        return self.backend.povezava.poslana[-1]["payload"]
+
+    def test_stanje_oglasa_samo_kar_zna(self):
+        from core import os_torrent
+        with mock.patch.object(os_torrent, "platforma", lambda: "windows-amd64"):
+            self.assertTrue({"magnet.stream", "magnet.list", "magnet.remove"} <= set(self._ukaz("status", {})["data"]["actions"]))
+        with mock.patch.object(os_torrent, "platforma", lambda: ""):
+            self.assertNotIn("magnet.stream", self._ukaz("status", {})["data"]["actions"])
+
+    def test_tok_za_napravo(self):
+        klici = []
+
+        class Datoteke:
+            def tok_torrenta(self, uri, naprava, hub, datoteka):
+                klici.append((uri, naprava, datoteka))
+                return {"server": {"base_url": "https://192.168.0.2:5000", "fp": "ab", "token": "z"}, "path": "/m/s/film.mkv",
+                        "name": "film.mkv", "file": 2, "size": 10}
+
+        with mock.patch.object(self.backend, "_datoteke_torrenta", lambda: Datoteke()), \
+                mock.patch.object(control_backend.os_backend_win, "zmogljivost", lambda: {"pomoc": {"lahko": True, "razlog": ""}}):
+            o = self._ukaz("magnet.stream", {"uri": MAGNET, "file": 2})
+        self.assertTrue(o["ok"], o)
+        self.assertEqual((o["action"], o["data"]["path"], o["data"]["file"]), ("magnet.stream", "/m/s/film.mkv", 2))
+        self.assertEqual(klici, [(MAGNET, "tv-1", 2)])
+
+    def test_napake_so_kratke_kode(self):
+        from core import os_torrent
+        self.assertEqual(self._ukaz("magnet.stream", {"uri": "ni magnet"})["code"], "ni_magnet")
+        self.assertEqual(self._ukaz("magnet.remove", {"id": "x"})["code"], "ni_prenosa")
+
+        class Polno:
+            def tok_torrenta(self, *_a):
+                raise os_torrent.NapakaTorrenta("ni_prostora")
+
+        with mock.patch.object(self.backend, "_datoteke_torrenta", lambda: Polno()), \
+                mock.patch.object(control_backend.os_backend_win, "zmogljivost", lambda: {"pomoc": {"lahko": True, "razlog": ""}}):
+            o = self._ukaz("magnet.stream", {"uri": MAGNET})
+        self.assertEqual((o["ok"], o["code"]), (False, "ni_prostora"))
+
+    def test_obremenjen_procesor_ni_razlog_baterija_je(self):
+        class Datoteke:
+            def tok_torrenta(self, *_a):
+                return {"server": {}, "path": "/m/s/f.mkv", "name": "f.mkv", "file": 0, "size": 1}
+
+        with mock.patch.object(self.backend, "_datoteke_torrenta", lambda: Datoteke()):
+            with mock.patch.object(control_backend.os_backend_win, "zmogljivost", lambda: {"pomoc": {"lahko": False, "razlog": "preobremenjen"}}):
+                self.assertTrue(self._ukaz("magnet.stream", {"uri": MAGNET})["ok"])
+            with mock.patch.object(control_backend.os_backend_win, "zmogljivost", lambda: {"pomoc": {"lahko": False, "razlog": "baterija"}}):
+                o = self._ukaz("magnet.stream", {"uri": MAGNET})
+            self.assertEqual((o["ok"], o["code"]), (False, "baterija"))
+
+    def test_solidarnost_tudi_z_omejenimi_pravicami_brez_pravic_ne(self):
+        class Datoteke:
+            def prenosi_za_naprave(self):
+                return {"items": []}
+
+        self.backend.nastavi_dovoljenje("tv-2", "zaslon")
+        with mock.patch.object(self.backend, "_datoteke_torrenta", lambda: Datoteke()):
+            self.assertTrue(self._ukaz("magnet.list", {}, posiljatelj="tv-2")["ok"])
+
+
 class _LazniRegister:
     """Dovolj winreg za registracijo: HKCR = HKCU\\Software\\Classes prek HKLM\\Software\\Classes."""
     HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, HKEY_CLASSES_ROOT = "HKCU", "HKLM", "HKCR"
