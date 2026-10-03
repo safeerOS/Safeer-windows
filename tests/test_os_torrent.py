@@ -234,6 +234,10 @@ class Motor(unittest.TestCase):
         self.assertTrue(ot.Torrenti(self.mapa, self.mapa, svoj_dht=True).svoj_dht)
         self.assertIn('["--disable-dht-persistence"] if self.svoj_dht else []', inspect.getsource(ot.Torrenti.zazeni))
         self.assertIn("svoj_dht=True", inspect.getsource(link_datoteke.torrenti_za_naprave))
+        # ... in poslusa na sosednjih vratih (na Windows rqbit vrata deli, preverjanje zasedenosti tam ne zadosca).
+        self.assertIn("_vrata_za_torrent(VRATA_TORRENTA + 1 if self.svoj_dht else VRATA_TORRENTA)", inspect.getsource(ot.Torrenti.zazeni))
+        with mock.patch.object(ot, "_vrata_zasedena", lambda v: False):
+            self.assertEqual((ot._vrata_za_torrent(), ot._vrata_za_torrent(ot.VRATA_TORRENTA + 1)), (ot.VRATA_TORRENTA, ot.VRATA_TORRENTA + 1))
 
     def test_vrata_so_prosta_samo_ce_so_prosta_na_ipv4_in_ipv6_tcp_in_udp(self):
         # Windows (v zivo, 3. 10. 2026): prvi motor poslusa na 0.0.0.0, preverjanje samo [::] je vrata razglasilo za

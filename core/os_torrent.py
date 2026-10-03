@@ -365,13 +365,14 @@ def prenesi_program(napredek: Optional[Callable[[int, int], None]] = None,
 VRATA_TORRENTA = 4240
 
 
-def _vrata_za_torrent() -> int:
+def _vrata_za_torrent(zelena: int = 0) -> int:
     """Vrata za dohodne povezave BitTorrent: privzeta, ce so prosta, sicer nakljucna prosta (0 = ne vemo).
 
     Dva motorja hkrati (Safeer OS in Safeer Control, ki pretaka napravam) na istih vratih ne moreta teci: drugi se je
     do 3. 10. 2026 ugasnil takoj ob zagonu in uporabnik je dobil "program se je ustavil"."""
-    if not _vrata_zasedena(VRATA_TORRENTA):
-        return VRATA_TORRENTA
+    zelena = int(zelena or VRATA_TORRENTA)
+    if not _vrata_zasedena(zelena):
+        return zelena
     for _ in range(20):
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -483,7 +484,9 @@ class Torrenti:
             # rqbit, ki je ostal po sesutju Safeer OS, bi oddajal brez nadzora in si delil stanje z novim.
             _ustavi_sirote(self.mapa_stanja, program)
             self.vrata = _prosta_vrata()
-            vrata_torrenta = _vrata_za_torrent()
+            # Motor za naprave poslusa na sosednjih vratih: na Windows rqbit vrata deli (SO_REUSEADDR), zato tam
+            # preverjanje zasedenosti ne zadosca - dohodne povezave bi sicer padale v napacen motor.
+            vrata_torrenta = _vrata_za_torrent(VRATA_TORRENTA + 1 if self.svoj_dht else VRATA_TORRENTA)
             self._geslo = secrets.token_urlsafe(24)
             okolje = dict(os.environ, RQBIT_HTTP_BASIC_AUTH_USERPASS="safeer:" + self._geslo)
             ukaz = [program, "--http-api-listen-addr", "127.0.0.1:%d" % self.vrata, "--http-api-allow-create",
