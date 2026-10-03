@@ -34,6 +34,7 @@ from . import zakoniti_viri
 from . import media_servers
 from . import tok_izbira
 from . import os_torrent, os_torrent_tok
+from . import knjiznica_kroga
 from . import watch_providers
 from . import uvoz_seznama
 from . import seznami_sink
@@ -1159,6 +1160,8 @@ class MediaCenter:
         self._tokovi_odgovor = threading.local()   # .vsi: ali so ob zadnjem vprasanju po tokovih odgovorili vsi dodatki
         self._tmdb_cache: dict[str, tuple[float, dict]] = {}
         self._dynamic_items: dict[str, dict] = {}
+        #: koren dodatka -> ali je zaseben (manifest behaviorHints.adult); velja do konca tega zagona.
+        self._zasebni_koreni: dict[str, bool] = {}
         self._ping_cache: dict[str, tuple[float, float]] = {}
         self._ping_lock = threading.Lock()
         self._zakoniti_viri = zakoniti_viri.ZakonitiViri()
@@ -1503,8 +1506,74 @@ class MediaCenter:
                 resolved["pot"] = tok["pot"]
             if tok.get("podnapisi") and not resolved.get("podnapisi"):
                 resolved["podnapisi"] = list(tok["podnapisi"])
+            if tok.get("zacasen"):
+                self._zabelezi_knjiznico(item, str(t["hash"]), tok.get("indeks"))
             return resolved
         return dict(item, napaka_koda=koda)
+
+    # --- knjiznica kroga: polica »Na tvojih napravah« -----------------------------
+    def _koren_zaseben(self, koren: str) -> Optional[bool]:
+        """Ali se dodatek v manifestu sam oznaci kot zaseben. None = ne vemo (manifesta ni bilo mogoce prebrati)."""
+        koren = media_servers._stremio_koren(str(koren or ""))
+        if not koren:
+            return None
+        znano = self._zasebni_koreni.get(koren)
+        if znano is not None:
+            return znano
+        try:
+            zaseben = media_servers.stremio_je_zaseben(media_servers.stremio_manifest(koren))
+        except Exception:
+            return None
+        self._zasebni_koreni[koren] = zaseben
+        return zaseben
+
+    def _zabelezi_knjiznico(self, item: dict, hash_: str, indeks: Any) -> None:
+        """Film, ki ga je Safeer OS zaradi gledanja prenesel sam: zapomnimo si naslov in plakat za polico - ali, ce ga je
+        ponudil zaseben dodatek (ali tega ne vemo), samo oznako, da je zaseben."""
+        try:
+            # Odloca dodatek, ki je torrent ponudil. Naslov iz kataloga samega dodatka (ne iz javnega kataloga TMDB)
+            # je zaseben tudi, ce je zaseben ta dodatek. Drugi dodatki na kartici so le mozne razlicice.
+            koreni = []
+            dodatek = (getattr(self._tokovi_odgovor, "dodatki_torrentov", None) or {}).get(str(hash_).lower())
+            if dodatek:
+                koreni.append(dodatek)
+            stremio = item.get("stremio") if isinstance(item.get("stremio"), dict) else {}
+            if stremio.get("koren") and not item.get("tmdb_id"):
+                koreni.append(str(stremio["koren"]))
+            stanja = [self._koren_zaseben(k) for k in dict.fromkeys(koreni)] if dodatek else []
+            zaseben = True if any(z is True for z in stanja) else (None if (not stanja or any(z is None for z in stanja)) else False)
+            knjiznica_kroga.zabelezi(hash_, knjiznica_kroga.opis_vnosa(item, zaseben),
+                                     indeks if isinstance(indeks, int) else None)
+        except Exception:
+            pass
+
+    def knjiznica_vnos(self, v: dict) -> dict:
+        """Vnos police, ki ga hrani motor Safeer OS na tem racunalniku: predvaja se naravnost iz torrenta, brez dodatka.
+        Vnos obdrzi oznako izvirnega naslova (`ref`), da se film nadaljuje tam, kjer je uporabnik ostal."""
+        kljuc = str(v.get("kljuc") or "").lower()
+        datoteka = v.get("datoteka")
+        item = {"id": str(v.get("ref") or "") or "knjiznica:" + kljuc, "naslov": str(v.get("naslov") or ""),
+                "vrsta": "serija" if v.get("vrsta") == "serija" else "film", "slika": str(v.get("slika") or ""),
+                "url": "knjiznica:%s|%s" % (kljuc, datoteka if isinstance(datoteka, int) else ""),
+                "vir": "", "kakovost": "", "opis": "", "leto": 0, "izvajalec": ""}
+        self._dynamic_items["knjiznica:" + kljuc] = item
+        return item
+
+    def _razresi_knjiznico(self, item: dict) -> dict:
+        hash_, _, datoteka = str(item.get("url") or "")[len("knjiznica:"):].partition("|")
+        try:
+            tok = os_torrent_tok.pripravi(hash_, int(datoteka) if datoteka.isdigit() else None)
+        except os_torrent.NapakaTorrenta as napaka:
+            return dict(item, napaka_koda=str(napaka) if str(napaka) in ("ni_prostora", "malo_pomnilnika") else "tok")
+        except Exception:
+            return dict(item, napaka_koda="tok")
+        resolved = dict(item, url=tok["url"], torrent=True, stevilo_razlicic=1,
+                        razlicice=[{"url": tok["url"], "vir": "Torrent", "kakovost": ""}])
+        if tok.get("pot"):
+            resolved["pot"] = tok["pot"]
+        if tok.get("podnapisi"):
+            resolved["podnapisi"] = list(tok["podnapisi"])
+        return resolved
 
     def _na_voljo(self, koren: str, tip: str, ident: str) -> Optional[bool]:
         """True = kateri od dodatkov ima tok, False = vsi so odgovorili in nobeden nima, None = ne vemo (izpad)."""
@@ -2009,15 +2078,27 @@ class MediaCenter:
                 izpadi.append(k)
                 return []
 
+        # Kateri dodatek je ponudil torrent (za zasebnost na polici »Na tvojih napravah«). Naslov dodatka ostane tu:
+        # v njem je lahko uporabnikov zeton, zato ga tokovom, ki gredo na stran, ne pripisemo.
+        dodatki_torrentov: dict[str, str] = {}
+        self._tokovi_odgovor.dodatki_torrentov = dodatki_torrentov
+
+        def zapomni(k: str, izid: list) -> None:
+            for t in izid:
+                if t.get("torrent") and t.get("hash"):
+                    dodatki_torrentov.setdefault(str(t["hash"]).lower(), k)
+
         if len(koreni) == 1:
             tokovi = vprasaj(koren)
+            zapomni(koren, tokovi)
             self._tokovi_odgovor.vsi = not izpadi
             return tokovi
         from concurrent.futures import ThreadPoolExecutor
         tokovi: list[dict] = []
         videni: set[str] = set()
         with ThreadPoolExecutor(max_workers=min(6, len(koreni))) as bazen:
-            for izid in bazen.map(vprasaj, koreni[:10]):
+            for k, izid in zip(koreni[:10], bazen.map(vprasaj, koreni[:10])):
+                zapomni(k, izid)
                 for t in izid:
                     kljuc = str(t.get("url") or "") or ("torrent:%s:%s" % (t.get("hash") or "", t.get("indeks"))
                                                          if t.get("torrent") else "")
@@ -2831,7 +2912,8 @@ class MediaCenter:
         }
 
     def details(self, item_id: str, country: str = "auto", language: str = "sl") -> dict:
-        item = self.resolve(item_id)
+        # Odprte podrobnosti niso predvajanje: torrenta zaradi njih ne zacnemo prenasati.
+        item = self.resolve(item_id, pripravi_torrent=False)
         if not item or not item.get("tmdb_id"):
             return item or {}
         media_type = "tv" if item.get("vrsta") == "serija" else "movie"
@@ -3019,12 +3101,16 @@ class MediaCenter:
             self._save(shramba)
             return {"ok": True, "st_vnosov": len(items), "vir": custom_name, "vrsta": "katalog"}
 
-    def resolve(self, item_id: str) -> Optional[dict]:
+    def resolve(self, item_id: str, pripravi_torrent: bool = True) -> Optional[dict]:
+        """Vnos, pripravljen za predvajanje. `pripravi_torrent=False` (podrobnosti naslova): naslova, ki ga ponujajo
+        samo torrenti, ne zacnemo prenasati - to se zgodi sele, ko uporabnik pritisne Predvajaj."""
         if str(item_id or "").startswith("seznam:"):
             return self.seznam_posnetek(str(item_id))
         item = self._dynamic_items.get(item_id) or next((item for item in self.catalog()["vnosi"] if item.get("id") == item_id), None)
         if not item:
             return None
+        if str(item.get("url") or "").startswith("knjiznica:"):
+            return self._razresi_knjiznico(item) if pripravi_torrent else dict(item, torrent=True)
         # Posebni naslovi (Stremio dodatek) so lahko tudi med razlicicami zdruzene kartice.
         posebni = [str(item.get("url") or "")] + [str(v.get("url") or "") for v in (item.get("razlicice") or []) if isinstance(v, dict)]
         if any(u.startswith("kodi-dodatek:") for u in posebni):
@@ -3059,7 +3145,7 @@ class MediaCenter:
             # Neposrednega toka ni: torrent, ce ga ta racunalnik zna prenasati (kot Android: neposredni imajo prednost).
             torrenti = [t for t in tokovi if t.get("torrent") and t.get("hash")]
             if torrenti and os_torrent_tok.podprto():
-                return self._razresi_torrent(item, torrenti)
+                return self._razresi_torrent(item, torrenti) if pripravi_torrent else dict(item, torrent=True)
             # Brez predvajljivega toka ni strani in ni seznama povezav: kratko obvestilo, vsebina izgine s seznama.
             # Za ure si to zapomnimo le, ce so odgovorili vsi dodatki (izpad dodatka ni "ni na voljo").
             if getattr(self._tokovi_odgovor, "vsi", False):

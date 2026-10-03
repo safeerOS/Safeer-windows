@@ -225,6 +225,45 @@ class Motor(unittest.TestCase):
         with mock.patch.object(ot, "VRATA_TORRENTA", vrata):
             self.assertEqual(ot._vrata_za_torrent(), vrata)      # prosta privzeta vrata ostanejo privzeta
 
+    def test_motor_za_naprave_ima_svoj_dht(self):
+        # Windows (v zivo, 3. 10. 2026): vsi rqbit istega uporabnika si delijo shranjeno stanje DHT - drugi motor se je
+        # ugasnil ob zagonu. Motor, ki pretaka napravam, zato tece s stikalom --disable-dht-persistence.
+        import inspect
+        from core import link_datoteke
+        self.assertFalse(ot.Torrenti(self.mapa, self.mapa).svoj_dht)
+        self.assertTrue(ot.Torrenti(self.mapa, self.mapa, svoj_dht=True).svoj_dht)
+        self.assertIn('["--disable-dht-persistence"] if self.svoj_dht else []', inspect.getsource(ot.Torrenti.zazeni))
+        self.assertIn("svoj_dht=True", inspect.getsource(link_datoteke.torrenti_za_naprave))
+
+    def test_vrata_so_prosta_samo_ce_so_prosta_na_ipv4_in_ipv6_tcp_in_udp(self):
+        # Windows (v zivo, 3. 10. 2026): prvi motor poslusa na 0.0.0.0, preverjanje samo [::] je vrata razglasilo za
+        # prosta in drugi motor se je ugasnil ob zagonu. Vsaka druzina in protokol posebej.
+        for druzina, naslov, vrsta in ((socket.AF_INET, "0.0.0.0", socket.SOCK_STREAM), (socket.AF_INET, "0.0.0.0", socket.SOCK_DGRAM)):
+            s = socket.socket(druzina, vrsta)
+            s.bind((naslov, 0))
+            if vrsta == socket.SOCK_STREAM:
+                s.listen(1)
+            vrata = s.getsockname()[1]
+            try:
+                self.assertTrue(ot._vrata_zasedena(vrata), (druzina, vrsta))
+                with mock.patch.object(ot, "VRATA_TORRENTA", vrata):
+                    self.assertNotIn(ot._vrata_za_torrent(), (0, vrata))
+            finally:
+                s.close()
+            self.assertFalse(ot._vrata_zasedena(vrata))
+        if socket.has_ipv6:
+            try:
+                s = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+                s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+                s.bind(("::", 0))
+            except OSError:
+                return                                       # brez IPv6 na tem racunalniku
+            s.listen(1)
+            try:
+                self.assertTrue(ot._vrata_zasedena(s.getsockname()[1]))
+            finally:
+                s.close()
+
     def test_dodajanje_brez_ponovnega_branja_in_z_najdenimi_viri(self):
         self.t.preberi(MAGNET)
         self.t.dodaj(MAGNET, [1])

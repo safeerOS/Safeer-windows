@@ -186,6 +186,46 @@ class TokTorrenta(unittest.TestCase):
         self.d.prenosi_za_naprave(t, raba, "tel-2")
         self.assertEqual(link_datoteke._beri_opise(link_datoteke._pot_opisov(raba)), {})
 
+    def test_kar_je_prenesel_safeer_os_vidijo_in_odstranijo_tudi_naprave(self):
+        """Ena naprava hrani, vse predvajajo: film, ki ga je Safeer OS zaradi gledanja prenesel sam in je v celoti na
+        disku, je v `magnet.list` z naslovom in plakatom; `magnet.remove` z njegovo (negativno) oznako ga odstrani."""
+        h1, h2 = "1" * 40, "2" * 40
+        t = _Torrenti(self.lokalni.server_address[1])
+        t.seznam = lambda: []
+        odstranjeni = []
+        d = link_datoteke.Datoteke([], tls_mapa=os.path.join(self.mapa, "tls"))
+        self.addCleanup(d.ustavi)
+        self.assertEqual(d.prenosi_za_naprave(t)["items"], [])                 # brez Safeer OS: po starem
+        self.assertFalse(d.odstrani_prenos(-5, t))
+        d.gledanje = lambda: [
+            {"hash": h1, "title": "Film na racunalniku", "poster": "https://slike.primer.si/p.jpg", "kind": "movie", "ref": "r1",
+             "magnet": "magnet:?xt=urn:btih:" + h1, "file": 2, "finished": True, "size": 700, "name": "Film.mkv"},
+            {"hash": h2, "title": "Se se prenasa", "magnet": "magnet:?xt=urn:btih:" + h2, "file": 0, "finished": False, "size": 0, "name": ""}]
+        d.odstrani_gledanje = lambda h: odstranjeni.append(h) or True
+        vnosi = d.prenosi_za_naprave(t, id_naprave="tv-1")["items"]
+        self.assertEqual(len(vnosi), 1)                                        # nedokoncanega Control ne ponuja
+        v = vnosi[0]
+        self.assertEqual({k: v[k] for k in ("title", "poster", "kind", "ref", "file", "finished", "size", "done", "name")},
+                         {"title": "Film na racunalniku", "poster": "https://slike.primer.si/p.jpg", "kind": "movie", "ref": "r1",
+                          "file": 2, "finished": True, "size": 700, "done": 700, "name": "Film.mkv"})
+        self.assertLess(v["id"], 0)                                            # ne more trciti z oznako motorja za naprave
+        self.assertEqual(v["id"], link_datoteke.oznaka_gledanja(h1))
+        self.assertFalse(d.odstrani_prenos(link_datoteke.oznaka_gledanja(h2) - 1, t))   # neznana oznaka: nic
+        self.assertEqual(odstranjeni, [])
+        self.assertTrue(d.odstrani_prenos(v["id"], t))
+        self.assertEqual(odstranjeni, [h1])
+        self.assertFalse(hasattr(t, "odstranjen"))                            # motorja za naprave se ne dotakne
+
+    def test_film_safeer_os_ki_ga_gleda_naprava_ne_potece(self):
+        h = "3" * 40
+        raba_naprave = os.path.join(self.mapa, "krog", "raba-naprave.json")
+        raba_gledanja = os.path.join(self.mapa, "krog", "raba-gledanje.json")
+        link_datoteke.zabelezi_rabo(h, raba_gledanja, zdaj=1000.0)
+        link_datoteke._osvezi_rabo_gledanja(h, raba_naprave)
+        self.assertGreater(link_datoteke._beri_rabo(raba_gledanja)[h], 1000.0)
+        link_datoteke._osvezi_rabo_gledanja("4" * 40, raba_naprave)             # ni prenos Safeer OS: nic ne zapise
+        self.assertNotIn("4" * 40, link_datoteke._beri_rabo(raba_gledanja))
+
     def test_ne_preobremeni_racunalnika(self):
         t = _Torrenti(self.lokalni.server_address[1])
         for razlog in ("preobremenjen", "malo_pomnilnika", "ni_prostora"):

@@ -163,8 +163,13 @@ class Tok(unittest.TestCase):
             self.assertEqual((tok["pot"], tok["indeks"], tok["velikost"]), (pot, 1, 10))
             self.assertTrue(tok["url"].startswith("file://"))
             self.assertEqual(self.m.dodane, [])
+            self.assertEqual(link_datoteke._beri_rabo(self.raba), {})          # uporabnikov torrent: z diska, brez zapisa
             # Paket brez indeksa: najvecji video na disku ni nujno zahtevana epizoda -> ne ugibamo, vprasamo motor.
             self.assertEqual(self._pripravi(ime="Film.S01E01.mkv")["indeks"], 2)
+            # Prenos zaradi gledanja, ki ga gledajo z diska, ne potece: rok tece od zadnjega predvajanja.
+            tt.zabelezi(H1, self.raba, zdaj=1000.0)
+            self._pripravi(indeks=1)
+            self.assertGreater(link_datoteke._beri_rabo(self.raba)[H1], 1000.0)
 
 
 class Izbira(unittest.TestCase):

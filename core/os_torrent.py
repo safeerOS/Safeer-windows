@@ -370,23 +370,46 @@ def _vrata_za_torrent() -> int:
 
     Dva motorja hkrati (Safeer OS in Safeer Control, ki pretaka napravam) na istih vratih ne moreta teci: drugi se je
     do 3. 10. 2026 ugasnil takoj ob zagonu in uporabnik je dobil "program se je ustavil"."""
+    if not _vrata_zasedena(VRATA_TORRENTA):
+        return VRATA_TORRENTA
+    for _ in range(20):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(("0.0.0.0", 0))
+                vrata = int(s.getsockname()[1])
+        except OSError:
+            return 0
+        if not _vrata_zasedena(vrata):
+            return vrata
+    return 0
+
+
+def _vrata_zasedena(vrata: int) -> bool:
+    """Ali na teh vratih ze kdo poslusa - na katerikoli druzini naslovov (IPv4, IPv6) ali protokolu (TCP, uTP = UDP).
+
+    Vsako druzino preverimo posebej: na Windows je vticnica IPv6 samo IPv6, zato prost [::]:4240 ne pomeni, da je prost
+    tudi 0.0.0.0:4240 (tam je drugi motor do 3. 10. 2026 dobil »prosta« vrata in se ugasnil ob zagonu)."""
     import errno
-    for vrata in (VRATA_TORRENTA, 0):
-        for druzina, naslov in ((socket.AF_INET6, "::"), (socket.AF_INET, "0.0.0.0")):
+    zasedeno = (errno.EADDRINUSE, getattr(errno, "WSAEADDRINUSE", 10048), errno.EACCES, getattr(errno, "WSAEACCES", 10013), 10048, 10013)
+    for druzina, naslov in ((socket.AF_INET, "0.0.0.0"), (socket.AF_INET6, "::")):
+        for vrsta in (socket.SOCK_STREAM, socket.SOCK_DGRAM):
             try:
-                s = socket.socket(druzina, socket.SOCK_STREAM)
+                s = socket.socket(druzina, vrsta)
             except OSError:
-                continue
+                continue                # ta druzina naslovov ni na voljo (npr. brez IPv6)
             try:
+                if druzina == socket.AF_INET6:
+                    try:
+                        s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)   # IPv4 preverimo posebej
+                    except (OSError, AttributeError):
+                        pass
                 s.bind((naslov, vrata))
-                return int(s.getsockname()[1])
             except OSError as e:
-                if e.errno in (errno.EADDRINUSE, getattr(errno, "WSAEADDRINUSE", -1), errno.EACCES):
-                    break               # zasedena: naslednja izbira vrat
-                continue                # ta druzina naslovov ni na voljo (npr. brez IPv6): poskusimo IPv4
+                if e.errno in zasedeno:
+                    return True
             finally:
                 s.close()
-    return 0
+    return False
 
 
 def _prosta_vrata() -> int:
@@ -403,10 +426,13 @@ class Torrenti:
     """Upravlja proces rqbit (samo 127.0.0.1, z geslom) in lokalni tok za predvajalnik."""
 
     def __init__(self, mapa_prenosov_: str = "", mapa_stanja_: str = "", program: str = "",
-                 nastavitve: str = "") -> None:
+                 nastavitve: str = "", svoj_dht: bool = False) -> None:
         self.mapa_prenosov = mapa_prenosov_ or mapa_prenosov()
         self.mapa_stanja = mapa_stanja_ or mapa_stanja()
         self.program = program
+        #: Drugi motor na istem racunalniku (Control, ki pretaka napravam): svoj DHT brez shranjenega stanja. Vsi rqbit
+        #: istega uporabnika si sicer delijo shranjeno stanje DHT (isti UDP naslov) in drugi se na Windows ugasne ob zagonu.
+        self.svoj_dht = bool(svoj_dht)
         self._pot_nastavitev = nastavitve or os.path.join(os.path.dirname(self.mapa_stanja), "safeer.json")
         self._proces: Optional[subprocess.Popen] = None
         self.vrata = 0
@@ -464,6 +490,7 @@ class Torrenti:
                     # Brez odpiranja vrat na usmerjevalniku (UPnP) in brez spletnega vmesnika navzven.
                     "--disable-upnp-port-forward",
                     *(["--listen-port", str(vrata_torrenta)] if vrata_torrenta else []),
+                    *(["--disable-dht-persistence"] if self.svoj_dht else []),
                     "--peer-limit", str(NAJVEC_POVEZAV), "-t", str(NITI),
                     "--ratelimit-upload", str(ODDAJA_MED_PRENOSOM_BPS),
                     "server", "start", "--persistence-location", self.mapa_stanja, "--fastresume",

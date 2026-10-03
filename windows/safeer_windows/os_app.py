@@ -814,6 +814,22 @@ class SafeerOsWindow(QMainWindow):
                 "vir": str(naprava.get("ime") or ""), "neposredni": True, "podnapisi": seznam_podnapisov}
         return self._predvajaj_neposredno(item, ime, zvok)
 
+    def _knjiznica(self):
+        """Polica »Na tvojih napravah« (core/knjiznica_kroga.py). Naprave v Linku vprasa Control, ki tece v istem
+        procesu; ukaz temu racunalniku (kar je prenesel za naprave) se izvede tukaj, brez sredisca."""
+        if getattr(self, "_knjiznica_kroga", None) is None:
+            from core import knjiznica_kroga
+            cb = self.control_backend
+
+            def ukaz(id_naprave: str, dejanje: str, parametri: dict, cas: float) -> dict:
+                if id_naprave == cb.device_id:
+                    r = cb._tok_torrenta(dejanje, dict(parametri or {}), cb.device_id)
+                    return {"ok": bool(r.get("ok")), "message": str(r.get("message") or ""), "koda": str(r.get("code") or ""),
+                            "data": r.get("data") if isinstance(r.get("data"), dict) else {}}
+                return cb.ukaz_pocakaj(id_naprave, dejanje, parametri, cas=cas)
+            self._knjiznica_kroga = knjiznica_kroga.Knjiznica(cb.vse_naprave, ukaz)
+        return self._knjiznica_kroga
+
     def _predvajaj_neposredno(self, item: dict, ime: str, zvok: bool) -> dict:
         """Neposreden tok (naprava v Linku, magnet): VLC, kadar je na voljo, sicer predvajalnik v strani."""
         # Vgrajeni brskalnik (Qt WebEngine) nima patentiranih kodekov (AAC/M4A, WMA ...): tak zvok predvaja
@@ -2373,6 +2389,34 @@ class SafeerOsWindow(QMainWindow):
         if metoda == "mediaOsveziVir":
             source_id = str(a[0]) if a else ""
             return self.media_center.refresh_source(source_id) if source_id else self.media_center.refresh_all()
+
+        # Polica »Na tvojih napravah« (knjiznica kroga): kar je prenesla katera koli naprava v Safeer Linku.
+        if metoda == "mediaKnjiznica":
+            return self._knjiznica().seznam()
+        if metoda == "mediaKnjiznicaOdstrani":
+            return bool(self._knjiznica().odstrani(str(a[0]) if a else ""))
+        if metoda == "mediaKnjiznicaPredvajaj":
+            r = self._knjiznica().predvajaj(str(a[0]) if a else "")
+            if not r.get("ok"):
+                return {"napaka_koda": str(r.get("koda") or "napaka")}
+            if r.get("tukaj"):
+                # Prenos motorja Safeer OS na tem racunalniku: naravnost iz torrenta, po isti poti kot vsak naslov kataloga.
+                self.media_center.knjiznica_vnos(r["tukaj"])
+                return self._izvedi_metodo("mediaPredvajaj", ["knjiznica:" + r["tukaj"]["kljuc"]])
+            # Film na drugi napravi: pretaka ga naprava, ki ga hrani; predvajalnik bere lokalni pretok (pripeto
+            # potrdilo in zeton naprave, core/link_pretok.py) - kot datoteke z naprav.
+            from core import link_pretok
+            v, tok = r["vnos"], r["tok"]
+            ime = str(tok.get("name") or "")
+            mime = mimetypes.guess_type(ime)[0] or ""
+            vir = link_pretok.vir_toka(tok.get("server"), tok.get("path"), mime)
+            if vir is None:
+                return {"napaka_koda": "napaka"}
+            item = {"ok": True, "id": str(v.get("ref") or "") or "knjiznica:" + v["kljuc"], "naslov": str(v.get("naslov") or ""),
+                    "vrsta": "video", "url": link_pretok.pretok().dodaj(vir), "mime": mime,
+                    "vir": str((v.get("naprava") or {}).get("ime") or ""), "neposredni": True, "podnapisi": []}
+            print("[SafeerMedia] MEDIA_ROUTE knjiznica", flush=True)
+            return self._predvajaj_neposredno(item, ime or item["naslov"], False)
 
         if metoda == "mediaPredvajaj":
             item = self.media_center.resolve(str(a[0]) if a else "")

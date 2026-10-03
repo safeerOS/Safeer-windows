@@ -100,6 +100,8 @@ def pocisti(torrenti, pot: Optional[str] = None, zdaj: Optional[float] = None,
             nonlocal spremenjeno
             t = po_hashu.get(h)
             if t is None:
+                if link_datoteke.v_seji_motorja(torrenti, h):
+                    return                 # motor ga ima, a ga (takoj po zagonu) se ne nasteje: zapis ostane za naslednjic
                 raba.pop(h, None)          # torrenta ni vec (uporabnik ga je odstranil sam): zapis ne ostaja
                 spremenjeno = True
                 return
@@ -168,6 +170,9 @@ def pripravi(hash_: str, indeks: Optional[int] = None, ime: str = "", sledilniki
             os.path.basename(obstojeca).lower() != os.path.basename(str(ime).replace("\\", "/")).lower():
         obstojeca = ""      # paket z vec videi brez indeksa: najvecji video ni nujno zahtevana epizoda
     if obstojeca:
+        # Prenos zaradi gledanja, ki ga kdo se gleda (zdaj z diska), ne potece: rok tece od zadnjega predvajanja.
+        if pot and hash_ in link_datoteke._beri_rabo(pot):
+            zabelezi(hash_, pot)
         return {"url": Path(obstojeca).as_uri(), "pot": obstojeca, "ime": os.path.basename(obstojeca), "indeks": i,
                 "velikost": os.path.getsize(obstojeca), "podnapisi": []}
     if torrenti is None:
@@ -211,8 +216,9 @@ def pripravi(hash_: str, indeks: Optional[int] = None, ime: str = "", sledilniki
             podnapisi.append({"uri": torrenti.tok(tid, j), "ime": os.path.basename(pot_p), "jezik": jezik, "oznaka": oznaka})
     except Exception:  # noqa: BLE001 - podnapisi niso nujni za predvajanje
         pass
+    # "zacasen": prenos je nastal zaradi gledanja (zapisan v rabi) - samo tak gre na polico »Na tvojih napravah«.
     return {"url": url, "ime": os.path.basename(str(izbrana.get("ime") or "")), "indeks": izbrana["i"],
-            "velikost": velikost, "podnapisi": podnapisi}
+            "velikost": velikost, "podnapisi": podnapisi, "zacasen": bool(belezi)}
 
 
 _CISCENJE_TECE = False

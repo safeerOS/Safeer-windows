@@ -83,7 +83,7 @@ class TestWatchCountry(unittest.TestCase):
 class TestMediaWhereToWatch(unittest.TestCase):
     def setUp(self):
         self.center = MediaCenter(_zacasna_mapa(self))
-        self.center.resolve = lambda _item_id: {
+        self.center.resolve = lambda _item_id, **_k: {
             "id": "catalog:gladiator", "tmdb_id": 98, "vrsta": "film", "naslov": "Gladiator"
         }
         self.center._tmdb_cache.clear()
@@ -137,7 +137,7 @@ class TestMediaWhereToWatch(unittest.TestCase):
                          "https://www.themoviedb.org/movie/98/watch?locale=DE")
 
     def test_tv_details_use_the_requested_region(self):
-        self.center.resolve = lambda _item_id: {
+        self.center.resolve = lambda _item_id, **_k: {
             "id": "catalog:got", "tmdb_id": 1399, "vrsta": "serija", "naslov": "Igra prestolov"
         }
         result = self.center.details("catalog:got", "SI", "sl")
@@ -163,7 +163,7 @@ class TestMediaWhereToWatch(unittest.TestCase):
         self.center.watch_regions = lambda language="sl": {"regions": []}
         self.center._tmdb_cache.clear()
         with mock.patch("core.os_media.urllib.request.urlopen", side_effect=OSError("offline")):
-            self.center.resolve = lambda _item_id: {
+            self.center.resolve = lambda _item_id, **_k: {
                 "id": "catalog:gladiator", "tmdb_id": 98, "vrsta": "film", "naslov": "Gladiator"
             }
             data = self.center.details("catalog:gladiator", "SI", "sl")

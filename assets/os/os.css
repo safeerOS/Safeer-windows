@@ -1044,3 +1044,14 @@ body.vrstica-skrita.nacin-splet .rocaj-vrstice { display: block; }
   border-radius: 50%; background: rgba(3,7,10,.86); color: #fff; font-size: 14px; opacity: 0; }
 .media-kartica:hover .media-odstrani, .media-kartica:focus-visible .media-odstrani { opacity: 1; }
 .media-kartica .media-odstrani:hover { background: #b3261e; }
+/* Polica »Na tvojih napravah«: kar je prenesla katera koli naprava v Safeer Linku (plakati v eni vrsti). */
+.media-knjiznica[hidden] { display: none !important; }
+.media-knjiznica { margin: 14px 0 6px; }
+.media-knjiznica h3 { margin: 0 0 10px; font-size: 16px; }
+.media-knjiznica-vrsta { display: flex; gap: 14px; overflow-x: auto; padding: 5px 2px 12px; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.16) transparent; }
+.media-knjiznica-vrsta .media-kartica { flex: 0 0 150px; width: 150px; }
+/* Pod naslovom v dveh vrsticah: naprava, ki film hrani, in velikost (ali da se se prenasa) - ime naprave ni odrezano na par crk. */
+.media-knjiznica-vrsta .media-kartica .media-meta { display: flex; flex-direction: column; align-items: stretch; gap: 2px; text-transform: none; font-size: 12px; }
+.media-knjiznica-vrsta .media-kartica .media-meta span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.media-kartica .media-odstrani.potrdi { width: auto; padding: 0 10px; border-radius: 13px; background: #b3261e; opacity: 1; font-size: 12px; font-weight: 700; }
+.media-kartica.media-caka { opacity: .55; pointer-events: none; }

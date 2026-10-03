@@ -758,6 +758,10 @@ class Datoteke:
         self.streznik = StreznikDatotek(self.mape, tls_mapa)
         # Klicatelj (Control) ga nastavi, da spremembo map shrani in stran osvezi.
         self.ob_spremembi: Optional[callable] = None
+        #: Knjiznica kroga: gledanje() vrne prenose, ki jih je Safeer OS na tem racunalniku zaradi gledanja prenesel
+        #: sam (core/knjiznica_kroga.lokalni), odstrani_gledanje(hash) tak prenos odstrani. Nastavi ju Control.
+        self.gledanje: Optional[callable] = None
+        self.odstrani_gledanje: Optional[callable] = None
 
     def poti(self) -> List[str]:
         return list(self.mape.poti)
@@ -860,6 +864,7 @@ class Datoteke:
         if obstojeca:
             zabelezi_rabo(m["hash"], pot_rabe)
             zabelezi_opis(m["hash"], opis_naprave, id_naprave, pot_rabe)
+            _osvezi_rabo_gledanja(m["hash"], pot_rabe)
             self.streznik.zazeni()
             naslov = naslov_do_huba(hub_url) if hub_url else krajevni_naslov()
             return {"server": {"base_url": self.streznik.osnova(naslov), "fp": self.streznik.odtis,
@@ -943,6 +948,20 @@ class Datoteke:
             elif opis.get("title"):
                 vnos.update({k: opis[k] for k in ("title", "poster", "kind", "ref") if opis.get(k)})
             izid.append(vnos)
+        # Kar je Safeer OS na tem racunalniku zaradi gledanja prenesel sam in je ze v celoti na disku: ena naprava
+        # hrani, vse predvajajo. Zasebnih in tistih brez naslova tu ni (core/knjiznica_kroga.lokalni).
+        if self.gledanje is not None:
+            try:
+                for v in self.gledanje():
+                    if not v.get("finished") or v.get("hash") in zivi:
+                        continue
+                    vnos = {"id": oznaka_gledanja(v["hash"]), "name": v.get("name") or "", "size": int(v.get("size") or 0),
+                            "done": int(v.get("size") or 0), "finished": True, "speed_mibs": 0, "magnet": v.get("magnet") or "",
+                            "file": v.get("file")}
+                    vnos.update({k: v[k] for k in ("title", "poster", "kind", "ref") if v.get(k)})
+                    izid.append(vnos)
+            except Exception:  # noqa: BLE001 - polica Controla ne sme pasti zaradi zapisov Safeer OS
+                pass
         # Opisi prenosov, ki jih ni vec (odstranjeni rocno ali s ciscenjem), ne ostajajo.
         odvec = [h for h in opisi if h not in zivi]
         if odvec and pot_opisov:
@@ -954,7 +973,16 @@ class Datoteke:
         return {"items": izid}
 
     def odstrani_prenos(self, tid: int, torrenti=None) -> bool:
-        """`magnet.remove`: torrent in njegove prenesene datoteke z racunalnika (samo iz mape prenosov za naprave)."""
+        """`magnet.remove`: torrent in njegove prenesene datoteke z racunalnika (samo iz mape prenosov za naprave).
+        Negativna oznaka: prenos, ki ga je Safeer OS zaradi gledanja prenesel sam ([oznaka_gledanja])."""
+        if int(tid) < 0:
+            if self.gledanje is None or self.odstrani_gledanje is None:
+                return False
+            hash_ = next((str(v.get("hash") or "") for v in self.gledanje() if oznaka_gledanja(str(v.get("hash") or "")) == int(tid)), "")
+            if not hash_:
+                return False
+            self.streznik.pozabi_tokove()
+            return bool(self.odstrani_gledanje(hash_))
         torrenti = torrenti if torrenti is not None else torrenti_za_naprave()
         if not torrenti.tece():
             torrenti.seznam()   # zazene rqbit, ce ima shranjeno stanje
@@ -968,6 +996,27 @@ def _odgovor_z_streznikom(datoteke: "Datoteke", o: dict, id_naprave: str, hub_ur
     o["server"] = {"base_url": datoteke.streznik.osnova(naslov), "fp": datoteke.streznik.odtis,
                    "token": datoteke.streznik.zeton_za(id_naprave or "naprava")}
     return o
+
+
+def oznaka_gledanja(hash_: str) -> int:
+    """Oznaka prenosa Safeer OS v `magnet.list`: negativna (motor za naprave ima oznake od 0 navzgor), ista ob vsakem klicu."""
+    try:
+        return -1 - int(str(hash_)[:7], 16)
+    except ValueError:
+        return -1
+
+
+def _osvezi_rabo_gledanja(hash_: str, pot_rabe_naprave: Optional[str]) -> None:
+    """Film, ki ga je prenesel Safeer OS in ga zdaj z diska gleda naprava: rok do samodejne odstranitve tece od tega
+    predvajanja (zapis rabe Safeer OS stoji ob zapisu rabe Controla)."""
+    if not pot_rabe_naprave:
+        return
+    pot = os.path.join(os.path.dirname(pot_rabe_naprave), "raba-gledanje.json")
+    with _RABA_ZAKLEP:
+        raba = _beri_rabo(pot)
+        if str(hash_).lower() in raba:
+            raba[str(hash_).lower()] = float(time.time())
+            _pisi_rabo(pot, raba)
 
 
 def _bdekodiraj(b: bytes, i: int = 0):
@@ -1170,6 +1219,20 @@ def _hash_torrenta(torrenti, t: dict) -> str:
     return m.group(1).lower() if m else ""
 
 
+def v_seji_motorja(torrenti, hash_: str) -> bool:
+    """Ali ima motor torrent v svojem shranjenem stanju (session.json), tudi ce ga (se) ne nasteje: takoj po zagonu
+    motor stanje se bere (pocasen disk). Dokler je torrent v seji, njegovega zapisa ne zavrzemo."""
+    mapa = str(getattr(torrenti, "mapa_stanja", "") or "")
+    if not mapa or not hash_:
+        return False
+    try:
+        with open(os.path.join(mapa, "session.json"), encoding="utf-8") as d:
+            seja = json.load(d)
+        return any(str(t.get("info_hash") or "").lower() == str(hash_).lower() for t in (seja.get("torrents") or {}).values())
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
 def pocisti_neuporabljene(torrenti, pot: Optional[str] = None, zdaj: Optional[float] = None,
                           dovolj=None, obdrzi: str = "") -> List[str]:
     """Odstrani prenose za naprave (torrent in datoteke), ki jih [RABA_VELJA_S] nihce ni predvajal. Vrne njihove hashe.
@@ -1225,7 +1288,7 @@ def pocisti_neuporabljene(torrenti, pot: Optional[str] = None, zdaj: Optional[fl
         # Zapisi o torrentih, ki jih ni vec (uporabnik jih je odstranil sam), ne ostajajo.
         zivi = {h for _, h, _ in znani} - set(odstranjeni)
         for h in [h for h in raba if h not in zivi and h != obdrzi.lower()]:
-            if zdaj - raba[h] > RABA_VELJA_S:
+            if zdaj - raba[h] > RABA_VELJA_S and not v_seji_motorja(torrenti, h):
                 raba.pop(h)
                 spremenjeno = True
         if spremenjeno:
@@ -1276,7 +1339,8 @@ def torrenti_za_naprave():
     with _ZA_NAPRAVE_ZAKLEP:
         if _ZA_NAPRAVE is None:
             _ZA_NAPRAVE = os_torrent.Torrenti(os.path.join(os_torrent.mapa_prenosov(), "Za naprave"),
-                                              os.path.join(os.path.dirname(os_torrent.mapa_stanja()), "stanje-naprave"))
+                                              os.path.join(os.path.dirname(os_torrent.mapa_stanja()), "stanje-naprave"),
+                                              svoj_dht=True)
             # Ob izhodu Controla ustavimo tudi rqbit (sicer ostane do naslednjega zagona, ko ga pocisti _ustavi_sirote).
             import atexit
             atexit.register(_ZA_NAPRAVE.ustavi)
