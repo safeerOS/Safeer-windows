@@ -232,10 +232,20 @@ class Motor(unittest.TestCase):
         self.assertEqual(len(branja), 1)                 # dodajanje metapodatkov ne isce se enkrat
         dodaj = [z for z in LazniRqbit.zahteve if z[0] == "POST" and "only_files=" in z[1]][-1][1]
         self.assertTrue(dodaj.endswith("&initial_peers=203.0.113.7:6881"), dodaj)   # samo veljavni naslovi IPv4
-        # Po izteku roka (ali za neznan torrent) se prebere znova.
+        # Po izteku roka se torrent, ki ga motor (se) nima, prebere znova.
+        self.s.dodan = False
         with mock.patch.object(ot, "PREBRANO_VELJA_S", -1.0):
             self.t.dodaj(MAGNET, [1])
         self.assertEqual(len([z for z in LazniRqbit.zahteve if z[0] == "POST" and "list_only=true" in z[1]]), 2)
+
+    def test_znan_torrent_se_ne_isce_znova(self):
+        self.t.dodaj(MAGNET, [1])
+        LazniRqbit.zahteve = []
+        with mock.patch.object(ot, "PREBRANO_VELJA_S", -1.0):      # tudi brez spomina: motor torrent ze ima
+            opis = self.t.preberi(MAGNET)
+            self.assertEqual(self.t.dodaj(MAGNET, [0]), 0)
+        self.assertEqual([d["ime"] for d in opis["datoteke"]][:2], ["Big Buck Bunny.en.srt", "Big Buck Bunny.mp4"])
+        self.assertEqual([z for z in LazniRqbit.zahteve if z[0] == "POST" and "list_only=true" in z[1]], [])
 
     def test_tok_pocaka_da_je_torrent_pripravljen(self):
         self.t.dodaj(MAGNET, [1])

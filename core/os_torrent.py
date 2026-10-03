@@ -561,7 +561,14 @@ class Torrenti:
         m = razcleni_magnet(magnet)
         if m is None:
             raise NapakaTorrenta("ni_magnet")
-        d = self._json("POST", "/torrents?overwrite=true&list_only=true", z_sledilniki(m["uri"]).encode(), cas=90)
+        # Torrent, ki ga motor ze ima (se prenasa ali je prenesen): opis iz motorja. Novo iskanje metapodatkov pri
+        # virih (list_only) v tem primeru obvisi do izteka roka - viri, s katerimi smo ze povezani, druge povezave
+        # ne sprejmejo (izmerjeno 3. 10. 2026: drugi klik na isti film je cakal 90 s).
+        obstojeci = self._poisci(m["hash"])
+        if obstojeci is not None:
+            d = {"details": self._json("GET", "/torrents/%d" % obstojeci[0])}
+        else:
+            d = self._json("POST", "/torrents?overwrite=true&list_only=true", z_sledilniki(m["uri"]).encode(), cas=90)
         podrobno = d.get("details") or {}
         datoteke = razvrsti_datoteke(podrobno.get("files") or [])
         opis = {"hash": str(podrobno.get("info_hash") or m["hash"]), "ime": str(podrobno.get("name") or m["ime"]),
