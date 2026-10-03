@@ -254,7 +254,8 @@ class Motor(unittest.TestCase):
                     self.assertNotIn(ot._vrata_za_torrent(), (0, vrata))
             finally:
                 s.close()
-            self.assertFalse(ot._vrata_zasedena(vrata))
+            # Ali so vrata po zaprtju spet prosta, tu ne preverjamo: na zasedenem racunalniku (CI) jih lahko v tem hipu
+            # dobi kdo drug in preizkus bi padal po nakljucju (3. 10. 2026: en tek od treh).
         if socket.has_ipv6:
             try:
                 s = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
