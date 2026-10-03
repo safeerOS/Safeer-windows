@@ -1,10 +1,19 @@
 import unittest
 import json
+import shutil
+import tempfile
 import urllib.parse
 from unittest import mock
 
 from core import watch_providers
 from core.os_media import MediaCenter, TMDB_IMAGE
+
+
+def _zacasna_mapa(test):
+    """Vsak preizkus dobi svojo mapo: skupna /tmp/safeer-test-watch je prenasala stanje med Linux in Windows preizkusi."""
+    pot = tempfile.mkdtemp(prefix="safeer-test-watch-")
+    test.addCleanup(shutil.rmtree, pot, True)
+    return pot
 
 
 class FakeResponse:
@@ -57,7 +66,7 @@ class TestWatchCountry(unittest.TestCase):
         self.assertEqual(fake.kernel.geo_class, 16)
 
     def test_regions_selected_country_and_automatic_default(self):
-        center = MediaCenter("/tmp/safeer-test-watch")
+        center = MediaCenter(_zacasna_mapa(self))
         center.watch_regions = lambda language="sl": {"regions": [
             {"code": "SI", "native_name": "Slovenija", "english_name": "Slovenia"},
             {"code": "DE", "native_name": "Deutschland", "english_name": "Germany"},
@@ -73,7 +82,7 @@ class TestWatchCountry(unittest.TestCase):
 
 class TestMediaWhereToWatch(unittest.TestCase):
     def setUp(self):
-        self.center = MediaCenter("/tmp/safeer-test-watch")
+        self.center = MediaCenter(_zacasna_mapa(self))
         self.center.resolve = lambda _item_id: {
             "id": "catalog:gladiator", "tmdb_id": 98, "vrsta": "film", "naslov": "Gladiator"
         }
