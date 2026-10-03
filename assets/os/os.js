@@ -4310,7 +4310,9 @@
       if (item.napaka_koda) { obvesti(t("mediaNapaka_" + item.napaka_koda)); return; }
       if (item.napaka) { obvesti(item.napaka); return; }
       if (item.sporocilo) { obvesti(item.sporocilo); return; }
-      if (item.stran) { otvoriSpletnoStran(item.stran, item.naslov); return; }
+      // »stran« ob toku, ki ga predvajalnik že igra, je le izvor (npr. stran filma v arhivu): v Splet gre samo,
+      // kar nima toka - sicer bi se film predvajal, čez njega pa bi se odprla še spletna stran.
+      if (item.stran && !item.native) { otvoriSpletnoStran(item.stran, item.naslov); return; }
       media.aktivni = item;
       klic("mediaImaKodi").then(function (ima) { var g = $("mediaNaKodi"); if (g) g.hidden = !ima; });
       var gs = $("mediaNaSeznam"); if (gs) gs.hidden = !(item.vrsta === "glasba" || item.vrsta === "podcast");
@@ -4585,7 +4587,7 @@
         info.appendChild(el("b", "", "E" + String(ep.stevilka).padStart(2, "0") + "  " + ubezi(ep.naslov || "Epizoda")));
         info.appendChild(el("small", "", ubezi([ep.datum, ep.trajanje ? ep.trajanje + " min" : "", ep.ocena ? "★ " + ep.ocena : ""].filter(Boolean).join(" · "))));
         if (ep.opis) info.appendChild(el("p", "", ubezi(ep.opis))); row.appendChild(info);
-        var play = el("button", "gumb glavni", "▶ Predvajaj (1080p)");
+        var play = el("button", "gumb glavni", "▶ Predvajaj");
         play.onclick = function () {
           klic("mediaEpizoda", [item.tmdb_id, season, ep.stevilka, item.naslov + " · " + ep.naslov]).then(function (entry) {
             if (entry && entry.id) { zapriMediaPodrobnosti(); odpriMedia(entry.id); }
@@ -4612,7 +4614,7 @@
         if ($("mediaSezoneNaslov")) $("mediaSezoneNaslov").hidden = true;
         if ($("mediaSezone")) $("mediaSezone").hidden = true;
         $("mediaEpizodeNaslov").textContent = "Možnosti predvajanja";
-        var playBtn = el("button", "gumb glavni", "▶ Predvajaj film (1080p HD)");
+        var playBtn = el("button", "gumb glavni", "▶ Predvajaj film");
         playBtn.style.padding = "14px 28px";
         playBtn.style.fontSize = "18px";
         playBtn.style.marginTop = "12px";
