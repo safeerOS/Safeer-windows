@@ -1564,7 +1564,7 @@ class SafeerControlBackend:
         d = self._datoteke_torrenta()
         if akcija == "magnet.list":
             try:
-                podatki = d.prenosi_za_naprave()
+                podatki = d.prenosi_za_naprave(id_naprave=posiljatelj)
                 return {"ok": True, "message": f"{len(podatki['items'])} prenosov", "data": podatki}
             except Exception:  # noqa: BLE001
                 return {"ok": True, "message": "Ni prenosov", "data": {"items": []}}
@@ -1589,7 +1589,8 @@ class SafeerControlBackend:
             print(f"[SafeerTorrent] magnet.stream za {posiljatelj}: zavrnjeno ({pomoc.get('razlog')})", flush=True)
             return {"ok": False, "message": "Računalnik ta trenutek ne more pomagati", "code": str(pomoc.get("razlog") or "zaseden")}
         try:
-            podatki = d.tok_torrenta(uri, posiljatelj, self.hub_url(), f)
+            from core import link_datoteke
+            podatki = d.tok_torrenta(uri, posiljatelj, self.hub_url(), f, opis_naprave=link_datoteke.opis_iz_parametrov(params))
             print(f"[SafeerTorrent] magnet.stream za {posiljatelj}: pretakam {podatki.get('name')}", flush=True)
             return {"ok": True, "message": "Računalnik pretaka: " + str(podatki.get("name") or ""), "data": podatki}
         except Exception as e:  # noqa: BLE001 - napravi povemo kratko kodo

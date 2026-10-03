@@ -839,9 +839,12 @@ class Datoteke:
 
 
     def tok_torrenta(self, uri: str, id_naprave: str, hub_url: str = "", datoteka: Optional[int] = None,
-                     torrenti=None, zmogljivost=None, mape_stanja=None, pot_rabe: Optional[str] = None) -> dict:
+                     torrenti=None, zmogljivost=None, mape_stanja=None, pot_rabe: Optional[str] = None,
+                     opis_naprave: Optional[dict] = None) -> dict:
         """`magnet.stream`: racunalnik prenasa torrent in ga pretaka napravi (televizorju), ki tako
         nicesar ne shranjuje. Vrne {server, path, name, file} ali vrze os_torrent.NapakaTorrenta.
+
+        `opis_naprave` (opis_iz_parametrov): naslov in plakat, ki ju pove naprava - za polico »Preneseno« na vseh napravah.
 
         Izbere zahtevano datoteko ali najvecji video; programov (nevarno) nikoli ne predvaja."""
         from core import os_torrent
@@ -856,6 +859,7 @@ class Datoteke:
         obstojeca, indeks = ze_preneseno(m["hash"], datoteka, mape_stanja)
         if obstojeca:
             zabelezi_rabo(m["hash"], pot_rabe)
+            zabelezi_opis(m["hash"], opis_naprave, id_naprave, pot_rabe)
             self.streznik.zazeni()
             naslov = naslov_do_huba(hub_url) if hub_url else krajevni_naslov()
             return {"server": {"base_url": self.streznik.osnova(naslov), "fp": self.streznik.odtis,
@@ -883,6 +887,7 @@ class Datoteke:
         # "ce uporabnik torrenta ne uporablja vec, ga naprava samodejno odstrani"). Film, ki ga pravkar hocejo, ostane.
         pot_rabe = pot_rabe or _pot_rabe_za(torrenti)
         zabelezi_rabo(m["hash"], pot_rabe)
+        zabelezi_opis(m["hash"], opis_naprave, id_naprave, pot_rabe)
         pocisti_neuporabljene(torrenti, pot_rabe)
         mapa_diska = os.path.dirname(getattr(torrenti, "mapa_prenosov", "") or "") or os.path.expanduser("~")
         preveri = zmogljivost or zmogljivost_za_tok
@@ -904,9 +909,14 @@ class Datoteke:
                 "size": int(izbrana.get("velikost") or 0)}
 
 
-    def prenosi_za_naprave(self, torrenti=None, pot_rabe: Optional[str] = None) -> dict:
-        """`magnet.list`: kar racunalnik hrani za naprave (da jih uporabnik z medijskega centra odstrani)."""
+    def prenosi_za_naprave(self, torrenti=None, pot_rabe: Optional[str] = None, id_naprave: str = "") -> dict:
+        """`magnet.list`: kar racunalnik hrani za naprave - knjiznica kroga (polica »Preneseno« na vseh napravah) in
+        seznam, s katerega uporabnik prenos odstrani. Kjer je naprava povedala naslov in plakat, ju vrnemo zraven;
+        zaseben prenos dobi samo naprava, ki ga je prosila (`id_naprave`)."""
         torrenti = torrenti if torrenti is not None else torrenti_za_naprave()
+        pot_opisov = _pot_opisov(pot_rabe or _pot_rabe_za(torrenti))
+        opisi = _beri_opise(pot_opisov) if pot_opisov else {}
+        zivi = set()
         izid = []
         if not torrenti.tece():
             torrenti.seznam()   # zazene rqbit, ce ima shranjeno stanje
@@ -919,10 +929,28 @@ class Datoteke:
                 magnet = torrenti.magnet(int(t["id"]))
             except Exception:  # noqa: BLE001
                 magnet = ""
-            izid.append({"id": int(t["id"]), "name": t.get("ime") or "", "size": int(t.get("skupaj") or 0),
-                         "done": int(t.get("preneseno") or 0), "finished": bool(t.get("koncano")),
-                         "speed_mibs": t.get("hitrost_mibs") or 0, "magnet": magnet,
-                         "file": videi[0]["i"] if videi else None})
+            vnos = {"id": int(t["id"]), "name": t.get("ime") or "", "size": int(t.get("skupaj") or 0),
+                    "done": int(t.get("preneseno") or 0), "finished": bool(t.get("koncano")),
+                    "speed_mibs": t.get("hitrost_mibs") or 0, "magnet": magnet,
+                    "file": videi[0]["i"] if videi else None}
+            hash_ = _hash_torrenta(torrenti, t) if opisi else ""
+            opis = opisi.get(hash_) or {}
+            zivi.add(hash_)
+            if opis.get("private"):
+                if not id_naprave or id_naprave not in (opis.get("narocniki") or []):
+                    continue                    # zasebno: samo napravi, ki je prenos prosila
+                vnos["private"] = True
+            elif opis.get("title"):
+                vnos.update({k: opis[k] for k in ("title", "poster", "kind", "ref") if opis.get(k)})
+            izid.append(vnos)
+        # Opisi prenosov, ki jih ni vec (odstranjeni rocno ali s ciscenjem), ne ostajajo.
+        odvec = [h for h in opisi if h not in zivi]
+        if odvec and pot_opisov:
+            with _RABA_ZAKLEP:
+                sveze = _beri_opise(pot_opisov)
+                for h in odvec:
+                    sveze.pop(h, None)
+                _pisi_rabo(pot_opisov, sveze)
         return {"items": izid}
 
     def odstrani_prenos(self, tid: int, torrenti=None) -> bool:
@@ -1253,6 +1281,63 @@ def torrenti_za_naprave():
             import atexit
             atexit.register(_ZA_NAPRAVE.ustavi)
         return _ZA_NAPRAVE
+
+
+# --- knjiznica kroga: kar je naprava povedala o filmu, ki ga je prosila ------------------------------------------------
+#: Najvec toliko naprav si zapomnimo kot narocnike enega prenosa.
+NAJVEC_NAROCNIKOV = 16
+
+
+def opis_iz_parametrov(parametri) -> Optional[dict]:
+    """Opis filma iz zahteve `magnet.stream` (title, poster, kind, ref, private) ali None, ce ga naprava ni poslala
+    (starejsa razlicica). Zaseben naslov pride brez naslova in plakata: racunalnik ve samo, da ga drugim ne pokaze."""
+    if not isinstance(parametri, dict):
+        return None
+    if parametri.get("private") is True:
+        return {"private": True}
+    naslov = str(parametri.get("title") or "").strip()[:200]
+    if not naslov:
+        return None
+    plakat = str(parametri.get("poster") or "").strip()[:600]
+    vrsta = str(parametri.get("kind") or "")
+    return {"title": naslov, "poster": plakat if plakat.startswith("https://") else "",
+            "kind": vrsta if vrsta in ("movie", "series") else "", "ref": str(parametri.get("ref") or "")[:400], "private": False}
+
+
+def _pot_opisov(pot_rabe: Optional[str]) -> str:
+    return os.path.join(os.path.dirname(pot_rabe), "opisi-naprave.json") if pot_rabe else ""
+
+
+def _beri_opise(pot: str) -> dict:
+    try:
+        with open(pot, encoding="utf-8") as d:
+            opisi = json.load(d)
+        return {str(k).lower(): v for k, v in opisi.items() if isinstance(v, dict)} if isinstance(opisi, dict) else {}
+    except (OSError, ValueError, TypeError):
+        return {}
+
+
+def zabelezi_opis(hash_: str, opis: Optional[dict], id_naprave: str, pot_rabe: Optional[str]) -> None:
+    """Zapomni si, kaj je naprava povedala o prenosu, in kdo ga je prosil. Kar je enkrat zasebno, ostane zasebno."""
+    pot = _pot_opisov(pot_rabe)
+    if not pot or not opis or not re.fullmatch(r"[0-9a-fA-F]{40}", hash_ or ""):
+        return
+    with _RABA_ZAKLEP:
+        opisi = _beri_opise(pot)
+        vnos = dict(opisi.get(hash_.lower()) or {})
+        if opis.get("private") or vnos.get("private"):
+            vnos = {"private": True, "narocniki": vnos.get("narocniki") or []}
+        else:
+            for k in ("title", "poster", "kind", "ref"):
+                if opis.get(k):
+                    vnos[k] = opis[k]
+            vnos["private"] = False
+        narocniki = [n for n in (vnos.get("narocniki") or []) if isinstance(n, str) and n != id_naprave]
+        if id_naprave:
+            narocniki.append(str(id_naprave))
+        vnos["narocniki"] = narocniki[-NAJVEC_NAROCNIKOV:]
+        opisi[hash_.lower()] = vnos
+        _pisi_rabo(pot, opisi)
 
 
 def krajevni_naslov() -> str:
