@@ -395,6 +395,8 @@ class SafeerOsWindow(QMainWindow):
             lambda ime, koda: self.poslji_dogodek("kodaPrijave", {"ime": ime, "koda": koda}))
         _korak("control_backend")
         self.media_center = os_media.MediaCenter(os_backend_win.CONFIG_DIR)
+        # Pred predvajanjem preverimo, da prvi tok res odgovori (mrtva povezava ne sme biti prva).
+        self.media_center.preveri_tokove = True
         # Film iz torrenta (dodatek): branje torrenta traja - stran med tem pove, da ga pripravljamo.
         self.media_center.ob_pripravi_torrenta = lambda item: self.poslji_dogodek(
             "mediaTorrent", {"naslov": str(item.get("naslov") or "")})

@@ -3409,6 +3409,32 @@ class MediaCenter:
             self._save(shramba)
             return {"ok": True, "st_vnosov": len(items), "vir": custom_name, "vrsta": "katalog"}
 
+    #: Ali pred predvajanjem preverimo, da streznik prvega toka res odgovori. Vklopi aplikacija; preizkusi
+    #: in orodja brez omrezja ostanejo brez zahtev.
+    preveri_tokove = False
+
+    def _zivi_naprej(self, tokovi: list) -> list:
+        """Prvi tok mora res odgovoriti: prve tri vprasamo hkrati (zahteva prvih bajtov, core/media_servers.tok_odgovarja)
+        in na prvo mesto damo najboljsega, ki odgovori - mrtva povezava (izbrisana, zavrnjena, potekla brez roka v
+        naslovu) tako ne pride do predvajalnika. Ce ne odgovori nobeden, vrstni red ostane (predvajalnik pove napako)."""
+        if not self.preveri_tokove or len(tokovi) < 2:
+            return tokovi
+        from concurrent.futures import ThreadPoolExecutor
+        kandidati = tokovi[:3]
+        bazen = ThreadPoolExecutor(max_workers=len(kandidati))
+        try:
+            niti = [bazen.submit(media_servers.tok_odgovarja, str(t.get("url") or ""), t.get("glave")) for t in kandidati]
+            for i, nit in enumerate(niti):
+                try:
+                    ok = bool(nit.result(timeout=5))
+                except Exception:  # noqa: BLE001
+                    ok = False
+                if ok:
+                    return tokovi if i == 0 else [kandidati[i]] + [t for j, t in enumerate(tokovi) if j != i]
+        finally:
+            bazen.shutdown(wait=False)
+        return tokovi
+
     def resolve(self, item_id: str, pripravi_torrent: bool = True) -> Optional[dict]:
         """Vnos, pripravljen za predvajanje. `pripravi_torrent=False` (podrobnosti naslova): naslova, ki ga ponujajo
         samo torrenti, ne zacnemo prenasati - to se zgodi sele, ko uporabnik pritisne Predvajaj."""
@@ -3431,8 +3457,12 @@ class MediaCenter:
             neposredni = [t for t in tokovi if t.get("url") and not t.get("zunanje")
                           and (t["url"].startswith("https://") or media_servers.dovoljen_naslov(t["url"]))]
             # Najboljsi tok za to napravo na prvo mesto (film se zacne takoj, brez izbiranja); ostali ostanejo kot razlicice.
+            # Steje tudi rok veljavnosti povezave: potekla (dodatek jo ponudi iz predpomnilnika) je zadnja, mrtva ne pride
+            # na prvo mesto (_zivi_naprej) - uporabnik ne caka na vir, ki ne dela.
             neposredni = tok_izbira.uredi(neposredni, lambda t: str(t.get("opis") or "%s %s" % (t.get("vir", ""), t.get("kakovost", ""))),
-                                          tok_izbira.Zmoznosti(visina=int(getattr(self, "visina_zaslona", 0) or 1080)))
+                                          tok_izbira.Zmoznosti(visina=int(getattr(self, "visina_zaslona", 0) or 1080)),
+                                          naslov=lambda t: str(t.get("url") or ""))
+            neposredni = self._zivi_naprej(neposredni)
             drugi_http = [v for v in (item.get("razlicice") or []) if isinstance(v, dict)
                           and str(v.get("url") or "").startswith(("http://", "https://"))]
             if neposredni:
