@@ -56,6 +56,10 @@ SLEDILNIKI = (
 )
 NAJDALJSI_MAGNET = 8192
 KOS = 256 * 1024
+#: Toliko casa velja pravkar prebran opis torrenta (datoteke, najdeni viri): dodajanje ga uporabi, namesto da
+#: bi metapodatke iskalo se enkrat.
+PREBRANO_VELJA_S = 180.0
+_VIR_IPV4 = re.compile(r"\d{1,3}(?:\.\d{1,3}){3}:\d{1,5}")
 #: Toliko casa posrednik toka caka, da rqbit torrent pripravi (500 "initializing"), preden napako poslje naprej.
 PRIPRAVA_TOKA_S = 45.0
 PRIPRAVA_TOKA_RAZMIK_S = 0.3
@@ -357,6 +361,34 @@ def prenesi_program(napredek: Optional[Callable[[int, int], None]] = None,
 
 # ------------------------------------------------------------------ motor
 
+#: Privzeta vrata rqbit za dohodne povezave BitTorrent.
+VRATA_TORRENTA = 4240
+
+
+def _vrata_za_torrent() -> int:
+    """Vrata za dohodne povezave BitTorrent: privzeta, ce so prosta, sicer nakljucna prosta (0 = ne vemo).
+
+    Dva motorja hkrati (Safeer OS in Safeer Control, ki pretaka napravam) na istih vratih ne moreta teci: drugi se je
+    do 3. 10. 2026 ugasnil takoj ob zagonu in uporabnik je dobil "program se je ustavil"."""
+    import errno
+    for vrata in (VRATA_TORRENTA, 0):
+        for druzina, naslov in ((socket.AF_INET6, "::"), (socket.AF_INET, "0.0.0.0")):
+            try:
+                s = socket.socket(druzina, socket.SOCK_STREAM)
+            except OSError:
+                continue
+            try:
+                s.bind((naslov, vrata))
+                return int(s.getsockname()[1])
+            except OSError as e:
+                if e.errno in (errno.EADDRINUSE, getattr(errno, "WSAEADDRINUSE", -1), errno.EACCES):
+                    break               # zasedena: naslednja izbira vrat
+                continue                # ta druzina naslovov ni na voljo (npr. brez IPv6): poskusimo IPv4
+            finally:
+                s.close()
+    return 0
+
+
 def _prosta_vrata() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
@@ -381,6 +413,8 @@ class Torrenti:
         self._geslo = ""
         self._zaklep = threading.RLock()
         self._tokovi: Dict[str, Tuple[int, int]] = {}
+        #: hash -> (cas, opis, viri): pravkar prebrani torrenti (glej PREBRANO_VELJA_S).
+        self._prebrano: Dict[str, Tuple[float, dict, List[str]]] = {}
         self._streznik: Optional[http.server.ThreadingHTTPServer] = None
         self.vrata_toka = 0
         self._deli_naprej: set = set(self._nalozi_nastavitve().get("deli_naprej", []))
@@ -423,11 +457,13 @@ class Torrenti:
             # rqbit, ki je ostal po sesutju Safeer OS, bi oddajal brez nadzora in si delil stanje z novim.
             _ustavi_sirote(self.mapa_stanja, program)
             self.vrata = _prosta_vrata()
+            vrata_torrenta = _vrata_za_torrent()
             self._geslo = secrets.token_urlsafe(24)
             okolje = dict(os.environ, RQBIT_HTTP_BASIC_AUTH_USERPASS="safeer:" + self._geslo)
             ukaz = [program, "--http-api-listen-addr", "127.0.0.1:%d" % self.vrata, "--http-api-allow-create",
                     # Brez odpiranja vrat na usmerjevalniku (UPnP) in brez spletnega vmesnika navzven.
                     "--disable-upnp-port-forward",
+                    *(["--listen-port", str(vrata_torrenta)] if vrata_torrenta else []),
                     "--peer-limit", str(NAJVEC_POVEZAV), "-t", str(NITI),
                     "--ratelimit-upload", str(ODDAJA_MED_PRENOSOM_BPS),
                     "server", "start", "--persistence-location", self.mapa_stanja, "--fastresume",
@@ -505,7 +541,12 @@ class Torrenti:
 
     def _json(self, metoda: str, pot: str, telo: Optional[bytes] = None, cas: float = 30, **k) -> dict:
         self.zazeni()
-        koda, podatki = self._api(metoda, pot, telo, cas, **k)
+        try:
+            koda, podatki = self._api(metoda, pot, telo, cas, **k)
+        except OSError:
+            # Motor v roku ni odgovoril (npr. torrent brez virov: dodajanje caka na metapodatke): kratka koda
+            # namesto surove izjeme omrezja, da klicatelj poskusi naslednji tok ali pove uporabniku.
+            raise NapakaTorrenta("program_ne_odgovori")
         if koda != 200:
             raise NapakaTorrenta("api_%d" % koda)
         try:
@@ -523,8 +564,31 @@ class Torrenti:
         d = self._json("POST", "/torrents?overwrite=true&list_only=true", z_sledilniki(m["uri"]).encode(), cas=90)
         podrobno = d.get("details") or {}
         datoteke = razvrsti_datoteke(podrobno.get("files") or [])
-        return {"hash": str(podrobno.get("info_hash") or m["hash"]), "ime": str(podrobno.get("name") or m["ime"]),
+        opis = {"hash": str(podrobno.get("info_hash") or m["hash"]), "ime": str(podrobno.get("name") or m["ime"]),
                 "datoteke": datoteke, "sumljiv": sumljiv(datoteke), "uri": m["uri"]}
+        # Viri, ki jih je motor nasel med branjem: dodajanje jih poda naprej (initial_peers), da se prenos zacne takoj.
+        viri = [str(v) for v in (d.get("seen_peers") or []) if isinstance(v, str) and _VIR_IPV4.fullmatch(v)][:40]
+        with self._zaklep:
+            self._prebrano[str(m["hash"]).lower()] = (time.monotonic(), opis, viri)
+            while len(self._prebrano) > 32:
+                self._prebrano.pop(next(iter(self._prebrano)))
+        return opis
+
+    def _opis_in_viri(self, magnet: str) -> Tuple[dict, List[str]]:
+        """Opis torrenta in najdeni viri: pravkar prebrano iz spomina, sicer novo branje."""
+        m = razcleni_magnet(magnet)
+        if m is None:
+            raise NapakaTorrenta("ni_magnet")
+        kljuc = str(m["hash"]).lower()
+        with self._zaklep:
+            znano = self._prebrano.get(kljuc)
+        if znano is None or time.monotonic() - znano[0] > PREBRANO_VELJA_S:
+            self.preberi(magnet)
+            with self._zaklep:
+                znano = self._prebrano.get(kljuc)
+        if znano is None:
+            raise NapakaTorrenta("ni_magnet")
+        return znano[1], znano[2]
 
     def dodaj(self, magnet: str, izbrane: List[int], potrjene_nevarne: Iterable[int] = ()) -> int:
         """Začne prenos izbranih datotek; če torrent že teče, doda datoteke. Vrne id.
@@ -532,7 +596,7 @@ class Torrenti:
         Datoteko, ki je videti kot program, prenesemo samo, če jo je uporabnik po opozorilu izrecno
         potrdil (potrjene_nevarne): prepoznava je samodejna in se lahko zmoti, odločitev je njegova.
         Predvajamo je nikoli (tok() jo zavrne)."""
-        opis = self.preberi(magnet)
+        opis, viri = self._opis_in_viri(magnet)
         potrjene = {int(i) for i in potrjene_nevarne}
         dovoljene = {d["i"] for d in opis["datoteke"] if d["vrsta"] != "nevarno" or d["i"] in potrjene}
         izbrane = sorted({int(i) for i in izbrane} & dovoljene)
@@ -549,6 +613,8 @@ class Torrenti:
             self._api("POST", "/torrents/%d/start" % tid)
             return tid
         pot = "/torrents?overwrite=true&only_files=" + ",".join(str(i) for i in izbrane)
+        if viri:
+            pot += "&initial_peers=" + ",".join(viri)
         d = self._json("POST", pot, z_sledilniki(opis["uri"]).encode(), cas=90)
         if d.get("id") is None:
             raise NapakaTorrenta("ni_dodan")

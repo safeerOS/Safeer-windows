@@ -123,7 +123,14 @@ class StremioPreveriTest(unittest.TestCase):
                 "catalog/movie/top.json": {"metas": [{"id": "tt1"}]},
                 "stream/movie/tt1.json": {"streams": [{"infoHash": "abc"}]},
             })
-            self.assertIn("torrent", ms.stremio_preveri("https://dodatek.si/manifest.json"))
+            from core import os_torrent_tok
+            from unittest import mock
+            # Racunalnik, ki zna prenasati torrente, dodatek s samimi torrenti sprejme (kot Android) ...
+            with mock.patch.object(os_torrent_tok, "podprto", lambda: True):
+                self.assertEqual(ms.stremio_preveri("https://dodatek.si/manifest.json"), "")
+            # ... kjer motorja za to platformo ni, ga zavrne z razlogom.
+            with mock.patch.object(os_torrent_tok, "podprto", lambda: False):
+                self.assertIn("torrent", ms.stremio_preveri("https://dodatek.si/manifest.json"))
             odgovori["stream/movie/tt1.json"] = {"streams": [{"url": "https://cdn.si/f.mp4"}]}
             self.assertEqual(ms.stremio_preveri("https://dodatek.si/manifest.json"), "")
             odgovori["manifest.json"] = {"id": "d", "resources": ["catalog"], "catalogs": []}

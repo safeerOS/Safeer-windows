@@ -7,6 +7,7 @@ import io
 import json
 import os
 import shutil
+import socket
 import sys
 import tempfile
 import threading
@@ -149,7 +150,8 @@ class LazniRqbit(http.server.BaseHTTPRequestHandler):
         if self.path.startswith("/torrents?"):
             f = [dict(d, included=True) for d in self.DATOTEKE]
             if "list_only=true" in self.path:
-                return self._odgovor(200, json.dumps({"id": None, "details": {"info_hash": HASH, "name": "Big Buck Bunny", "files": f}}).encode())
+                return self._odgovor(200, json.dumps({"id": None, "details": {"info_hash": HASH, "name": "Big Buck Bunny", "files": f},
+                                                      "seen_peers": ["203.0.113.7:6881", "[2001:db8::1]:6881", "ni naslov"]}).encode())
             self.server.vkljucene = set(int(x) for x in self.path.split("only_files=")[1].split("&")[0].split(","))
             self.server.dodan = True
             return self._odgovor(200, json.dumps({"id": 0, "details": {"info_hash": HASH, "files": f}}).encode())
@@ -207,6 +209,33 @@ class Motor(unittest.TestCase):
         self.assertEqual(e.exception.code, 404)
         with self.assertRaises(ot.NapakaTorrenta):
             self.t.tok(0, 2)                             # program se ne predvaja nikoli
+
+    def test_vsak_motor_dobi_svoja_vrata(self):
+        # Zasedena privzeta vrata (drug motor ze tece): dobimo druga prosta, ne napake ob zagonu.
+        zasedena = socket.socket(socket.AF_INET6 if socket.has_ipv6 else socket.AF_INET, socket.SOCK_STREAM)
+        zasedena.bind(("::" if socket.has_ipv6 else "0.0.0.0", 0))
+        zasedena.listen(1)
+        vrata = zasedena.getsockname()[1]
+        try:
+            with mock.patch.object(ot, "VRATA_TORRENTA", vrata):
+                druga = ot._vrata_za_torrent()
+                self.assertNotIn(druga, (0, vrata))
+        finally:
+            zasedena.close()
+        with mock.patch.object(ot, "VRATA_TORRENTA", vrata):
+            self.assertEqual(ot._vrata_za_torrent(), vrata)      # prosta privzeta vrata ostanejo privzeta
+
+    def test_dodajanje_brez_ponovnega_branja_in_z_najdenimi_viri(self):
+        self.t.preberi(MAGNET)
+        self.t.dodaj(MAGNET, [1])
+        branja = [z for z in LazniRqbit.zahteve if z[0] == "POST" and "list_only=true" in z[1]]
+        self.assertEqual(len(branja), 1)                 # dodajanje metapodatkov ne isce se enkrat
+        dodaj = [z for z in LazniRqbit.zahteve if z[0] == "POST" and "only_files=" in z[1]][-1][1]
+        self.assertTrue(dodaj.endswith("&initial_peers=203.0.113.7:6881"), dodaj)   # samo veljavni naslovi IPv4
+        # Po izteku roka (ali za neznan torrent) se prebere znova.
+        with mock.patch.object(ot, "PREBRANO_VELJA_S", -1.0):
+            self.t.dodaj(MAGNET, [1])
+        self.assertEqual(len([z for z in LazniRqbit.zahteve if z[0] == "POST" and "list_only=true" in z[1]]), 2)
 
     def test_tok_pocaka_da_je_torrent_pripravljen(self):
         self.t.dodaj(MAGNET, [1])

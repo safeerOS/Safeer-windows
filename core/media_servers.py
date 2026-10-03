@@ -612,7 +612,9 @@ def stremio_poskusne_epizode(koren: str, ident: str) -> list[str]:
 
 def stremio_tokovi(koren: str, tip: str, ident: str) -> list[dict]:
     """Predvajalne povezave dodatka: samo neposredni tokovi HTTP(S). Zunanjih povezav (`externalUrl`) in obvestil
-    dodatka (donacije, Discord, "No streams found") ni med njimi; torrentov (infoHash/magnet) Safeer ne predvaja."""
+    dodatka (donacije, Discord, "No streams found") ni med njimi. Tok `infoHash` (torrent) vrnemo z vsem, kar
+    potrebuje motor (hash, indeks datoteke, ime, sledilniki): predvaja ga racunalnik, ki zna prenasati torrente
+    (core/os_torrent_tok.py) - kot Safeer OS za Android."""
     if tip == "series" and ":" not in ident:
         meta = json.loads(_request(koren + "/meta/series/%s.json" % urllib.parse.quote(ident, safe=""))).get("meta") or {}
         videi = [v for v in (meta.get("videos") or []) if v.get("id")]
@@ -656,15 +658,30 @@ def stremio_tokovi(koren: str, tip: str, ident: str) -> list[dict]:
         # `externalUrl` ni tok, ampak povezava na stran (prosnja za donacijo, Discord, "No streams found", trgovina):
         # tega ne kazemo in ne odpiramo nikoli.
         elif t.get("infoHash"):
-            tokovi.append({"url": "", "torrent": True})
+            tok = {"url": "", "torrent": True}
+            hash_ = str(t.get("infoHash") or "").strip().lower()
+            if re.fullmatch(r"[0-9a-f]{40}", hash_):
+                namigi = t.get("behaviorHints") if isinstance(t.get("behaviorHints"), dict) else {}
+                indeks = t.get("fileIdx")
+                tok.update({
+                    "hash": hash_,
+                    "indeks": indeks if isinstance(indeks, int) and not isinstance(indeks, bool) and indeks >= 0 else None,
+                    "ime": str(namigi.get("filename") or "")[:300],
+                    # Sledilniki iz `sources` ("tracker:udp://..."), da motor hitreje najde vire.
+                    "sledilniki": [str(v)[len("tracker:"):] for v in (t.get("sources") or [])
+                                   if isinstance(v, str) and v.startswith("tracker:")][:20],
+                    "vir": (t.get("name") or "Torrent").split("\n")[0][:60],
+                    "kakovost": (t.get("title") or t.get("description") or "").split("\n")[0][:40],
+                    "opis": " ".join(str(t.get(k) or "") for k in ("name", "title", "description")).replace("\n", " ")[:600]})
+            tokovi.append(tok)
     return tokovi
 
 
 def stremio_preveri(base: str) -> str:
     """Pred dodajanjem preveri, ali dodatek ponuja kaj, kar Safeer zna predvajati.
 
-    Vrne prazen niz, ce je dodatek uporaben, sicer razlog za uporabnika. Katalog brez
-    predvajalnih povezav ali dodatek s samimi torrenti v medijskem centru ne bi deloval.
+    Vrne prazen niz, ce je dodatek uporaben, sicer razlog za uporabnika. Katalog brez predvajalnih povezav v
+    medijskem centru ne bi deloval; dodatek s samimi torrenti deluje na racunalniku, ki zna prenasati torrente.
     """
     koren = _stremio_koren(base)
     manifest = stremio_manifest(koren)
@@ -696,7 +713,10 @@ def stremio_preveri(base: str) -> str:
         predvajljivo += sum(1 for t in tokovi if t.get("url"))
         torrent += sum(1 for t in tokovi if t.get("torrent"))
     if not predvajljivo and torrent:
-        return ("Ta dodatek ponuja samo torrent povezave. Safeer predvaja samo neposredne tokove, "
+        from core import os_torrent_tok
+        if os_torrent_tok.podprto():
+            return ""
+        return ("Ta dodatek ponuja samo torrent povezave. Ta racunalnik torrentov ne zna prenasati, "
                 "zato dodatka nismo dodali.")
     return ""
 
