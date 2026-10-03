@@ -581,6 +581,12 @@ class _Streznik(link_tls.RokovanjeVNiti, http.server.ThreadingHTTPServer):
     allow_reuse_address = True
 
 
+#: Najvec toliko objavljenih tokov hkrati (film in njegovi podnapisi so vsak svoj tok); najstarejsi izpadejo.
+NAJVEC_TOKOV = 256
+#: Najvec toliko podnapisov ponudimo napravi ob enem filmu.
+NAJVEC_PODNAPISOV_TOKA = 12
+
+
 class StreznikDatotek:
     """HTTPS streznik datotek Controla: zazene se ob prvi rabi, na nakljucnih vratih, samo za naprave z zetonom."""
 
@@ -681,7 +687,7 @@ class StreznikDatotek:
         skrivnost = secrets.token_urlsafe(18)
         with self._kljucavnica:
             self._tokovi[skrivnost] = lokalni_url
-            while len(self._tokovi) > 64:
+            while len(self._tokovi) > NAJVEC_TOKOV:
                 self._tokovi.pop(next(iter(self._tokovi)))
         return "/m/%s/%s" % (skrivnost, u.path.rsplit("/", 1)[-1])
 
@@ -697,7 +703,7 @@ class StreznikDatotek:
         skrivnost = secrets.token_urlsafe(18)
         with self._kljucavnica:
             self._tokovi[skrivnost] = "file://" + pot
-            while len(self._tokovi) > 64:
+            while len(self._tokovi) > NAJVEC_TOKOV:
                 self._tokovi.pop(next(iter(self._tokovi)))
         return "/m/%s/%s" % (skrivnost, urllib.parse.quote(os.path.basename(pot)))
 
@@ -762,6 +768,8 @@ class Datoteke:
         #: sam (core/knjiznica_kroga.lokalni), odstrani_gledanje(hash) tak prenos odstrani. Nastavi ju Control.
         self.gledanje: Optional[callable] = None
         self.odstrani_gledanje: Optional[callable] = None
+        #: »Obdrži« za prenos Safeer OS: obdrzi_gledanje(hash, bool) -> bool (core/knjiznica_kroga.nastavi_obdrzi).
+        self.obdrzi_gledanje: Optional[callable] = None
 
     def poti(self) -> List[str]:
         return list(self.mape.poti)
@@ -870,7 +878,8 @@ class Datoteke:
             return {"server": {"base_url": self.streznik.osnova(naslov), "fp": self.streznik.odtis,
                                "token": self.streznik.zeton_za(id_naprave or "naprava")},
                     "path": self.streznik.dodaj_datoteko_toka(obstojeca), "name": os.path.basename(obstojeca),
-                    "file": indeks, "size": os.path.getsize(obstojeca), "local": True}
+                    "file": indeks, "size": os.path.getsize(obstojeca), "local": True,
+                    "subs": self._podnapisi_z_diska(obstojeca)}
         if torrenti is None:
             if not os_torrent.program_na_voljo():
                 os_torrent.prenesi_program()
@@ -911,7 +920,31 @@ class Datoteke:
         return {"server": {"base_url": self.streznik.osnova(naslov), "fp": self.streznik.odtis,
                            "token": self.streznik.zeton_za(id_naprave or "naprava")},
                 "path": pot, "name": os.path.basename(str(izbrana.get("ime") or "")), "file": izbrana["i"],
-                "size": int(izbrana.get("velikost") or 0)}
+                "size": int(izbrana.get("velikost") or 0),
+                "subs": self._podnapisi_torrenta(torrenti, tid, izbrana["i"]) if izbrana.get("vrsta") == "video" else []}
+
+    def _podnapisi_z_diska(self, pot_videa: str) -> List[dict]:
+        """Podnapisi ob filmu, ki je ze na disku (ista mapa ali podmapa Subs): vsak svoj tok, kot film."""
+        izid: List[dict] = []
+        try:
+            from core import podnapisi as pn
+            for p in pn.podnapisi_mape(pot_videa)[:NAJVEC_PODNAPISOV_TOKA]:
+                izid.append({"path": self.streznik.dodaj_datoteko_toka(p), "name": os.path.basename(p)})
+        except Exception:  # noqa: BLE001 - podnapisi niso nujni za predvajanje
+            pass
+        return izid
+
+    def _podnapisi_torrenta(self, torrenti, tid: int, indeks: int) -> List[dict]:
+        """Podnapisi iz istega torrenta kot film (`subs` v odgovoru `magnet.stream`): naprava, ki film samo gleda, jih
+        dobi kot tokove z istega streznika. Ime pove jezik (Film.en.srt) - razbere ga naprava."""
+        izid: List[dict] = []
+        try:
+            for j, pot_p in list(torrenti.podnapisi_za(tid, indeks))[:NAJVEC_PODNAPISOV_TOKA]:
+                ime = os.path.basename(str(pot_p))
+                izid.append({"path": self.streznik.dodaj_tok(torrenti.tok(tid, j)), "name": ime})
+        except Exception:  # noqa: BLE001 - podnapisi niso nujni za predvajanje
+            pass
+        return izid
 
 
     def prenosi_za_naprave(self, torrenti=None, pot_rabe: Optional[str] = None, id_naprave: str = "") -> dict:
@@ -941,6 +974,8 @@ class Datoteke:
             hash_ = _hash_torrenta(torrenti, t) if opisi else ""
             opis = opisi.get(hash_) or {}
             zivi.add(hash_)
+            # »Obdrži«: prenos ne potece (polje je vedno tu - naprava po njem ve, da racunalnik zna `magnet.keep`).
+            vnos["keep"] = bool(opis.get("keep"))
             if opis.get("private"):
                 if not id_naprave or id_naprave not in (opis.get("narocniki") or []):
                     continue                    # zasebno: samo napravi, ki je prenos prosila
@@ -958,6 +993,8 @@ class Datoteke:
                     vnos = {"id": oznaka_gledanja(v["hash"]), "name": v.get("name") or "", "size": int(v.get("size") or 0),
                             "done": int(v.get("size") or 0), "finished": True, "speed_mibs": 0, "magnet": v.get("magnet") or "",
                             "file": v.get("file")}
+                    if self.obdrzi_gledanje is not None:
+                        vnos["keep"] = bool(v.get("keep"))
                     vnos.update({k: v[k] for k in ("title", "poster", "kind", "ref") if v.get(k)})
                     izid.append(vnos)
             except Exception:  # noqa: BLE001 - polica Controla ne sme pasti zaradi zapisov Safeer OS
@@ -989,6 +1026,28 @@ class Datoteke:
         self.streznik.pozabi_tokove()
         return torrenti.odstrani(int(tid), z_datotekami=True)
 
+    def obdrzi_prenos(self, tid: int, obdrzi: bool, torrenti=None, pot_rabe: Optional[str] = None,
+                      id_naprave: str = "") -> bool:
+        """`magnet.keep`: prenos, ki ga uporabnik hoce obdrzati, ne potece po 48 urah in ne gre ob pomanjkanju prostora
+        (odstrani ga samo uporabnik). Zasebnega sme oznaciti le naprava, ki ga je prosila."""
+        if int(tid) < 0:
+            if self.gledanje is None or self.obdrzi_gledanje is None:
+                return False
+            hash_ = next((str(v.get("hash") or "") for v in self.gledanje() if oznaka_gledanja(str(v.get("hash") or "")) == int(tid)), "")
+            return bool(hash_ and self.obdrzi_gledanje(hash_, bool(obdrzi)))
+        torrenti = torrenti if torrenti is not None else torrenti_za_naprave()
+        if not torrenti.tece():
+            torrenti.seznam()   # zazene rqbit, ce ima shranjeno stanje
+        t = next((x for x in torrenti.seznam() if int(x.get("id", -1)) == int(tid)), None)
+        hash_ = _hash_torrenta(torrenti, t) if t is not None else ""
+        pot_opisov = _pot_opisov(pot_rabe or _pot_rabe_za(torrenti))
+        if not hash_ or not pot_opisov or t.get("lastna"):
+            return False
+        opis = _beri_opise(pot_opisov).get(hash_) or {}
+        if opis.get("private") and (not id_naprave or id_naprave not in (opis.get("narocniki") or [])):
+            return False
+        return nastavi_obdrzi(pot_opisov, hash_, bool(obdrzi))
+
 
 def _odgovor_z_streznikom(datoteke: "Datoteke", o: dict, id_naprave: str, hub_url: str) -> dict:
     datoteke.streznik.zazeni()
@@ -996,6 +1055,31 @@ def _odgovor_z_streznikom(datoteke: "Datoteke", o: dict, id_naprave: str, hub_ur
     o["server"] = {"base_url": datoteke.streznik.osnova(naslov), "fp": datoteke.streznik.odtis,
                    "token": datoteke.streznik.zeton_za(id_naprave or "naprava")}
     return o
+
+
+def obdrzani(pot_opisov: str) -> set:
+    """Hashi prenosov, ki jih je uporabnik oznacil z »Obdrži« (zapis opisov ob zapisu rabe)."""
+    return {h for h, o in _beri_opise(pot_opisov).items() if o.get("keep")} if pot_opisov else set()
+
+
+def nastavi_obdrzi(pot_opisov: str, hash_: str, obdrzi: bool) -> bool:
+    """Oznaci (ali odznaci) prenos kot obdrzan. Opis prenosa (naslov, zasebnost, narocniki) ostane, kot je."""
+    hash_ = str(hash_ or "").lower()
+    if not pot_opisov or not re.fullmatch(r"[0-9a-f]{40}", hash_):
+        return False
+    with _RABA_ZAKLEP:
+        opisi = _beri_opise(pot_opisov)
+        vnos = dict(opisi.get(hash_) or {})
+        if obdrzi:
+            vnos["keep"] = True
+        else:
+            vnos.pop("keep", None)
+        if vnos:
+            opisi[hash_] = vnos
+        else:
+            opisi.pop(hash_, None)
+        _pisi_rabo(pot_opisov, opisi)
+    return True
 
 
 def oznaka_gledanja(hash_: str) -> int:
@@ -1252,10 +1336,13 @@ def pocisti_neuporabljene(torrenti, pot: Optional[str] = None, zdaj: Optional[fl
     except Exception:  # noqa: BLE001
         return []
     odstranjeni: List[str] = []
+    # Kar je uporabnik oznacil z »Obdrži«, ne potece in ne gre niti ob pomanjkanju prostora.
+    drzimo = obdrzani(_pot_opisov(pot))
     with _RABA_ZAKLEP:
         raba = _beri_rabo(pot)
         spremenjeno = False
         znani = []
+        zivi_vsi = set()
         for t in vsi:
             h = _hash_torrenta(torrenti, t)
             if not h or t.get("lastna"):
@@ -1263,6 +1350,9 @@ def pocisti_neuporabljene(torrenti, pot: Optional[str] = None, zdaj: Optional[fl
             if h not in raba:
                 raba[h] = zdaj
                 spremenjeno = True
+            zivi_vsi.add(h)
+            if h in drzimo:
+                continue
             znani.append((raba[h], h, t))
 
         def odstrani(h: str, t: dict) -> bool:
@@ -1286,7 +1376,7 @@ def pocisti_neuporabljene(torrenti, pot: Optional[str] = None, zdaj: Optional[fl
                     continue
                 spremenjeno = odstrani(h, t) or spremenjeno
         # Zapisi o torrentih, ki jih ni vec (uporabnik jih je odstranil sam), ne ostajajo.
-        zivi = {h for _, h, _ in znani} - set(odstranjeni)
+        zivi = zivi_vsi - set(odstranjeni)
         for h in [h for h in raba if h not in zivi and h != obdrzi.lower()]:
             if zdaj - raba[h] > RABA_VELJA_S and not v_seji_motorja(torrenti, h):
                 raba.pop(h)
@@ -1390,7 +1480,7 @@ def zabelezi_opis(hash_: str, opis: Optional[dict], id_naprave: str, pot_rabe: O
         opisi = _beri_opise(pot)
         vnos = dict(opisi.get(hash_.lower()) or {})
         if opis.get("private") or vnos.get("private"):
-            vnos = {"private": True, "narocniki": vnos.get("narocniki") or []}
+            vnos = dict({"private": True, "narocniki": vnos.get("narocniki") or []}, **({"keep": True} if vnos.get("keep") else {}))
         else:
             for k in ("title", "poster", "kind", "ref"):
                 if opis.get(k):

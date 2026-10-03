@@ -11,8 +11,12 @@ Pravila (ista kot na Androidu):
   * vnos brez naslova (prenesen pred to razlicico ali za starejso napravo) se ne pokaze;
   * isti film pri vec napravah je en vnos: prednost ima ta racunalnik, nato drugi racunalniki, nato naprave.
 
-Protokol Linka: `magnet.list` (vnosi s `title`, `poster`, `kind`, `ref`), `magnet.stream` (`server`, `path`),
-`magnet.remove` - glej core/link_datoteke.py.
+Protokol Linka: `magnet.list` (vnosi s `title`, `poster`, `kind`, `ref`, `keep`), `magnet.stream` (`server`, `path`,
+`subs`), `magnet.remove`, `magnet.keep` - glej core/link_datoteke.py.
+
+»Obdrži« (krog 85): prenos, ki ga uporabnik oznaci, ne potece po 48 urah; odstrani ga samo on. Oznako hrani naprava,
+ki film hrani. Naprava, ki `magnet.keep` ne pozna (starejsa razlicica), v `magnet.list` ne poslje polja `keep` - pri
+njej moznosti ne ponudimo.
 """
 
 from __future__ import annotations
@@ -37,6 +41,8 @@ CAKANJE_TOKA_S = 150.0
 RAZMIK_TOKA_S = 0.7
 #: Oznaka naprave za prenose motorja Safeer OS na tem racunalniku.
 TUKAJ = "tukaj"
+#: Najvec toliko podnapisov vzamemo od naprave, ki film pretaka.
+NAJVEC_PODNAPISOV = 12
 
 
 def hash_magneta(uri: str) -> str:
@@ -77,6 +83,7 @@ def zabelezi(hash_: str, opis: Optional[dict], datoteka: Optional[int] = None, p
     with link_datoteke._RABA_ZAKLEP:
         opisi = link_datoteke._beri_opise(pot)
         vnos = dict(opisi.get(hash_.lower()) or {})
+        drzimo = bool(vnos.get("keep"))
         if opis.get("private") or vnos.get("private"):
             vnos = {"private": True}
         else:
@@ -86,8 +93,16 @@ def zabelezi(hash_: str, opis: Optional[dict], datoteka: Optional[int] = None, p
             vnos["private"] = False
             if isinstance(datoteka, int) and not isinstance(datoteka, bool) and datoteka >= 0:
                 vnos["file"] = datoteka
+        if drzimo:
+            vnos["keep"] = True
         opisi[hash_.lower()] = vnos
         link_datoteke._pisi_rabo(pot, opisi)
+
+
+def nastavi_obdrzi(hash_: str, obdrzi: bool, pot: Optional[str] = None) -> bool:
+    """»Obdrži« za prenos motorja Safeer OS na tem racunalniku (tudi na zahtevo naprave, `magnet.keep` prek Controla)."""
+    pot = pot_opisov() if pot is None else pot
+    return link_datoteke.nastavi_obdrzi(pot, hash_, bool(obdrzi))
 
 
 def pozabi(hash_: str, pot: Optional[str] = None, pot_rabe: Optional[str] = None) -> None:
@@ -136,7 +151,7 @@ def lokalni(pot_rabe: Optional[str] = None, pot: Optional[str] = None, mape_stan
             na_disku, indeks = "", -1
         vnos = {"hash": h, "magnet": "magnet:?xt=urn:btih:" + h, "file": indeks if na_disku else datoteka,
                 "finished": bool(na_disku), "size": os.path.getsize(na_disku) if na_disku else 0,
-                "name": os.path.basename(na_disku) if na_disku else ""}
+                "name": os.path.basename(na_disku) if na_disku else "", "keep": bool(opis.get("keep"))}
         vnos.update({k: opis[k] for k in ("title", "poster", "kind", "ref") if opis.get(k)})
         izid.append(vnos)
     return izid
@@ -161,7 +176,8 @@ def polica(tukaj: List[dict], naprave: List[dict]) -> List[dict]:
 
     `naprave`: [{"id", "ime", "racunalnik", "ta", "items"}] - `items` kot jih vrne `magnet.list`.
     Vnos police: {"kljuc", "naslov", "slika", "vrsta", "naprava": {"id", "ime", "tukaj"}, "velikost", "koncano",
-    + za predvajanje in odstranitev: "magnet", "datoteka", "id", "ref"}."""
+    "obdrzi" (True/False; None = naprava »Obdrži« ne pozna), + za predvajanje in odstranitev: "magnet", "datoteka",
+    "id", "ref"}."""
     viri = [{"id": TUKAJ, "ime": "", "racunalnik": True, "ta": True, "items": tukaj or []}]
     viri += sorted([n for n in naprave or [] if isinstance(n, dict)],
                    key=lambda n: (not n.get("ta"), not n.get("racunalnik")))
@@ -186,6 +202,7 @@ def polica(tukaj: List[dict], naprave: List[dict]) -> List[dict]:
                 "naprava": {"id": str(vir.get("id") or ""), "ime": str(vir.get("ime") or ""),
                             "tukaj": bool(vir.get("ta"))},
                 "velikost": int(x.get("size") or 0), "koncano": bool(x.get("finished")),
+                "obdrzi": bool(x.get("keep")) if isinstance(x.get("keep"), bool) else None,
                 "magnet": magnet or "magnet:?xt=urn:btih:" + h,
                 "datoteka": datoteka if isinstance(datoteka, int) and not isinstance(datoteka, bool) else None,
                 "id": tid if isinstance(tid, int) and not isinstance(tid, bool) else None,
@@ -244,7 +261,8 @@ class Knjiznica:
         with self._zaklep:
             self._vnosi = {v["kljuc"]: v for v in vnosi}
         # Stran dobi samo, kar pokaze: magnet povezave in oznake prenosov ostanejo tukaj.
-        return [{k: v[k] for k in ("kljuc", "naslov", "slika", "vrsta", "naprava", "velikost", "koncano")} for v in vnosi]
+        return [{k: v[k] for k in ("kljuc", "naslov", "slika", "vrsta", "naprava", "velikost", "koncano", "obdrzi")}
+                for v in vnosi]
 
     def vnos(self, kljuc: str) -> Optional[dict]:
         with self._zaklep:
@@ -272,7 +290,10 @@ class Knjiznica:
             r = r if isinstance(r, dict) else {}
             d = r.get("data") if isinstance(r.get("data"), dict) else {}
             if r.get("ok") and isinstance(d.get("server"), dict) and d.get("path"):
-                return {"server": d["server"], "path": str(d["path"]), "name": str(d.get("name") or "")}
+                return {"server": d["server"], "path": str(d["path"]), "name": str(d.get("name") or ""),
+                        "subs": [{"path": str(p.get("path") or ""), "name": str(p.get("name") or "")[:200]}
+                                 for p in (d.get("subs") if isinstance(d.get("subs"), list) else [])[:NAJVEC_PODNAPISOV]
+                                 if isinstance(p, dict) and p.get("path")]}
             koda = str(r.get("koda") or r.get("code") or "")
             caka = (r.get("ok") and d.get("pending")) or (not r.get("ok") and koda == "cas")
             if not caka or time.monotonic() >= rok:
@@ -293,6 +314,27 @@ class Knjiznica:
             return {"ok": False, "koda": tok["koda"]}
         return {"ok": True, "vnos": v, "tok": tok}
 
+    def obdrzi(self, kljuc: str, obdrzi: bool, obdrzi_tukaj: Optional[Callable[[str, bool], bool]] = None) -> bool:
+        """»Obdrži« (ali ne vec): oznako nastavi naprava, ki film hrani. False, ce je ne pozna ali ne odgovori."""
+        v = self.vnos(kljuc)
+        if v is None or v.get("obdrzi") is None:
+            return False
+        if v["naprava"]["id"] == TUKAJ:
+            ok = bool((obdrzi_tukaj or nastavi_obdrzi)(v["kljuc"], bool(obdrzi)))
+        else:
+            if v.get("id") is None:
+                return False
+            try:
+                r = self._ukaz(str(v["naprava"]["id"]), "magnet.keep", {"id": v["id"], "keep": bool(obdrzi)}, 15.0)
+            except Exception:  # noqa: BLE001
+                r = {}
+            ok = bool(isinstance(r, dict) and r.get("ok"))
+        if ok:
+            with self._zaklep:
+                if v["kljuc"] in self._vnosi:
+                    self._vnosi[v["kljuc"]]["obdrzi"] = bool(obdrzi)
+        return ok
+
     def odstrani(self, kljuc: str, odstrani_tukaj: Optional[Callable[[dict], bool]] = None) -> bool:
         """Prenos odstrani z naprave, ki ga hrani (z datotekami). Prenos tega racunalnika odstrani `odstrani_tukaj`."""
         v = self.vnos(kljuc)
@@ -312,6 +354,27 @@ class Knjiznica:
             with self._zaklep:
                 self._vnosi.pop(v["kljuc"], None)
         return ok
+
+
+def podnapisi_toka(tok: dict, dodaj: Optional[Callable[[object], str]] = None) -> List[tuple]:
+    """Podnapisi iz torrenta za film, ki ga pretaka druga naprava (`subs` v odgovoru `magnet.stream`): vsak dobi svoj
+    lokalni tok skozi core/link_pretok (pripeto potrdilo in zeton, kot film). Vrne [(naslov, ime, jezik, oznaka)]."""
+    from core import link_pretok, os_torrent, podnapisi as pn
+    if dodaj is None:
+        dodaj = link_pretok.pretok().dodaj
+    izid: List[tuple] = []
+    for p in (tok.get("subs") or [])[:NAJVEC_PODNAPISOV]:
+        ime = os.path.basename(str(p.get("name") or "").replace("\\", "/"))
+        if not ime or os_torrent.vrsta_datoteke(ime) != "podnapisi":
+            continue
+        vir = link_pretok.vir_toka(tok.get("server"), p.get("path"), "text/plain")
+        if vir is None:
+            continue
+        try:
+            izid.append((dodaj(vir), ime) + tuple(pn.jezik(str(tok.get("name") or ""), ime)))
+        except Exception:  # noqa: BLE001 - podnapisi niso nujni za predvajanje
+            continue
+    return izid
 
 
 #: Toliko casa po zagonu motorja cakamo, da nasteje torrent, ki ga ima v svoji seji (pocasen disk). Manj kot 20 s:

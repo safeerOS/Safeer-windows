@@ -3047,7 +3047,8 @@
     if (vrsta === "magnetProgram" && S.magnet.gumbPrograma && podatki)
       S.magnet.gumbPrograma.textContent = t("magnetProgramPrenasam", { odstotek: Math.floor(100 * podatki.n / (podatki.vse || 1)) });
     if (vrsta === "magnetDeljen") magnetDeljen(podatki);
-    if (vrsta === "mediaOsvezen" && S.razdelek === "media") naloziMedia();
+    // "mediaViriUsklajeni": Moji viri so se uskladili z drugo napravo v Linku (dodan ali izbrisan dodatek, podkast ...).
+    if ((vrsta === "mediaOsvezen" || vrsta === "mediaViriUsklajeni") && S.razdelek === "media") naloziMedia();
     // Seznami predvajanja so se uskladili z drugo napravo v Linku: seznam seznamov (in odprt seznam) tiho osvezimo.
     if (vrsta === "mediaSeznamiUsklajeni") {
       naloziSeznamePredvajanja();
@@ -4007,6 +4008,24 @@
       };
       card.onmouseleave = function () { if (potrjeno) { potrjeno = false; odstrani.classList.remove("potrdi"); odstrani.textContent = "✕"; } };
       card.appendChild(odstrani);
+      // »Obdrži«: prenos ne poteče po 48 urah. Samo pri napravi, ki to zna (jedro pove true/false; sicer null).
+      if (x.obdrzi === true || x.obdrzi === false) {
+        if (x.obdrzi) meta.appendChild(el("span", "media-obdrzano", ubezi(t("knjiznicaObdrzanoOznaka"))));
+        var obdrzi = el("span", "media-obdrzi" + (x.obdrzi ? " je" : ""),
+          '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M6 3h12v18l-6-4-6 4z" fill="' +
+          (x.obdrzi ? "currentColor" : "none") + '" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>');
+        obdrzi.title = t(x.obdrzi ? "knjiznicaNeObdrzi" : "knjiznicaObdrzi");
+        obdrzi.onclick = function (e) {
+          e.stopPropagation();
+          var novo = !x.obdrzi; card.classList.add("media-caka");
+          klic("mediaKnjiznicaObdrzi", [x.kljuc, novo]).then(function (ok) {
+            card.classList.remove("media-caka");
+            if (!ok) { obvesti(t("knjiznicaObdrziNiUspelo")); return; }
+            x.obdrzi = novo; narisiKnjiznico(); obvesti(t(novo ? "knjiznicaObdrzano" : "knjiznicaNiVecObdrzano"));
+          }, function () { card.classList.remove("media-caka"); obvesti(t("knjiznicaObdrziNiUspelo")); });
+        };
+        card.appendChild(obdrzi);
+      }
       card.onclick = function () { predvajajIzKnjiznice(x); };
       vrsta.appendChild(card);
     });
@@ -4176,7 +4195,15 @@
       var refresh = el("button", "gumb-ikona", svg("ponovno")); refresh.title = t("mediaOsvezi");
       refresh.onclick = function () { osveziMediaVir(source.id); }; row.appendChild(refresh);
       var remove = el("button", "gumb-ikona", svg("x")); remove.title = t("odstrani");
-      remove.onclick = function () { klic("mediaOdstraniVir", [source.id]).then(naloziMedia); }; row.appendChild(remove);
+      // Vir, ki je enak na vseh napravah v Safeer Linku, se izbriše povsod: prvi klik vpraša (brez sistemskega okna).
+      var povsod = (source.ponudnik === "stremio" && source.zaseben === false) ||
+        (source.vrsta !== "streznik" && source.tip !== "predvajalni_vir" && (!!source.link_tip || (source.stevilo || 0) > 0)), potrjeno = false;
+      remove.onclick = function () {
+        if (povsod && !potrjeno) { potrjeno = true; remove.classList.add("potrdi"); remove.textContent = t("virOdstraniPovsod"); return; }
+        klic("mediaOdstraniVir", [source.id]).then(naloziMedia);
+      };
+      row.onmouseleave = function () { if (potrjeno) { potrjeno = false; remove.classList.remove("potrdi"); remove.innerHTML = svg("x"); } };
+      row.appendChild(remove);
       cilj.appendChild(row);
     });
   }

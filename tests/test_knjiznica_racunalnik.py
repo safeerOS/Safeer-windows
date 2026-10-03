@@ -222,7 +222,7 @@ class Krog(unittest.TestCase):
         self.assertEqual(sorted(k[0] for k in self.klici), ["n-jaz-control", "n-pc-control", "n-telefon"])   # TV brez "torrent" ne
         self.assertEqual([(v["naslov"], v["naprava"]["ime"], v["naprava"]["tukaj"]) for v in s],
                          [("Film na tem racunalniku", "Ta racunalnik", True), ("Film na telefonu", "Telefon", False)])
-        self.assertEqual(sorted(s[0]), ["kljuc", "koncano", "naprava", "naslov", "slika", "velikost", "vrsta"])
+        self.assertEqual(sorted(s[0]), ["kljuc", "koncano", "naprava", "naslov", "obdrzi", "slika", "velikost", "vrsta"])
         self.assertNotIn("magnet", json.dumps(s))
         self.assertNotIn("surovo", json.dumps(s))
 
@@ -246,7 +246,7 @@ class Krog(unittest.TestCase):
         self.assertEqual(len(self.klici), 3)
         self.assertEqual(self.klici[0], ("n-telefon", "magnet.stream", {"uri": "magnet:?xt=urn:btih:%s&dn=surovo.ime" % H1, "file": 2,
                                                                      "title": "Film", "poster": PLAKAT, "kind": "series", "ref": "r9"}))
-        self.assertEqual((r["ok"], r["tok"]), (True, {"server": streznik, "path": "/magnet/skrivnost", "name": "f.mkv"}))
+        self.assertEqual((r["ok"], r["tok"]), (True, {"server": streznik, "path": "/magnet/skrivnost", "name": "f.mkv", "subs": []}))
         self.assertEqual((r["vnos"]["naslov"], r["vnos"]["naprava"]["id"], r["vnos"]["ref"]), ("Film", "n-telefon", "r9"))
 
     def test_napaka_pomocnika_je_kratka_koda_in_nic_se_ne_predvaja(self):

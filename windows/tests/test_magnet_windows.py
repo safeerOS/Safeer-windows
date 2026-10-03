@@ -121,7 +121,7 @@ class LinkTokTorrenta(unittest.TestCase):
     def test_stanje_oglasa_samo_kar_zna(self):
         from core import os_torrent
         with mock.patch.object(os_torrent, "platforma", lambda: "windows-amd64"):
-            self.assertTrue({"magnet.stream", "magnet.list", "magnet.remove"} <= set(self._ukaz("status", {})["data"]["actions"]))
+            self.assertTrue({"magnet.stream", "magnet.list", "magnet.remove", "magnet.keep"} <= set(self._ukaz("status", {})["data"]["actions"]))
         with mock.patch.object(os_torrent, "platforma", lambda: ""):
             self.assertNotIn("magnet.stream", self._ukaz("status", {})["data"]["actions"])
 
@@ -154,6 +154,23 @@ class LinkTokTorrenta(unittest.TestCase):
                 mock.patch.object(control_backend.os_backend_win, "zmogljivost", lambda: {"pomoc": {"lahko": True, "razlog": ""}}):
             o = self._ukaz("magnet.stream", {"uri": MAGNET})
         self.assertEqual((o["ok"], o["code"]), (False, "ni_prostora"))
+
+    def test_obdrzi_prenos(self):
+        """»Obdrži« (krog 85): prenos ne potece po 48 urah; oznako nastavi racunalnik, ki film hrani."""
+        klici = []
+
+        class Datoteke:
+            def obdrzi_prenos(self, tid, drzi, id_naprave=""):
+                klici.append((tid, drzi, id_naprave))
+                return tid == 7
+
+        self.assertEqual(self._ukaz("magnet.keep", {"id": 7})["code"], "ni_prenosa")              # brez true/false
+        self.assertEqual(self._ukaz("magnet.keep", {"id": "x", "keep": True})["code"], "ni_prenosa")
+        with mock.patch.object(self.backend, "_datoteke_torrenta", lambda: Datoteke()):
+            o = self._ukaz("magnet.keep", {"id": 7, "keep": True}, posiljatelj="tel-1")
+            self.assertEqual((o["ok"], o["data"]), (True, {"keep": True}))
+            self.assertEqual(self._ukaz("magnet.keep", {"id": 8, "keep": False}, posiljatelj="tel-1")["code"], "ni_prenosa")
+        self.assertEqual(klici, [(7, True, "tel-1"), (8, False, "tel-1")])
 
     def test_obremenjen_procesor_ni_razlog_baterija_je(self):
         class Datoteke:

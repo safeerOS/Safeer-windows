@@ -30,7 +30,7 @@ CONFIG_FILE = os.path.join(CONFIG_DIR, "link.json")
 DEJANJA_MAGNET = ["magnet.open"]
 #: Torrent prenasa in pretaka ta racunalnik, naprava (televizor, telefon) samo predvaja tok in nicesar ne
 #: shranjuje - isto kot Safeer Control na Linuxu (core/link_datoteke.py: tok_torrenta).
-DEJANJA_TOK_TORRENTA = ["magnet.stream", "magnet.list", "magnet.remove"]
+DEJANJA_TOK_TORRENTA = ["magnet.stream", "magnet.list", "magnet.remove", "magnet.keep"]
 #: Sprotno pretvarjanje za napravo, ki videa ne zna predvajati (core/link_sprotno.py, isti protokol kot Linux/Android).
 DEJANJA_PRETOK = ["video.stream", "video.stream_stop", "video.stream_status"]
 #: Zakon solidarnosti: naprava z dolocenimi pravicami (tudi samo zaslon) sme prositi za moc racunalnika - s tem ne
@@ -1557,6 +1557,7 @@ class SafeerControlBackend:
             from core import knjiznica_kroga
             d.gledanje = knjiznica_kroga.lokalni
             d.odstrani_gledanje = knjiznica_kroga.odstrani_lokalnega
+            d.obdrzi_gledanje = knjiznica_kroga.nastavi_obdrzi
         return d
 
     def _tok_torrenta(self, akcija: str, params: dict, posiljatelj: str) -> Dict[str, Any]:
@@ -1583,6 +1584,17 @@ class SafeerControlBackend:
                 ok = False
             return ({"ok": True, "message": "Odstranjeno z računalnika"} if ok
                     else {"ok": False, "message": "Tega prenosa ni mogoče odstraniti", "code": "ni_prenosa"})
+        if akcija == "magnet.keep":
+            # »Obdrži«: prenos ne potece po 48 urah (odstrani ga samo uporabnik).
+            tid, drzi = params.get("id"), params.get("keep")
+            if not isinstance(tid, int) or isinstance(tid, bool) or not isinstance(drzi, bool):
+                return {"ok": False, "message": "Manjka prenos", "code": "ni_prenosa"}
+            try:
+                ok = d.obdrzi_prenos(tid, drzi, id_naprave=posiljatelj)
+            except Exception:  # noqa: BLE001
+                ok = False
+            return ({"ok": True, "message": "Prenos ostane na računalniku" if drzi else "Prenos ni več obdržan", "data": {"keep": drzi}}
+                    if ok else {"ok": False, "message": "Tega prenosa ni mogoče obdržati", "code": "ni_prenosa"})
         uri = str(params.get("uri") or "")
         f = params.get("file")
         f = int(f) if isinstance(f, (int, float)) and not isinstance(f, bool) else None

@@ -524,6 +524,8 @@ class SafeerOsWindow(QMainWindow):
         self.control_backend.ob_mediju = self._link_medij
         # Seznami predvajanja so enaki na vseh napravah v Linku: druge naprave berejo nase, mi njihove (ob odprtju Glasbe).
         self.control_backend.ob_seznamih = self.media_center.seznami_izvoz
+        # Moji viri z drugih naprav v Linku (core/viri_sink.py): stran osvezi vire in katalog.
+        self.media_center.ob_virih = lambda: self.poslji_dogodek("mediaViriUsklajeni", {})
         self._seznami_usklajeni = 0.0
         self._seznami_usklajujem = False
         # Zacasni profili predvajalnika iz prejsnjih zagonov; v ozadju, da zagon ni pocasnejsi.
@@ -2395,6 +2397,9 @@ class SafeerOsWindow(QMainWindow):
             return self._knjiznica().seznam()
         if metoda == "mediaKnjiznicaOdstrani":
             return bool(self._knjiznica().odstrani(str(a[0]) if a else ""))
+        if metoda == "mediaKnjiznicaObdrzi":
+            # »Obdrži«: prenos ne potece po 48 urah (oznako hrani naprava, ki film hrani).
+            return bool(self._knjiznica().obdrzi(str(a[0]) if a else "", bool(a[1]) if len(a) > 1 else True))
         if metoda == "mediaKnjiznicaPredvajaj":
             r = self._knjiznica().predvajaj(str(a[0]) if a else "")
             if not r.get("ok"):
@@ -2412,10 +2417,14 @@ class SafeerOsWindow(QMainWindow):
             vir = link_pretok.vir_toka(tok.get("server"), tok.get("path"), mime)
             if vir is None:
                 return {"napaka_koda": "napaka"}
+            # Podnapisi iz istega torrenta: naprava, ki film hrani, jih pretaka kot film (krog 85).
+            from core import knjiznica_kroga
+            seznam_podnapisov = [self._podnapis("url", url_p, ime_p, jezik, oznaka)
+                                 for url_p, ime_p, jezik, oznaka in knjiznica_kroga.podnapisi_toka(tok)]
             item = {"ok": True, "id": str(v.get("ref") or "") or "knjiznica:" + v["kljuc"], "naslov": str(v.get("naslov") or ""),
                     "vrsta": "video", "url": link_pretok.pretok().dodaj(vir), "mime": mime,
-                    "vir": str((v.get("naprava") or {}).get("ime") or ""), "neposredni": True, "podnapisi": []}
-            print("[SafeerMedia] MEDIA_ROUTE knjiznica", flush=True)
+                    "vir": str((v.get("naprava") or {}).get("ime") or ""), "neposredni": True, "podnapisi": seznam_podnapisov}
+            print("[SafeerMedia] MEDIA_ROUTE knjiznica podnapisov=%d" % len(seznam_podnapisov), flush=True)
             return self._predvajaj_neposredno(item, ime or item["naslov"], False)
 
         if metoda == "mediaPredvajaj":
