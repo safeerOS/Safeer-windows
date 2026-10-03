@@ -3042,6 +3042,8 @@
         if (c && c.uri) odpriMagnet(c.uri, c.samodejno === true); else odpriMagnet((podatki && podatki.uri) || "", samo);
       }).catch(function () { odpriMagnet((podatki && podatki.uri) || "", samo); });
     }
+    // Film iz torrenta (dodatek): med branjem torrenta in prenosom zacetka uporabnik vidi, da se nekaj dogaja.
+    if (vrsta === "mediaTorrent") obvesti(t("mediaTorrentPripravljam", { ime: (podatki && podatki.naslov) || "" }));
     if (vrsta === "magnetProgram" && S.magnet.gumbPrograma && podatki)
       S.magnet.gumbPrograma.textContent = t("magnetProgramPrenasam", { odstotek: Math.floor(100 * podatki.n / (podatki.vse || 1)) });
     if (vrsta === "magnetDeljen") magnetDeljen(podatki);

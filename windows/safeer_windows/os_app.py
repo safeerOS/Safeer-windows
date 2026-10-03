@@ -25,7 +25,7 @@ from PySide6.QtWebEngineCore import (QWebEnginePage, QWebEngineProfile, QWebEngi
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QMainWindow, QStackedWidget, QWidget
 
-from core import os_dvd, os_media, os_posodobitve, os_scit, os_sporocila, os_torrent, podnapisi
+from core import os_dvd, os_media, os_posodobitve, os_scit, os_sporocila, os_torrent, os_torrent_tok, podnapisi
 
 from . import en_primerek
 from . import (browser, control_backend, control_window, magnet_win, os_backend_win, policy, vlc_player,
@@ -395,6 +395,11 @@ class SafeerOsWindow(QMainWindow):
             lambda ime, koda: self.poslji_dogodek("kodaPrijave", {"ime": ime, "koda": koda}))
         _korak("control_backend")
         self.media_center = os_media.MediaCenter(os_backend_win.CONFIG_DIR)
+        # Film iz torrenta (dodatek): branje torrenta traja - stran med tem pove, da ga pripravljamo.
+        self.media_center.ob_pripravi_torrenta = lambda item: self.poslji_dogodek(
+            "mediaTorrent", {"naslov": str(item.get("naslov") or "")})
+        # Prenosi zaradi gledanja, ki jih 48 ur nihce ni predvajal, se odstranijo sami.
+        os_torrent_tok.zazeni_ciscenje()
         # Visina zaslona (v pravih pikah) za izbiro najboljsega toka: na zaslonu 1080p ne jemljemo 4K z 18 GB.
         try:
             zaslon = QApplication.primaryScreen()
@@ -1562,7 +1567,14 @@ class SafeerOsWindow(QMainWindow):
             return _magnet_klic(lambda: t().preberi(niz(0)))
         if metoda == "magnetDodaj":
             # 3. argument: datoteke, ki so videti kot program in jih je uporabnik po opozorilu izrecno potrdil.
-            return _magnet_klic(lambda: {"id": t().dodaj(niz(0), stevila(1), stevila(2))})
+            def dodaj() -> dict:
+                tid = t().dodaj(niz(0), stevila(1), stevila(2))
+                # Uporabnik ga je dodal sam: ostane, dokler ga sam ne odstrani (ni vec "prenos zaradi gledanja").
+                m = os_torrent.razcleni_magnet(niz(0))
+                if m is not None:
+                    os_torrent_tok.obdrzi(m["hash"])
+                return {"id": tid}
+            return _magnet_klic(dodaj)
         if metoda == "magnetSeznam":
             try:
                 return t().seznam()

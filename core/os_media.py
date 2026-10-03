@@ -33,6 +33,7 @@ from typing import Any, Iterable, Optional
 from . import zakoniti_viri
 from . import media_servers
 from . import tok_izbira
+from . import os_torrent, os_torrent_tok
 from . import watch_providers
 from . import uvoz_seznama
 from . import seznami_sink
@@ -1431,7 +1432,7 @@ class MediaCenter:
     def _ni_na_voljo_beri(self) -> dict:
         if getattr(self, "_ni_na_voljo", None) is None:
             try:
-                data = json.loads((self.config_dir / "ni_na_voljo.json").read_text(encoding="utf-8"))
+                data = json.loads((self.config_dir / "ni_na_voljo-2.json").read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 data = {}
             self._ni_na_voljo = {str(k): float(v) for k, v in data.items()} if isinstance(data, dict) else {}
@@ -1449,7 +1450,7 @@ class MediaCenter:
             stanje[kljuc] = zdaj
             try:
                 self.config_dir.mkdir(parents=True, exist_ok=True)
-                (self.config_dir / "ni_na_voljo.json").write_text(json.dumps(stanje), encoding="utf-8")
+                (self.config_dir / "ni_na_voljo-2.json").write_text(json.dumps(stanje), encoding="utf-8")
             except OSError:
                 pass
 
@@ -1462,8 +1463,48 @@ class MediaCenter:
 
     @staticmethod
     def _predvajljivi(tokovi: list) -> bool:
-        return any(t.get("url") and not t.get("zunanje")
-                   and (str(t["url"]).startswith("https://") or media_servers.dovoljen_naslov(str(t["url"]))) for t in tokovi)
+        if any(t.get("url") and not t.get("zunanje")
+               and (str(t["url"]).startswith("https://") or media_servers.dovoljen_naslov(str(t["url"]))) for t in tokovi):
+            return True
+        # Torrent (infoHash) je predvajljiv na racunalniku, ki zna prenasati torrente - kot na Androidu.
+        return any(t.get("torrent") and t.get("hash") for t in tokovi) and os_torrent_tok.podprto()
+
+    #: Najvec toliko casa iscemo tok med torrenti (branje metapodatkov slabo podprtega torrenta traja).
+    TORRENT_ROK_S = 60.0
+
+    def _razresi_torrent(self, item: dict, tokovi: list) -> dict:
+        """Naslov, ki ga ponujajo samo torrenti: najboljsi torrent za to napravo prenasa motor Safeer OS, predvajalnik
+        dobi lokalni tok ze med prenosom (core/os_torrent_tok.py). Brez toka: kratka koda napake, naslova ne skrijemo."""
+        urejeni = tok_izbira.uredi(tokovi, lambda t: str(t.get("opis") or "%s %s" % (t.get("vir", ""), t.get("kakovost", ""))),
+                                   tok_izbira.Zmoznosti(visina=int(getattr(self, "visina_zaslona", 0) or 1080)))
+        obvesti = getattr(self, "ob_pripravi_torrenta", None)
+        if obvesti is not None:
+            try:
+                obvesti(item)
+            except Exception:
+                pass
+        zacetek = time.monotonic()
+        koda = "tok"
+        for i, t in enumerate(urejeni[:3]):
+            if i and time.monotonic() - zacetek > self.TORRENT_ROK_S:
+                break
+            try:
+                tok = os_torrent_tok.pripravi(str(t["hash"]), t.get("indeks"), str(t.get("ime") or ""), t.get("sledilniki") or ())
+            except os_torrent.NapakaTorrenta as napaka:
+                if str(napaka) in ("ni_prostora", "malo_pomnilnika"):
+                    koda = str(napaka)
+                    break
+                continue
+            except Exception:
+                continue
+            resolved = dict(item, url=tok["url"], torrent=True, stevilo_razlicic=1,
+                            razlicice=[{"url": tok["url"], "vir": t.get("vir") or "Torrent", "kakovost": t.get("kakovost") or ""}])
+            if tok.get("pot"):
+                resolved["pot"] = tok["pot"]
+            if tok.get("podnapisi") and not resolved.get("podnapisi"):
+                resolved["podnapisi"] = list(tok["podnapisi"])
+            return resolved
+        return dict(item, napaka_koda=koda)
 
     def _na_voljo(self, koren: str, tip: str, ident: str) -> Optional[bool]:
         """True = kateri od dodatkov ima tok, False = vsi so odgovorili in nobeden nima, None = ne vemo (izpad)."""
@@ -1978,7 +2019,8 @@ class MediaCenter:
         with ThreadPoolExecutor(max_workers=min(6, len(koreni))) as bazen:
             for izid in bazen.map(vprasaj, koreni[:10]):
                 for t in izid:
-                    kljuc = str(t.get("url") or "") or ("torrent" if t.get("torrent") else "")
+                    kljuc = str(t.get("url") or "") or ("torrent:%s:%s" % (t.get("hash") or "", t.get("indeks"))
+                                                         if t.get("torrent") else "")
                     if kljuc not in videni:
                         videni.add(kljuc)
                         tokovi.append(t)
@@ -3014,6 +3056,10 @@ class MediaCenter:
                 return resolved
             if drugi_http:
                 return dict(item, razlicice=drugi_http, stevilo_razlicic=len(drugi_http))
+            # Neposrednega toka ni: torrent, ce ga ta racunalnik zna prenasati (kot Android: neposredni imajo prednost).
+            torrenti = [t for t in tokovi if t.get("torrent") and t.get("hash")]
+            if torrenti and os_torrent_tok.podprto():
+                return self._razresi_torrent(item, torrenti)
             # Brez predvajljivega toka ni strani in ni seznama povezav: kratko obvestilo, vsebina izgine s seznama.
             # Za ure si to zapomnimo le, ce so odgovorili vsi dodatki (izpad dodatka ni "ni na voljo").
             if getattr(self._tokovi_odgovor, "vsi", False):

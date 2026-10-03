@@ -50,6 +50,15 @@ _SLAB = re.compile(r"\b(cam|hdcam|camrip|ts|hdts|telesync|tc|telecine|scr|screen
 _VELIKOST = re.compile(r"(\d+(?:[.,]\d+)?)\s*(gb|gib|mb|mib)")
 
 
+_SEJALCI = re.compile("(?:\U0001F464|seed(?:er)?s?\\s*[:=]?)\\s*(\\d{1,6})")
+
+
+def sejalci(besedilo: str) -> int:
+    """Koliko sejalcev navaja opis torrenta ("\U0001F464 123", "Seeders: 12"); -1 = opis tega ne pove."""
+    m = _SEJALCI.search(str(besedilo or "").lower())
+    return int(m.group(1)) if m else -1
+
+
 def opisi(besedilo: str) -> Opis:
     t = str(besedilo or "").lower()
     visina = next((v for v, vzorec in _V if vzorec.search(t)), 0)
@@ -85,6 +94,17 @@ def ocena(besedilo: str, z: Zmoznosti) -> int:
     if o.slab_posnetek:
         tocke -= 800
     tocke -= int(min(o.gb, 40.0) * 4)        # med enakovrednimi se manjsa datoteka zacne hitreje
+    # Torrent: zacetek predvajanja doloca roj, ne naprava (izmerjeno 3. 10. 2026). Kjer opis pove stevilo sejalcev,
+    # ima podprt torrent prednost tudi pred eno stopnjo visjo locljivostjo; brez sejalcev je zadnji.
+    s = sejalci(besedilo)
+    if s == 0:
+        tocke -= 2500
+    elif 1 <= s <= 4:
+        tocke -= 600
+    elif 5 <= s <= 19:
+        tocke -= 150
+    elif s >= 20:
+        tocke += min(60, s // 20)
     return tocke
 
 
