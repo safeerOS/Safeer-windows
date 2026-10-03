@@ -129,17 +129,17 @@ class LinkTokTorrenta(unittest.TestCase):
         klici = []
 
         class Datoteke:
-            def tok_torrenta(self, uri, naprava, hub, datoteka):
-                klici.append((uri, naprava, datoteka))
+            def tok_torrenta(self, uri, naprava, hub, datoteka, opis_naprave=None):
+                klici.append((uri, naprava, datoteka, opis_naprave))
                 return {"server": {"base_url": "https://192.168.0.2:5000", "fp": "ab", "token": "z"}, "path": "/m/s/film.mkv",
                         "name": "film.mkv", "file": 2, "size": 10}
 
         with mock.patch.object(self.backend, "_datoteke_torrenta", lambda: Datoteke()), \
                 mock.patch.object(control_backend.os_backend_win, "zmogljivost", lambda: {"pomoc": {"lahko": True, "razlog": ""}}):
-            o = self._ukaz("magnet.stream", {"uri": MAGNET, "file": 2})
+            o = self._ukaz("magnet.stream", {"uri": MAGNET, "file": 2, "title": "Sintel", "kind": "movie"})
         self.assertTrue(o["ok"], o)
         self.assertEqual((o["action"], o["data"]["path"], o["data"]["file"]), ("magnet.stream", "/m/s/film.mkv", 2))
-        self.assertEqual(klici, [(MAGNET, "tv-1", 2)])
+        self.assertEqual(klici, [(MAGNET, "tv-1", 2, {"title": "Sintel", "poster": "", "kind": "movie", "ref": "", "private": False})])
 
     def test_napake_so_kratke_kode(self):
         from core import os_torrent
@@ -147,7 +147,7 @@ class LinkTokTorrenta(unittest.TestCase):
         self.assertEqual(self._ukaz("magnet.remove", {"id": "x"})["code"], "ni_prenosa")
 
         class Polno:
-            def tok_torrenta(self, *_a):
+            def tok_torrenta(self, *_a, **_k):
                 raise os_torrent.NapakaTorrenta("ni_prostora")
 
         with mock.patch.object(self.backend, "_datoteke_torrenta", lambda: Polno()), \
@@ -157,7 +157,7 @@ class LinkTokTorrenta(unittest.TestCase):
 
     def test_obremenjen_procesor_ni_razlog_baterija_je(self):
         class Datoteke:
-            def tok_torrenta(self, *_a):
+            def tok_torrenta(self, *_a, **_k):
                 return {"server": {}, "path": "/m/s/f.mkv", "name": "f.mkv", "file": 0, "size": 1}
 
         with mock.patch.object(self.backend, "_datoteke_torrenta", lambda: Datoteke()):
@@ -169,7 +169,8 @@ class LinkTokTorrenta(unittest.TestCase):
 
     def test_solidarnost_tudi_z_omejenimi_pravicami_brez_pravic_ne(self):
         class Datoteke:
-            def prenosi_za_naprave(self):
+            def prenosi_za_naprave(self, id_naprave=""):
+                self.vprasal = id_naprave
                 return {"items": []}
 
         self.backend.nastavi_dovoljenje("tv-2", "zaslon")

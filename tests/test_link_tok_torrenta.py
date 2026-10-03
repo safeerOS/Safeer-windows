@@ -149,6 +149,43 @@ class TokTorrenta(unittest.TestCase):
         self.assertEqual(self._zahteva(o["path"], z)[0], 404)  # odstranjen tok ni vec dosegljiv
         self.assertFalse(self.d.odstrani_prenos(8, t))
 
+    def test_knjiznica_kroga_naslov_plakat_in_zasebno(self):
+        t = _Torrenti(self.lokalni.server_address[1])
+        raba = os.path.join(self.mapa, "knjiznica", "raba.json")
+        prosto = lambda m, v: ""  # noqa: E731
+        # Starejsa naprava ne pove nicesar: vnos kot do zdaj (brez naslova).
+        self.d.tok_torrenta(MAGNET, "tv-1", torrenti=t, zmogljivost=prosto, pot_rabe=raba)
+        self.assertNotIn("title", self.d.prenosi_za_naprave(t, raba, "tel-2")["items"][0])
+        # Naprava pove naslov in plakat: dobijo ju vse naprave v krogu.
+        opis = link_datoteke.opis_iz_parametrov({"title": " Sintel ", "poster": "https://slike.primer/s.jpg", "kind": "movie",
+                                                 "ref": "stremio|movie|tt1|https://d.primer", "uri": MAGNET})
+        self.d.tok_torrenta(MAGNET, "tv-1", torrenti=t, zmogljivost=prosto, pot_rabe=raba, opis_naprave=opis)
+        vnos = self.d.prenosi_za_naprave(t, raba, "tel-2")["items"][0]
+        self.assertEqual((vnos["title"], vnos["poster"], vnos["kind"], vnos["ref"]),
+                         ("Sintel", "https://slike.primer/s.jpg", "movie", "stremio|movie|tt1|https://d.primer"))
+        self.assertNotIn("private", vnos)
+        # Plakat s tujega protokola in neznana vrsta odpadeta; brez naslova ni opisa.
+        o = link_datoteke.opis_iz_parametrov({"title": "X", "poster": "http://192.168.0.2/p.jpg", "kind": "karkoli"})
+        self.assertEqual((o["poster"], o["kind"]), ("", ""))
+        self.assertIsNone(link_datoteke.opis_iz_parametrov({"poster": "https://x/p.jpg"}))
+        # Zaseben prenos: vidi ga samo naprava, ki ga je prosila - brez naslova in plakata, tudi ce sta bila prej znana.
+        zasebno = link_datoteke.opis_iz_parametrov({"private": True, "title": "ne sme na racunalnik"})
+        self.assertEqual(zasebno, {"private": True})
+        self.d.tok_torrenta(MAGNET, "tablica-3", torrenti=t, zmogljivost=prosto, pot_rabe=raba, opis_naprave=zasebno)
+        self.assertEqual(self.d.prenosi_za_naprave(t, raba, "tel-2")["items"], [])
+        self.assertEqual(self.d.prenosi_za_naprave(t, raba)["items"], [])
+        moj = self.d.prenosi_za_naprave(t, raba, "tablica-3")["items"][0]
+        self.assertTrue(moj["private"])
+        self.assertNotIn("title", moj)
+        # Kar je enkrat zasebno, ostane zasebno, tudi ce ga druga naprava prosi z javnim opisom.
+        self.d.tok_torrenta(MAGNET, "tel-2", torrenti=t, zmogljivost=prosto, pot_rabe=raba, opis_naprave=opis)
+        self.assertTrue(self.d.prenosi_za_naprave(t, raba, "tel-2")["items"][0]["private"])
+        self.assertEqual(self.d.prenosi_za_naprave(t, raba, "tv-9")["items"], [])
+        # Ko prenosa ni vec, tudi opis ne ostane.
+        t.seznam = lambda: []
+        self.d.prenosi_za_naprave(t, raba, "tel-2")
+        self.assertEqual(link_datoteke._beri_opise(link_datoteke._pot_opisov(raba)), {})
+
     def test_ne_preobremeni_racunalnika(self):
         t = _Torrenti(self.lokalni.server_address[1])
         for razlog in ("preobremenjen", "malo_pomnilnika", "ni_prostora"):
