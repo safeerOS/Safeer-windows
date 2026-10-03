@@ -520,6 +520,13 @@ def stremio_manifest(url: str) -> dict:
     return m
 
 
+def stremio_je_zaseben(manifest: dict) -> bool:
+    """Zaseben dodatek: v manifestu se sam oznaci z `behaviorHints.adult`. Kar pride iz njega, ostane na napravi -
+    naslova in plakata ne povemo drugim napravam in ga ni na polici »Na tvojih napravah« (kot v Safeer OS za Android)."""
+    namigi = manifest.get("behaviorHints") if isinstance(manifest, dict) else None
+    return bool(isinstance(namigi, dict) and namigi.get("adult"))
+
+
 def _stremio_items(base: str, server: dict, query: str) -> list[dict]:
     """Katalogi dodatka po protokolu Stremio. Predvajalne povezave (stream) poiscemo sele ob kliku."""
     koren = _stremio_koren(base)

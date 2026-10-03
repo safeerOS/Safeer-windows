@@ -303,7 +303,7 @@ def safeer_os_tece(vodilo=None) -> bool:
         return False
 
 
-def _klic_safeer_os(metoda: str) -> Optional[dict]:
+def _klic_safeer_os(metoda: str, *argumenti: str, cas_ms: int = 3000) -> Optional[dict]:
     """Metoda vmesnika Predvajanje v tekocem Safeer OS; None, ce ne tece ali ne odgovori."""
     import json
     try:
@@ -311,8 +311,9 @@ def _klic_safeer_os(metoda: str) -> Optional[dict]:
         vodilo = _vodilo()
         if not safeer_os_tece(vodilo):
             return None
-        r = vodilo.call_sync(APP_ID, POT, VMESNIK, metoda, None, GLib.VariantType("(s)"),
-                             Gio.DBusCallFlags.NONE, 3000, None)
+        parametri = GLib.Variant("(" + "s" * len(argumenti) + ")", tuple(str(a) for a in argumenti)) if argumenti else None
+        r = vodilo.call_sync(APP_ID, POT, VMESNIK, metoda, parametri, GLib.VariantType("(s)"),
+                             Gio.DBusCallFlags.NONE, cas_ms, None)
         izid = json.loads(r.unpack()[0])
         return izid if isinstance(izid, dict) and izid.get("ok") else None
     except Exception:  # noqa: BLE001
@@ -326,6 +327,12 @@ def stanje_safeer_os() -> Optional[dict]:
 def premor_safeer_os() -> bool:
     izid = _klic_safeer_os("Premor")
     return bool(izid and izid.get("stopped"))
+
+
+def odstrani_prenos_safeer_os(hash_: str) -> bool:
+    """Prenos zaradi gledanja odstrani tekoci Safeer OS (motor torrentov je njegov): polica »Na tvojih napravah«."""
+    izid = _klic_safeer_os("OdstraniPrenos", str(hash_ or ""), cas_ms=30000)
+    return bool(izid and izid.get("ok"))
 
 
 def zadnji_video() -> Optional[dict]:

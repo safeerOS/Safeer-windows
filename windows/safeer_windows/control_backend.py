@@ -1552,6 +1552,11 @@ class SafeerControlBackend:
         d = getattr(self, "_datoteke_tokov", None)
         if d is None:
             d = self._datoteke_tokov = link_datoteke.Datoteke(poti=[], tls_mapa=self.navidezni_zaslon.tls_mapa, ves_disk=False)
+            # Knjiznica kroga: film, ki ga je Safeer OS na tem racunalniku zaradi gledanja prenesel sam, vidijo in
+            # predvajajo tudi naprave (magnet.list); zasebnih naslovov med njimi ni. Motor je v istem procesu.
+            from core import knjiznica_kroga
+            d.gledanje = knjiznica_kroga.lokalni
+            d.odstrani_gledanje = knjiznica_kroga.odstrani_lokalnega
         return d
 
     def _tok_torrenta(self, akcija: str, params: dict, posiljatelj: str) -> Dict[str, Any]:

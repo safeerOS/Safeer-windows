@@ -50,6 +50,8 @@ class Vir:
     id_datoteke: str
     kljuc: str = ""
     mime: str = ""
+    #: Tok torrenta (`magnet.stream`): natancna pot na strezniku naprave (/m/... ali /magnet/...) namesto /d/<id>.
+    pot: str = ""
 
 
 def vir_iz_streznika(streznik: dict, id_datoteke: str, kljuc: str = "", mime: str = "") -> Optional[Vir]:
@@ -73,6 +75,20 @@ def vir_iz_streznika(streznik: dict, id_datoteke: str, kljuc: str = "", mime: st
     if not re.fullmatch(r"[\w.+-]+/[\w.+-]+", mime):
         mime = ""
     return Vir(osnova, odtis, zeton, str(id_datoteke), str(kljuc or ""), mime)
+
+
+#: Poti tokov torrenta na strezniku datotek: racunalnik `/m/<skrivnost>/<ime>`, Android `/magnet/<skrivnost>`.
+_POT_TOKA = re.compile(r"/(m|magnet)/[A-Za-z0-9_\-]{8,200}(/[^/?#\\]{1,300})?")
+
+
+def vir_toka(streznik: dict, pot: str, mime: str = "") -> Optional[Vir]:
+    """Vir za tok torrenta, ki ga pretaka druga naprava (odgovor `magnet.stream`: `server` + `path`). Ista pravila kot
+    pri datotekah (HTTPS s pripetim odtisom, zeton, naslov v domacem omrezju); pot mora biti pot toka, nic drugega."""
+    pot = str(pot or "")
+    if not _POT_TOKA.fullmatch(pot) or pot.rsplit("/", 1)[-1] in (".", ".."):
+        return None
+    vir = vir_iz_streznika(streznik, pot, "", mime)
+    return None if vir is None else Vir(vir.base_url, vir.odtis, vir.zeton, pot, "", vir.mime, pot)
 
 
 @dataclass
@@ -209,7 +225,9 @@ class LokalniPretok:
             if obseg:
                 glave["Range"] = obseg
             try:
-                povezava.request(metoda, p.predpona + urllib.parse.quote(vir.id_datoteke, safe=""), headers=glave)
+                if vir.pot and p.rele:
+                    raise ConnectionError("tok torrenta samo v domacem omrezju")
+                povezava.request(metoda, vir.pot or (p.predpona + urllib.parse.quote(vir.id_datoteke, safe="")), headers=glave)
                 odgovor = povezava.getresponse()
                 # Pot dela: dokler tok tece, je ne preverjamo znova (brez premora in brez dodatnih kanalov releja).
                 p.velja_do = time.time() + POT_VELJA_S
