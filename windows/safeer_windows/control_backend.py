@@ -28,11 +28,14 @@ CONFIG_DIR = os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~/.co
 CONFIG_FILE = os.path.join(CONFIG_DIR, "link.json")
 #: Magnet povezava z druge naprave v krogu: odpre jo Safeer OS (Medijski center), kot na Linuxu.
 DEJANJA_MAGNET = ["magnet.open"]
+#: Torrent prenasa in pretaka ta racunalnik, naprava (televizor, telefon) samo predvaja tok in nicesar ne
+#: shranjuje - isto kot Safeer Control na Linuxu (core/link_datoteke.py: tok_torrenta).
+DEJANJA_TOK_TORRENTA = ["magnet.stream", "magnet.list", "magnet.remove"]
 #: Sprotno pretvarjanje za napravo, ki videa ne zna predvajati (core/link_sprotno.py, isti protokol kot Linux/Android).
 DEJANJA_PRETOK = ["video.stream", "video.stream_stop", "video.stream_status"]
 #: Zakon solidarnosti: naprava z dolocenimi pravicami (tudi samo zaslon) sme prositi za moc racunalnika - s tem ne
 #: dobi njegovih datotek ali zaslona, le pretvorjen svoj video in podatek, koliko moci ima racunalnik.
-DEJANJA_SOLIDARNOST = ["host.info"] + DEJANJA_PRETOK
+DEJANJA_SOLIDARNOST = ["host.info"] + DEJANJA_PRETOK + DEJANJA_TOK_TORRENTA
 #: Daljinec (Link) upravlja Medijski center v istem procesu (os_app nastavi ob_mediju). Tipke daljinca
 #: play_pause/play/pause/stop/next/previous gredo najprej v predvajalnik; "media" je izrecni ukaz s parametri.
 DEJANJA_MEDIJ = ["media"]
@@ -1114,7 +1117,7 @@ class SafeerControlBackend:
                 odtis=odtis or None,
                 dodatne_zmoznosti=["files", "remote", "desktop", "screen", "apps", "chat", "lists"]
                 # Magnet povezave z drugih naprav odpre Safeer OS na tem racunalniku.
-                + (["magnet"] if self.magnet_na_voljo() else []),
+                + (["magnet"] if self.magnet_na_voljo() or self.tok_torrenta_na_voljo() else []),
                 katalog=self.navidezni_zaslon.katalog_aplikacij,
                 v_krog=bool(self.nastavitve.get("zaupana", True)),
             )
@@ -1122,6 +1125,13 @@ class SafeerControlBackend:
             p.ob_stanju = self._na_stanje_povezave
             p.povezi()
             self.povezava = p
+            if self.tok_torrenta_na_voljo():
+                # Prenosi za naprave, ki jih 48 ur nihce ni predvajal, se odstranijo sami (kot na Linuxu).
+                try:
+                    from core import link_datoteke
+                    link_datoteke.zazeni_ciscenje()
+                except Exception:  # noqa: BLE001
+                    pass
             return True
         except Exception as e:
             print(f"[ControlBackend] Povezava s Hubom ni uspela: {e}")
@@ -1299,6 +1309,8 @@ class SafeerControlBackend:
                 stanje_naprave = dict(self.navidezni_zaslon.stanje_naprave())
                 if self.magnet_na_voljo():
                     stanje_naprave["actions"] = list(stanje_naprave.get("actions") or []) + DEJANJA_MAGNET
+                if self.tok_torrenta_na_voljo():
+                    stanje_naprave["actions"] = list(stanje_naprave.get("actions") or []) + DEJANJA_TOK_TORRENTA
                 if self._sprotno().ffmpeg():
                     stanje_naprave["actions"] = list(stanje_naprave.get("actions") or []) + DEJANJA_PRETOK
                 medij = self._medij("status", {})
@@ -1316,6 +1328,17 @@ class SafeerControlBackend:
 
             elif akcija in DEJANJA_MAGNET:
                 izid = self.odpri_magnet(str(params.get("uri") or ""))
+
+            elif akcija in DEJANJA_TOK_TORRENTA:
+                # Branje metapodatkov torrenta traja tudi minuto: ne v niti povezave, sicer bi drugi ukazi cakali.
+                def delo(p: dict = dict(params)) -> None:
+                    try:
+                        izid_toka = self._tok_torrenta(akcija, p, posiljatelj)
+                    except Exception as e:  # noqa: BLE001
+                        izid_toka = {"ok": False, "message": f"Napaka pri izvedbi ukaza: {e}", "code": "napaka_izvedbe"}
+                    self._odgovori_na_ukaz(posiljatelj, id_ukaza, akcija, izid_toka)
+                threading.Thread(target=delo, name="safeer-magnet-tok", daemon=True).start()
+                return
 
             elif akcija in DEJANJA_MEDIJ:
                 izid = self._medij(str(params.get("cmd") or params.get("key") or ""), dict(params)) or {
@@ -1476,9 +1499,13 @@ class SafeerControlBackend:
         except Exception as e:
             izid = {"ok": False, "message": f"Napaka pri izvedbi ukaza: {e}", "code": "napaka_izvedbe"}
 
-        # Pošlji odgovor nazaj pošiljatelju
-        if posiljatelj and id_ukaza and self.povezava:
-            self.povezava.poslji({
+        self._odgovori_na_ukaz(posiljatelj, id_ukaza, akcija, izid)
+
+    def _odgovori_na_ukaz(self, posiljatelj: str, id_ukaza: str, akcija: str, izid: Dict[str, Any]) -> None:
+        """Odgovor na ukaz daljinca nazaj pošiljatelju (tudi iz niti, ki dela dlje)."""
+        povezava = self.povezava
+        if posiljatelj and id_ukaza and povezava:
+            povezava.poslji({
                 "id": str(uuid.uuid4()),
                 "type": "control.result",
                 "target": posiljatelj,
@@ -1511,6 +1538,65 @@ class SafeerControlBackend:
         return izid if isinstance(izid, dict) else None
 
     # ------------------------------------------------------------------ Magnet povezave
+    def tok_torrenta_na_voljo(self) -> bool:
+        """Ali ta racunalnik zna torrent prenasati in pretakati napravam (rqbit obstaja za to platformo)."""
+        try:
+            from core import os_torrent
+            return bool(os_torrent.platforma())
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _datoteke_torrenta(self):
+        """Streznik za tokove torrenta (/m/): brez deljenih map, zeton naprave ni vezan na pravico do datotek."""
+        from core import link_datoteke
+        d = getattr(self, "_datoteke_tokov", None)
+        if d is None:
+            d = self._datoteke_tokov = link_datoteke.Datoteke(poti=[], tls_mapa=self.navidezni_zaslon.tls_mapa, ves_disk=False)
+        return d
+
+    def _tok_torrenta(self, akcija: str, params: dict, posiljatelj: str) -> Dict[str, Any]:
+        """magnet.stream / magnet.list / magnet.remove: racunalnik prenasa torrent, naprava dobi samo tok.
+
+        Isto vedenje kot Linux Control (core/link_daljinec.py): film, ki je na disku ze v celoti, gre takoj z
+        diska; prenosi, ki jih 48 ur nihce ni predvajal, se odstranijo sami; ob pomanjkanju prostora, pomnilnika
+        ali baterije racunalnik pove razlog in naprava vprasa naslednjega v Linku."""
+        from core import os_torrent
+        d = self._datoteke_torrenta()
+        if akcija == "magnet.list":
+            try:
+                podatki = d.prenosi_za_naprave()
+                return {"ok": True, "message": f"{len(podatki['items'])} prenosov", "data": podatki}
+            except Exception:  # noqa: BLE001
+                return {"ok": True, "message": "Ni prenosov", "data": {"items": []}}
+        if akcija == "magnet.remove":
+            tid = params.get("id")
+            if not isinstance(tid, int) or isinstance(tid, bool):
+                return {"ok": False, "message": "Manjka prenos", "code": "ni_prenosa"}
+            try:
+                ok = d.odstrani_prenos(tid)
+            except Exception:  # noqa: BLE001
+                ok = False
+            return ({"ok": True, "message": "Odstranjeno z računalnika"} if ok
+                    else {"ok": False, "message": "Tega prenosa ni mogoče odstraniti", "code": "ni_prenosa"})
+        uri = str(params.get("uri") or "")
+        f = params.get("file")
+        f = int(f) if isinstance(f, (int, float)) and not isinstance(f, bool) else None
+        if os_torrent.razcleni_magnet(uri) is None:
+            return {"ok": False, "message": "Torrenta ni mogoče pretakati", "code": "ni_magnet"}
+        # Pretakanje torrenta je delo omrezja in diska: obremenjen procesor ni razlog za zavrnitev (kot na Linuxu).
+        pomoc = (os_backend_win.zmogljivost().get("pomoc") or {})
+        if pomoc.get("lahko") is False and str(pomoc.get("razlog") or "") != "preobremenjen":
+            print(f"[SafeerTorrent] magnet.stream za {posiljatelj}: zavrnjeno ({pomoc.get('razlog')})", flush=True)
+            return {"ok": False, "message": "Računalnik ta trenutek ne more pomagati", "code": str(pomoc.get("razlog") or "zaseden")}
+        try:
+            podatki = d.tok_torrenta(uri, posiljatelj, self.hub_url(), f)
+            print(f"[SafeerTorrent] magnet.stream za {posiljatelj}: pretakam {podatki.get('name')}", flush=True)
+            return {"ok": True, "message": "Računalnik pretaka: " + str(podatki.get("name") or ""), "data": podatki}
+        except Exception as e:  # noqa: BLE001 - napravi povemo kratko kodo
+            koda = str(e) if type(e).__name__ == "NapakaTorrenta" else "napaka"
+            print(f"[SafeerTorrent] magnet.stream za {posiljatelj}: napaka {koda} ({e})", flush=True)
+            return {"ok": False, "message": "Torrenta ni mogoče pretakati", "code": koda}
+
     def magnet_na_voljo(self) -> bool:
         """Ali ta racunalnik zna odpreti magnet povezavo z druge naprave (Safeer OS tece ali je namescen)."""
         if self.ob_magnetu is not None:
