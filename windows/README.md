@@ -39,6 +39,16 @@ python windows/build_windows.py package   # potrebuje Inno Setup 6
 
 Zagon iz izvorne kode: `set PYTHONPATH=windows` in `python -m safeer_windows`.
 
+## Most med vmesnikom in aplikacijo
+
+Vmesnik Safeer OS (`assets/os`) kliče aplikacijo z `window.SafeerOS.klic(metoda, argumenti)`; skripta mostu klic izpiše v konzolo, `SafeerOsPage.javaScriptConsoleMessage` ga izvede in odgovor vrne z `window.__safeerOsOdgovor`.
+
+- **Skripta mostu je registrirana na strani (`page.scripts()`), ne na profilu.** Po koncu procesa strani (straža pomnilnika, sesutje) QtWebEngine skript profila v nov proces ne prenese – stran se naloži brez mostu in noben gumb ne dela (izmerjeno s PySide6 6.11.2 na Windows in Linuxu). Skripte strani se prenesejo. Enako velja za `control_window.py`.
+- **Po vsakem nalaganju** `SafeerOsWindow._preveri_most` preveri, ali most obstaja, in ga sicer vstavi ročno; `os.js` nanj počaka (`koMost`).
+- **Žeton.** Qt javi izpise konzole vseh okvirjev, tudi tuje strani v vgradnem predvajalniku. Vsak klic zato nosi žeton, ki živi v zaprtju skripte mostu v glavnem okvirju; klic brez njega se ne izvede.
+- **Meni polja in odložišče.** Privzeti meni QtWebEngine je v lupini izklopljen; `os.js` pokaže svoj meni (Izreži, Kopiraj, Prilepi, Izberi vse). Odložišče gre skozi most (`kopiraj`, `odlozisceBeri`): Qt, na Windows ob neuspehu Win32; izid se zapiše v dnevnik brez vsebine.
+- Preizkus: `windows/tests/test_most_lupine.py` (tudi živi preizkus v QtWebEngine, `windows/tests/_most_zivo.py`).
+
 ## Omejitve
 
 - Brez podpisa kode Windows SmartScreen ob prvem zagonu opozori na neznanega izdajatelja.

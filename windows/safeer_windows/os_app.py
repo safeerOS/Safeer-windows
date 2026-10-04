@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import hmac
 import json
 import mimetypes
 import os
 import platform
 import re
+import secrets
 import socket
 import socketserver
 import sys
@@ -146,9 +148,10 @@ class ShrambaWrapper:
 
 BRIDGE_PREFIX = "__safeer_os_bridge__:"
 
-MOST_JS = r"""
+_MOST_JS_PREDLOGA = r"""
 (function () {
-  var cakajo = {}, stevec = 0;
+  if (window.SafeerOS && window.SafeerOS.klic) return;
+  var cakajo = {}, stevec = 0, zeton = "__ZETON__";
   window.__safeerOsOdgovor = function (id, ok, podatki) {
     var c = cakajo[id]; if (!c) return; delete cakajo[id];
     if (ok) c.res(podatki); else c.rej(podatki);
@@ -158,13 +161,136 @@ MOST_JS = r"""
       return new Promise(function (res, rej) {
         var id = ++stevec; cakajo[id] = { res: res, rej: rej };
         try {
-          console.log("__safeer_os_bridge__:" + JSON.stringify({ id: id, m: metoda, a: argumenti || [] }));
+          console.log("__safeer_os_bridge__:" + JSON.stringify({ id: id, m: metoda, a: argumenti || [], z: zeton }));
         } catch (e) { delete cakajo[id]; rej(String(e)); }
       });
     }
   };
 })();
 """
+
+
+def most_js(zeton: str) -> str:
+    """Skripta mostu z zetonom tega okna.
+
+    Most tece po izpisih v konzolo, te pa Qt javi za VSE okvirje strani - tudi za tujo stran v vgradnem
+    predvajalniku. Zeton zivi v zaprtju skripte v glavnem okvirju: tuja stran ga ne vidi, zato klica mostu
+    (datoteke, napajanje, programi) z izpisom v konzolo ne more ponarediti.
+    """
+    if not re.fullmatch(r"[A-Za-z0-9_-]{16,128}", zeton or ""):
+        raise ValueError("zeton mostu")
+    return _MOST_JS_PREDLOGA.replace("__ZETON__", zeton)
+
+
+#: Najvec znakov, ki jih most prebere iz odlozisca ali zapise vanj (zapisek je lahko dolg; povezava kratka).
+NAJVEC_ODLOZISCE = 200_000
+
+
+def _odlozisce_win32_beri() -> Optional[str]:
+    """Besedilo iz odlozisca neposredno prek Win32 (rezerva, kadar odlozisce Qt ne vrne nic). None = ni uspelo."""
+    if sys.platform != "win32":
+        return None
+    import ctypes
+    from ctypes import wintypes
+    u, k = ctypes.windll.user32, ctypes.windll.kernel32
+    u.GetClipboardData.restype = wintypes.HANDLE
+    k.GlobalLock.restype = ctypes.c_void_p
+    k.GlobalLock.argtypes = [wintypes.HANDLE]
+    k.GlobalUnlock.argtypes = [wintypes.HANDLE]
+    for _ in range(5):
+        if u.OpenClipboard(None):
+            break
+        time.sleep(0.05)
+    else:
+        return None
+    try:
+        h = u.GetClipboardData(13)  # CF_UNICODETEXT
+        if not h:
+            return ""
+        p = k.GlobalLock(h)
+        if not p:
+            return ""
+        try:
+            return ctypes.wstring_at(p)
+        finally:
+            k.GlobalUnlock(h)
+    finally:
+        u.CloseClipboard()
+
+
+def _odlozisce_win32_pisi(besedilo: str) -> bool:
+    """Besedilo v odlozisce neposredno prek Win32 (rezerva, kadar ga odlozisce Qt ne sprejme)."""
+    if sys.platform != "win32":
+        return False
+    import ctypes
+    from ctypes import wintypes
+    u, k = ctypes.windll.user32, ctypes.windll.kernel32
+    u.SetClipboardData.argtypes = [wintypes.UINT, wintypes.HANDLE]
+    u.SetClipboardData.restype = wintypes.HANDLE
+    k.GlobalAlloc.restype = wintypes.HANDLE
+    k.GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
+    k.GlobalLock.restype = ctypes.c_void_p
+    k.GlobalLock.argtypes = [wintypes.HANDLE]
+    k.GlobalUnlock.argtypes = [wintypes.HANDLE]
+    k.GlobalFree.argtypes = [wintypes.HANDLE]
+    for _ in range(5):
+        if u.OpenClipboard(None):
+            break
+        time.sleep(0.05)
+    else:
+        return False
+    try:
+        u.EmptyClipboard()
+        podatki = (besedilo + "\0").encode("utf-16-le")
+        h = k.GlobalAlloc(0x0002, len(podatki))  # GMEM_MOVEABLE
+        if not h:
+            return False
+        p = k.GlobalLock(h)
+        if not p:
+            k.GlobalFree(h)
+            return False
+        ctypes.memmove(p, podatki, len(podatki))
+        k.GlobalUnlock(h)
+        if not u.SetClipboardData(13, h):
+            k.GlobalFree(h)
+            return False
+        return True
+    finally:
+        u.CloseClipboard()
+
+
+_QT_SPOROCILA: dict = {}
+
+
+def qt_sporocila_v_dnevnik() -> None:
+    """Opozorila Qt zapise v dnevnik (safeer_os.log).
+
+    Brez konzole jih Qt na Windows poslje samo razhroscevalniku, zato jih v dnevniku ni bilo - med njimi napak
+    odlozisca (OleSetClipboard) in izrisa. Vsako razlicno sporocilo zapisemo najvec trikrat, skupaj najvec 300.
+    """
+    try:
+        from PySide6.QtCore import QtMsgType, qInstallMessageHandler
+    except Exception:  # noqa: BLE001
+        return
+
+    def obdelaj(vrsta, _kontekst, sporocilo) -> None:
+        try:
+            # Izpise strani (kategorija "js") ze zapise javaScriptConsoleMessage.
+            if vrsta == QtMsgType.QtDebugMsg or getattr(_kontekst, "category", "") == "js":
+                return
+            kljuc = str(sporocilo)[:200]
+            n = _QT_SPOROCILA.get(kljuc, 0) + 1
+            if n > 3 and kljuc in _QT_SPOROCILA:
+                _QT_SPOROCILA[kljuc] = n
+                return
+            if kljuc not in _QT_SPOROCILA and len(_QT_SPOROCILA) >= 300:
+                return
+            _QT_SPOROCILA[kljuc] = n
+            print(f"[Qt] {str(sporocilo)[:600]}", flush=True)
+        except Exception:  # noqa: BLE001
+            pass
+
+    qInstallMessageHandler(obdelaj)
 
 
 # Stalna vrata lokalnega streznika vmesnika. Izvor strani (http://127.0.0.1:<vrata>) mora biti ob vsakem
@@ -349,6 +475,11 @@ class SafeerOsPage(QWebEnginePage):
         if message.startswith(BRIDGE_PREFIX):
             try:
                 payload = json.loads(message[len(BRIDGE_PREFIX):])
+                # Klic velja samo z zetonom skripte mostu (glavni okvir). Brez njega je izpis prisel od drugod -
+                # npr. iz tuje strani v okvirju - in ga ne izvedemo.
+                if not isinstance(payload, dict) or not self.window_ref.zeton_mostu_velja(payload.pop("z", None)):
+                    self.window_ref.zavrnjen_klic_mostu()
+                    return
                 if str(payload.get("m") or "").startswith("media"):
                     print(f"[SafeerOS] Media zahteva #{payload.get('id')}: {payload.get('m')}", flush=True)
                 self.window_ref.obdelaj_klic(payload)
@@ -445,19 +576,29 @@ class SafeerOsWindow(QMainWindow):
         settings.setAttribute(attr.JavascriptCanOpenWindows, False)
         settings.setAttribute(attr.PluginsEnabled, False)
 
-        # Registriraj skripto mostu
+        # Skripta mostu. Na STRANI, ne na profilu: po koncu procesa strani (straza pomnilnika, sesutje)
+        # QtWebEngine skript profila v nov proces ne prenese (izmerjeno 4. 10. 2026, PySide6 6.11.2, Windows in
+        # Linux) - stran se nalozi brez window.SafeerOS in noben gumb ne dela vec. Skripte strani se prenesejo.
+        self._zeton_mostu = secrets.token_urlsafe(24)
+        self._most_js = most_js(self._zeton_mostu)
+        self._zavrnjeni_klici_mostu = 0
         script = QWebEngineScript()
         script.setName("SafeerOsBridge")
-        script.setSourceCode(MOST_JS)
+        script.setSourceCode(self._most_js)
         script.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentCreation)
         script.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
-        self.profile.scripts().insert(script)
+        script.setRunsOnSubFrames(False)
 
         # Pogled
         _korak("profile")
         self.view = QWebEngineView(self)
+        # Privzeti meni QtWebEngine (Back, Reload, View page source ... v anglescini) v lupini ni na mestu:
+        # »Reload« nalozi vmesnik znova, »Back« ga zamenja. Polja za vnos imajo svoj meni (os.js, meni polja).
+        self.view.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
         self.page_obj = SafeerOsPage(self.profile, self)
+        self.page_obj.scripts().insert(script)
         self.page_obj.renderProcessTerminated.connect(self._izris_koncan)
+        self.page_obj.loadFinished.connect(self._preveri_most)
         self.view.setPage(self.page_obj)
         # Straza pomnilnika izrisa: ce proces strani zraste cez mejo (puscanje v QtWebEngine), stran
         # tiho nalozimo znova v istem razdelku, preden Windows zacne menjati pomnilnik na disk.
@@ -1476,11 +1617,59 @@ class SafeerOsWindow(QMainWindow):
         except Exception:  # noqa: BLE001
             pass
 
+    def _na_glavni_niti(self, fn, cakaj: float = 3.0) -> Any:
+        """Izvede fn v glavni niti (Qt) in vrne izid; klicati iz niti mostu. None, ce se v roku ne izvede."""
+        if threading.current_thread() is threading.main_thread():
+            return fn()          # ze smo v glavni niti: cakanje nase bi jo ustavilo
+        izid: dict = {}
+        konec = threading.Event()
+
+        def delo() -> None:
+            try:
+                izid["v"] = fn()
+            except Exception as e:  # noqa: BLE001
+                izid["napaka"] = e
+            finally:
+                konec.set()
+        self.dispatcher.dispatch(delo)
+        konec.wait(cakaj)
+        if "napaka" in izid:
+            raise izid["napaka"]
+        return izid.get("v")
+
     def _kopiraj(self, besedilo: str) -> bool:
-        """Besedilo v odlozisce (npr. magnet povezava za deljenje z drugimi)."""
-        besedilo = str(besedilo or "")[:8192]
-        self.dispatcher.dispatch(lambda: QApplication.clipboard().setText(besedilo))
-        return True
+        """Besedilo v odlozisce (magnet povezava, »Kopiraj« v meniju polja). Preverimo, da je res tam."""
+        besedilo = str(besedilo or "")[:NAJVEC_ODLOZISCE]
+
+        def qt() -> bool:
+            odlozisce = QApplication.clipboard()
+            odlozisce.setText(besedilo)
+            return odlozisce.text() == besedilo
+        try:
+            uspelo = bool(self._na_glavni_niti(qt))
+        except Exception as e:  # noqa: BLE001
+            print(f"[SafeerOS] Odlozisce: Qt je zavrnil zapis: {e}", flush=True)
+            uspelo = False
+        if not uspelo and _odlozisce_win32_pisi(besedilo):
+            print(f"[SafeerOS] Odlozisce: Qt besedila ni zapisal, Win32 ga je ({len(besedilo)} znakov)", flush=True)
+            uspelo = True
+        if not uspelo:
+            print(f"[SafeerOS] Odlozisce: zapis ni uspel ({len(besedilo)} znakov)", flush=True)
+        return uspelo
+
+    def _odlozisce_beri(self) -> dict:
+        """Besedilo iz odlozisca za »Prilepi« v meniju polja. Vsebine v dnevnik ne pisemo, samo dolzino."""
+        try:
+            besedilo = self._na_glavni_niti(lambda: QApplication.clipboard().text()) or ""
+        except Exception as e:  # noqa: BLE001
+            print(f"[SafeerOS] Odlozisce: Qt je zavrnil branje: {e}", flush=True)
+            besedilo = ""
+        if not besedilo:
+            drugo = _odlozisce_win32_beri()
+            if drugo:
+                print(f"[SafeerOS] Odlozisce: Qt besedila ni vrnil, Win32 ga je ({len(drugo)} znakov)", flush=True)
+                besedilo = drugo
+        return {"besedilo": besedilo[:NAJVEC_ODLOZISCE]}
 
     def _magnet_prenesi_program(self) -> dict:
         """Enkratni prenos odprtokodnega rqbita (preverjen SHA-256); napredek gre na stran."""
@@ -1684,7 +1873,29 @@ class SafeerOsWindow(QMainWindow):
             # Konec posiljanja datoteke (ali napaka): uporabniku povemo izid.
             self.poslji_dogodek("posiljanjeKoncano", {k: podatki.get(k) for k in ("ime", "cilj", "uspeh", "napaka")})
 
+    def zeton_mostu_velja(self, zeton: Any) -> bool:
+        return isinstance(zeton, str) and hmac.compare_digest(zeton.encode("utf-8"), self._zeton_mostu.encode("utf-8"))
+
+    def zavrnjen_klic_mostu(self) -> None:
+        self._zavrnjeni_klici_mostu += 1
+        if self._zavrnjeni_klici_mostu in (1, 10, 100, 1000):
+            print(f"[SafeerOS] Most: zavrnjen klic brez veljavnega zetona (skupaj {self._zavrnjeni_klici_mostu})", flush=True)
+
+    def _preveri_most(self, ok: bool) -> None:
+        """Po vsakem nalaganju vmesnika: ali ima stran most? Ce ga nima, ga vstavimo rocno - stran nanj pocaka."""
+        if not ok:
+            return
+
+        def _izid(ima) -> None:
+            if ima:
+                return
+            print("[SafeerOS] Most: skripte ob nalaganju ni bilo - vstavljam jo rocno", flush=True)
+            self.page_obj.runJavaScript(self._most_js)
+        self.page_obj.runJavaScript("!!(window.SafeerOS && window.SafeerOS.klic)", _izid)
+
     MEJA_IZRISA_MB = 1500
+    #: Do te meje strazo odlozimo, dokler je uporabnik sredi dela (predvajanje, vnos, odprto vprasanje).
+    MEJA_IZRISA_TRDA_MB = 2600
 
     def _izris_koncan(self, status, koda) -> None:
         print(f"[SafeerOS] RenderProcessTerminated: status={status}, code={koda}", flush=True)
@@ -1704,14 +1915,31 @@ class SafeerOsWindow(QMainWindow):
         # Ponovno nalaganje v istem procesu pomnilnika ne vrne (izmerjeno 29. 9.: 1,9 GB ostane in
         # stran se je nalagala vsako minuto). Zato proces strani koncamo; Qt javi konec in
         # _izris_koncan stran nalozi v NOVEM procesu, v istem razdelku.
-        self._zadnja_obnova = time.monotonic()
-        print(f"[SafeerOS] Proces strani porablja {mb} MB (meja {self.MEJA_IZRISA_MB}) - nov proces strani", flush=True)
+        odlocen = []
 
-        def _koncaj(razdelek):
-            self._razdelek_po_obnovi = str(razdelek or "")
+        def _odloci(stanje) -> None:
+            if odlocen:
+                return
+            odlocen.append(True)
+            zaseden, _, razdelek = str(stanje or "").partition("|")
+            if zaseden and mb < self.MEJA_IZRISA_TRDA_MB:
+                # Uporabnik je sredi dela: novo nalaganje bi mu prekinilo predvajanje, izbrisalo vnos ali zaprlo
+                # vprasanje. Poskusimo ob naslednji preverbi (cez minuto).
+                if not getattr(self, "_izris_odlozen", False):
+                    print(f"[SafeerOS] Proces strani porablja {mb} MB - novo nalaganje odlozeno ({zaseden})", flush=True)
+                self._izris_odlozen = True
+                return
+            self._izris_odlozen = False
+            self._zadnja_obnova = time.monotonic()
+            print(f"[SafeerOS] Proces strani porablja {mb} MB (meja {self.MEJA_IZRISA_MB}) - nov proces strani", flush=True)
+            self._razdelek_po_obnovi = razdelek
             if not koncaj_proces(pid):
                 self._nalozi_znova_v_razdelku(self._razdelek_po_obnovi)
-        self.page_obj.runJavaScript("window.safeerOsRazdelek ? window.safeerOsRazdelek() : ''", _koncaj)
+        self.page_obj.runJavaScript(
+            "(window.safeerOsZaseden ? window.safeerOsZaseden() : '') + '|' + (window.safeerOsRazdelek ? window.safeerOsRazdelek() : '')",
+            _odloci)
+        # Stran, ki ne odgovarja vec, ne more povedati, ali je uporabnik sredi dela: po 5 s odlocimo brez nje.
+        QTimer.singleShot(5000, lambda: _odloci("|"))
 
     def _nalozi_znova_v_razdelku(self, razdelek: str) -> None:
         razdelek = re.sub(r"[^a-zA-Z_-]", "", razdelek)[:40]
@@ -1853,6 +2081,8 @@ class SafeerOsWindow(QMainWindow):
             return self._vzemi_cakajoci_magnet()
         if metoda == "kopiraj":
             return self._kopiraj(str(a[0]) if a else "")
+        if metoda == "odlozisceBeri":
+            return self._odlozisce_beri()
         if metoda == "dvdPogoni":
             return os_dvd.pogoni()
         if metoda == "dvdPredvajaj":
@@ -2665,6 +2895,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         zacetni = args.razdelek
 
     browser.register_schemes()
+    qt_sporocila_v_dnevnik()
     app = QApplication.instance() or QApplication(sys.argv)
     zaklep = en_primerek.zakleni()
     if zaklep is None:

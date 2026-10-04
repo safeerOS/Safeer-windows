@@ -74,11 +74,40 @@
   }
 
   // ------------------------------------------------------------------ most
+  // Most (window.SafeerOS) vstavi Safeer OS, se preden se stran zacne nalagati. Ce ga ob zagonu ni - po koncu
+  // procesa strani ga QtWebEngine ni vedno vstavil -, ga Safeer OS doda takoj po nalaganju; zato ga iscemo sproti
+  // (imaMost) in z nalaganjem podatkov nanj pocakamo (koMost).
   var most = window.SafeerOS || null;
+  var cakajoMost = [];
+  function imaMost() {
+    if (!most) most = window.SafeerOS || null;
+    return !!most;
+  }
+  function koMost(delo) {
+    if (imaMost()) { delo(); return; }
+    cakajoMost.push(delo);
+    if (cakajoMost.length > 1) return;
+    var poskusi = 0;
+    var ura = setInterval(function () {
+      if (!imaMost() && ++poskusi < 100) return;        // najvec 5 s
+      clearInterval(ura);
+      var vrsta = cakajoMost; cakajoMost = [];
+      if (imaMost()) vrsta.forEach(function (d) { try { d(); } catch (e) { console.error(e); } });
+    }, 50);
+  }
   function klic(metoda, argumenti) {
-    if (!most) return Promise.reject("brez mosta");
+    if (!imaMost()) return Promise.reject("brez mosta");
     return most.klic(metoda, argumenti || []);
   }
+  // Ce mostu vseeno ni (ne bi se smelo zgoditi), naj uporabnik ne gleda gumbov, ki ne naredijo nic: povemo, kaj storiti.
+  var brezMostuObvesceno = 0;
+  window.addEventListener("unhandledrejection", function (e) {
+    if (!e || e.reason !== "brez mosta" || imaMost()) return;
+    if (window.performance && performance.now() < 8000) return;      // ob zagonu most se lahko prihaja (koMost)
+    if (Date.now() - brezMostuObvesceno < 60000) return;
+    brezMostuObvesceno = Date.now();
+    obvesti(t("brezMostu"));
+  });
 
   // ------------------------------------------------------------------ besedila
   var jezik = "sl";
@@ -428,6 +457,19 @@
     });
   }
   window.safeerOsRazdelek = function () { return S.razdelek || ""; };
+  // Straza pomnilnika (Safeer OS) vmesnik obcasno nalozi znova. Sredi dela tega ne sme: prekinilo bi predvajanje,
+  // izbrisalo napisano besedilo ali zaprlo vprasanje, na katero se nisi odgovoril. Vrne razlog ali prazen niz.
+  window.safeerOsZaseden = function () {
+    try {
+      var p = $("mediaPredvajalnik");
+      if (p && !p.hidden) return "predvajanje";
+      if ([].some.call(document.querySelectorAll("video, audio"), function (m) { return !m.paused && !m.ended; })) return "predvajanje";
+      if (document.querySelector(".sloj-koda-prijave")) return "vprasanje";
+      var a = document.activeElement;
+      if (a && a.value && (a.tagName === "TEXTAREA" || (a.tagName === "INPUT" && a.type !== "password"))) return "vnos";
+    } catch (e) {}
+    return "";
+  };
   window.safeerOsPojdi = function (kam) {
     kam = String(kam || "");
     if (kam.indexOf("iskanje:") === 0) {
@@ -1406,7 +1448,7 @@
   // ------------------------------------------------------------------ DVD brez zaščite
   // Gumb »Predvajaj disk« se pokaže samo, kadar je v pogonu DVD (core/os_dvd.py; predvaja LibVLC).
   function osveziDvdPogon() {
-    if (!most) return;
+    if (!imaMost()) return;
     klic("dvdPogoni").then(function (pogoni) {
       var disk = (Array.isArray(pogoni) ? pogoni : []).filter(function (p) { return p.vstavljen; })[0];
       $("medijiDisk").hidden = !disk;
@@ -2681,7 +2723,7 @@
       });
     }
     narisiZadetkeSporocil();
-    if (!(S.sporocilaSkupine || []).length && most) {
+    if (!(S.sporocilaSkupine || []).length && imaMost()) {
       var mojSp = iskanjeStevec + 1;
       klic("sporocilaSeznam").then(function (p) {
         if (!p || mojSp !== iskanjeStevec) return;
@@ -3117,7 +3159,7 @@
 
   // ------------------------------------------------------------------ zdruzeni nabiralnik
   function naloziSporocila() {
-    if (!most) { narisiSporocila(); return; }
+    if (!imaMost()) { narisiSporocila(); return; }
     klic("sporocilaSeznam").then(function (p) {
       S.sporocilaSkupine = p.skupine || []; S.sporocilaKanali = p.kanali || []; S.sporocilaOznakeVse = p.oznake || [];
       narisiSporocila(); uskladiOdprtPogovor();
@@ -3767,15 +3809,122 @@
     });
   }
 
+  // ------------------------------------------------------------------ meni polja (desni klik)
+  // Privzeti meni QtWebEngine je v lupini izklopljen (anglesko »Back / Reload / View page source« sem ne sodi).
+  // Polja za vnos in izbrano besedilo dobijo svoj kratek meni v jeziku vmesnika. Odlozisce gre skozi most:
+  // Safeer OS preveri, da je besedilo res zapisano, in o neuspehu pove, namesto da se ne zgodi nic.
+  var meniPolja = null;
+  function zapriMeniPolja() {
+    if (!meniPolja) return;
+    meniPolja.remove();
+    meniPolja = null;
+  }
+  function poljeZaMeni(cilj) {
+    var e = cilj && cilj.closest ? cilj.closest("input, textarea, [contenteditable=''], [contenteditable='true'], [contenteditable='plaintext-only']") : null;
+    if (!e || e.disabled) return null;
+    if (e.tagName === "INPUT" && !/^(text|search|url|email|tel|password|number)$/i.test(e.type || "text")) return null;
+    return e;
+  }
+  function izborPolja(p) {
+    // {od, konec, besedilo}; polja brez izbire po mestih (number, email) in urejevalno besedilo nimajo od/konec.
+    var od = null, konec = null, besedilo = "";
+    if (p && (p.tagName === "INPUT" || p.tagName === "TEXTAREA")) {
+      try { od = p.selectionStart; konec = p.selectionEnd; } catch (e) { od = konec = null; }
+    }
+    if (od != null && konec != null) besedilo = p.value.substring(od, konec);
+    else besedilo = String(window.getSelection ? window.getSelection() : "");
+    return { od: od, konec: konec, besedilo: besedilo };
+  }
+  function vrniIzborPolja(p, izbor) {
+    if (!p) return;
+    p.focus();
+    if (izbor.od != null && izbor.konec != null) { try { p.setSelectionRange(izbor.od, izbor.konec); } catch (e) {} }
+  }
+  function odpriMeniPolja(p, x, y) {
+    zapriMeniPolja();
+    var izbor = izborPolja(p);
+    var geslo = !!p && p.tagName === "INPUT" && p.type === "password";
+    var samoBranje = !p || !!p.readOnly;
+    var imaVsebino = !!p && ((p.tagName === "INPUT" || p.tagName === "TEXTAREA") ? p.value.length > 0 : (p.textContent || "").length > 0);
+    var m = el("div", "meni-polja");
+    m.setAttribute("role", "menu");
+    function vrstica(kljuc, omogoceno, dejanje) {
+      var g = el("button");
+      g.type = "button"; g.textContent = t(kljuc); g.disabled = !omogoceno;
+      g.setAttribute("role", "menuitem");
+      // Pritisk ne sme vzeti fokusa polju: izbira in kazalec ostaneta, kjer sta.
+      g.addEventListener("mousedown", function (e) { e.preventDefault(); });
+      g.addEventListener("click", function () { zapriMeniPolja(); dejanje(); });
+      m.appendChild(g);
+    }
+    function niUspelo() { obvesti(t("meniOdlozisceNapaka")); }
+    if (p) vrstica("meniIzrezi", !!izbor.besedilo && !geslo && !samoBranje, function () {
+      klic("kopiraj", [izbor.besedilo]).then(function (ok) {
+        if (!ok) { niUspelo(); return; }
+        vrniIzborPolja(p, izbor);
+        document.execCommand("delete");
+      }, niUspelo);
+    });
+    vrstica("meniKopiraj", !!izbor.besedilo && !geslo, function () {
+      klic("kopiraj", [izbor.besedilo]).then(function (ok) {
+        vrniIzborPolja(p, izbor);
+        if (!ok) niUspelo();
+      }, niUspelo);
+    });
+    if (p) vrstica("meniPrilepi", !samoBranje, function () {
+      klic("odlozisceBeri").then(function (r) {
+        var besedilo = (r && r.besedilo) || "";
+        vrniIzborPolja(p, izbor);
+        if (!besedilo) { obvesti(t("meniOdloziscePrazno")); return; }
+        // Enovrsticno polje: prelomi vrstic postanejo presledki (kot pri lepljenju s tipkovnico).
+        if (p.tagName === "INPUT") besedilo = besedilo.replace(/\r\n|\r|\n/g, " ");
+        document.execCommand("insertText", false, besedilo);
+      }, niUspelo);
+    });
+    if (p) vrstica("meniIzberiVse", imaVsebino, function () {
+      p.focus();
+      if (p.select) p.select(); else document.execCommand("selectAll");
+    });
+    document.body.appendChild(m);
+    var r = m.getBoundingClientRect();
+    m.style.left = Math.max(4, Math.min(x, window.innerWidth - r.width - 4)) + "px";
+    m.style.top = Math.max(4, Math.min(y, window.innerHeight - r.height - 4)) + "px";
+    meniPolja = m;
+  }
+  function poveziMeniPolja() {
+    document.addEventListener("contextmenu", function (e) {
+      var p = poljeZaMeni(e.target);
+      if (!p && e.target.closest && e.target.closest("#slojIskanje")) {
+        // Odprti zadetki iskanja: polje je pod tancico sloja, klik vanj zato zadene tancico.
+        var polje = $("iskanje"), okvir = polje ? polje.getBoundingClientRect() : null;
+        if (okvir && e.clientX >= okvir.left && e.clientX <= okvir.right && e.clientY >= okvir.top && e.clientY <= okvir.bottom) p = polje;
+      }
+      var izbrano = p ? "" : String(window.getSelection ? window.getSelection() : "").trim();
+      if (!p && !izbrano) { zapriMeniPolja(); return; }
+      e.preventDefault();
+      if (p && document.activeElement !== p) p.focus();
+      odpriMeniPolja(p, e.clientX, e.clientY);
+    });
+    document.addEventListener("mousedown", function (e) { if (meniPolja && !meniPolja.contains(e.target)) zapriMeniPolja(); }, true);
+    document.addEventListener("keydown", function (e) {
+      if (meniPolja && e.key === "Escape") { e.preventDefault(); e.stopPropagation(); zapriMeniPolja(); }
+    }, true);
+    window.addEventListener("blur", zapriMeniPolja);
+    window.addEventListener("resize", zapriMeniPolja);
+    document.addEventListener("scroll", zapriMeniPolja, true);
+  }
+
   function zacni() {
     if (/[?&]namizje=1/.test(location.search)) document.body.classList.add("namizje");
     prevedi();
     poveziDogodke();
+    poveziMeniPolja();
     osveziUro();
     setInterval(osveziUro, 1000);
     narisiDomov();
     narisiPovezavo();
-    if (!most) return;
+    // Podatke nalozimo, ko je most na voljo (obicajno takoj; glej koMost).
+    koMost(function () {
     klic("zacetek").then(function (z) {
       S.zacetek = z;
       prilagodiPlatformo(z.namizje);
@@ -3802,6 +3951,7 @@
       osveziOkna();
       narisiNedavneDomov();
     }, function () {});
+    });
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", zacni); else zacni();
   // ------------------------------------------------------------------ Safeer Media
@@ -4929,7 +5079,9 @@
       obvesti(je ? t("magnetPrivzetoOk") : t("magnetPrivzetoNastavitve"));
     });
   });
-  if (most) klic("cakajociMagnet").then(function (c) { if (c && c.uri) odpriMagnet(c.uri, c.samodejno === true); }).catch(function () {});
+  koMost(function () {
+    klic("cakajociMagnet").then(function (c) { if (c && c.uri) odpriMagnet(c.uri, c.samodejno === true); }).catch(function () {});
+  });
   on("mediaDodajVir", "submit", function (event) {
     event.preventDefault(); var url = $("mediaVirUrl").value.trim(), name = $("mediaVirIme").value.trim();
     if (!url) return;

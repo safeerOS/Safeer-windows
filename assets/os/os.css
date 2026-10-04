@@ -1062,3 +1062,9 @@ body.vrstica-skrita.nacin-splet .rocaj-vrstice { display: block; }
 .media-kartica:hover .media-obdrzi, .media-kartica:focus-visible .media-obdrzi, .media-kartica .media-obdrzi.je { opacity: 1; }
 .media-kartica .media-obdrzi.je, .media-kartica .media-obdrzi:hover { background: var(--zelena, #54d6a5); color: #06110d; }
 .media-knjiznica-vrsta .media-kartica .media-meta .media-obdrzano { color: var(--zelena, #54d6a5); }
+/* Meni polja za vnos (desni klik): Izrezi, Kopiraj, Prilepi, Izberi vse. Privzeti meni QtWebEngine je izklopljen. */
+.meni-polja { position: fixed; z-index: 1000000; min-width: 176px; padding: 6px; border-radius: 12px; border: 1px solid var(--rob);
+  background: var(--ozadje); box-shadow: var(--senca); }
+.meni-polja button { display: block; width: 100%; padding: 9px 12px; border-radius: 8px; font-size: 14px; text-align: left; cursor: default; }
+.meni-polja button:hover:not(:disabled) { background: var(--kartica-poudarek); }
+.meni-polja button:disabled { color: var(--medlo); opacity: .45; }

@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import hmac
 import json
 import os
+import re
+import secrets
 from typing import Any, Optional
 
 from PySide6.QtCore import QObject, Qt, QTimer, QUrl, Signal, Slot
@@ -38,9 +41,10 @@ class GuiDispatcher(QObject):
     def dispatch(self, fn):
         self.signal_run.emit(fn)
 
-MOST_JS = """
+_MOST_JS_PREDLOGA = """
 (function () {
   if (window.SafeerLink) return;
+  var zeton = "__ZETON__";
   window.__safeerLink = window.__safeerLink || {
     stanje: {"znan": false, "seznanjen": false, "control": true},
     naprave: [],
@@ -53,7 +57,7 @@ MOST_JS = """
   };
   function poslji(metoda, argumenti) {
     try {
-      console.log("__safeer_link_bridge__:" + JSON.stringify({ m: metoda, a: argumenti || [] }));
+      console.log("__safeer_link_bridge__:" + JSON.stringify({ m: metoda, a: argumenti || [], z: zeton }));
     } catch (e) {}
   }
   window.SafeerLink = {
@@ -103,6 +107,13 @@ MOST_JS = """
 """
 
 
+def most_js(zeton: str) -> str:
+    """Skripta mostu z zetonom tega okna (zeton je v zaprtju skripte; glej os_app.most_js)."""
+    if not re.fullmatch(r"[A-Za-z0-9_-]{16,128}", zeton or ""):
+        raise ValueError("zeton mostu")
+    return _MOST_JS_PREDLOGA.replace("__ZETON__", zeton)
+
+
 class SafeerControlPage(QWebEnginePage):
     def __init__(self, profile: QWebEngineProfile, window: "SafeerControlWindow"):
         super().__init__(profile, window)
@@ -112,6 +123,10 @@ class SafeerControlPage(QWebEnginePage):
         if message.startswith(BRIDGE_PREFIX):
             try:
                 payload = json.loads(message[len(BRIDGE_PREFIX):])
+                # Klic velja samo z zetonom skripte mostu (glej os_app.most_js).
+                zeton = payload.pop("z", None) if isinstance(payload, dict) else None
+                if not isinstance(zeton, str) or not hmac.compare_digest(zeton.encode("utf-8"), self.window_ref.zeton_mostu.encode("utf-8")):
+                    return
                 self.window_ref.obdelaj_klic(payload)
             except Exception as e:
                 print(f"[SafeerControl] Napaka pri razclenjevanju mostu: {e}")
@@ -153,16 +168,19 @@ class SafeerControlWindow(QWidget):
         settings.setAttribute(attr.LocalContentCanAccessFileUrls, True)
         settings.setAttribute(attr.ScrollAnimatorEnabled, True)
 
-        # Registriraj skripto mostu
+        # Skripta mostu na STRANI, ne na profilu: skript profila QtWebEngine po koncu procesa strani v nov proces
+        # ne prenese (glej os_app.py); stran bi po ponovnem nalaganju ostala brez window.SafeerLink.
+        self.zeton_mostu = secrets.token_urlsafe(24)
         script = QWebEngineScript()
         script.setName("SafeerLinkBridge")
-        script.setSourceCode(MOST_JS)
+        script.setSourceCode(most_js(self.zeton_mostu))
         script.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentCreation)
         script.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
-        self.profile.scripts().insert(script)
+        script.setRunsOnSubFrames(False)
 
         self.view = QWebEngineView(self)
         self.page_obj = SafeerControlPage(self.profile, self)
+        self.page_obj.scripts().insert(script)
         self.page_obj.setBackgroundColor(QColor("#090d15"))
         self.view.setPage(self.page_obj)
 
