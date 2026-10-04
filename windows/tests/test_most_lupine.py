@@ -302,6 +302,129 @@ class StrazaPomnilnika(unittest.TestCase):
             self.assertIn("return " + razlog, js)
 
 
+class VrataVmesnika(unittest.TestCase):
+    """Nova razlicica mora dobiti ista vrata vmesnika kot stara: izvor strani doloca shranjene nastavitve."""
+
+    def test_poslusalca_prepozna_ne_glede_na_jezik_windows(self):
+        izpis = (
+            "  Proto  Local Address          Foreign Address        State           PID\n"
+            "  TCP    0.0.0.0:135            0.0.0.0:0              LISTENING       1048\n"
+            "  TCP    127.0.0.1:47815        0.0.0.0:0              POSLUSANJE      11016\n"
+            "  TCP    127.0.0.1:47815        127.0.0.1:50211        ESTABLISHED     11016\n"
+            "  TCP    127.0.0.1:47816        0.0.0.0:0              ABHOEREN        11172\n")
+        self.assertEqual(os_app._pid_poslusalca(izpis, 47815), 11016)
+        self.assertEqual(os_app._pid_poslusalca(izpis, 47816), 11172)
+        self.assertEqual(os_app._pid_poslusalca(izpis, 47817), 0)
+        self.assertEqual(os_app._pid_poslusalca("", 47815), 0)
+
+    def _isci(self, prosta, cakaj, stara=False):
+        klici = {"koncani": [], "spanje": 0}
+        ura = [0.0]
+
+        def spi(s):
+            klici["spanje"] += 1
+            ura[0] += s
+        os_app.PREVZEM["cakaj_s"] = cakaj
+        with mock.patch.object(os_app, "_prosta_vrata", prosta), mock.patch.object(os_app, "_poslusalec_vrat", return_value=4242), \
+                mock.patch.object(os_app, "_je_stara_kopija", return_value=stara), \
+                mock.patch.object(os_app, "koncaj_proces", lambda pid: klici["koncani"].append(pid) or True), \
+                mock.patch.object(os_app.time, "sleep", spi), mock.patch.object(os_app.time, "monotonic", lambda: ura[0]), \
+                redirect_stdout(io.StringIO()):
+            vrata = os_app._find_free_port()
+        return vrata, klici
+
+    def test_obicajen_zagon_ne_caka(self):
+        vrata, klici = self._isci(lambda v: 0 if v == 47815 else (v or 50000), 0.0)
+        self.assertEqual((vrata, klici["spanje"], klici["koncani"]), (47816, 0, []))
+
+    def test_prevzem_pocaka_da_stara_kopija_sprosti_vrata(self):
+        stanje = {"n": 0}
+
+        def prosta(v):
+            if v != 47815:
+                return v or 50000
+            stanje["n"] += 1
+            return 47815 if stanje["n"] > 4 else 0
+        vrata, klici = self._isci(prosta, 12.0)
+        self.assertEqual((vrata, klici["koncani"]), (47815, []))
+        self.assertGreater(klici["spanje"], 0)
+        self.assertEqual(os_app.PREVZEM["cakaj_s"], 0.0)          # caka samo prvi zagon po prevzemu
+
+    def test_prevzem_po_roku_konca_staro_kopijo(self):
+        stanje = {"koncana": False}
+
+        def prosta(v):
+            if v != 47815:
+                return v or 50000
+            return 47815 if stanje["koncana"] else 0
+        klici = {}
+        ura = [0.0]
+        os_app.PREVZEM["cakaj_s"] = 12.0
+
+        def koncaj(pid):
+            stanje["koncana"] = True
+            klici["pid"] = pid
+            return True
+        with mock.patch.object(os_app, "_prosta_vrata", prosta), mock.patch.object(os_app, "_poslusalec_vrat", return_value=4242), \
+                mock.patch.object(os_app, "_je_stara_kopija", return_value=True), mock.patch.object(os_app, "koncaj_proces", koncaj), \
+                mock.patch.object(os_app.time, "sleep", lambda s: ura.__setitem__(0, ura[0] + s)), \
+                mock.patch.object(os_app.time, "monotonic", lambda: ura[0]), redirect_stdout(io.StringIO()) as izpis:
+            self.assertEqual(os_app._find_free_port(), 47815)
+        self.assertEqual(klici, {"pid": 4242})
+        self.assertGreaterEqual(ura[0], 12.0)
+        self.assertIn("koncana", izpis.getvalue())
+
+    def test_tujega_procesa_na_vratih_ne_konca(self):
+        vrata, klici = self._isci(lambda v: 0 if v == 47815 else (v or 50000), 12.0, stara=False)
+        self.assertEqual((vrata, klici["koncani"]), (47816, []))
+
+    def test_po_zanki_qt_se_proces_zagotovo_konca(self):
+        ustvarjeni = []
+
+        class Casovnik:
+            def __init__(self, cez, fn):
+                self.cez, self.fn, self.daemon, self.zagnan = cez, fn, False, False
+                ustvarjeni.append(self)
+
+            def start(self):
+                self.zagnan = True
+        with mock.patch.object(os_app.threading, "Timer", Casovnik):
+            os_app.zagotovi_izhod(3, 8.0)
+        c = ustvarjeni[0]
+        self.assertTrue(c.daemon and c.zagnan)
+        self.assertEqual(c.cez, 8.0)
+        with mock.patch.object(os_app.os, "_exit") as izhod:
+            c.fn()
+        izhod.assert_called_once_with(3)
+        vir = inspect.getsource(os_app.main)
+        self.assertIn("zagotovi_izhod(koda)", vir)
+        self.assertIn('PREVZEM["cakaj_s"] = 12.0', vir)
+
+    def test_umik_pred_novo_razlicico_najprej_sprosti_vrata(self):
+        vir = inspect.getsource(os_app.SafeerOsWindow.koncaj_za_posodobitev)
+        self.assertLess(vir.index("_stop_local_asset_server()"), vir.index("_zaklep_primerka.unlock()"))
+        self.assertIn("zagotovi_izhod(0)", vir)
+
+
+class SesutjeMedBrskanjem(unittest.TestCase):
+    def _koncaj(self, spletni_nacin, razdelek_straze=""):
+        okno = types.SimpleNamespace(_razdelek_po_obnovi=razdelek_straze, _spletni_nacin=spletni_nacin, nalozeno=[])
+        okno._nalozi_znova_v_razdelku = okno.nalozeno.append
+        status = os_app.QWebEnginePage.RenderProcessTerminationStatus.CrashedTerminationStatus
+        with mock.patch.object(os_app.QTimer, "singleShot", lambda ms, fn: fn()), redirect_stdout(io.StringIO()):
+            os_app.SafeerOsWindow._izris_koncan(okno, status, 1)
+        return okno.nalozeno
+
+    def test_v_spletu_ostane_v_spletu(self):
+        self.assertEqual(self._koncaj(True), ["splet"])
+
+    def test_drugje_se_nalozi_privzeti_razdelek(self):
+        self.assertEqual(self._koncaj(False), [""])
+
+    def test_straza_pomnilnika_ohrani_svoj_razdelek(self):
+        self.assertEqual(self._koncaj(True, "zapiski"), ["zapiski"])
+
+
 class ZivoVQtWebEngine(unittest.TestCase):
     """Prava stran v QtWebEngine: most ob nalaganju, zeton, meni polja, konec procesa strani, pozno vstavljen most."""
 
