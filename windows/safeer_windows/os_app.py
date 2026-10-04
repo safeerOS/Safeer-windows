@@ -299,19 +299,90 @@ def qt_sporocila_v_dnevnik() -> None:
 STALNA_VRATA = (47815, 47816, 47817, 47818)
 
 
+#: Prevzem od stare kopije (posodobitev): koliko sekund nova kopija caka na prva stalna vrata (main ga nastavi).
+PREVZEM = {"cakaj_s": 0.0}
+
+
+def _prosta_vrata(vrata: int) -> int:
+    """Vrne vrata, ce se je nanje mogoce vezati (0 = poljubna prosta), sicer 0."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            # Windows: brez tega bi se smeli vezati na vrata, ki jih ze poslusa drug program.
+            izkljucno = getattr(socket, "SO_EXCLUSIVEADDRUSE", None)
+            if izkljucno is not None:
+                s.setsockopt(socket.SOL_SOCKET, izkljucno, 1)
+            s.bind(("127.0.0.1", vrata))
+            return s.getsockname()[1]
+    except OSError:
+        return 0
+
+
+def _poslusalec_vrat(vrata: int) -> int:
+    """PID procesa, ki na 127.0.0.1 poslusa na danih vratih (Windows, netstat); 0, ce ga ni mogoce ugotoviti."""
+    if sys.platform != "win32":
+        return 0
+    try:
+        import subprocess
+        r = subprocess.run(["netstat", "-ano", "-p", "TCP"], capture_output=True, text=True, timeout=6,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except Exception:  # noqa: BLE001
+        return 0
+    return _pid_poslusalca(r.stdout, vrata)
+
+
+def _pid_poslusalca(izpis: str, vrata: int) -> int:
+    """Iz izpisa `netstat -ano` prebere PID poslusalca na 127.0.0.1:<vrata>. Beseda za stanje je odvisna od jezika
+    Windows, zato poslusalca prepoznamo po oddaljenem naslovu 0.0.0.0:0."""
+    for vrstica in str(izpis or "").splitlines():
+        deli = vrstica.split()
+        if len(deli) >= 5 and deli[0] == "TCP" and deli[1] == f"127.0.0.1:{vrata}" and deli[2] == "0.0.0.0:0" and deli[-1].isdigit():
+            return int(deli[-1])
+    return 0
+
+
+def _je_stara_kopija(pid: int) -> bool:
+    """Ali je proces druga kopija Safeer OS: tece z istim tolmacem Python kot ta proces (in ni ta proces)."""
+    if not pid or pid == os.getpid() or sys.platform != "win32":
+        return False
+    import ctypes
+    from ctypes import wintypes
+    k = ctypes.windll.kernel32
+    h = k.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not h:
+        return False
+    try:
+        buf = ctypes.create_unicode_buffer(1024)
+        n = wintypes.DWORD(1024)
+        if not k.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(n)):
+            return False
+        return os.path.normcase(buf.value) == os.path.normcase(sys.executable)
+    finally:
+        k.CloseHandle(h)
+
+
 def _find_free_port() -> int:
     """Poišče prosta TCP vrata na lokalnem vmesniku: najprej stalna (isti izvor ob vsakem zagonu)."""
+    prva = STALNA_VRATA[0]
+    cakaj, PREVZEM["cakaj_s"] = float(PREVZEM.get("cakaj_s") or 0.0), 0.0
+    if cakaj > 0 and not _prosta_vrata(prva):
+        # Posodobitev: stara kopija se zapira in prva vrata se drzi. Z drugimi vrati bi imel vmesnik drug izvor -
+        # shranjene nastavitve (tema, skrita vrstica, »Ne zdaj«) bi bile do naslednjega zagona prazne.
+        konec = time.monotonic() + cakaj
+        while time.monotonic() < konec and not _prosta_vrata(prva):
+            time.sleep(0.3)
+        if not _prosta_vrata(prva):
+            pid = _poslusalec_vrat(prva)
+            if _je_stara_kopija(pid) and koncaj_proces(pid):
+                # Stara kopija je zaklep ze sprostila (svoje delo je koncala), proces pa se ni koncal.
+                print(f"[SafeerOS] Stara kopija ({pid}) se ni koncala v {cakaj:.0f} s - koncana, da vmesnik obdrzi svoja vrata", flush=True)
+                for _ in range(25):
+                    if _prosta_vrata(prva):
+                        break
+                    time.sleep(0.2)
     for vrata in STALNA_VRATA + (0,):
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                # Windows: brez tega bi se smeli vezati na vrata, ki jih ze poslusa drug program.
-                izkljucno = getattr(socket, "SO_EXCLUSIVEADDRUSE", None)
-                if izkljucno is not None:
-                    s.setsockopt(socket.SOL_SOCKET, izkljucno, 1)
-                s.bind(("127.0.0.1", vrata))
-                return s.getsockname()[1]
-        except OSError:
-            continue
+        prosta = _prosta_vrata(vrata)
+        if prosta:
+            return prosta
     raise OSError("ni prostih vrat za lokalni streznik vmesnika")
 
 
@@ -409,6 +480,36 @@ def _start_local_asset_server(assets_root: str) -> int:
     t.start()
     print(f"[SafeerOS] Lokalni asset server zagnan na http://127.0.0.1:{port}/", flush=True)
     return port
+
+
+def _stop_local_asset_server() -> None:
+    """Ustavi streznik vmesnika in sprosti njegova vrata (ob umiku pred novo razlicico)."""
+    global _local_server, _local_server_port
+    server, _local_server, _local_server_port = _local_server, None, 0
+    if server is None:
+        return
+    try:
+        server.shutdown()
+        server.server_close()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def zagotovi_izhod(koda: int = 0, cez_s: float = 8.0) -> None:
+    """Ko se zanka Qt konca, se mora koncati tudi proces.
+
+    Kopija, ki se je umaknila novi razlicici, je zivela se 2-3 minute (izmerjeno 4. 10. 2026) in ta cas drzala
+    vrata vmesnika. Rednemu zapiranju pustimo `cez_s` sekund (shranjevanje profila strani), nato proces koncamo.
+    """
+    def konec() -> None:
+        try:
+            sys.stdout.flush()
+        except Exception:  # noqa: BLE001
+            pass
+        os._exit(koda)
+    nit = threading.Timer(cez_s, konec)
+    nit.daemon = True
+    nit.start()
 
 
 _ROCAJ_SIRINA = 22  # sirina ozkega rocaja, ko je stranska vrstica skrita v nacinu Splet
@@ -1902,6 +2003,10 @@ class SafeerOsWindow(QMainWindow):
         if status != QWebEnginePage.RenderProcessTerminationStatus.NormalTerminationStatus:
             # Sesut ali (zaradi pomnilnika) koncan proces strani: brez tega ostane okno prazno.
             razdelek, self._razdelek_po_obnovi = self._razdelek_po_obnovi, ""
+            if not razdelek and getattr(self, "_spletni_nacin", False):
+                # Sesutje sredi brskanja: vgrajeni brskalnik ostane odprt, zato mora tudi vmesnik ostati v Spletu -
+                # sicer klik na Domov ali Programe brskalnika ne zapre (stran ne ve, da je odprt).
+                razdelek = "splet"
             QTimer.singleShot(1000, lambda: self._nalozi_znova_v_razdelku(razdelek))
 
     def _preveri_pomnilnik_izrisa(self) -> None:
@@ -2803,6 +2908,9 @@ class SafeerOsWindow(QMainWindow):
     def koncaj_za_posodobitev(self) -> None:
         """Nova razlicica se zaganja: zapremo vse (Link, zaslon, predvajalnik), sprostimo zaklep in koncamo."""
         self.close()
+        # Vrata vmesnika sprostimo PRED zaklepom: nova kopija jih potrebuje takoj (isti izvor strani = iste
+        # shranjene nastavitve vmesnika).
+        _stop_local_asset_server()
         try:
             if getattr(self, "_streznik_primerka", None) is not None:
                 self._streznik_primerka.close()
@@ -2811,6 +2919,7 @@ class SafeerOsWindow(QMainWindow):
         except Exception:
             pass
         QApplication.quit()
+        zagotovi_izhod(0)
 
     def _ustvari_medijski_center(self):
         """Medijski center: libmpv (mpv_player), ce je paket prilozen in nalozljiv, sicer dosedanji LibVLC.
@@ -2909,6 +3018,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             print("[SafeerOS] Ze tece druga kopija, ki se ne odziva.", flush=True)
             return 1
         print("[SafeerOS] Stara kopija se je umaknila; zaganjam novo razlicico.", flush=True)
+        PREVZEM["cakaj_s"] = 12.0
     app.setApplicationName("SafeerOS")
     app.setOrganizationName("Safeer")
     browser.apply_dns_mode(browser_settings)
@@ -2927,7 +3037,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         window.control_backend.povezi_se()
         window.hide()
 
-    return app.exec()
+    koda = app.exec()
+    zagotovi_izhod(koda)
+    return koda
 
 
 if __name__ == "__main__":
