@@ -252,7 +252,11 @@ def _kind(value: Any, url: str = "", title: str = "", season: int = 0, episode: 
         return "glasba"
     if ext in IMAGES or any(x in hint for x in ("image", "slika", "photo", "fotografija")):
         return "slika"
-    if any(x in hint for x in ("series", "episode", "season", "show", "tv", "serija", "epizoda", "/tv/", "/series/")):
+    # »tv« in »show« veljata kot besedi (tv, tv-shows, tvshows, shows), ne kot del besede: mapa »Latvia« ali
+    # nakljucno ime zacasne mape z »tv« je sicer film razglasilo za serijo.
+    besede = set(re.findall(r"[a-z0-9]+", hint))
+    if (any(x in hint for x in ("series", "episode", "season", "serija", "epizoda", "/tv/", "/series/"))
+            or besede & {"tv", "show", "shows", "tvshow", "tvshows"}):
         return "serija"
     return "film"
 

@@ -539,3 +539,15 @@ Object.assign(BESEDILA_OS.de, {"virOdstraniPovsod": "Von allen Geräten entferne
 Object.assign(BESEDILA_OS.es, {"virOdstraniPovsod": "¿Quitar de todos los dispositivos?"});
 Object.assign(BESEDILA_OS.fr, {"virOdstraniPovsod": "Supprimer de tous les appareils ?"});
 Object.assign(BESEDILA_OS.it, {"virOdstraniPovsod": "Rimuovere da tutti i dispositivi?"});
+Object.assign(BESEDILA_OS.sl, {"meniIzrezi": "Izreži", "meniKopiraj": "Kopiraj", "meniPrilepi": "Prilepi", "meniIzberiVse": "Izberi vse", "meniOdlozisceNapaka": "Odložišče trenutno ni dosegljivo. Poskusi znova.", "meniOdloziscePrazno": "V odložišču ni besedila."});
+Object.assign(BESEDILA_OS.en, {"meniIzrezi": "Cut", "meniKopiraj": "Copy", "meniPrilepi": "Paste", "meniIzberiVse": "Select all", "meniOdlozisceNapaka": "The clipboard is not available right now. Try again.", "meniOdloziscePrazno": "There is no text on the clipboard."});
+Object.assign(BESEDILA_OS.de, {"meniIzrezi": "Ausschneiden", "meniKopiraj": "Kopieren", "meniPrilepi": "Einfügen", "meniIzberiVse": "Alles auswählen", "meniOdlozisceNapaka": "Die Zwischenablage ist gerade nicht erreichbar. Versuche es erneut.", "meniOdloziscePrazno": "In der Zwischenablage ist kein Text."});
+Object.assign(BESEDILA_OS.es, {"meniIzrezi": "Cortar", "meniKopiraj": "Copiar", "meniPrilepi": "Pegar", "meniIzberiVse": "Seleccionar todo", "meniOdlozisceNapaka": "El portapapeles no está disponible en este momento. Inténtalo de nuevo.", "meniOdloziscePrazno": "No hay texto en el portapapeles."});
+Object.assign(BESEDILA_OS.fr, {"meniIzrezi": "Couper", "meniKopiraj": "Copier", "meniPrilepi": "Coller", "meniIzberiVse": "Tout sélectionner", "meniOdlozisceNapaka": "Le presse-papiers n'est pas disponible pour le moment. Réessayez.", "meniOdloziscePrazno": "Le presse-papiers ne contient pas de texte."});
+Object.assign(BESEDILA_OS.it, {"meniIzrezi": "Taglia", "meniKopiraj": "Copia", "meniPrilepi": "Incolla", "meniIzberiVse": "Seleziona tutto", "meniOdlozisceNapaka": "Gli appunti non sono disponibili in questo momento. Riprova.", "meniOdloziscePrazno": "Negli appunti non c'è testo."});
+Object.assign(BESEDILA_OS.sl, {"brezMostu": "Safeer OS je izgubil povezavo s sistemom. Zapri ga in znova odpri."});
+Object.assign(BESEDILA_OS.en, {"brezMostu": "Safeer OS lost its connection to the system. Close it and open it again."});
+Object.assign(BESEDILA_OS.de, {"brezMostu": "Safeer OS hat die Verbindung zum System verloren. Schließe es und öffne es erneut."});
+Object.assign(BESEDILA_OS.es, {"brezMostu": "Safeer OS ha perdido la conexión con el sistema. Ciérralo y ábrelo de nuevo."});
+Object.assign(BESEDILA_OS.fr, {"brezMostu": "Safeer OS a perdu la connexion avec le système. Fermez-le puis rouvrez-le."});
+Object.assign(BESEDILA_OS.it, {"brezMostu": "Safeer OS ha perso la connessione con il sistema. Chiudilo e riaprilo."});

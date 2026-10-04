@@ -317,6 +317,16 @@ class IzbiraPodnapisov(unittest.TestCase):
 
 
 class DvdKnjiznica(unittest.TestCase):
+    def test_tv_v_imenu_mape_ne_naredi_serije(self):
+        """»tv« kot del besede (Latvia, nakljucno ime zacasne mape) ni znak serije; kot beseda je."""
+        self.assertEqual(os_media._kind("film", "file:///D:/Latvia/izlet.mkv", "izlet"), "film")
+        self.assertEqual(os_media._kind("film", "file:///tmp/tmpie2fltvi/Disk/", "Disk"), "film")
+        self.assertEqual(os_media._kind("film", "file:///D:/Showgirls.mkv", "Showgirls"), "film")
+        self.assertEqual(os_media._kind("", "file:///D:/TV/Nadaljevanka/01.mkv", "01"), "serija")
+        self.assertEqual(os_media._kind("", "file:///D:/tv-shows/Nadaljevanka/01.mkv", "01"), "serija")
+        self.assertEqual(os_media._kind("", "file:///D:/TVShows/Nadaljevanka/01.mkv", "01"), "serija")
+        self.assertEqual(os_media._kind("series", "https://vir.test/x", "x"), "serija")
+
     def test_mapa_video_ts_je_film_z_naslovom_dvd(self):
         td = tempfile.mkdtemp()
         try:
