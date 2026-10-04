@@ -48,10 +48,76 @@ func getAppDir() string {
 	return filepath.Join(base, "SafeerOS", "app")
 }
 
+// Pripona datoteke, ki je bila ob posodobitvi v rabi: umaknjena s preimenovanjem, pobrisana ob naslednjem zagonu.
+const staraPripona = ".staro-"
+
+// odpriZaPisanje odpre ciljno datoteko. Ce je v rabi (tece prejsnja kopija Safeer OS: SafeerMediaWebView.exe,
+// knjiznice predvajalnika), je Windows ne pusti prepisati, preimenovati pa jo: staro umaknemo in zapisemo novo.
+func odpriZaPisanje(outPath string, mode os.FileMode) (*os.File, error) {
+	outFile, err := os.OpenFile(outPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
+	if err == nil {
+		return outFile, nil
+	}
+	if _, statErr := os.Stat(outPath); statErr != nil {
+		return nil, err
+	}
+	for poskus := 0; poskus < 5; poskus++ {
+		umaknjena := fmt.Sprintf("%s%s%d", outPath, staraPripona, time.Now().UnixNano())
+		if os.Rename(outPath, umaknjena) == nil {
+			return os.OpenFile(outPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
+		}
+		time.Sleep(300 * time.Millisecond)
+		if outFile, err = os.OpenFile(outPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode); err == nil {
+			return outFile, nil
+		}
+	}
+	return nil, err
+}
+
+// pocistiUmaknjene pobrise datoteke, umaknjene ob prejsnji posodobitvi (tiste, ki so se v rabi, ostanejo do naslednjic).
+func pocistiUmaknjene(targetDir string) {
+	seznam := filepath.Join(targetDir, ".umaknjene")
+	data, err := os.ReadFile(seznam)
+	if err != nil {
+		return
+	}
+	ostale := []string{}
+	for _, pot := range strings.Split(string(data), "\n") {
+		pot = strings.TrimSpace(pot)
+		if pot == "" || !strings.Contains(filepath.Base(pot), staraPripona) ||
+			!strings.HasPrefix(filepath.Clean(pot), filepath.Clean(targetDir)) {
+			continue
+		}
+		if err := os.Remove(pot); err != nil && !os.IsNotExist(err) {
+			ostale = append(ostale, pot)
+		}
+	}
+	if len(ostale) == 0 {
+		os.Remove(seznam)
+		return
+	}
+	os.WriteFile(seznam, []byte(strings.Join(ostale, "\n")+"\n"), 0644)
+}
+
+// zabeleziUmaknjene v seznam doda datoteke *.staro-*, ki jih je posodobitev pustila ob novih.
+func zabeleziUmaknjene(targetDir string) {
+	najdene := []string{}
+	filepath.Walk(targetDir, func(pot string, info os.FileInfo, err error) error {
+		if err == nil && !info.IsDir() && strings.Contains(info.Name(), staraPripona) {
+			najdene = append(najdene, pot)
+		}
+		return nil
+	})
+	if len(najdene) > 0 {
+		os.WriteFile(filepath.Join(targetDir, ".umaknjene"), []byte(strings.Join(najdene, "\n")+"\n"), 0644)
+	}
+}
+
 func extractIfNeeded(targetDir string) error {
 	h := sha256.Sum256(embeddedZip)
 	currentHash := hex.EncodeToString(h[:])
 
+	pocistiUmaknjene(targetDir)
 	verFile := filepath.Join(targetDir, ".version")
 	if data, err := os.ReadFile(verFile); err == nil {
 		if strings.TrimSpace(string(data)) == currentHash {
@@ -85,7 +151,7 @@ func extractIfNeeded(targetDir string) error {
 			return err
 		}
 
-		outFile, err := os.OpenFile(outPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
+		outFile, err := odpriZaPisanje(outPath, f.Mode())
 		if err != nil {
 			rc.Close()
 			return err
@@ -99,6 +165,7 @@ func extractIfNeeded(targetDir string) error {
 		}
 	}
 
+	zabeleziUmaknjene(targetDir)
 	os.WriteFile(verFile, []byte(currentHash), 0644)
 	return nil
 }
