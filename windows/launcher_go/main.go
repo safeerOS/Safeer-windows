@@ -20,6 +20,11 @@ import (
 //go:embed safeer-os-windows.zip
 var embeddedZip []byte
 
+// paketOdtis je SHA-256 vdelanega paketa. Gradnja izdaje ga vpise (-ldflags "-X main.paketOdtis=<64 sestnajstiskih
+// znakov>"), da ga zaganjalniku ni treba racunati ob vsakem zagonu: zgoscanje 80 MB traja okoli 0,2 s (izmerjeno na
+// i5-4590), na hladnem disku pa se branje celega paketa. Pri razvojni gradnji je prazen in se izracuna.
+var paketOdtis string
+
 const (
 	MB_OK              = 0x00000000
 	MB_ICONERROR       = 0x00000010
@@ -229,8 +234,29 @@ func zapisiSeznam(targetDir string, nove map[string]bool) {
 // (prej je star exe brez opozorila vrnil staro kodo in pustil mesanico obeh razlicic). `vsili` (--namesti) to
 // preskoci - za namerno vrnitev na starejso razlicico.
 func razpakiraj(paket []byte, targetDir string, vsili bool) (bool, error) {
-	h := sha256.Sum256(paket)
-	currentHash := hex.EncodeToString(h[:])
+	return razpakirajZOdtisom(paket, "", targetDir, vsili)
+}
+
+// jeOdtis: 64 malih sestnajstiskih znakov.
+func jeOdtis(s string) bool {
+	if len(s) != 64 {
+		return false
+	}
+	for _, z := range s {
+		if !(z >= '0' && z <= '9' || z >= 'a' && z <= 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// razpakirajZOdtisom: kot razpakiraj, le da odtis paketa (SHA-256) dobi od gradnje; prazen ali nepravilen izracuna.
+func razpakirajZOdtisom(paket []byte, odtis, targetDir string, vsili bool) (bool, error) {
+	currentHash := odtis
+	if !jeOdtis(currentHash) {
+		h := sha256.Sum256(paket)
+		currentHash = hex.EncodeToString(h[:])
+	}
 
 	pocistiUmaknjene(targetDir)
 	verFile := filepath.Join(targetDir, ".version")
@@ -718,7 +744,7 @@ func main() {
 			vsili = true
 		}
 	}
-	razpakirano, err := razpakiraj(embeddedZip, targetDir, vsili)
+	razpakirano, err := razpakirajZOdtisom(embeddedZip, paketOdtis, targetDir, vsili)
 	if err != nil {
 		showMessage("Safeer OS - Napaka", fmt.Sprintf("Napaka pri pripravi datotek:\n%v", err), MB_ICONERROR)
 		return

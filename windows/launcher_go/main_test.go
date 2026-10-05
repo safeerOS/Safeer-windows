@@ -936,3 +936,40 @@ func TestZazeniProgram(t *testing.T) {
 		}
 	}
 }
+
+// Odtis paketa iz gradnje (-X main.paketOdtis): zaganjalnik paketa ob navadnem zagonu ne zgosca.
+func TestOdtisIzGradnje(t *testing.T) {
+	mapa := filepath.Join(t.TempDir(), "app")
+	a := paket(t, map[string]string{"windows/VERSION": "1.0.36", "windows/safeer_os_windows.py": "a"})
+	b := paket(t, map[string]string{"windows/VERSION": "1.0.36", "windows/safeer_os_windows.py": "b"})
+	odtis := strings.Repeat("ab", 32)
+	if ok, err := razpakirajZOdtisom(a, odtis, mapa, false); err != nil || !ok {
+		t.Fatalf("prva namestitev: %v %v", ok, err)
+	}
+	if v := vsebina(filepath.Join(mapa, ".version")); v != odtis {
+		t.Fatalf("zapis o paketu: %q", v)
+	}
+	// Isti odtis: paketa se ne dotakne (tudi ce bi bila vsebina druga - odtis je iz gradnje, ne iz zgoscanja).
+	if ok, _ := razpakirajZOdtisom(b, odtis, mapa, false); ok || vsebina(filepath.Join(mapa, "windows", "safeer_os_windows.py")) != "a" {
+		t.Fatal("paket z istim odtisom se je razpakiral znova")
+	}
+	// Drug odtis, ista razlicica: nova gradnja se namesti.
+	drugi := strings.Repeat("cd", 32)
+	if ok, _ := razpakirajZOdtisom(b, drugi, mapa, false); !ok || vsebina(filepath.Join(mapa, "windows", "safeer_os_windows.py")) != "b" {
+		t.Fatal("nova gradnja iste razlicice se ni namestila")
+	}
+	// Prazen ali nepravilen odtis: izracuna se iz paketa (razvojna gradnja) - isti kot pri razpakiraj().
+	for _, slab := range []string{"", "abc", strings.Repeat("AB", 32), strings.Repeat("zz", 32)} {
+		mapa2 := filepath.Join(t.TempDir(), "app")
+		if ok, err := razpakirajZOdtisom(a, slab, mapa2, false); err != nil || !ok {
+			t.Fatalf("odtis %q: %v %v", slab, ok, err)
+		}
+		pravi := vsebina(filepath.Join(mapa2, ".version"))
+		if !jeOdtis(pravi) || pravi == slab {
+			t.Fatalf("odtis %q: v zapisu je %q", slab, pravi)
+		}
+		if ok, _ := razpakiraj(a, mapa2, false); ok {
+			t.Fatalf("odtis %q: razpakiraj() ne prepozna istega paketa", slab)
+		}
+	}
+}
