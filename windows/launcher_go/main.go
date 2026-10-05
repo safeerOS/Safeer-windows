@@ -556,14 +556,19 @@ const (
 )
 
 // paketiPip so knjiznice, ki jih Safeer OS potrebuje (katere module preveri program, pove knjiznice.py).
+//
+// cryptography in Pillow: do 1.0.38 ju zaganjalnik ni namestil. Brez cryptography Safeer Link na cistem racunalniku
+// ne more narediti svoje identitete (kljuc in potrdilo; rezerva je program openssl, ki ga Windows nima), brez Pillow
+// racunalnik ne zajame zaslona za oddaljeni zaslon. Na razvojnem racunalniku sta bila namescena rocno.
 var paketiPip = []string{
 	"PySide6", "qrcode", "python-vlc", "mutagen", "av", "truststore", "zeroconf", "python-mpv==1.0.8",
+	"cryptography", "Pillow",
 	"winrt-runtime==3.2.1", "winrt-Windows.Foundation==3.2.1", "winrt-Windows.Foundation.Collections==3.2.1",
 	"winrt-Windows.Media==3.2.1", "winrt-Windows.Media.Playback==3.2.1", "winrt-Windows.Storage.Streams==3.2.1",
 }
 
 func namestiKnjiznice(py *PythonInfo) error {
-	showMessage("Safeer OS", "Safeer OS pripravlja potrebne knjižnice (PySide6, python-vlc, python-mpv, mutagen, PyAV, zeroconf, WinRT za medijske tipke). Namestitev poteka v ozadju...", MB_ICONINFORMATION)
+	showMessage("Safeer OS", "Safeer OS pripravlja potrebne knjižnice (PySide6, python-vlc, python-mpv, mutagen, PyAV, zeroconf, cryptography, Pillow, WinRT za medijske tipke). Namestitev poteka v ozadju...", MB_ICONINFORMATION)
 	args := []string{"-m", "pip", "install"}
 	if py.IsLauncher {
 		args = append([]string{"-3"}, args...)

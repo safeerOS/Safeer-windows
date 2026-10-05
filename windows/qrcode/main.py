@@ -12,11 +12,13 @@ from typing import (
     overload,
 )
 
-from typing_extensions import Literal
+# Safeer: Literal je v typing (Python 3.8+); typing_extensions ni med knjiznicami, ki jih Safeer OS namesti.
+from typing import Literal
 
 from qrcode import constants, exceptions, util
 from qrcode.image.base import BaseImage
-from qrcode.image.pure import PyPNGImage
+# Safeer: PyPNGImage (modul png iz paketa pypng) se uvozi sele v make_image, ce kdo res zahteva sliko PNG brez PIL.
+# Safeer Link rise kodo kot SVG (qrcode.image.svg); pypng ni namescen in uvoz tukaj je onemogocil vso knjiznico.
 
 ModulesType = List[List[Optional[bool]]]
 # Cache modules generated just based on the QR Code version
@@ -360,7 +362,12 @@ class QRCode(Generic[GenericImage]):
                 from qrcode.image.pil import Image, PilImage
 
                 # Use PIL by default if available, otherwise use PyPNG.
-                image_factory = PilImage if Image else PyPNGImage
+                if Image:
+                    image_factory = PilImage
+                else:
+                    from qrcode.image.pure import PyPNGImage  # Safeer: pozen uvoz, glej vrh datoteke
+
+                    image_factory = PyPNGImage
 
         im = image_factory(
             self.border,
