@@ -5,12 +5,11 @@ on:
     tags: ['windows-v*']
     paths:
       - 'windows/**'
-      - 'core/adblock.py'
-      - 'core/config.py'
-      - 'core/bookmarks_importer.py'
-      - 'core/reader.py'
-      - 'core/signed_feed.py'
-      - 'core/threat_intel.py'
+      # Vse jedro, ne le nekaj datotek: jedro Safeer Linka (core/link_*.py) gre v paket in ima tu svoje preizkuse.
+      # Do 5. 10. 2026 potisk, ki je spremenil samo core/link_mesh.py, preverjanja sploh ni sprozil.
+      - 'core/**'
+      - 'tests/**'
+      - 'conftest.py'
       - 'ui/home.*'
       - 'ui/splet.*'
       - 'assets/icon.png'
