@@ -83,9 +83,16 @@ računalnik, ki je ves čas prižgan. Hub je ena točka odpovedi in ena točka, 
      pošiljateljev hub in datoteka z drugega računalnika je ostala v zalogi njegovega huba.
    - **zaslon**: pošiljatelj začne deljenje (`POST /cast/share/screen/start`) pri hubu ciljne naprave
      z isto sejo in tja potiska okvirje; ta hub svoji napravi pove, kje je gledalec
-     (`link_deljenje.sredisce_za_zaslon`). Hub računalnika zaslona ne posreduje: naprava, ki je
-     prijavljena neposredno nanj, dobi `zaslon_ni_na_voljo`. Do 1.0.97 (Linux) in 1.0.38 (Windows) je
-     bil cilj deljenja hub računalnika in »Zaslon« na plošči »Deli z« ni deloval.
+     (`link_deljenje.sredisce_za_zaslon`). Tako delajo računalniki. Telefon (Android) deljenje začne
+     pri SVOJEM hubu in `share.screen` gre do cilja čez sosede, zato prejemnik stran gledalca poišče
+     **najprej pri svojem hubu, nato pri pošiljateljevem** (`link_deljenje.gledalec_pri_srediscih`;
+     velja prvi, ki stran ima). Hub zaslon posreduje samo napravi, ki je prijavljena pri njem (sicer
+     409 `naprava_pri_drugem_srediscu`) – pri tretjem hubu prejemnik strani ne bi iskal.
+     Hub računalnika zaslon posreduje od 1.0.99 (Linux) in 1.0.40 (Windows): isti protokol kot hub na
+     Androidu (`link_hub_deljenje.Zasloni`), stran gledalca je samo za gledanje, deljenje pa se konča
+     tudi, ko ga 10 s nihče več ne gleda – pošiljatelj razlog dobi v odgovoru na svoj tok okvirjev
+     (`razlog: ni_gledalcev`). Prej računalnik računalniku zaslona ni mogel pokazati, zaslon s
+     telefona pa se je na računalniku odprl kot napaka (stran gledalca je iskal samo pri svojem hubu).
 
    Zaupanje je isto kot pri sosednji povezavi: ključ v potrdilu huba mora biti ključ člana kroga
    (`link_mesh.sredisce_naprave`).
