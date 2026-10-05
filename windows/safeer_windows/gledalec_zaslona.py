@@ -85,15 +85,16 @@ class GledalecZaslona:
         try:
             if not je_gledalec(self._naslov(zavihek)):
                 return False                                 # uporabnik je v tem zavihku odprl nekaj svojega
-            bil_trenutni = bool(self._je_trenutni(zavihek))
+            # Gledalec je se na zaslonu: razdelek in okno vrnemo, kot sta bila pred deljenjem.
+            nazaj = vrni and bool(self._je_trenutni(zavihek)) and self._v_spletu()
+            if nazaj and self._prej != "splet":
+                # Najprej iz Spleta, sele nato zapremo zavihek: sicer se za hip pokaze zavihek pod gledalcem in
+                # WebView2 nad Safeer OS pusti vrstico stanja s povezavo, ki je bila pod misko.
+                self._vrni_v_os(self._prej or "domov")
             if not self._zapri_zavihek(zavihek):
                 return False                                 # zaprl ga je ze sam
         except RuntimeError:
             return False                                     # pogled je ze unicen (zavihek zaprt)
-        if vrni and bil_trenutni and self._v_spletu():
-            # Gledalec je bil se na zaslonu: razdelek in okno vrnemo, kot sta bila pred deljenjem.
-            if self._prej != "splet":
-                self._vrni_v_os(self._prej or "domov")
-            if okno_prej and self._vrni_okno is not None:
-                self._vrni_okno(okno_prej)
+        if nazaj and okno_prej and self._vrni_okno is not None:
+            self._vrni_okno(okno_prej)
         return True

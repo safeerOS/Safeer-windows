@@ -1542,6 +1542,11 @@ class SafeerOsWindow(QMainWindow):
         indeks = self.browser_window.tabs.indexOf(pogled)
         if indeks < 0:
             return False
+        if self.browser_window.tabs.count() == 1:
+            # Gledalec je edini zavihek: Splet dobi zacetno stran, preden ga zapremo. Brskalnik brez zavihkov bi
+            # se zaprl (zunaj nacina Splet - tja pridemo, ker Splet zapustimo pred zaprtjem zavihka).
+            self.browser_window.new_tab(switch=False)
+            indeks = self.browser_window.tabs.indexOf(pogled)
         self.browser_window.close_tab(indeks)
         return True
 

@@ -22,6 +22,7 @@ class Okno:
         self.v_spletu = v_spletu
         self.razdelek = razdelek
         self.vrnitve = []
+        self.dnevnik = []         # vrstni red: "vrni" (iz Spleta) in "zapri" (zavihek)
         self.branja = []          # povratni klici, ki cakajo na odgovor strani
         self.odgovori_takoj = True
         self.okno = okno          # okno programa: "" = vidno, "pomanjsano", "skrito"
@@ -50,6 +51,7 @@ class Okno:
     def zapri(self, z):
         if z not in self.zavihki:
             return False
+        self.dnevnik.append("zapri")
         self.zavihki.remove(z)
         if self.trenutni is z:
             self.trenutni = self.zavihki[-1] if self.zavihki else None
@@ -65,6 +67,7 @@ class Okno:
         self.v_spletu = True
 
     def vrni(self, razdelek):
+        self.dnevnik.append("vrni")
         self.vrnitve.append(razdelek)
         self.v_spletu = False
 
@@ -83,6 +86,21 @@ class Gledalec(unittest.TestCase):
         self.assertEqual(o.zavihki, [mojo])
         self.assertEqual(o.vrnitve, ["datoteke"])
         self.assertFalse(o.g.odprt())
+
+    def test_najprej_iz_spleta_nato_se_zapre_zavihek(self):
+        """Sicer se za hip pokaze zavihek pod gledalcem in WebView2 pusti nad Safeer OS napis s povezavo pod misko."""
+        o = Okno(razdelek="link")
+        o.nov("safeer://splet")
+        o.g.odpri(GLEDALEC)
+        self.assertTrue(o.g.zapri())
+        self.assertEqual(o.dnevnik, ["vrni", "zapri"])
+        self.assertEqual((o.naslovi(), o.vrnitve), (["safeer://splet"], ["link"]))
+
+    def test_v_spletu_se_samo_zapre_zavihek(self):
+        o = Okno(v_spletu=True)
+        o.g.odpri(GLEDALEC)
+        self.assertTrue(o.g.zapri())
+        self.assertEqual(o.dnevnik, ["zapri"])
 
     def test_uporabnik_v_spletu_ostane_v_spletu(self):
         o = Okno(v_spletu=True)
@@ -314,6 +332,24 @@ class SafeerOs(unittest.TestCase):
         okno.browser_window.tabs.indexOf.return_value = -1
         self.assertFalse(os_app.SafeerOsWindow._zapri_zavihek_gledalca(okno, "pogled"))
         okno.browser_window.close_tab.assert_called_once_with(2)
+
+    def test_gledalec_kot_edini_zavihek_najprej_dobi_zacetno_stran(self):
+        okno = types.SimpleNamespace(browser_window=mock.Mock())
+        okno.browser_window.tabs.count.return_value = 1
+        okno.browser_window.tabs.indexOf.side_effect = [0, 0]
+        self.assertTrue(os_app.SafeerOsWindow._zapri_zavihek_gledalca(okno, "pogled"))
+        self.assertEqual([k[0] for k in okno.browser_window.method_calls if k[0] in ("new_tab", "close_tab")],
+                         ["new_tab", "close_tab"])
+        okno.browser_window.new_tab.assert_called_once_with(switch=False)
+        okno.browser_window.close_tab.assert_called_once_with(0)
+
+    def test_vec_zavihkov_brez_nove_zacetne_strani(self):
+        okno = types.SimpleNamespace(browser_window=mock.Mock())
+        okno.browser_window.tabs.count.return_value = 3
+        okno.browser_window.tabs.indexOf.return_value = 1
+        self.assertTrue(os_app.SafeerOsWindow._zapri_zavihek_gledalca(okno, "pogled"))
+        okno.browser_window.new_tab.assert_not_called()
+        okno.browser_window.close_tab.assert_called_once_with(1)
 
     def test_razdelek_se_prebere_enkrat_tudi_ce_stran_ne_odgovori(self):
         odgovori = []
