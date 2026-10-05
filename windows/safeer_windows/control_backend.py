@@ -46,6 +46,10 @@ DEJANJA_PREDAJA = ["play.state", "play.stop", "play.offer"]
 #: Seznami predvajanja so enaki na vseh uporabnikovih napravah v Linku (core/seznami_sink.py, SeznamiSink.kt na
 #: Androidu): druga naprava v Linku prebere sezname Medijskega centra (samo branje, brez posebne pravice).
 DEJANJA_SEZNAMI = ["lists.get"]
+#: Sejni zeton s podpisom velja pri srediscu 12 ur; toliko casa ga uporabljamo, preden vzamemo novega.
+SEJA_HTTP_HRANIMO_S = 1800.0
+#: Premori (s) med ponovnimi poskusi zagona sredisca, kadar vrata se drzi kopija programa, ki se zapira.
+POSKUSI_SREDISCA = (1.0, 1.0, 2.0, 2.0, 3.0)
 TIPKE_MEDIJ = ("play_pause", "play", "pause", "stop", "next", "previous", "naslednja", "prejsnja")
 
 
@@ -128,6 +132,8 @@ class SafeerControlBackend:
         self.ob_seznamih: Optional[Callable[[dict], dict]] = None
         self._poslusavci: List[Callable[[str, Any], None]] = []
         self._povezovanje = False
+        #: Sejni zeton za klice HTTP tujega sredisca: (zeton, velja do [monotonic], naslov sredisca).
+        self._seja_http: Tuple[str, float, str] = ("", 0.0, "")
         #: Povezovanje tece naenkrat samo enkrat (zagon programa, stran in gumb ga lahko sprozijo hkrati).
         self._povezi_kljuc = threading.Lock()
         self._zadnji_hubi: List[dict] = []
@@ -211,6 +217,47 @@ class SafeerControlBackend:
 
     def zeton(self) -> str:
         return str(self.nastavitve.get("control_token") or "")
+
+    def _gostimo_lokalno(self) -> bool:
+        """Ali je sredisce, na katero je Control prijavljen, nase (v tem procesu)."""
+        lokalni = getattr(self, "_lokalni_hub", None)
+        return bool(lokalni is not None and lokalni.tece() and lokalni.hub is not None
+                    and self.hub_url().startswith("wss://127.0.0.1:"))
+
+    def _zeton_http(self) -> str:
+        """Zeton za klice HTTP sredisca (vabilo, preimenovanje, oddaja datoteke, odhod).
+
+        Zeton seznanitve velja 24 ur, program pa lahko tece vec dni:
+        - lastno sredisce (isti proces): veljaven zeton obdrzimo, preteklega zamenjamo neposredno pri srediscu;
+        - tuje sredisce: naprava v krogu zaupanja dobi sejni zeton s podpisom kljuca (velja 12 ur, hranimo ga pol
+          ure); sicer ostane zeton seznanitve.
+        """
+        hub, zeton = self.hub_url(), self.zeton()
+        if not hub:
+            return ""
+        if self._gostimo_lokalno():
+            sredisce = self._lokalni_hub.hub
+            if zeton and sredisce.naprava_zetona(zeton) is not None:
+                return zeton
+            nov = sredisce.zeton_lastne_naprave(self.device_id, self.device_ime)
+            if not nov:
+                return zeton
+            self.nastavitve["control_token"] = nov
+            self.shrani_nastavitve()
+            return nov
+        seja, velja_do, za = getattr(self, "_seja_http", ("", 0.0, ""))
+        if seja and za == hub and time.monotonic() < velja_do:
+            return seja
+        try:
+            from core import link_krog
+            if bool(self.nastavitve.get("zaupana", True)) and link_krog.lahko_s_podpisom(self.device_id):
+                seja = link_hub.seja_s_podpisom(hub, self.device_id, self.hub_fp(), self.device_ime) or ""
+                if seja:
+                    self._seja_http = (seja, time.monotonic() + SEJA_HTTP_HRANIMO_S, hub)
+                    return seja
+        except Exception as e:  # noqa: BLE001 - brez seje ostane zeton seznanitve
+            print(f"[ControlBackend] Seja s podpisom ni uspela: {e}")
+        return zeton
 
     def stanje_povezave(self) -> dict:
         """Stanje za Safeer OS: stanje ('povezan' | 'nov' | 'brez'), control=True, zaupana, hubi."""
@@ -765,7 +812,7 @@ class SafeerControlBackend:
         streznik = link_hub_streznik.HubStreznik()
         # Deljene mape tudi prek Huba (/cast/d/): po Global Linku pride samo povezava do vrat Huba.
         streznik.datoteke = lambda: [x.streznik for x in list((getattr(self, "_datoteke", None) or {}).values())]
-        if not streznik.zazeni() or streznik.hub is None:
+        if not self._zazeni_sredisce(streznik) or streznik.hub is None:
             return None
         self._lokalni_hub = streznik
         naslov = f"wss://127.0.0.1:{streznik.vrata}/cast/ws"
@@ -793,6 +840,22 @@ class SafeerControlBackend:
             streznik.ustavi()
             self._lokalni_hub = None
             return None
+
+    @staticmethod
+    def _zazeni_sredisce(streznik) -> bool:
+        """Zazene sredisce; ce ne gre, pocaka in poskusi znova - vrata lahko se drzi kopija programa, ki se zapira.
+
+        Sredisce si na Windows vrat ne deli vec z drugim procesom (core/link_hub_streznik.nastavitve_vticnika). Prej
+        je nova kopija ob posodobitvi ali hitrem ponovnem zagonu "uspesno" poslusala na istih vratih kot stara; zdaj
+        pocaka, da jih stara sprosti. Klic tece v delovni niti (povezi_se, povezi_naprave), vmesnika ne ustavi."""
+        if streznik.zazeni():
+            return True
+        for premor in POSKUSI_SREDISCA:
+            time.sleep(premor)
+            if streznik.zazeni():
+                print("[ControlBackend] Sredisce se je zagnalo po cakanju na vrata.")
+                return True
+        return False
 
     def nadzor(self, cilj: str, dejanje: str, polozaj: Optional[float] = None, glasnost: Optional[float] = None) -> bool:
         """Ukazi za predvajanje in daljinec (seek, volume, pause, play, play_pause)."""
@@ -963,7 +1026,7 @@ class SafeerControlBackend:
         """Obnavlja isto vabilo, iz katerega stran dobi QR, pin in veljavnost."""
         self._vabilo_rod += 1
         rod = self._vabilo_rod
-        naslov, zeton, odtis = self.hub_url(), self.zeton(), self.hub_fp()
+        naslov, zeton, odtis = self.hub_url(), self._zeton_http(), self.hub_fp()
         if not naslov or not zeton:
             self._oddaj_dogodek("vabilo", {"napaka": "ni_seznanjena"})
             return
@@ -1007,13 +1070,14 @@ class SafeerControlBackend:
         """Zapre odprto vabilo in ga preklice tudi na srediscu."""
         self._vabilo_rod += 1
         staro, self._vabilo = self._vabilo, None
-        naslov, zeton, odtis = self.hub_url(), self.zeton(), self.hub_fp()
-        if staro and naslov and zeton:
-            threading.Thread(
-                target=lambda: link_hub.preklici_vabilo(naslov, zeton, odtis, str(staro["qr_id"])),
-                name="safeer-link-vabilo-preklic",
-                daemon=True,
-            ).start()
+        naslov, odtis = self.hub_url(), self.hub_fp()
+        if staro and naslov:
+            def preklici() -> None:
+                zeton = self._zeton_http()
+                if zeton:
+                    link_hub.preklici_vabilo(naslov, zeton, odtis, str(staro["qr_id"]))
+
+            threading.Thread(target=preklici, name="safeer-link-vabilo-preklic", daemon=True).start()
 
     def povezi_naprave(self) -> None:
         self.nastavitve["brez_povezave"] = False
@@ -1060,7 +1124,7 @@ class SafeerControlBackend:
 
     def pozabi_napravo(self) -> bool:
         hub = self.hub_url()
-        zeton = self.zeton()
+        zeton = self._zeton_http()
         odtis = self.hub_fp()
         if hub and zeton:
             try:
@@ -1354,6 +1418,14 @@ class SafeerControlBackend:
         elif vrsta == "cast.status":
             self._oddaj_dogodek("predvajanje", sporocilo.get("payload"))
 
+        elif vrsta == "pair.code":
+            # Nova naprava caka na kodo; sredisce jo poslje napravam v Linku. Kodo lastnega sredisca je ze pokazalo
+            # sredisce samo (ob_kodi), zato jo tu pokazemo samo, kadar smo prijavljeni na tuje. Neveljavne nikoli.
+            telo = sporocilo.get("payload") if isinstance(sporocilo.get("payload"), dict) else {}
+            koda = str(telo.get("code") or "")
+            if len(koda) == 6 and koda.isascii() and koda.isdigit() and not self._gostimo_lokalno():
+                link_hub_streznik._obvestilo_kode(str(telo.get("name") or "")[:64], koda)
+
     def _prejmi_deljenje(self, vrsta: str, sporocilo: dict) -> None:
         """Zaslon ali datoteka z druge naprave (npr. \"Odpri tukaj\" s televizorja, datoteka s telefona)."""
         od = str(sporocilo.get("sender_name") or sporocilo.get("sender") or "naprava")
@@ -1372,9 +1444,16 @@ class SafeerControlBackend:
         odtis_vsebine = str(telo.get("sha256") or "")
         if not pot or not self.hub_url():
             return
+        posiljatelj = str(sporocilo.get("sender") or "")
 
         def _prenesi() -> None:
-            cilj, razlog = link_deljenje.prevzemi_datoteko(self.hub_url(), self.hub_fp(), pot, ime, odtis_vsebine)
+            # Pot v sporocilu je relativna na sredisce, ki je datoteko sprejelo: nase (racunalnik jo odda nam) ali
+            # posiljateljevo (oddal jo je svojemu, sporocilo je prislo cez sosede). Vprasamo po vrsti.
+            sredisca = [(self.hub_url(), self.hub_fp())]
+            sredisce, _koda = self._sredisce_naprave(posiljatelj)
+            if sredisce is not None:
+                sredisca.append(sredisce)
+            cilj, razlog = link_deljenje.prevzemi_pri_srediscih(sredisca, pot, ime, odtis_vsebine)
             self._oddaj_dogodek("prejetaDatoteka", {
                 "od": od, "ime": os.path.basename(cilj) if cilj else ime, "pot": cilj or "",
                 "uspeh": bool(cilj), "napaka": "" if cilj else str(razlog or ""),
@@ -2076,7 +2155,7 @@ class SafeerControlBackend:
 
     def preimenuj_napravo(self, id_naprave: str, novo_ime: str) -> dict:
         hub = self.hub_url()
-        zeton = self.zeton()
+        zeton = self._zeton_http()
         odtis = self.hub_fp()
         if not (hub and zeton):
             return {"ok": False, "koda": "ni_povezave"}
@@ -2121,6 +2200,42 @@ class SafeerControlBackend:
             return False
         return bool(self.povezava.poslji_url(cilj, url, naslov or ""))
 
+    def _sredisce_naprave(self, id_naprave: str) -> tuple:
+        """Sredisce druge naprave, kadar to ni nase: ((naslov, odtis), "") | (None, "") | (None, koda)."""
+        lokalni = getattr(self, "_lokalni_hub", None)
+        hub = lokalni.hub if (lokalni is not None and lokalni.tece()) else None
+        try:
+            from core import link_mesh
+            return link_mesh.sredisce_naprave(hub, getattr(self, "_mesh", None), id_naprave)
+        except Exception as e:  # noqa: BLE001 - brez tega podatka ravnamo kot doslej (lastno sredisce)
+            print(f"[ControlBackend] Sredisce naprave: {e}")
+            return None, ""
+
+    def poslji_datoteko_napravi(self, cilj: str, pot: str,
+                                napredek: Optional[Callable[[int], None]] = None) -> Tuple[bool, Dict[str, str]]:
+        """Datoteko odda srediscu za napravo (PUT /cast/file); sredisce pove cilju, ta jo prevzame in preveri.
+
+        Link Mesh: naprava ima svoje sredisce in datoteko prevzame pri NJEM, zato jo oddamo tja (prijava s podpisom,
+        kot sosednja povezava). Pri nasem srediscu ostane samo naprava, ki je prijavljena neposredno nanj. Enako kot
+        Safeer Control na Linuxu. Vrne (uspeh, napaka); klic caka do konca oddaje - vedno iz delovne niti."""
+        sredisce, koda = self._sredisce_naprave(cilj)
+        if koda:
+            return False, {"sporocilo": link_deljenje.SPOROCILA_SREDISCA.get(koda, koda), "koda": koda, "zasedenaOd": ""}
+        if sredisce is not None:
+            naslov, odtis = sredisce
+            lokalni = getattr(self, "_lokalni_hub", None)
+            nas_id = str(getattr(getattr(lokalni, "hub", None), "nas_id", "") or "") or self.device_id
+            seja = link_hub.seja_s_podpisom(naslov, nas_id, odtis, self.device_ime)
+            if not seja:
+                koda = "sredisce_naprave_ni_dosegljivo"
+                return False, {"sporocilo": link_deljenje.SPOROCILA_SREDISCA[koda], "koda": koda, "zasedenaOd": ""}
+            return link_deljenje.poslji_datoteko(naslov, seja, odtis, nas_id, cilj, pot, napredek)
+        zeton = self._zeton_http()
+        if not zeton:
+            return False, {"sporocilo": "Datoteke ni mogoče poslati brez varne povezave s Safeer Linkom.",
+                           "koda": "hub_ni_znan", "zasedenaOd": ""}
+        return link_deljenje.poslji_datoteko(self.hub_url(), zeton, self.hub_fp(), self.device_id, cilj, pot, napredek)
+
     def poslji_datoteko(self, cilj: str, pot: str) -> bool:
         """Datoteko pošlje asinhrono in vmesniku sproti javlja napredek."""
         if not cilj or not os.path.isfile(pot) or not (self.hub_url() and self.zeton() and self.hub_fp()):
@@ -2139,9 +2254,7 @@ class SafeerControlBackend:
                 })
 
             _napredek(0)
-            ok, napaka = link_deljenje.poslji_datoteko(
-                self.hub_url(), self.zeton(), self.hub_fp(), self.device_id, cilj, pot, _napredek
-            )
+            ok, napaka = self.poslji_datoteko_napravi(cilj, pot, _napredek)
             self._oddaj_dogodek("deljenje", {
                 "tece": False, "cilj": cilj, "ime": ime, "odstotek": 100 if ok else 0,
                 "uspeh": ok, "napaka": "" if ok else str(napaka.get("sporocilo") or "Pošiljanje ni uspelo."),
