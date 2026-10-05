@@ -518,6 +518,8 @@ def zagotovi_izhod(koda: int = 0, cez_s: float = 8.0) -> None:
     nit.start()
 
 
+#: Predpona razdelka pred deljenim zaslonom, ce je bila odprta stran Safeer Control (»control:<razdelek>«).
+PRED_CONTROL = "control:"
 _ROCAJ_SIRINA = 22  # sirina ozkega rocaja, ko je stranska vrstica skrita v nacinu Splet
 
 
@@ -812,7 +814,7 @@ class SafeerOsWindow(QMainWindow):
             v_spletu=lambda: bool(self._spletni_nacin),
             preberi_razdelek=self._preberi_razdelek,
             pokazi_splet=self._pokazi_splet_za_gledalca,
-            vrni_v_os=self._zapri_browser,
+            vrni_v_os=self._vrni_po_gledalcu,
             pokazi_okno=self._pokazi_okno_za_gledalca,
             vrni_okno=self._vrni_okno_po_gledalcu)
         self.setCentralWidget(self.zaslon)
@@ -1571,15 +1573,26 @@ class SafeerOsWindow(QMainWindow):
 
     def _preberi_razdelek(self, nadaljuj) -> None:
         """Razdelek Safeer OS, v katerem je uporabnik (za vrnitev po koncu gledanja). Stran odgovori takoj; ce ne
-        (se se nalaga), po kratkem roku nadaljujemo brez odgovora (vrnitev na Domov)."""
+        (se se nalaga), po kratkem roku nadaljujemo brez odgovora (vrnitev na Domov). Ce je odprta stran Safeer
+        Control (svoj pogled nad razdelki), je odgovor »control:<razdelek>« - po koncu se vrnemo nanjo."""
+        v_controlu = self.control_window is not None and self.zaslon.currentWidget() is self.control_window
         opravljeno: List[bool] = []
 
         def enkrat(razdelek: Any = "") -> None:
             if not opravljeno:
                 opravljeno.append(True)
-                nadaljuj(razdelek if isinstance(razdelek, str) else "")
+                razdelek = razdelek if isinstance(razdelek, str) else ""
+                nadaljuj(PRED_CONTROL + razdelek if v_controlu else razdelek)
         self.view.page().runJavaScript("window.safeerOsRazdelek ? window.safeerOsRazdelek() : ''", enkrat)
         QTimer.singleShot(800, enkrat)
+
+    def _vrni_po_gledalcu(self, prej: str) -> None:
+        """Po koncu gledanja nazaj tja, kjer je bil uporabnik: v razdelek Safeer OS ali na stran Safeer Control."""
+        v_control = prej.startswith(PRED_CONTROL)
+        self._zapri_browser(prej[len(PRED_CONTROL):] if v_control else prej)
+        if v_control and self.control_window is not None:
+            self.zaslon.setCurrentWidget(self.control_window)
+            self.setWindowTitle("Safeer OS · Naprave")
 
     def _izmeri_stransko_in_pokazi_splet(self) -> None:
         js = (

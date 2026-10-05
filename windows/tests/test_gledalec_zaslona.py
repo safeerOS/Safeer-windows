@@ -317,7 +317,7 @@ class SafeerOs(unittest.TestCase):
 
     def test_razdelek_se_prebere_enkrat_tudi_ce_stran_ne_odgovori(self):
         odgovori = []
-        okno = types.SimpleNamespace(view=mock.Mock())
+        okno = types.SimpleNamespace(view=mock.Mock(), control_window=None, zaslon=mock.Mock())
         with mock.patch.object(os_app.QTimer, "singleShot") as pozneje:
             os_app.SafeerOsWindow._preberi_razdelek(okno, odgovori.append)
         js, povratni = okno.view.page.return_value.runJavaScript.call_args[0]
@@ -333,6 +333,68 @@ class SafeerOs(unittest.TestCase):
         okno.view.page.return_value.runJavaScript.call_args[0][1]("datoteke")
         pozneje.call_args[0][1]()
         self.assertEqual(odgovori, ["datoteke"])
+
+    # -- stran Safeer Control (svoj gradnik nad razdelki Safeer OS) --------------------------------------------
+    def _okno_s_controlom(self, control_na_zaslonu):
+        control = mock.Mock(name="control_window")
+        okno = mock.Mock()
+        okno.control_window = control
+        okno.zaslon.currentWidget.return_value = control if control_na_zaslonu else mock.Mock()
+        return okno, control
+
+    def test_razdelek_pove_da_je_bila_odprta_stran_control(self):
+        odgovori = []
+        okno, _ = self._okno_s_controlom(True)
+        with mock.patch.object(os_app.QTimer, "singleShot"):
+            os_app.SafeerOsWindow._preberi_razdelek(okno, odgovori.append)
+        okno.view.page.return_value.runJavaScript.call_args[0][1]("link")
+        self.assertEqual(odgovori, [os_app.PRED_CONTROL + "link"])
+
+    def test_razdelek_brez_strani_control_ostane_kot_prej(self):
+        odgovori = []
+        okno, _ = self._okno_s_controlom(False)
+        with mock.patch.object(os_app.QTimer, "singleShot"):
+            os_app.SafeerOsWindow._preberi_razdelek(okno, odgovori.append)
+        okno.view.page.return_value.runJavaScript.call_args[0][1]("link")
+        self.assertEqual(odgovori, ["link"])
+
+    def test_stran_control_brez_odgovora_strani(self):
+        odgovori = []
+        okno, _ = self._okno_s_controlom(True)
+        with mock.patch.object(os_app.QTimer, "singleShot") as pozneje:
+            os_app.SafeerOsWindow._preberi_razdelek(okno, odgovori.append)
+        pozneje.call_args[0][1]()
+        self.assertEqual(odgovori, [os_app.PRED_CONTROL])
+
+    def test_po_gledanju_nazaj_na_stran_control(self):
+        okno, control = self._okno_s_controlom(False)
+        os_app.SafeerOsWindow._vrni_po_gledalcu(okno, os_app.PRED_CONTROL + "link")
+        okno._zapri_browser.assert_called_once_with("link")
+        okno.zaslon.setCurrentWidget.assert_called_once_with(control)
+        okno.setWindowTitle.assert_called_once_with("Safeer OS · Naprave")
+
+    def test_po_gledanju_nazaj_v_razdelek(self):
+        okno, _ = self._okno_s_controlom(False)
+        os_app.SafeerOsWindow._vrni_po_gledalcu(okno, "datoteke")
+        okno._zapri_browser.assert_called_once_with("datoteke")
+        okno.zaslon.setCurrentWidget.assert_not_called()
+
+    def test_stran_control_ki_je_ni_vec(self):
+        okno, _ = self._okno_s_controlom(False)
+        okno.control_window = None
+        os_app.SafeerOsWindow._vrni_po_gledalcu(okno, os_app.PRED_CONTROL)
+        okno._zapri_browser.assert_called_once_with("")
+        okno.zaslon.setCurrentWidget.assert_not_called()
+
+    def test_gledalec_se_vrne_s_funkcijo_ki_pozna_control(self):
+        vir = inspect.getsource(os_app.SafeerOsWindow.__init__)
+        self.assertIn("vrni_v_os=self._vrni_po_gledalcu", vir)
+
+    def test_gledalec_razdelka_s_predpono_ne_spreminja(self):
+        o = Okno(razdelek=os_app.PRED_CONTROL + "link")
+        o.g.odpri(GLEDALEC)
+        o.g.zapri()
+        self.assertEqual(o.vrnitve, [os_app.PRED_CONTROL + "link"])
 
 
 if __name__ == "__main__":
