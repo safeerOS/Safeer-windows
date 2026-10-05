@@ -29,6 +29,7 @@ import threading
 import time
 from typing import Dict, List, Optional
 
+from core import link_vticnik
 from core.link_datoteke import TLS_MAPA, zagotovi_potrdilo
 from core.link_mediji import CAKAJ_MPRIS_S, dogodek_v_tipko
 from core.link_plosek import Plosek
@@ -54,6 +55,12 @@ PRAZNO_PO_ZAPRTJU_S, PRAZNO_OD_ZACETKA_S = 1.5, 30.0
 ZVOK_HZ, ZVOK_KANALI = 48000, 2
 #: Kolikor casa cakamo, da se televizor javi, preden sejo zavrzemo.
 CAKANJE_S = 30
+#: Toliko casa ima, kdor se poveze, za rokovanje TLS in pozdrav; kdor obstane, ne sme zadrzati televizorja.
+ROKOVANJE_S = 10
+#: Najdlje sme pisanje enega okvirja cakati na televizor. Televizor sam po 10 s tisine sejo konca
+#: (ZaslonOdjemalec.TISINA_MS); kdor dvakrat toliko ne vzame nobenega bajta, ga ni vec. Brez te omejitve je
+#: seja visela, dokler ni obupalo jedro (cetrt ure ali nikoli), z njo pa zajem in programi na locenem zaslonu.
+ROK_PISANJA_S = 20.0
 #: Najvecja slika, ki jo posiljamo (televizor je 4K, a 1080p je za namizje dovolj in hitreje).
 NAJVEC_SIRINA, NAJVEC_VISINA = 1920, 1080
 # Kvantizator (qp) je pri tem kodirniku edini vzvod kakovosti - gonilnik zna samo CQP. Izmerjeno na
@@ -160,6 +167,40 @@ def privzeti_monitor() -> Optional[str]:
     return None
 
 
+def _okvir(vrsta: int, vsebina: bytes) -> bytes:
+    """Okvir pretoka: bajt vrste, stirje bajti dolzine, vsebina."""
+    return bytes([vrsta]) + len(vsebina).to_bytes(4, "big") + vsebina
+
+
+def _zapri(s) -> None:
+    """shutdown pred close: niti, ki na vticnici cakajo (branje, pisanje), se zbudijo, druga stran pa dobi konec.
+    Samo close() ne zbudi nikogar in televizorju konca ne poslje, dokler vticnico kdo drzi."""
+    if s is None:
+        return
+    try:
+        s.shutdown(socket.SHUT_RDWR)
+    except Exception:
+        pass
+    try:
+        s.close()
+    except Exception:
+        pass
+
+
+def _koncaj(proces: Optional[subprocess.Popen]) -> None:
+    """Ustavi zajem (slika ali zvok); ce se na prijazen konec ne odzove, ga ubije."""
+    if proces is None or proces.poll() is not None:
+        return
+    try:
+        proces.terminate()
+        proces.wait(timeout=3)
+    except Exception:
+        try:
+            proces.kill()
+        except Exception:
+            pass
+
+
 def ukaz_zvok(vir: str, ffmpeg: str = "ffmpeg") -> List[str]:
     """Zajem zvoka racunalnika kot surov PCM. Majhni koscki (10 ms), da zvok ne zaostaja za sliko."""
     return [ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin",
@@ -194,7 +235,8 @@ class Zaslon:
         self._proces: Optional[subprocess.Popen] = None
         self._zvocni: Optional[subprocess.Popen] = None
         self._nit: Optional[threading.Thread] = None
-        self._pisalo = threading.Lock()
+        #: Povezava televizorja v tekoci seji (ovita, core/link_vticnik.py); ustavi() jo zapre in s tem zbudi niti seje.
+        self._odjemalec = None
         self._vnos = Vnos()
         # Navidezni igralni plosek racunalnika: nastane sele, ko televizor res poslje plosek.
         self._plosek = Plosek()
@@ -287,6 +329,7 @@ class Zaslon:
             raise RuntimeError("Zaslona ni mogoce zajeti (seja ni na voljo)")
         k = KAKOVOSTI.get(kakovost) or KAKOVOSTI[PRIVZETA_KAKOVOST]
         self._seja_st += 1
+        seja_st = self._seja_st
         if cilj == "apps" and self.drugi is not None and not self.drugi.tece():
             # Televizor hoce program, locenega zaslona pa ni vec (Control je bil znova zagnan,
             # programi so zaprti). Prej je dobil namizje racunalnika - tega ni zahteval in tam
@@ -333,7 +376,7 @@ class Zaslon:
                 self._vnos = Vnos(display=display)
                 ukaz = ukaz_ffmpeg(display, sirina, visina, izvor[0], izvor[1], int(k["fps"]),
                                    str(k["bitrate"]), vaapi_naprava(), self.ffmpeg, int(k["qp"]))
-            self._nit = threading.Thread(target=self._streci, args=(posluh, ctx, ukaz),
+            self._nit = threading.Thread(target=self._streci, args=(posluh, ctx, ukaz, seja_st),
                                          name="safeer-zaslon", daemon=True)
             self._nit.start()
         return {"port": self.vrata, "fp": self.odtis, "token": self._zeton, "v": 2,
@@ -357,15 +400,36 @@ class Zaslon:
         merilo = min(najvec_sirina / s, najvec_visina / v, 1.0)
         return (max(2, int(s * merilo) // 2 * 2), max(2, int(v * merilo) // 2 * 2))
 
-    def _streci(self, posluh: socket.socket, ctx: ssl.SSLContext, ukaz: List[str]) -> None:
-        odjemalec = None
-        try:
+    def _sprejmi(self, posluh: socket.socket, ctx: ssl.SSLContext):
+        """Caka televizor s pravim zetonom. Kdor pride z napacnim (ali brez TLS), ne dobi nicesar in seje tudi
+        ne podre - televizor, ki mu je zaslon namenjen, se lahko se vedno poveze. (Prej je prva tuja povezava
+        sejo koncala: kdorkoli v omrezju je lahko deljenje zaslona preprecil.)"""
+        konec = time.monotonic() + CAKANJE_S
+        while time.monotonic() < konec:
+            posluh.settimeout(max(0.1, konec - time.monotonic()))
             surov, _ = posluh.accept()
-            odjemalec = ctx.wrap_socket(surov, server_side=True)
-            odjemalec.settimeout(10)
-            pozdrav = self._preberi_vrstico(odjemalec)
-            if not pozdrav.startswith("SAFEER-ZASLON ") or pozdrav.split(" ", 1)[1].strip() != self._zeton:
-                odjemalec.close()
+            odjemalec = None
+            try:
+                surov.settimeout(ROKOVANJE_S)
+                # Slika in zvok sta drobni, pogosti okvirji: vsak naj gre takoj, ne sele po potrditvi prejsnjega.
+                link_vticnik.brez_zamika(surov)
+                odjemalec = ctx.wrap_socket(surov, server_side=True)
+                pozdrav = self._preberi_vrstico(odjemalec)
+                zeton = self._zeton
+                if zeton and pozdrav.startswith("SAFEER-ZASLON ") and secrets.compare_digest(
+                        pozdrav.split(" ", 1)[1].strip().encode("utf-8"), zeton.encode("utf-8")):
+                    return odjemalec
+            except (OSError, ssl.SSLError, ValueError):
+                pass
+            _zapri(odjemalec if odjemalec is not None else surov)
+        return None
+
+    def _streci(self, posluh: socket.socket, ctx: ssl.SSLContext, ukaz: List[str], seja: int) -> None:
+        odjemalec = None
+        slika = zvok = None
+        try:
+            odjemalec = self._sprejmi(posluh, ctx)
+            if odjemalec is None:
                 return
             glava = {"v": 2, "w": self._slika["width"], "h": self._slika["height"],
                      "fps": self._slika["fps"],
@@ -373,23 +437,35 @@ class Zaslon:
                      "vnos": self._vnos.mozno, "plosek": self._plosek.mozno()}
             odjemalec.sendall((json.dumps(glava) + "\n").encode("utf-8"))
             odjemalec.settimeout(None)
-            self._povezan = True
+            # Sliko in zvok piseta dve niti, vnos bere tretja: vticnica TLS tega sama ne prenese
+            # (core/link_vticnik.py). Ovita vticnica obenem jamci, da gre vsak okvir (en sendall) ven cel.
+            # Branje sme cakati poljubno dolgo - televizor med gledanjem ne posilja nicesar -, pisanje pa ne.
+            odjemalec = link_vticnik.zavaruj(odjemalec)
+            if isinstance(odjemalec, link_vticnik.VarnaTls):
+                odjemalec.nastavi_rok_pisanja(ROK_PISANJA_S)
 
-            slika = subprocess.Popen(ukaz, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                                     stdin=subprocess.DEVNULL, bufsize=0, env=self._okolje_zajema)
-            self._proces = slika
-            niti = [threading.Thread(target=self._crpaj, args=(slika, OKVIR_SLIKA, odjemalec, 32 * 1024),
-                                     name="safeer-zaslon-slika", daemon=True)]
-            if self._zvok_vir:
-                try:
-                    zvok = subprocess.Popen(ukaz_zvok(self._zvok_vir, self.ffmpeg), stdout=subprocess.PIPE,
-                                            stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, bufsize=0)
-                    self._zvocni = zvok
-                    # Zvok beremo v majhnih koscih (10 ms), da ne caka za veliko sliko.
-                    niti.append(threading.Thread(target=self._crpaj, args=(zvok, OKVIR_ZVOK, odjemalec, 1920),
-                                                 name="safeer-zaslon-zvok", daemon=True))
-                except Exception:
-                    self._zvocni = None
+            niti = []
+            with self._kljucavnica:
+                if self._seja_st != seja or self._posluh is not posluh:
+                    return                  # medtem ustavljeno ali pa se je zacela nova seja
+                # Zajem zazenemo pod kljucem in ga takoj vpisemo: ustavi() ga tako vedno najde.
+                slika = subprocess.Popen(ukaz, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                         stdin=subprocess.DEVNULL, bufsize=0, env=self._okolje_zajema)
+                self._proces = slika
+                self._odjemalec = odjemalec
+                self._povezan = True
+                niti.append(threading.Thread(target=self._crpaj, args=(slika, OKVIR_SLIKA, odjemalec, 32 * 1024),
+                                             name="safeer-zaslon-slika", daemon=True))
+                if self._zvok_vir:
+                    try:
+                        zvok = subprocess.Popen(ukaz_zvok(self._zvok_vir, self.ffmpeg), stdout=subprocess.PIPE,
+                                                stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, bufsize=0)
+                        self._zvocni = zvok
+                        # Zvok beremo v majhnih koscih (10 ms), da ne caka za veliko sliko.
+                        niti.append(threading.Thread(target=self._crpaj, args=(zvok, OKVIR_ZVOK, odjemalec, 1920),
+                                                     name="safeer-zaslon-zvok", daemon=True))
+                    except Exception:
+                        zvok = self._zvocni = None
             # Vnos tece nazaj po isti povezavi; brati ga moramo sproti, sicer se vticnica zamasi.
             niti.append(threading.Thread(target=self._beri_vnos, args=(odjemalec,),
                                          name="safeer-zaslon-vnos", daemon=True))
@@ -405,22 +481,27 @@ class Zaslon:
         except (OSError, ssl.SSLError, ValueError):
             pass
         finally:
-            self._povezan = False
-            try:
-                if odjemalec is not None:
-                    # Najprej shutdown: druge niti (zvok, vnos) drzijo vticnico in sam close televizorju
-                    # ne bi poslal konca - ta bi gledal zamrznjeno sliko.
-                    try:
-                        odjemalec.shutdown(socket.SHUT_RDWR)
-                    except (OSError, ValueError):
-                        pass
-                    odjemalec.close()
-            except Exception:
-                pass
-            if self._cilj == "apps" and self.drugi is not None:
-                self._strazi_osirotele(self._seja_st)
-                self._pospravi_zvok_po_seji(self._seja_st)
-            self.ustavi()
+            # Najprej shutdown: druge niti (zvok, vnos) drzijo vticnico in sam close televizorju
+            # ne bi poslal konca - ta bi gledal zamrznjeno sliko.
+            _zapri(odjemalec)
+            _koncaj(slika)
+            _koncaj(zvok)
+            # Seja pospravi samo za sabo. Ce se je medtem zacela nova (televizor se je povezal znova), je ta nit
+            # prej ustavila in podrla tudi njo: ustavi() ne loci, cigav je zajem, ki ga konca.
+            with self._kljucavnica:
+                moja = self._seja_st == seja
+                if self._odjemalec is odjemalec:
+                    self._odjemalec = None
+            if moja:
+                if self._cilj == "apps" and self.drugi is not None:
+                    self._strazi_osirotele(seja)
+                    self._pospravi_zvok_po_seji(seja)
+                self.ustavi(seja)
+            else:
+                try:
+                    posluh.close()
+                except OSError:
+                    pass
 
     def _strazi_osirotele(self, seja: int) -> None:
         """Televizor je izginil sredi seje (ugasnjen, aplikacija zaprta ali posodobljena) in se ne
@@ -474,10 +555,8 @@ class Zaslon:
                 continue
             if self._proces is not slika:
                 return
-            vsebina = json.dumps({"konec": razlog}).encode("utf-8")
             try:
-                with self._pisalo:
-                    odjemalec.sendall(bytes([OKVIR_OBVESTILO]) + len(vsebina).to_bytes(4, "big") + vsebina)
+                odjemalec.sendall(_okvir(OKVIR_OBVESTILO, json.dumps({"konec": razlog}).encode("utf-8")))
             except (OSError, ssl.SSLError, ValueError):
                 pass
             print("[zaslon] drugi zaslon je prazen (%s), seja koncana" % razlog, flush=True)
@@ -485,16 +564,18 @@ class Zaslon:
             return
 
     def _crpaj(self, proces: subprocess.Popen, vrsta: int, odjemalec, kos: int) -> None:
-        """Bere en vir (slika ali zvok) in ga v okvirjih poslje televizorju. Pisanje je pod kljucem,
-        da se okvirja dveh virov nikoli ne prepletata."""
+        """Bere en vir (slika ali zvok) in ga v okvirjih poslje televizorju. Vsak okvir je en `sendall`
+        na oviti vticnici, ta pa jamci, da se okvirja dveh virov nikoli ne prepleteta.
+
+        Kljucavnica za pisanje je tako del povezave in ne vec del tega objekta: prej je pisanje stare seje, ki je
+        obstalo (televizor je izginil brez slovesa), drzalo kljucavnico tudi novi seji - televizor se je povezal
+        znova, slike pa ni dobil, dokler jedro stare povezave ni opustilo."""
         try:
             while True:
                 podatki = proces.stdout.read(kos)
                 if not podatki:
                     break
-                glava = bytes([vrsta]) + len(podatki).to_bytes(4, "big")
-                with self._pisalo:
-                    odjemalec.sendall(glava + podatki)
+                odjemalec.sendall(_okvir(vrsta, podatki))
         except (OSError, ssl.SSLError, ValueError, AttributeError):
             pass
 
@@ -511,10 +592,8 @@ class Zaslon:
 
     def _obvesti(self, odjemalec, podatki: dict) -> None:
         """Obvestilo televizorju po isti povezavi kot slika (okvir izbire, kazalec za povecavo ...)."""
-        vsebina = json.dumps(podatki).encode("utf-8")
         try:
-            with self._pisalo:
-                odjemalec.sendall(bytes([OKVIR_OBVESTILO]) + len(vsebina).to_bytes(4, "big") + vsebina)
+            odjemalec.sendall(_okvir(OKVIR_OBVESTILO, json.dumps(podatki).encode("utf-8")))
         except (OSError, ssl.SSLError, ValueError):
             pass
 
@@ -675,29 +754,30 @@ class Zaslon:
         """Ob preklopu nazaj na navadni daljinec spusti gumbe in osi."""
         self._plosek.sprosti_vse()
 
-    def ustavi(self) -> None:
-        """Konca zajem in zapre vrata; zeton takoj ne velja vec."""
-        self._vnos.sprosti_vse()
-        self._plosek.zapri()
+    def ustavi(self, seja: Optional[int] = None) -> None:
+        """Konca zajem in zapre vrata; zeton takoj ne velja vec.
+
+        Nit seje, ki pospravlja za sabo, poda svojo stevilko `seja`: ce se je medtem zacela nova seja, klic ne
+        naredi nicesar (sicer bi konec stare seje ustavil novo)."""
         with self._kljucavnica:
-            proces, zvocni, posluh = self._proces, self._zvocni, self._posluh
+            if seja is not None and self._seja_st != seja:
+                return
+            proces, zvocni, posluh, odjemalec = self._proces, self._zvocni, self._posluh, self._odjemalec
             self._proces = None
             self._zvocni = None
             self._posluh = None
+            self._odjemalec = None
+            self._povezan = False
             self._zeton = ""
             self.vrata = 0
             self._tece_od = 0.0
+        self._vnos.sprosti_vse()
+        self._plosek.zapri()
         for p in (proces, zvocni):
-            if p is None:
-                continue
-            try:
-                p.terminate()
-                p.wait(timeout=3)
-            except Exception:
-                try:
-                    p.kill()
-                except Exception:
-                    pass
+            _koncaj(p)
+        # Niti seje lahko visijo na povezavi (pisanje televizorju, ki ne bere vec; branje vnosa). Konec zajema jih
+        # ne zbudi; shutdown jih. Brez tega je stara seja zivela naprej in ob svojem koncu podrla naslednjo.
+        _zapri(odjemalec)
         if posluh is not None:
             # Nit visi v accept(); samo close() je ne prebudi vedno, shutdown() pa jo.
             try:
