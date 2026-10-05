@@ -27,6 +27,7 @@ CORE_DIR = os.path.abspath(os.path.join(PACKAGE_DIR, "..", ".."))
 if CORE_DIR not in sys.path:
     sys.path.insert(0, CORE_DIR)
 
+from core import link_vticnik
 from core.link_datoteke import TLS_MAPA, zagotovi_potrdilo
 from safeer_windows import os_backend_win, policy, zajem_zaslona
 
@@ -47,6 +48,28 @@ PRIVZETA_KAKOVOST = "najvisja"
 OKVIR_SLIKA = 1
 OKVIR_ZVOK = 2
 OKVIR_OBVESTILO = 3
+
+#: Kolikor casa cakamo, da se naprava javi, preden sejo zavrzemo.
+CAKANJE_S = 30.0
+#: Toliko casa ima, kdor se poveze, za rokovanje TLS in pozdrav; kdor obstane, ne sme zadrzati prave naprave.
+ROKOVANJE_S = 10.0
+#: Najdlje sme pisanje enega okvirja cakati na napravo. Televizor sam po 10 s tisine sejo konca; kdor dvakrat
+#: toliko ne vzame nobenega bajta, ga ni vec. Brez te omejitve je seja (in zajem zaslona) visela v nedogled.
+ROK_PISANJA_S = 20.0
+
+
+def _zapri(s) -> None:
+    """shutdown pred close: niti, ki na vticnici cakajo, se zbudijo, druga stran pa dobi konec."""
+    if s is None:
+        return
+    try:
+        s.shutdown(socket.SHUT_RDWR)
+    except Exception:
+        pass
+    try:
+        s.close()
+    except Exception:
+        pass
 
 # Visoka kakovost posnetka zaslona (ostra besedila, 1280x720 ali polno 1080p, visoka kompresija JPEG)
 POSNETEK_SIRINA = 1280
@@ -126,6 +149,8 @@ class NavidezniZaslon:
         self._tece = False
         self._posiljatelj_seje = ""
         self._seja_nit: Optional[threading.Thread] = None
+        #: Stevec sej: nit seje ob koncu pospravi samo, ce je njena seja se tekoca.
+        self._seja_st = 0
         self._kljuc = threading.RLock()
 
         self.vnos = NavidezniVnos(self)
@@ -600,6 +625,8 @@ class NavidezniZaslon:
     def zacni_sejo(self, posiljatelj: str, kakovost: str = PRIVZETA_KAKOVOST) -> dict:
         """Začne visoko kakovosten pretočni strežnik za navidezni ločeni zaslon (skladno s core/link_zaslon.py)."""
         with self._kljuc:
+            self._seja_st += 1
+            seja = self._seja_st
             self.ustavi_sejo()
 
             self._zeton = secrets.token_urlsafe(24)
@@ -618,7 +645,7 @@ class NavidezniZaslon:
             posluh.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             posluh.bind(("0.0.0.0", 0))
             posluh.listen(1)
-            posluh.settimeout(30.0)
+            posluh.settimeout(CAKANJE_S)
 
             self.vrata = posluh.getsockname()[1]
             self._posluh = posluh
@@ -630,7 +657,7 @@ class NavidezniZaslon:
             fps = min(30, int(k.get("fps", 30)))
             self._slika_seje = zajem_zaslona.velikost_slike()
 
-            self._seja_nit = threading.Thread(target=self._streci_sejo, args=(posluh, ctx, fps),
+            self._seja_nit = threading.Thread(target=self._streci_sejo, args=(posluh, ctx, fps, seja),
                                               name="safeer-navidezni-zaslon-streznik", daemon=True)
             self._seja_nit.start()
 
@@ -655,24 +682,42 @@ class NavidezniZaslon:
                 "media": False,
             }
 
-    def _streci_sejo(self, posluh: socket.socket, ctx: ssl.SSLContext, fps: int = 60) -> None:
+    def _sprejmi(self, posluh: socket.socket, ctx: ssl.SSLContext):
+        """Caka napravo s pravim zetonom. Kdor pride z napacnim (ali brez TLS), ne dobi nicesar in seje tudi
+        ne podre - naprava, ki ji je zaslon namenjen, se lahko se vedno poveze. (Prej je prva tuja povezava
+        sejo koncala: kdorkoli v omrezju je lahko deljenje zaslona preprecil.)"""
+        konec = time.monotonic() + CAKANJE_S
+        while time.monotonic() < konec:
+            posluh.settimeout(max(0.1, konec - time.monotonic()))
+            surov, _ = posluh.accept()
+            odjemalec = None
+            try:
+                surov.settimeout(ROKOVANJE_S)
+                # Slika so drobni, pogosti okvirji: vsak naj gre takoj, ne sele po potrditvi prejsnjega.
+                link_vticnik.brez_zamika(surov)
+                odjemalec = ctx.wrap_socket(surov, server_side=True)
+                vrstica = b""
+                while b"\n" not in vrstica and len(vrstica) < 256:
+                    b = odjemalec.recv(1)
+                    if not b:
+                        break
+                    vrstica += b
+                deli = vrstica.decode("utf-8", "replace").strip().split(" ", 1)
+                zeton = self._zeton
+                # Primerjamo bajte: compare_digest z nizom, ki ni cisti ASCII, vrze TypeError.
+                if zeton and len(deli) == 2 and deli[0] == "SAFEER-ZASLON" and hmac.compare_digest(
+                        deli[1].encode("utf-8"), zeton.encode("utf-8")):
+                    return odjemalec
+            except (OSError, ssl.SSLError, ValueError):
+                pass
+            _zapri(odjemalec if odjemalec is not None else surov)
+        return None
+
+    def _streci_sejo(self, posluh: socket.socket, ctx: ssl.SSLContext, fps: int = 60, seja: int = 0) -> None:
         odjemalec = None
         try:
-            surov, _ = posluh.accept()
-            odjemalec = ctx.wrap_socket(surov, server_side=True)
-            odjemalec.settimeout(10.0)
-
-            # Preberi pozdrav
-            vrstica = b""
-            while b"\n" not in vrstica and len(vrstica) < 256:
-                b = odjemalec.recv(1)
-                if not b:
-                    break
-                vrstica += b
-            pozdrav = vrstica.decode("utf-8", "replace").strip()
-            deli = pozdrav.split(" ", 1)
-            if len(deli) != 2 or deli[0] != "SAFEER-ZASLON" or not hmac.compare_digest(deli[1], self._zeton):
-                odjemalec.close()
+            odjemalec = self._sprejmi(posluh, ctx)
+            if odjemalec is None:
                 return
 
             try:
@@ -692,39 +737,48 @@ class NavidezniZaslon:
             }
             odjemalec.sendall((json.dumps(glava) + "\n").encode("utf-8"))
             odjemalec.settimeout(None)
-            self._odjemalec = odjemalec
-            self._vnos_windows = zajem_zaslona.WindowsVnos(zajem.izvor, (zajem.sirina, zajem.visina))
+            # Sliko pise ta nit, vnos bere druga: vticnica TLS dveh niti sama ne prenese (core/link_vticnik.py).
+            # Branje sme cakati poljubno dolgo - naprava med gledanjem ne posilja nicesar -, pisanje pa ne.
+            odjemalec = link_vticnik.zavaruj(odjemalec)
+            if isinstance(odjemalec, link_vticnik.VarnaTls):
+                odjemalec.nastavi_rok_pisanja(ROK_PISANJA_S)
+            vnos = zajem_zaslona.WindowsVnos(zajem.izvor, (zajem.sirina, zajem.visina))
+            with self._kljuc:
+                if seja != self._seja_st or self._posluh is not posluh:
+                    zajem.zapri()            # medtem ustavljeno ali pa se je zacela nova seja
+                    return
+                self._odjemalec = odjemalec
+                self._vnos_windows = vnos
 
             # Nit za branje povratnega vnosa iz naprave (TV daljinec, telefon)
-            nit_vnos = threading.Thread(target=self._beri_povratni_vnos, args=(odjemalec,),
+            nit_vnos = threading.Thread(target=self._beri_povratni_vnos, args=(odjemalec, vnos, seja),
                                         name="safeer-navidezni-zaslon-vnos", daemon=True)
             nit_vnos.start()
             print(f"[NavidezniZaslon] Zaslon {zajem.sirina}x{zajem.visina} @ {zajem.fps} ({zajem.kodirnik})", flush=True)
             try:
-                for kos in zajem.okvirji(lambda: self._tece and nit_vnos.is_alive()):
+                for kos in zajem.okvirji(lambda: self._tece and seja == self._seja_st and nit_vnos.is_alive()):
                     odjemalec.sendall(bytes([1]) + len(kos).to_bytes(4, "big") + kos)
             finally:
                 zajem.zapri()
-                if self._vnos_windows is not None:
-                    self._vnos_windows.sprosti_vse()
+                vnos.sprosti_vse()
 
         except Exception as e:
             # Zapiranje poslušalca med običajnim `ustavi_sejo` prekine blokirani accept/recv.
             # To ni napaka in ne sme onesnažiti dnevnika končnega uporabnika.
-            if self._tece:
+            if self._tece and seja == self._seja_st:
                 print(f"[NavidezniZaslon] Seja prekinjena: {e}")
         finally:
-            if odjemalec:
-                try:
-                    odjemalec.close()
-                except Exception:
-                    pass
-            self.ustavi_sejo()
+            _zapri(odjemalec)
+            # Seja pospravi samo za sabo. Prej je konec stare seje vedno ustavil tudi novo: ce je druga naprava
+            # prevzela zaslon, medtem ko ga je prva se gledala, se ni mogla povezati (vrata je zaprla stara nit).
+            self.ustavi_sejo(seja)
 
-    def _beri_povratni_vnos(self, odjemalec: ssl.SSLSocket) -> None:
+    def _beri_povratni_vnos(self, odjemalec, vnos=None, seja: Optional[int] = None) -> None:
         ostanek = b""
+        if vnos is None:
+            vnos = self._vnos_windows
         try:
-            while self._tece:
+            while self._tece and (seja is None or seja == self._seja_st):
                 kos = odjemalec.recv(4096)
                 if not kos:
                     break
@@ -737,26 +791,24 @@ class NavidezniZaslon:
                         dogodek = json.loads(vrstica.decode("utf-8", "replace"))
                         # Pravi zaslon: dogodek gre na pravo misko/tipkovnico; ce ga ne pozna, ga
                         # obdela se navidezni kontekst (glasnost, stanje programov).
-                        if not (self._vnos_windows is not None and self._vnos_windows.izvedi(dogodek)):
+                        if not (vnos is not None and vnos.izvedi(dogodek)):
                             self.obdelaj_vnosni_dogodek(dogodek)
                     except Exception:
                         continue
         except Exception:
             pass
 
-    def ustavi_sejo(self) -> None:
-        """Ustavi pretočni strežnik navideznega zaslona."""
+    def ustavi_sejo(self, seja: Optional[int] = None) -> None:
+        """Ustavi pretočni strežnik navideznega zaslona.
+
+        Nit seje, ki pospravlja za sabo, poda svojo številko `seja`: če se je medtem začela nova seja, klic ne
+        naredi ničesar."""
         with self._kljuc:
+            if seja is not None and seja != self._seja_st:
+                return
             self._tece = False
             if self._odjemalec:
-                try:
-                    self._odjemalec.shutdown(socket.SHUT_RDWR)
-                except Exception:
-                    pass
-                try:
-                    self._odjemalec.close()
-                except Exception:
-                    pass
+                _zapri(self._odjemalec)
                 self._odjemalec = None
 
             if self._posluh:
