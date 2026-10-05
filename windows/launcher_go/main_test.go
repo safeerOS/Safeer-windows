@@ -3,11 +3,14 @@ package main
 import (
 	"archive/zip"
 	"bytes"
+	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +21,11 @@ func TestMain(m *testing.M) {
 	if os.Getenv("SAFEER_PREIZKUS_SPI") == "1" {
 		time.Sleep(6 * time.Second)
 		return
+	}
+	// ... in »koncaj se s to kodo«: prava napaka podprocesa z izhodno kodo.
+	if koda := os.Getenv("SAFEER_PREIZKUS_KODA"); koda != "" {
+		n, _ := strconv.Atoi(koda)
+		os.Exit(n)
 	}
 	os.Exit(m.Run())
 }
@@ -754,5 +762,163 @@ func TestZaganjalnikVRabiSeZamenja(t *testing.T) {
 	pocistiOstankeZaganjalnika(stalna)
 	if ostalo := imena(t, mapa); ostalo != "SafeerOS-Windows-9.9.9.exe SafeerOS.exe" {
 		t.Fatalf("ostalo: %s", ostalo)
+	}
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Zagon programa: knjiznice preveri program sam (krog 105).
+
+// izhodSKodo vrne napako pravega podprocesa, ki se je koncal s to kodo (nil pri kodi 0).
+func izhodSKodo(t *testing.T, koda int) error {
+	t.Helper()
+	jaz, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(jaz)
+	cmd.Env = append(os.Environ(), fmt.Sprintf("SAFEER_PREIZKUS_KODA=%d", koda))
+	return cmd.Run()
+}
+
+func TestKodaIzhoda(t *testing.T) {
+	if k := kodaIzhoda(nil); k != 0 {
+		t.Errorf("brez napake: %d", k)
+	}
+	if k := kodaIzhoda(errors.New("ni izhodna koda")); k != -1 {
+		t.Errorf("druga napaka: %d", k)
+	}
+	for _, koda := range []int{1, kodaManjkajoKnjiznice} {
+		if k := kodaIzhoda(izhodSKodo(t, koda)); k != koda {
+			t.Errorf("podproces s kodo %d: %d", koda, k)
+		}
+	}
+	if err := izhodSKodo(t, 0); err != nil {
+		t.Errorf("podproces s kodo 0: %v", err)
+	}
+}
+
+func koncan(err error, po time.Duration) <-chan error {
+	c := make(chan error, 1)
+	go func() {
+		time.Sleep(po)
+		c <- err
+	}()
+	return c
+}
+
+func TestPocakajNaZagon(t *testing.T) {
+	dnevnik := filepath.Join(t.TempDir(), "safeer_os.log")
+	tece := make(chan error) // program, ki se ne konca
+	meri := func(opis string, konec <-chan error, cakaOznako bool, najmanj, najdlje time.Duration, pricakovano int, vsaj time.Duration) error {
+		t.Helper()
+		zacetek := time.Now()
+		stanje, err := pocakajNaZagon(konec, dnevnik, cakaOznako, najmanj, najdlje)
+		if trajalo := time.Since(zacetek); stanje != pricakovano || trajalo < vsaj || trajalo > vsaj+4*time.Second {
+			t.Fatalf("%s: stanje=%d (pricakovano %d), trajalo %v (vsaj %v)", opis, stanje, pricakovano, trajalo, vsaj)
+		}
+		return err
+	}
+
+	// Oznaka pride cez 250 ms: program zazivi, a ne pred `najmanj`.
+	os.WriteFile(dnevnik, []byte("prva vrstica\n"), 0644)
+	go func() {
+		time.Sleep(250 * time.Millisecond)
+		os.WriteFile(dnevnik, []byte("prva vrstica\n"+oznakaKnjizniceOK+"\n"), 0644)
+	}()
+	meri("oznaka med cakanjem", tece, true, 600*time.Millisecond, 20*time.Second, zagonTece, 600*time.Millisecond)
+	// Oznaka je ze tam: po `najmanj`.
+	meri("oznaka ze v dnevniku", tece, true, 300*time.Millisecond, 20*time.Second, zagonTece, 300*time.Millisecond)
+	// Oznake ni (program brez preverbe): caka do `najdlje`.
+	os.WriteFile(dnevnik, []byte("brez oznake\n"), 0644)
+	meri("brez oznake", tece, true, 100*time.Millisecond, 700*time.Millisecond, zagonTece, 700*time.Millisecond)
+	os.Remove(dnevnik)
+	meri("brez dnevnika", tece, true, 100*time.Millisecond, 500*time.Millisecond, zagonTece, 500*time.Millisecond)
+	// Zagon brez preverbe: po `najmanj`, oznake ne caka.
+	meri("brez preverbe", tece, false, 300*time.Millisecond, 20*time.Second, zagonTece, 300*time.Millisecond)
+
+	// Program se konca: brez napake (okno je prepustil prvemu zagonu), s kodo manjkajocih knjiznic, z drugo napako.
+	if err := meri("konec brez napake", koncan(nil, 50*time.Millisecond), true, time.Second, 20*time.Second, zagonTece, 0); err != nil {
+		t.Fatalf("konec brez napake: %v", err)
+	}
+	manjkajo, napaka := izhodSKodo(t, kodaManjkajoKnjiznice), izhodSKodo(t, 1)
+	if err := meri("manjkajo knjiznice", koncan(manjkajo, 50*time.Millisecond), true, time.Second, 20*time.Second, zagonManjkajo, 0); err != manjkajo {
+		t.Fatalf("manjkajo knjiznice: %v", err)
+	}
+	if err := meri("druga napaka", koncan(napaka, 50*time.Millisecond), true, time.Second, 20*time.Second, zagonNapaka, 0); err != napaka {
+		t.Fatalf("druga napaka: %v", err)
+	}
+	// Brez narocene preverbe koda 86 ni dogovor, ampak napaka.
+	meri("koda 86 brez preverbe", koncan(manjkajo, 50*time.Millisecond), false, time.Second, 20*time.Second, zagonNapaka, 0)
+}
+
+func TestZazeniProgram(t *testing.T) {
+	dnevnik := filepath.Join(t.TempDir(), "safeer_os.log")
+	tece := make(chan error)
+	manjkajo, napaka := izhodSKodo(t, kodaManjkajoKnjiznice), izhodSKodo(t, 1)
+	type potek struct {
+		opis        string
+		zagoni      []func() (<-chan error, error) // izid vsakega zagona po vrsti
+		namestitev  error
+		tece        bool
+		preverbe    string // s katerim narocilom je bil program zagnan, npr. "da ne"
+		namestitev1 int
+		sporocila   []string // zacetki naslovov
+		vSporocilu  string
+	}
+	ziv := func() (<-chan error, error) {
+		os.WriteFile(dnevnik, []byte(oznakaKnjizniceOK+"\n"), 0644)
+		return tece, nil
+	}
+	zivBrezOznake := func() (<-chan error, error) { return tece, nil }
+	konca := func(err error, izpis string) func() (<-chan error, error) {
+		return func() (<-chan error, error) {
+			os.WriteFile(dnevnik, []byte(izpis), 0644)
+			return koncan(err, 30*time.Millisecond), nil
+		}
+	}
+	neZazene := func() (<-chan error, error) { return nil, errors.New("python.exe ni najden") }
+	for _, p := range []potek{
+		{opis: "vse na mestu", zagoni: []func() (<-chan error, error){ziv}, tece: true, preverbe: "da"},
+		{opis: "manjkajo, namestitev uspe", zagoni: []func() (<-chan error, error){konca(manjkajo, "[SafeerOS] manjkajo knjiznice: av\n"), zivBrezOznake},
+			tece: true, preverbe: "da ne", namestitev1: 1},
+		{opis: "manjkajo, namestitev ne uspe", zagoni: []func() (<-chan error, error){konca(manjkajo, ""), zivBrezOznake},
+			namestitev: errors.New("ni povezave"), tece: true, preverbe: "da ne", namestitev1: 1,
+			sporocila: []string{"Safeer OS - Opozorilo"}, vSporocilu: "ni povezave"},
+		{opis: "napaka ob zagonu", zagoni: []func() (<-chan error, error){konca(napaka, "Traceback: pokvarjeno\n")},
+			preverbe: "da", sporocila: []string{"Safeer OS - Napaka pri zagonu"}, vSporocilu: "Traceback: pokvarjeno"},
+		{opis: "napaka brez dnevnika", zagoni: []func() (<-chan error, error){konca(napaka, " \n")},
+			preverbe: "da", sporocila: []string{"Safeer OS - Napaka pri zagonu"}, vSporocilu: "exit status 1"},
+		{opis: "program se ne zazene", zagoni: []func() (<-chan error, error){neZazene},
+			preverbe: "da", sporocila: []string{"Safeer OS - Napaka"}, vSporocilu: "python.exe ni najden"},
+		{opis: "po namestitvi pade", zagoni: []func() (<-chan error, error){konca(manjkajo, ""), konca(napaka, "ImportError: av\n")},
+			preverbe: "da ne", namestitev1: 1, sporocila: []string{"Safeer OS - Napaka pri zagonu"}, vSporocilu: "ImportError: av"},
+		{opis: "po namestitvi se ne zazene", zagoni: []func() (<-chan error, error){konca(manjkajo, ""), neZazene},
+			preverbe: "da ne", namestitev1: 1, sporocila: []string{"Safeer OS - Napaka"}, vSporocilu: "python.exe ni najden"},
+		{opis: "drugi zagon preda okno prvemu", zagoni: []func() (<-chan error, error){konca(nil, oznakaKnjizniceOK+"\n")}, tece: true, preverbe: "da"},
+	} {
+		os.Remove(dnevnik)
+		preverbe, naslovi, besedila, namestitev := []string{}, []string{}, []string{}, 0
+		zazeni := func(preverba bool) (<-chan error, error) {
+			preverbe = append(preverbe, map[bool]string{true: "da", false: "ne"}[preverba])
+			if len(preverbe) > len(p.zagoni) {
+				t.Fatalf("%s: prevec zagonov", p.opis)
+			}
+			return p.zagoni[len(preverbe)-1]()
+		}
+		namesti := func() error {
+			namestitev++
+			return p.namestitev
+		}
+		sporoci := func(naslov, besedilo string, slog uint) {
+			naslovi = append(naslovi, naslov)
+			besedila = append(besedila, besedilo)
+		}
+		izid := zazeniProgram(zazeni, namesti, sporoci, dnevnik, 150*time.Millisecond, 5*time.Second)
+		if izid != p.tece || strings.Join(preverbe, " ") != p.preverbe || namestitev != p.namestitev1 || strings.Join(naslovi, "|") != strings.Join(p.sporocila, "|") {
+			t.Errorf("%s: tece=%v zagoni=%v namestitev=%d sporocila=%v", p.opis, izid, preverbe, namestitev, naslovi)
+		}
+		if p.vSporocilu != "" && !strings.Contains(strings.Join(besedila, "\n"), p.vSporocilu) {
+			t.Errorf("%s: v sporocilu ni %q: %v", p.opis, p.vSporocilu, besedila)
+		}
 	}
 }

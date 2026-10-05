@@ -56,7 +56,7 @@ Safeer OS in Safeer Control **nista dva ločena programa**, temveč enotna aplik
   - Ob zagonu preveri SHA-256 vsoto in po potrebi razširi datoteke v `%LOCALAPPDATA%\SafeerOS\app`. Starejši paket novejše namestitve ne prepiše (razen s stikalom `--namesti`); datoteke, ki jih nov paket nima več, odstrani po seznamu `app\.datoteke`.
   - Sam se prepiše na stalno mesto `%LOCALAPPDATA%\SafeerOS\SafeerOS.exe`; nanj kažejo bližnjici, samodejna posodobitev (`app\.zaganjalnik`) in protokol `magnet:`. Podrobnosti: [`windows/README.md`](windows/README.md), razdelek »Zaganjalnik Safeer OS«.
   - Preizkusi: `go vet ./... && go test ./...` v `windows/launcher_go` (del, vezan na Windows, je v `sistem_windows.go`, zato pravila tečejo tudi na Linuxu).
-  - Samodejno poišče nameščen Python 3 (3.10+) in po potrebi namesti `PySide6`.
+  - Samodejno poišče nameščen Python 3 (3.10+). Knjižnice preveri program sam (`windows/safeer_windows/knjiznice.py`, okolje `SAFEER_OS_PREVERI_KNJIZNICE=1`); če katera manjka (izhodna koda 86), jih zaganjalnik namesti s `pip` in program zažene znova. Nov paket je treba dodati na oba seznama: `paketiPip` v `main.go` in `PAKETI` v `knjiznice.py`.
   - Vedno zažene `windows/safeer_os_windows.py`. Če se kliče kot `SafeerControl.exe` ali s parametrom `--control`, doda `--control --okno`.
 
 ### 2.5 PowerShell namestitveni paket
