@@ -128,6 +128,8 @@ class SafeerControlBackend:
         self.ob_seznamih: Optional[Callable[[dict], dict]] = None
         self._poslusavci: List[Callable[[str, Any], None]] = []
         self._povezovanje = False
+        #: Povezovanje tece naenkrat samo enkrat (zagon programa, stran in gumb ga lahko sprozijo hkrati).
+        self._povezi_kljuc = threading.Lock()
         self._zadnji_hubi: List[dict] = []
         self._cas_hubi = 0.0
         #: Iskanje hubov tece v ozadju (hubi_brez_cakanja): ali je bilo ze kdaj koncano in ali ravno tece.
@@ -756,7 +758,7 @@ class SafeerControlBackend:
         """Če v hiši ni Huba, ga ta računalnik varno prevzame in se nanj vpiše.
 
         Tako Safeer Control na dveh računalnikih ni odvisen od prižganega TV-ja.
-        Lastni Control se seznani znotraj istega procesa; koda ne zapusti naprave.
+        Lastni Control dobi žeton neposredno od Huba v istem procesu (brez kode in brez omrežja).
         """
         if self._lokalni_hub is not None and self._lokalni_hub.tece():
             return {"naslov": self.hub_url(), "fp": self._lokalni_hub.odtis, "lokalni": True}
@@ -767,15 +769,14 @@ class SafeerControlBackend:
             return None
         self._lokalni_hub = streznik
         naslov = f"wss://127.0.0.1:{streznik.vrata}/cast/ws"
-        prikazane_kode: List[str] = []
-        streznik.hub.ob_kodi = lambda _ime, koda: prikazane_kode.append(str(koda))
         try:
-            prijava = link_hub.zacni_seznanitev(naslov, self.device_id, self.device_ime)
-            if not prijava or prijava.get("napaka") or not prikazane_kode:
-                raise RuntimeError("lokalna_seznanitev_ni_stekla")
-            zeton, napaka = link_hub.potrdi_kodo(naslov, prijava, self.device_id, prikazane_kode[-1])
+            # Hub tece v nasem procesu: zeton dobimo neposredno od njega. Prej se je Control ob vsakem zagonu z
+            # lastnim Hubom seznanil s kodo po omrezju (SPAKE2 na obeh koncih istega procesa: 2,6-4,8 s, izmerjeno
+            # 5. 10. 2026) in pri tem Hubu za stalno zamenjal obvestilo o kodi (ob_kodi) z zbiralnikom - nova
+            # naprava, ki se je hotela povezati s kodo, je na tem racunalniku ni vec videla.
+            zeton = streznik.hub.zeton_lastne_naprave(self.device_id, self.device_ime)
             if not zeton:
-                raise RuntimeError(napaka or "lokalna_seznanitev_ni_stekla")
+                raise RuntimeError("lokalna_prijava_ni_stekla")
             self.nastavitve.update({
                 "control_token": zeton,
                 "hub_fp": streznik.odtis,
@@ -1129,8 +1130,6 @@ class SafeerControlBackend:
         if not nas_id:
             return
         lokalni.hub.nas_id = nas_id
-        self._oglas = link_hub_streznik.Oglas()
-        self._oglas.zacni(lokalni.vrata, lokalni.odtis, nas_id, self.device_ime)
         from core import link_krog
         self._mesh = link_mesh.MeshPovezovalec(
             lokalni.hub, nas_id, self.device_ime,
@@ -1138,6 +1137,7 @@ class SafeerControlBackend:
             vrata=lambda s=lokalni: s.vrata if s.tece() else 0)
         self._mesh.zazeni()
         print(f"[ControlBackend] Link Mesh: vozlisce {nas_id} na vratih {lokalni.vrata}")
+        self._zacni_oglas(lokalni, nas_id)
         # Pomocnik sprotnega pretvarjanja potrebuje ffmpeg: ce ga ni, ga prenesemo v ozadju (pripeta LGPL gradnja).
         try:
             from safeer_windows import ffmpeg_win
@@ -1145,10 +1145,53 @@ class SafeerControlBackend:
         except Exception as e:  # noqa: BLE001
             print(f"[SafeerSprotno] ffmpeg: priprava ni uspela ({e})")
 
+    def _zacni_oglas(self, lokalni, nas_id: str) -> None:
+        """Oglas mDNS (da nas najdejo naprave, ki nas se ne poznajo) v svoji niti.
+
+        Uvoz knjiznice in registracija trajata vec sekund (izmerjeno 5. 10. 2026: 2,3-8,1 s); klic znanih sosedov in
+        prijava lastnega Controla sta prej cakala nanju, ceprav oglasa ne potrebujeta."""
+        oglas = link_hub_streznik.Oglas()
+        self._oglas = oglas
+        vrata, odtis, ime = lokalni.vrata, lokalni.odtis, self.device_ime
+
+        def zacni() -> None:
+            try:
+                oglas.zacni(vrata, odtis, nas_id, ime)
+            except Exception as e:  # noqa: BLE001
+                print(f"[ControlBackend] Oglas mDNS se ni zagnal: {e}")
+            if self._oglas is not oglas:
+                # Med registracijo smo se ustavili (koncaj): oglasa za ugasnjen Hub ne pustimo v omrezju.
+                oglas.koncaj()
+
+        threading.Thread(target=zacni, name="safeer-link-oglas", daemon=True).start()
+
     # ------------------------------------------------------------------ Trajna WebSocket povezava
-    def povezi_se(self) -> bool:
+    def povezi_ob_zagonu(self, vedno: bool = False) -> bool:
+        """Ob zagonu programa: povezovanje s Safeer Linkom se zacne takoj, v svoji niti.
+
+        Prej ga je sprozila sele nalozena zacetna stran (ko je vprasala za stanje), pri zagonu v ozadju pa je teklo
+        v glavni niti in zadrzalo zanko dogodkov. Racunalnik, ki se ni povezan z nobenim Hubom, se ne povezuje sam
+        (vedno=True: zagon v ozadju, kjer je povezovanje ze prej steklo brez tega pogoja)."""
         if self._povezovanje or self.je_povezan():
-            return True
+            return False
+        if not vedno and not (self.zeton() and self.hub_url()):
+            return False
+        threading.Thread(target=self.povezi_se, name="safeer-link-zagon", daemon=True).start()
+        return True
+
+    def povezi_se(self) -> bool:
+        # Samo eno povezovanje naenkrat: zastavica se postavi takoj. Prej sele po zagonu lastnega Huba (vec sekund),
+        # zato sta dva hkratna klica (stran in gumb) lahko oba zaganjala Hub.
+        with self._povezi_kljuc:
+            if self._povezovanje or self.je_povezan():
+                return True
+            self._povezovanje = True
+        try:
+            return self._povezi_se()
+        finally:
+            self._povezovanje = False
+
+    def _povezi_se(self) -> bool:
         try:
             self._zagotovi_mesh()
         except Exception as e:  # noqa: BLE001
@@ -1160,7 +1203,6 @@ class SafeerControlBackend:
         if not (hub and zeton):
             return False
 
-        self._povezovanje = True
         try:
             if self.povezava is not None:
                 try:
@@ -1197,8 +1239,6 @@ class SafeerControlBackend:
         except Exception as e:
             print(f"[ControlBackend] Povezava s Hubom ni uspela: {e}")
             return False
-        finally:
-            self._povezovanje = False
 
     def _na_stanje_povezave(self, povezan: bool) -> None:
         self._oddaj_dogodek("povezava", povezan)

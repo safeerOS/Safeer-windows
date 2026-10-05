@@ -550,6 +550,29 @@ class Hub:
             self._shrani_zetone()
         return zeton, None
 
+    def zeton_lastne_naprave(self, device_id: str, ime: str = "") -> Optional[str]:
+        """Zeton za napravo, ki ta Hub gosti v ISTEM procesu (Safeer OS za Windows in njegov lastni Hub).
+
+        Ni pot HTTP: kdor lahko poklice to metodo, ze tece v nasem procesu. Seznanitev s kodo (SPAKE2) med dvema
+        koncema istega procesa zato ne varuje nicesar, traja pa (izmerjeno 5. 10. 2026 na testnem Windows)
+        2,6-4,8 s ob vsakem zagonu. Prejsnje zetone iste naprave zamenja: zagon za zagonom bi sicer iz shrambe
+        (NAJVEC_ZETONOV) izrinil zetone drugih naprav.
+        """
+        device_id = (device_id or "").strip()[:NAJVEC_IMENA]
+        if not device_id:
+            return None
+        with self._zaklep:
+            self._pocisti_prijave()
+            for z in [z for z, vnos in self._zetoni.items() if vnos[0] == device_id]:
+                self._zetoni.pop(z, None)
+            if len(self._zetoni) >= NAJVEC_ZETONOV:
+                najstarejsi = min(self._zetoni, key=lambda k: self._zetoni[k][2])
+                self._zetoni.pop(najstarejsi, None)
+            zeton = "saf_pc_" + link_ws.nakljucni(24)
+            self._zetoni[zeton] = (device_id, (ime or device_id).strip()[:NAJVEC_IMENA], self.ura())
+            self._shrani_zetone()
+        return zeton
+
     def naprava_zetona(self, zeton: str) -> Optional[tuple]:
         """(device_id, ime) za zeton iz seznanitve, ali None."""
         import hmac

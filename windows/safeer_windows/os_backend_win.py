@@ -322,7 +322,9 @@ def _ni_program(ime: str) -> bool:
     return bool(_NI_PROGRAM.search(ime))
 
 
-def poisci_start_menu_programe() -> List[dict]:
+def poisci_start_menu_programe(z_ikonami: bool = True) -> List[dict]:
+    """Programi iz menija Start. z_ikonami=False: brez risanja ikon (polje `ikona` ostane prazno) - za katalog ob
+    prijavi v Safeer Link, kjer gresta samo ime in vrsta; id-ji in vrstni red so enaki kot pri polnem seznamu."""
     programi = []
     videni = set()
 
@@ -368,7 +370,7 @@ def poisci_start_menu_programe() -> List[dict]:
                         "ime": ime,
                         "pot": polna.replace("/", "\\"),
                         "skupina": doloci_skupino(ime, polna),
-                        "ikona": pridobi_ikono_programa(polna, ime),
+                        "ikona": pridobi_ikono_programa(polna, ime) if z_ikonami else "",
                         "opis": ""
                     })
 
@@ -390,7 +392,7 @@ def poisci_start_menu_programe() -> List[dict]:
                 "ime": ime,
                 "pot": cmd,
                 "skupina": skup,
-                "ikona": pridobi_ikono_programa(cmd, ime),
+                "ikona": pridobi_ikono_programa(cmd, ime) if z_ikonami else "",
                 "opis": ""
             })
 
