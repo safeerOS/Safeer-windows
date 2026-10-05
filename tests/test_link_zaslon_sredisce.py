@@ -31,7 +31,7 @@ class IzbiraSredisca(unittest.TestCase):
     def test_naprava_s_svojim_srediscem_dobi_deljenje_tam(self):
         (izbrano, napaka), seja, lastno = self._izberi((SOSED, ""))
         self.assertEqual(izbrano, ("wss://10.0.0.7:8990/cast/ws", "seja-pri-sosedu", "odtis-telefona", "n-moj-control"))
-        self.assertEqual(napaka, {})
+        self.assertEqual(napaka, {"pri_napravi": True})
         seja.assert_called_once_with("wss://10.0.0.7:8990/cast/ws", "odtis-telefona")
         lastno.assert_not_called()
 
@@ -134,6 +134,29 @@ class DeljenjeGreNaIzbranoSredisce(unittest.TestCase):
         self.assertEqual([s["tece"] for s in self.stanja], [True, False])
         self.assertEqual(self.stanja[-1]["napaka"], "")
 
+    def test_sredisce_naprave_ki_zaslona_ne_zna(self):
+        """Drug racunalnik: njegovo sredisce poti za zaslon nima. Nasvet »posodobi Safeer na napravi, ki je
+        središče« bi zavedel - posodobitev danes ne pomaga."""
+        d = self._deljenje(lambda: (("wss://10.0.0.8:8990/cast/ws", "seja", "odtis-pc", "n-moj-control"), {"pri_napravi": True}))
+        for odgovor in ((404, {}, None), (501, {}, None), (404, {"koda": "ni_poti"}, None)):
+            with mock.patch.object(link_deljenje.link_tls, "zahteva", return_value=odgovor):
+                d._tok()
+            self.assertEqual((d.koda, d.napaka), ("zaslon_ni_na_voljo", link_deljenje.SPOROCILA_ZASLONA["zaslon_ni_na_voljo"]), odgovor)
+
+    def test_tuje_sredisce_ki_zaslona_ne_zna_je_staro(self):
+        """Sredisce, na katero smo samo prijavljeni (naprava s starejsim Safeerjem): nasvet za posodobitev ostane."""
+        d = self._deljenje(lambda: (("wss://10.0.0.9:8990/cast/ws", "zeton", "odtis-tv", "n-moj-control"), {}))
+        with mock.patch.object(link_deljenje.link_tls, "zahteva", return_value=(404, {}, None)):
+            d._tok()
+        self.assertEqual(d.koda, "sredisce_ne_zna")
+
+    def test_zasedena_naprava_pri_svojem_sredisci_ostane_zasedena(self):
+        d = self._deljenje(lambda: (("wss://10.0.0.7:8990/cast/ws", "seja", "odtis-telefona", "n-moj-control"), {"pri_napravi": True}))
+        zasedena = (409, {"koda": "naprava_zasedena", "busy_by_name": "Tablica"}, None)
+        with mock.patch.object(link_deljenje.link_tls, "zahteva", return_value=zasedena):
+            d._tok()
+        self.assertEqual((d.koda, d.zasedena_od), ("naprava_zasedena", "Tablica"))
+
     def test_brez_izbire_sredisca_kot_doslej(self):
         d = _Deljenje("wss://10.0.0.9:8990/cast/ws", "zeton", "odtis-tv", "n-moj", "n-tv", "TV")
         with mock.patch.object(link_deljenje.link_tls, "zahteva", return_value=(404, {}, None)) as zahteva:
@@ -163,7 +186,8 @@ class SafeerControlZaLinux(unittest.TestCase):
         with mock.patch.object(self.safeer_link.link_hub, "seja_s_podpisom", return_value="seja") as seja:
             izbrano, napaka = self.link._sredisce_za_zaslon("n-tel")
         seja.assert_called_once_with("wss://10.0.0.7:8990/cast/ws", "n-moj-control", "odtis-telefona", "Safeer Control (pisarna)")
-        self.assertEqual((izbrano, napaka), (("wss://10.0.0.7:8990/cast/ws", "seja", "odtis-telefona", "n-moj-control"), {}))
+        self.assertEqual((izbrano, napaka), (("wss://10.0.0.7:8990/cast/ws", "seja", "odtis-telefona", "n-moj-control"),
+                                             {"pri_napravi": True}))
 
     def test_naprava_pri_nasem_sredisci(self):
         self.link._sredisce_naprave.return_value = (None, "")

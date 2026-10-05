@@ -280,7 +280,8 @@ def sredisce_za_zaslon(sredisce_naprave: Callable[[str], tuple], seja: Callable[
     seja(naslov, odtis)    -> (sejni zeton ali None, nas id pri tem sredisci)
     lastno()               -> ((naslov, zeton, odtis, nas id), "") za sredisce, na katero smo prijavljeni, kadar
                               NI v tem procesu; sicer (None, koda): "zaslon_ni_na_voljo" ali "hub_ni_znan".
-    Vrne ((naslov, zeton, odtis, nas id), {}) ali (None, {"sporocilo", "koda", "zasedenaOd"}). Caka na omrezje."""
+    Vrne ((naslov, zeton, odtis, nas id), opis) ali (None, {"sporocilo", "koda", "zasedenaOd"}). V opisu je
+    `pri_napravi`: True, kadar je izbrano sredisce ciljne naprave same. Caka na omrezje."""
     def napaka(koda: str) -> tuple:
         return None, {"sporocilo": SPOROCILA_ZASLONA.get(koda, koda), "koda": koda, "zasedenaOd": ""}
 
@@ -292,7 +293,7 @@ def sredisce_za_zaslon(sredisce_naprave: Callable[[str], tuple], seja: Callable[
         zeton, nas_id = seja(naslov, odtis)
         if not zeton:
             return napaka("sredisce_naprave_ni_dosegljivo")
-        return (naslov, zeton, odtis, nas_id), {}
+        return (naslov, zeton, odtis, nas_id), {"pri_napravi": True}
     nase, koda = lastno()
     if nase is None:
         return napaka(koda or "zaslon_ni_na_voljo")
@@ -308,6 +309,7 @@ class DeljenjeZaslona:
         #: Link Mesh: kje deljenje zacnemo, izvemo sele v delovni niti (prijava s podpisom caka na omrezje).
         #: Klic vrne ((naslov, zeton, odtis, moj id), {}) ali (None, napaka) - glej sredisce_za_zaslon.
         self._sredisce = sredisce
+        self._pri_napravi = False
         self.ws_naslov = ws_naslov
         self.zeton = zeton
         self.odtis = odtis
@@ -382,11 +384,16 @@ class DeljenjeZaslona:
                     self.zasedena_od = str(n.get("zasedenaOd") or "")
                     return          # stanje javi `finally`
                 self.ws_naslov, self.zeton, self.odtis, self.moj_id = izbrano
+                self._pri_napravi = bool(n.get("pri_napravi"))
             koda, odgovor, _ = link_tls.zahteva(_osnova(self.ws_naslov) + "/cast/share/screen/start",
                                                 {"device_id": self.moj_id, "target": self.cilj},
                                                 zeton=self.zeton, timeout=8.0, pripeti=self.odtis)
             if koda != 200:
                 n = napaka_huba(koda, odgovor)
+                if self._pri_napravi and n["koda"] == "sredisce_ne_zna":
+                    # To sredisce JE ciljna naprava (Link Mesh). Ce poti nima, tujega zaslona ne zna prikazati -
+                    # danes sredisce racunalnika. »Posodobi Safeer na napravi, ki je središče« bi zavedlo.
+                    n = {"sporocilo": SPOROCILA_ZASLONA["zaslon_ni_na_voljo"], "koda": "zaslon_ni_na_voljo", "zasedenaOd": ""}
                 self.napaka, self.koda, self.zasedena_od = n["sporocilo"], n["koda"], n["zasedenaOd"]
                 self._javi()
                 return
