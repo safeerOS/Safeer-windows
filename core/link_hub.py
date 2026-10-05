@@ -26,7 +26,7 @@ import sys
 from typing import Callable, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
-from core import link_krog, link_tls, spake2
+from core import link_krog, link_tls, link_vticnik, spake2
 
 # Kaj ta racunalnik pove srediscu: Windows in Linux imata isto kodo, platforma pa mora biti prava
 # (Windows se je predstavljal kot "linux").
@@ -713,6 +713,9 @@ class WsOdjemalec:
         self.bralni_timeout = bralni_timeout
         self.vticnik: Optional[socket.socket] = None
         self._medpomnilnik = b""
+        #: Deli sporocila, ki prihaja v vec okvirjih (prezivijo casovno omejitev med okvirjema).
+        self._deli: List[bytes] = []
+        self._vrsta_sporocila = 0
         self._zaklep = threading.Lock()
 
     def odpri(self) -> None:
@@ -763,8 +766,11 @@ class WsOdjemalec:
             raise ConnectionError(f"Hub je zavrnil povezavo: {prva}")
 
         self._medpomnilnik = glava.split(b"\r\n\r\n", 1)[1]
+        self._deli = []
         s.settimeout(self.bralni_timeout)
-        self.vticnik = s
+        link_vticnik.brez_zamika(s)
+        # Bere ena nit, pisejo druge: vticnica TLS tega sama ne prenese (core/link_vticnik.py).
+        self.vticnik = link_vticnik.zavaruj(s)
 
     def poslji(self, besedilo: str) -> None:
         s = self.vticnik
@@ -788,17 +794,51 @@ class WsOdjemalec:
         with self._zaklep:
             s.sendall(bytes(okvir))
 
-    def _preberi(self, koliko: int) -> bytes:
+    def _napolni(self, koliko: int) -> None:
+        """Bere, dokler medpomnilnik nima vsaj `koliko` bajtov. Iz njega ne vzame nicesar: ce branje
+        prekine casovna omejitev, naslednji klic nadaljuje tam, kjer je ta ostal."""
         while len(self._medpomnilnik) < koliko:
             s = self.vticnik
             if s is None:
                 raise ConnectionError("Povezava je zaprta.")
-            kos = s.recv(4096)
+            kos = s.recv(65536)
             if not kos:
                 raise ConnectionError("Hub je zaprl povezavo.")
             self._medpomnilnik += kos
+
+    def _preberi(self, koliko: int) -> bytes:
+        self._napolni(koliko)
         vzeto, self._medpomnilnik = self._medpomnilnik[:koliko], self._medpomnilnik[koliko:]
         return vzeto
+
+    def _okvir(self) -> Tuple[bool, int, bytes]:
+        """Naslednji cel okvir: (zadnji, vrsta, telo). Iz medpomnilnika ga vzame sele, ko je cel."""
+        self._napolni(2)
+        prvi, drugi = self._medpomnilnik[0], self._medpomnilnik[1]
+        dolzina = drugi & 0x7F
+        glava = 2
+        if dolzina == 126:
+            self._napolni(4)
+            dolzina = struct.unpack("!H", self._medpomnilnik[2:4])[0]
+            glava = 4
+        elif dolzina == 127:
+            self._napolni(10)
+            dolzina = struct.unpack("!Q", self._medpomnilnik[2:10])[0]
+            glava = 10
+        if dolzina > NAJVECJE_SPOROCILO:
+            self.zapri()
+            raise ConnectionError(
+                f"Hub je napovedal okvir {dolzina} B, dovoljeno je "
+                f"{NAJVECJE_SPOROCILO} B.")
+        maskirano = bool(drugi & 0x80)
+        if maskirano:
+            glava += 4
+        self._napolni(glava + dolzina)
+        okvir, self._medpomnilnik = self._medpomnilnik[:glava + dolzina], self._medpomnilnik[glava + dolzina:]
+        telo = okvir[glava:]
+        if maskirano:
+            telo = _maskiraj(telo, okvir[glava - 4:glava])
+        return bool(prvi & 0x80), prvi & 0x0F, telo
 
     def prejmi(self) -> Optional[str]:
         """Vrne naslednje besedilno sporocilo ali None, ko je povezava zaprta.
@@ -806,28 +846,12 @@ class WsOdjemalec:
         Dolgo sporocilo sme priti v vec okvirjih (FIN=0 + nadaljevalni okvirji);
         sestavimo ga, sicer bi ga vrnili odsekanega in ga json.loads tiho zavrgel.
         Napovedano dolzino preverimo, preden karkoli preberemo.
+
+        Casovna omejitev (TimeoutError) toka ne pokvari: delno prebrani okvir in ze prejeti deli
+        sporocila pocakajo na naslednji klic. Prej je klicatelj po njej bral sredi okvirja.
         """
-        deli: List[bytes] = []
-        vrsta_sporocila = 0
         while True:
-            glava = self._preberi(2)
-            fin = bool(glava[0] & 0x80)
-            vrsta = glava[0] & 0x0F
-            dolzina = glava[1] & 0x7F
-            maskirano = bool(glava[1] & 0x80)
-            if dolzina == 126:
-                dolzina = struct.unpack("!H", self._preberi(2))[0]
-            elif dolzina == 127:
-                dolzina = struct.unpack("!Q", self._preberi(8))[0]
-            if dolzina > NAJVECJE_SPOROCILO:
-                self.zapri()
-                raise ConnectionError(
-                    f"Hub je napovedal okvir {dolzina} B, dovoljeno je "
-                    f"{NAJVECJE_SPOROCILO} B.")
-            maska = self._preberi(4) if maskirano else b""
-            telo = self._preberi(dolzina) if dolzina else b""
-            if maskirano:
-                telo = _maskiraj(telo, maska)
+            fin, vrsta, telo = self._okvir()
 
             # Nadzorni okvirji smejo priti sredi razdeljenega sporocila in ga ne
             # prekinejo.
@@ -840,23 +864,24 @@ class WsOdjemalec:
                 continue
 
             if vrsta in (0x1, 0x2):
-                deli = [telo]
-                vrsta_sporocila = vrsta
+                self._deli = [telo]
+                self._vrsta_sporocila = vrsta
             elif vrsta == 0x0:
-                if not deli:
+                if not self._deli:
                     continue  # nadaljevanje brez zacetka -- zavrzemo
-                deli.append(telo)
+                self._deli.append(telo)
             else:
                 continue
 
-            if sum(len(d) for d in deli) > NAJVECJE_SPOROCILO:
+            if sum(len(d) for d in self._deli) > NAJVECJE_SPOROCILO:
                 self.zapri()
                 raise ConnectionError("Sporocilo s Huba je preveliko.")
 
             if fin:
-                if vrsta_sporocila == 0x1:
+                deli, self._deli = self._deli, []
+                if self._vrsta_sporocila == 0x1:
                     return b"".join(deli).decode("utf-8", "replace")
-                deli = []  # binarnega ne razumemo; mirno spregledamo
+                # binarnega ne razumemo; mirno spregledamo
 
     def ping(self) -> bool:
         """Poslje ping. Vrne False, ce povezave ni vec -- to je nas srcni utrip."""

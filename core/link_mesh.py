@@ -65,6 +65,8 @@ class OdhodnaSosednja:
         if self._zaprta:
             return False
         if len(self._vrsta) >= NAJVEC_V_VRSTI:
+            print("[SafeerLink] mesh: sosed %s ne bere (%d sporocil v vrsti) - povezavo zapiram" % (self.naslov, len(self._vrsta)),
+                  flush=True)
             self.zapri(1008, "sosed ne bere")
             return False
         self._vrsta.append(besedilo)
@@ -384,7 +386,10 @@ class MeshPovezovalec:
                     surovo = povezava.ws.prejmi()
                 except TimeoutError:
                     continue
-                except Exception:
+                except Exception as e:  # noqa: BLE001
+                    if not povezava.zaprta:
+                        print("[SafeerLink] mesh: branje s soseda %s se je koncalo: %s: %s" % (hid, type(e).__name__, str(e)[:120]),
+                              flush=True)
                     break
                 if surovo is None:
                     break

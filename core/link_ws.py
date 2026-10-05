@@ -26,6 +26,8 @@ import struct
 import threading
 from typing import Callable, Deque, Optional
 
+from core import link_vticnik
+
 CAROBNI_NIZ = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
 OPKODA_NADALJEVANJE = 0x0
@@ -73,6 +75,17 @@ def okvir(opkoda: int, podatki: bytes) -> bytes:
     return glava + podatki
 
 
+def odmaskiraj(telo: bytes, maska: bytes) -> bytes:
+    """XOR z masko po RFC 6455 kot eno celostevilsko dejanje.
+
+    Zanka po bajtih je za okvir 32 KiB porabila nekaj milisekund procesorja in s tem omejila vse, kar
+    naprave posiljajo skozi to sredisce (tokovi Safeer Internet Gatewaya), na nekaj MB/s."""
+    if not telo:
+        return telo
+    ponovljena = (maska * ((len(telo) + 3) // 4))[:len(telo)]
+    return (int.from_bytes(telo, "big") ^ int.from_bytes(ponovljena, "big")).to_bytes(len(telo), "big")
+
+
 class Povezava:
     """Ena povezana naprava: branje v klicateljevi niti, pisanje v svoji.
 
@@ -83,7 +96,9 @@ class Povezava:
     def __init__(self, vticnik: socket.socket, naslov: str,
                  ob_sporocilu: Callable[["Povezava", str], None],
                  ob_koncu: Optional[Callable[["Povezava"], None]] = None) -> None:
-        self.vticnik = vticnik
+        # Bere klicateljeva nit, pise pisec: vticnica TLS tega sama ne prenese (core/link_vticnik.py).
+        link_vticnik.brez_zamika(vticnik)
+        self.vticnik = link_vticnik.zavaruj(vticnik)
         self.naslov = naslov
         self.ob_sporocilu = ob_sporocilu
         self.ob_koncu = ob_koncu
@@ -107,6 +122,8 @@ class Povezava:
                 return False
             if len(self._vrsta) >= NAJVEC_V_VRSTI or self._bajtov + len(surovo) > NAJVEC_BAJTOV_V_VRSTI:
                 # Naprava ne bere. Ce bi cakali nanjo, bi zadrzala vse ostale.
+                print("[SafeerHub] naprava ne bere (%s): v vrsti %d okvirjev, %d B - povezavo zapiram"
+                      % (self.podatki.get("id") or self.naslov, len(self._vrsta), self._bajtov), flush=True)
                 self._zaprta = True
                 self._ima_kaj.set()
                 try:
@@ -132,10 +149,24 @@ class Povezava:
                 self._bajtov -= len(surovo)
             try:
                 self.vticnik.sendall(surovo)
-            except Exception:
+            except Exception as e:  # noqa: BLE001
                 with self._zaklep:
+                    ze_zaprta = self._zaprta
                     self._zaprta = True
+                if not ze_zaprta:
+                    self._zabelezi_konec("pisanje", e)
                 return
+
+    def _zabelezi_konec(self, kaj: str, napaka: BaseException) -> None:
+        """Ena vrstica o nenavadnem koncu povezave (napaka TLS, cas, pokvarjen okvir). Navaden odhod
+        naprave (zaprta vticnica) ni napaka in se ne belezi."""
+        if isinstance(napaka, ConnectionError):
+            return
+        try:
+            print("[SafeerHub] povezava %s se je koncala (%s): %s: %s"
+                  % (self.podatki.get("id") or self.naslov, kaj, type(napaka).__name__, str(napaka)[:160]), flush=True)
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------ branje
 
@@ -179,7 +210,7 @@ class Povezava:
                 if dolzina > NAJVECJE_SPOROCILO:
                     break
                 maska = self._preberi(4)
-                telo = bytes(b ^ maska[i % 4] for i, b in enumerate(self._preberi(dolzina)))
+                telo = odmaskiraj(self._preberi(dolzina), maska)
                 if opkoda == OPKODA_ZAPRI:
                     break
                 if opkoda == OPKODA_PING:
@@ -204,8 +235,9 @@ class Povezava:
                     except Exception:
                         pass
                 zbrano = b""
-        except Exception:
-            pass
+        except Exception as e:  # noqa: BLE001
+            if not self._zaprta:
+                self._zabelezi_konec("branje", e)
         finally:
             self.zapri()
             if self.ob_koncu is not None:
