@@ -1,0 +1,13 @@
+# Safeer OS za Windows 1.0.37
+
+- **Zaslon tega računalnika se z druge naprave spet odpre.** »Povezani zasloni« na telefonu, tablici ali televizorju so računalnik prosili za sliko, nato pa so se povezali sami nase – znova in znova, računalnik pa je ob vsakem poskusu odprl novo sejo. Vsako središče Safeer Linka programom na svoji napravi pripiše naslov 127.0.0.1 in ta naslov je nespremenjen potoval k drugim napravam. Zdaj dobijo naslov računalnika. Zadošča ena posodobljena naprava na poti.
+- **Oddaljeni zaslon se med premikanjem miške ne prekine več.** Okno »Oddaljeni zaslon« se je po nekaj sekundah ali minutah premikanja miške končalo s »Povezava se je prekinila«.
+- **Seja deljenja zaslona, ki obvisi, ne ustavi naslednje.** Če gledalec izgine brez slovesa (izpad Wi-Fi, televizor zaspi), se seja po 20 sekundah konča sama. Stara seja ne more več ustaviti nove, tuja povezava na vrata deljenja pa seje ne konča.
+- **Drobna sporočila prek Global Linka ne čakajo več drugo na drugo.**
+- **Naprave, ki je dosegljiva samo prek Global Linka, za sliko ne prosimo.** Slika potuje neposredno med napravama v istem omrežju. Okno zdaj takoj pove, zakaj slike ni; prej je naprava odprla vrata in zaman čakala.
+
+Preverjeno na pravem računalniku (Windows 10): telefon je 8 minut gledal zaslon tega računalnika v eni seji; okno »Oddaljeni zaslon« je več kot 5 minut gledalo računalnik z Linuxom na eni povezavi, medtem ko je miška naredila 11.000 premikov; telefon je odprl zaslon tega računalnika, ko je računalnik še imel prejšnjo različico (zadoščala je posodobljena naprava na poti). Sporočilo za napravo, dosegljivo samo prek Global Linka, pokrivajo preizkusi, ne prava naprava.
+
+Znane omejitve: slika zaslona potrebuje neposredno pot v istem omrežju. Če nista posodobljena ne računalnik ne središče, na katero je pripeta naprava, ki gleda, ostane staro vedenje.
+
+English: **The screen of this computer opens from another device again.** "Connected screens" on a phone, tablet or TV asked the computer for its screen and then connected to itself, again and again: every Safeer Link hub gives the address 127.0.0.1 to programs on its own machine, and that address travelled unchanged to other devices. They now get the address of the computer; one updated device on the path is enough. The Remote screen window no longer drops while the mouse moves. A screen-sharing session whose viewer vanished ends by itself after 20 seconds and can no longer stop the next one. Small messages through Global Link no longer wait for each other. A device that is reachable only through Global Link is not asked for its screen; the window says at once that the picture works only in the same network.
