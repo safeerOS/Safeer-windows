@@ -1442,7 +1442,12 @@ class BrowserWindow(QMainWindow):
         view.page().deleteLater()
         view.deleteLater()
         if self.tabs.count() == 0:
-            self.close()
+            if self.embedded and self.safeer_os_web_mode:
+                # Odsek Splet v Safeer OS: okna ni mogoce zapreti, brez zavihka pa je Splet ostal prazen, z naslovom
+                # zaprte strani v naslovni vrstici. Zadnji zavihek zato zamenja zacetna stran (kot gumb »+«).
+                self.new_tab()
+            else:
+                self.close()
 
     def reopen_closed_tab(self) -> None:
         if self.app.closed_tabs:
