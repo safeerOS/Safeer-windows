@@ -414,6 +414,13 @@ func TestBliznjiciNaWindows(t *testing.T) {
 	}
 	defer os.RemoveAll(mapa)
 	exe, _ := os.Executable()
+	// %TEMP% ima pri dolgem uporabniskem imenu kratko obliko (C:\Users\RUNNER~1\...), bliznjica pa vrne dolgo pot.
+	if dolga, err := filepath.EvalSymlinks(mapa); err == nil {
+		mapa = dolga
+	}
+	if dolga, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = dolga
+	}
 	start := filepath.Join(mapa, "Start", "Safeer OS.lnk")
 	namizje := filepath.Join(mapa, "Namizje", "Safeer OS.lnk")
 	ikona := filepath.Join(mapa, "ni.ico")
@@ -563,6 +570,13 @@ func TestIzberiZaganjalnik(t *testing.T) {
 	// Zagon s stalnega mesta.
 	preveri("zagon s stalnega mesta", stalna, "safeeros.exe", false, stalna, false, "1.0.36")
 	preveri("zagon s stalnega mesta, druge crke", strings.ToUpper(stalna), "safeeros.exe", true, stalna, false, "1.0.36")
+	// Ista datoteka pod drugim zapisom poti (povezava, kratko ime 8.3): ne kopira se sama nase.
+	if povezava := filepath.Join(koren, "povezava.exe"); os.Symlink(stalna, povezava) == nil {
+		preveri("zagon prek povezave na stalno mesto", povezava, "safeeros.exe", true, stalna, false, "1.0.36")
+		if u := umaknjene(t, filepath.Dir(stalna)); len(u) != 0 {
+			t.Fatalf("stalna kopija se je kopirala sama nase: %v", u)
+		}
+	}
 	// Starejsi exe, ki ni nic namestil (namescena razlicica je novejsa), stalne kopije ne prepise.
 	star := filepath.Join(koren, "Prenosi", "SafeerOS-Windows-1.0.17.exe")
 	zapisi(t, star, "1.0.17")

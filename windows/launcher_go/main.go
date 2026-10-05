@@ -336,6 +336,17 @@ func istaPot(a, b string) bool {
 	return strings.EqualFold(filepath.Clean(a), filepath.Clean(b))
 }
 
+// istaDatoteka: ista pot ali ista datoteka pod drugim zapisom (kratko ime 8.3, kot ga ima %TEMP% pri dolgem
+// uporabniskem imenu; povezava; preslikan pogon).
+func istaDatoteka(a, b string) bool {
+	if istaPot(a, b) {
+		return true
+	}
+	sa, errA := os.Stat(a)
+	sb, errB := os.Stat(b)
+	return errA == nil && errB == nil && os.SameFile(sa, sb)
+}
+
 func jeDatoteka(pot string) bool {
 	info, err := os.Stat(pot)
 	return err == nil && info.Mode().IsRegular()
@@ -416,7 +427,7 @@ func pocistiOstankeZaganjalnika(stalna string) int {
 // ni ali ce je ta zaganjalnik pravkar namestil svojo razlicico (potem je on najnovejsi); starejsi zaganjalnik novejse
 // stalne kopije ne prepise. Zaganjalnik s posebnim imenom (SafeerControl.exe ...) se ne kopira: ime doloca, kaj zazene.
 func izberiZaganjalnik(selfExe, stalna, baseName string, razpakirano bool) (string, bool) {
-	if istaPot(selfExe, stalna) {
+	if istaDatoteka(selfExe, stalna) {
 		return stalna, false
 	}
 	posebna := strings.Contains(baseName, "control") || strings.Contains(baseName, "browser")
