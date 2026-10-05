@@ -82,6 +82,72 @@ def _json(telo: dict) -> bytes:
     return json.dumps(telo, ensure_ascii=False).encode("utf-8")
 
 
+def _gostitelj_naslova(naslov) -> str:
+    """Gostitelj iz naslova povezave: goli IP (dohodna povezava) ali wss://gostitelj:vrata/pot (odhodna).
+    IPv4 v zapisu IPv6 (::ffff:a.b.c.d) vrne kot IPv4, obmocje vmesnika (%eth0) odreze."""
+    naslov = str(naslov or "").strip()
+    if "://" in naslov:
+        try:
+            naslov = urlparse(naslov).hostname or ""
+        except Exception:
+            return ""
+    naslov = naslov.strip("[]").split("%", 1)[0]
+    if naslov.lower().startswith("::ffff:") and "." in naslov:
+        naslov = naslov[7:]
+    return naslov
+
+
+def _samo_tukaj(naslov) -> bool:
+    """Naslov, ki velja samo na racunalniku, kjer je nastal: zanka (127.x, ::1, localhost), IPv6 naslov povezave
+    (fe80::/10 - brez vmesnika ga drug racunalnik ne more uporabiti) ali nic."""
+    g = _gostitelj_naslova(naslov).lower()
+    return not g or g in ("localhost", "::1") or g.startswith("127.") or g[:3] in ("fe8", "fe9", "fea", "feb")
+
+
+def _naslov_za_druge(naslov, gostitelj: str) -> str:
+    """Naslov naprave, kot velja ZUNAJ racunalnika, na katerem tece njen Hub.
+
+    Hub programu, ki se nanj poveze z istega racunalnika (svoj Safeer Control, svoj Safeer OS), pripise 127.0.0.1.
+    Ta naslov velja samo tam: kdor ga dobi na drugi napravi, se z njim poveze sam nase (telefon je tako namesto
+    zaslona racunalnika klical svoja vrata). Cez mejo Huba zato namesto zanke potuje naslov racunalnika, na katerem
+    naprava je (`gostitelj`). Ce ga ne poznamo (sosed prek Global Linka), naslova ni: "" pove resnico,
+    127.0.0.1 pa bi kazal na napacno napravo.
+    """
+    if not _samo_tukaj(naslov):
+        return str(naslov)
+    return "" if _samo_tukaj(gostitelj) else _gostitelj_naslova(gostitelj)
+
+
+def _konec_povezave(povezava, kateri: str) -> str:
+    """IP enega konca sosednje povezave iz njene vticnice: "getsockname" = nas, "getpeername" = sosedov.
+    Dohodna povezava (link_ws.Povezava) ima vticnico sama, odhodna (link_mesh.OdhodnaSosednja) v `ws`."""
+    for nosilec in (povezava, getattr(povezava, "ws", None)):
+        vticnica = getattr(nosilec, "vticnik", None)
+        if vticnica is None:
+            continue
+        try:
+            ime = getattr(vticnica, kateri)()[0]
+        except Exception:
+            continue
+        if isinstance(ime, str):
+            return _gostitelj_naslova(ime)
+    return ""
+
+
+def _nas_naslov_proti(povezava) -> str:
+    """Nas naslov na poti do soseda (krajevni konec sosednje povezave). "" prek releja - tam je nas konec
+    127.0.0.1 - in kadar ga ni mogoce prebrati."""
+    nas = _konec_povezave(povezava, "getsockname")
+    return "" if _samo_tukaj(nas) else nas
+
+
+def _gostitelj_soseda(povezava) -> str:
+    """Naslov racunalnika, na katerem tece sosednji Hub, kot ga vidimo mi: drugi konec povezave, sicer naslov, ki si
+    ga je povezava zapomnila (IP dohodne ali wss://... odhodne). "" prek releja (drugi konec je 127.0.0.1)."""
+    sosed = _konec_povezave(povezava, "getpeername") or _gostitelj_naslova(getattr(povezava, "naslov", ""))
+    return "" if _samo_tukaj(sosed) else sosed
+
+
 class Naprava:
     """Ena povezana naprava, kakor jo vidi Hub."""
 
@@ -737,9 +803,13 @@ class Hub:
         except Exception:
             return False
 
-    def _lokalne_json(self) -> Dict[str, dict]:
+    def _lokalne_json(self, nas_naslov: Optional[str] = None) -> Dict[str, dict]:
         """Nase lokalne naprave za sosede (id -> zapis): samo clani kroga, brez oddaljenih in brez casa
-        zadnjega stika. Oblika je ista kot na Androidu (HubUsmerjevalnik.lokalneZaSosede)."""
+        zadnjega stika. Oblika je ista kot na Androidu (HubUsmerjevalnik.lokalneZaSosede).
+
+        `nas_naslov` je nas naslov na poti do soseda, ki mu seznam posiljamo: program s TEGA racunalnika (pri nas
+        127.0.0.1) gre cez mejo s tem naslovom - gl. `_naslov_za_druge`. Brez njega (None) ostane zapis surov; tak
+        je samo kljuc, po katerem vemo, ali se je seznam spremenil."""
         naprave = {}
         for n in self.povezane():
             if n.sosed or not self._je_clan(n.id):
@@ -747,6 +817,8 @@ class Hub:
             zapis = n.json()
             for polje in ("id", "last_seen", "port"):
                 zapis.pop(polje, None)
+            if nas_naslov is not None:
+                zapis["ip"] = _naslov_za_druge(n.naslov, nas_naslov)
             naprave[n.id] = zapis
         return naprave
 
@@ -764,9 +836,10 @@ class Hub:
             naprave[n.id] = zapis
         return naprave
 
-    def _mesh_naprave(self) -> str:
+    def _mesh_naprave(self, za: Optional[object] = None) -> str:
+        """Seznam za enega soseda (`za` = povezava do njega): vsak sosed dobi nas naslov, kot velja na poti do njega."""
         return json.dumps({"type": "mesh.devices", "id": link_ws.nakljucni(8),
-                           "payload": {"hub": self.nas_id, "devices": self._lokalne_json(),
+                           "payload": {"hub": self.nas_id, "devices": self._lokalne_json(_nas_naslov_proti(za)),
                                        "relay": self._posredne_json()}},
                           ensure_ascii=False, sort_keys=True)
 
@@ -779,10 +852,9 @@ class Hub:
             if samo is None:
                 self._zadnji_mesh = kljuc
             prejemniki = [samo] if samo is not None else list(self._sosedje.values())
-        besedilo = self._mesh_naprave()
         for p in prejemniki:
             try:
-                p.poslji(besedilo)
+                p.poslji(self._mesh_naprave(p))
             except Exception:
                 pass
 
@@ -936,6 +1008,7 @@ class Hub:
                 if n.povezava is None:
                     novi.append(did)
                 self._napolni(n, z)
+                n.naslov = _naslov_za_druge(n.naslov, "")[:64]
                 n.sosed, n.posredno = sosed, True
                 if not (isinstance(n.povezava, _Namestnik) and n.povezava.sosed_id == sosed and n.povezava.posredno):
                     n.povezava = _Namestnik(sosed, self._sosedje[sosed], did, n.naslov, posredno=True)
@@ -964,6 +1037,7 @@ class Hub:
                 novi[did] = z
         self._stik(list(novi))
         dodani = []
+        gostitelj = _gostitelj_soseda(povezava)
         with self._zaklep:
             if self._sosedje.get(sosed_id) is not povezava:
                 return
@@ -981,6 +1055,7 @@ class Hub:
                 if n.povezava is None:
                     dodani.append(did)
                 self._napolni(n, z)
+                n.naslov = _naslov_za_druge(n.naslov, gostitelj)[:64]
                 n.sosed, n.posredno = sosed_id, False
                 n.povezava = _Namestnik(sosed_id, povezava, did, n.naslov)
                 obdrzani.add(did)
