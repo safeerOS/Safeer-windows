@@ -1872,6 +1872,23 @@ STORITEV_MDNS = "_safeercast._tcp.local."
 PRIORITETA_LINUX = 80
 
 
+def ime_oglasa(id_naprave: str) -> str:
+    """Ime primerka storitve mDNS za Hub racunalnika: za vsako napravo drugacno.
+
+    Prej »safeer-« + zadnjih 8 znakov id-ja. Id Controla se konca na »-control«, zato sta se dva racunalnika v istem
+    omrezju oglasala z istim imenom (»safeer--control«); drugemu registracija ni uspela in v omrezju ga ni bilo
+    videti (ugotovljeno 5. 10. 2026: testni Windows ob racunalniku z Linuxom). Ime zdaj nastane iz dela id-ja, ki
+    je pri vsaki napravi drugacen (brez pripone vloge); naprave Hub prepoznajo po polju `id`, ne po tem imenu.
+    """
+    jedro = (id_naprave or "").strip()
+    for pripona in ("-control", "-os"):
+        if jedro.endswith(pripona):
+            jedro = jedro[:-len(pripona)]
+            break
+    znaki = "".join(z for z in jedro if z.isascii() and z.isalnum())[-12:]
+    return "safeer-%s" % (znaki or "pc")
+
+
 class Oglas:
     """Oglas Huba prek mDNS. Brez zeroconfa mirno ne naredi nicesar - paket ostane brez nove
     obvezne odvisnosti, naprave pa Hub najdejo tudi po privzetem imenu in vratih."""
@@ -1900,14 +1917,22 @@ class Oglas:
                 b"mesh": MESH.encode(),
             }
             naslov = _s.inet_aton(_krajevni_ip())
-            ime_storitve = ("safeer-%s.%s" % ((id_naprave or "pc")[-8:], STORITEV_MDNS))
+            ime_storitve = "%s.%s" % (ime_oglasa(id_naprave), STORITEV_MDNS)
             info = ServiceInfo(STORITEV_MDNS, ime_storitve, addresses=[naslov], port=vrata,
                                properties=lastnosti, server=_s.gethostname().rstrip(".") + ".local.")
             zc = Zeroconf()
-            zc.register_service(info)
+            try:
+                # Ce je ime vseeno zasedeno (ostanek prejsnjega zagona v omrezju), dobi pripono - oglas z
+                # drugacnim imenom je boljsi kot nobenega.
+                zc.register_service(info, allow_name_change=True)
+            except Exception:
+                zc.close()
+                raise
             self._zc, self._info = zc, info
             return True
-        except Exception:
+        except Exception as e:  # noqa: BLE001
+            # Prej tiho: Hub brez oglasa je tekel, ne da bi bilo iz dnevnika razvidno, da ga v omrezju ni videti.
+            print("[SafeerLink] oglas mDNS ni uspel: %s: %s" % (type(e).__name__, e), flush=True)
             self._zc, self._info = None, None
             return False
 
