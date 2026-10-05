@@ -30,6 +30,7 @@ import threading
 import time
 from typing import Callable, List, Optional
 
+from core import link_vticnik
 from core.link_datoteke import TLS_MAPA, zagotovi_potrdilo
 
 LINK_IZHOD = "safeer_link_zvok"
@@ -40,6 +41,10 @@ OKVIR_ZVOK, OKVIR_OBVESTILO = 2, 3
 KOS = ZVOK_HZ * ZVOK_KANALI * 2 // 100
 #: Toliko casa naprava dobi, da se poveze, preden sejo opustimo in vrnemo zvok racunalniku.
 CAKANJE_S = 20
+#: Najdlje sme pisanje enega okvirja cakati na napravo. Zvok tece ves cas in naprava ga bere sproti; kdor toliko
+#: casa ne vzame nobenega bajta, ga ni vec (ugasnjen, brez omrezja). Brez te omejitve je seja visela, dokler ni
+#: obupalo jedro (cetrt ure ali nikoli) - racunalnik je bil ves ta cas brez zvoka.
+ROK_PISANJA_S = 20.0
 
 
 def _okolje() -> dict:
@@ -215,6 +220,11 @@ class ZvokNaNapravo:
                      "ime": socket.gethostname()}
             odjemalec.sendall((json.dumps(glava) + "\n").encode("utf-8"))
             odjemalec.settimeout(None)
+            # Zvok pise ta nit, konec seje pa na isti povezavi caka bralna nit (_bdi): vticnica TLS dveh niti
+            # sama ne prenese (core/link_vticnik.py). Branje caka poljubno dolgo, pisanje ne.
+            odjemalec = link_vticnik.zavaruj(odjemalec)
+            if isinstance(odjemalec, link_vticnik.VarnaTls):
+                odjemalec.nastavi_rok_pisanja(ROK_PISANJA_S)
             zajem = subprocess.Popen(ukaz_zajema(LINK_IZHOD + ".monitor", self.ffmpeg), stdout=subprocess.PIPE,
                                      stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, bufsize=0, env=_okolje())
             with self._kljuc:
@@ -248,10 +258,14 @@ class ZvokNaNapravo:
             odjemalec = None
             try:
                 surov.settimeout(10)
+                # Okvir zvoka (10 ms) naj gre takoj, ne sele po potrditvi prejsnjega (Naglov algoritem).
+                link_vticnik.brez_zamika(surov)
                 odjemalec = ctx.wrap_socket(surov, server_side=True)
                 pozdrav = self._preberi_vrstico(odjemalec)
-                if pozdrav.startswith("SAFEER-ZVOK ") and secrets.compare_digest(
-                        pozdrav.split(" ", 1)[1].strip(), self._zeton):
+                # Primerjamo bajte: compare_digest z nizom, ki ni cisti ASCII, vrze TypeError - tuj pozdrav bi
+                # tako koncal sejo, namesto da bi bil le zavrnjen.
+                if pozdrav.startswith("SAFEER-ZVOK ") and self._zeton and secrets.compare_digest(
+                        pozdrav.split(" ", 1)[1].strip().encode("utf-8"), self._zeton.encode("utf-8")):
                     return odjemalec
             except (OSError, ssl.SSLError, ValueError):
                 pass

@@ -20,6 +20,8 @@ import time
 import urllib.request
 from typing import Callable, List, Optional
 
+from core import link_vticnik
+
 GOSTITELJ = "link.safeer.si"
 OBJAVA_VSAKIH_S = 60
 PING_VSAKIH_S = 30
@@ -80,6 +82,8 @@ class WsOdjemalec:
 
     def __init__(self, pot: str, glave: dict, gostitelj: str = GOSTITELJ, rok_s: float = 15.0) -> None:
         surovi = socket.create_connection((gostitelj, 443), timeout=rok_s)
+        # Skozi kanal tece TLS Safeer Linka v majhnih kosih (sporocila, potrditve tokov): vsak naj gre takoj.
+        link_vticnik.brez_zamika(surovi)
         self.s = ssl.create_default_context().wrap_socket(surovi, server_hostname=gostitelj)
         try:
             self._rokovanje(pot, glave, gostitelj)
@@ -87,6 +91,9 @@ class WsOdjemalec:
             self.s.close()
             raise
         self.s.settimeout(None)
+        # Bere ena nit, pisejo druge (cev: obe smeri; agent: ping): vticnica TLS tega sama ne prenese
+        # (core/link_vticnik.py).
+        self.s = link_vticnik.zavaruj(self.s)
         self._pisi = threading.Lock()
 
     def _rokovanje(self, pot: str, glave: dict, gostitelj: str) -> None:
@@ -205,6 +212,10 @@ def _ustavi(s: socket.socket) -> None:
 
 def cev(ws: WsOdjemalec, tcp: socket.socket) -> None:
     """Bajti v obe smeri, dokler ena stran ne konca; nato zapre obe (sele ko obe niti koncata)."""
+    # Sporocilo Linka pride iz releja pogosto v dveh okvirjih (dva `sendall` na krajevno vticnico). Z Naglovim
+    # algoritmom drugi kos caka na potrditev prvega - na zanki do 40 ms (izmerjeno v krogu 106: 41 ms proti 0,2 ms).
+    link_vticnik.brez_zamika(tcp)
+
     def iz_tcp():
         try:
             while True:

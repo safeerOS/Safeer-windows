@@ -73,7 +73,7 @@ jobs:
           python -m pip install "pytest>=8,<9"
           python -m pytest windows/tests -q
       - name: Safeer Link TLS socket shared by two threads (real Windows sockets)
-        run: python -m pytest tests/test_link_vticnik.py -q
+        run: python -m pytest tests/test_link_vticnik.py tests/test_link_rele_tls.py -q
       - name: No Windows Error Reporting dialogs during unattended runs
         # A crashed exe would otherwise sit in a WerFault window until the job times out.
         run: |
