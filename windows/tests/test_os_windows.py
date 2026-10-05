@@ -1290,18 +1290,19 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
             self.assertTrue(cb.shrani_vzdevek("tv-1", ""))
             self.assertNotIn("tv-1", cb.nastavitve["link_vzdevki"])
 
-    def test_windows_deljenje_uporabi_izolirani_safeer_zaslon(self):
-        jpeg = b"\xff\xd8safeer-frame\xff\xd9"
-        navidezni = mock.Mock()
-        navidezni.zajemi_posnetek.return_value = {
-            "image": "data:image/jpeg;base64," + base64.b64encode(jpeg).decode("ascii")
-        }
+    def test_windows_deljenje_poslje_zaslon_ne_narisanega_namizja(self):
+        """»Zaslon« na plosci »Deli z« obljubi zaslon tega racunalnika. Do kroga 108 je razred posiljal sliko, ki jo
+        NavidezniZaslon narise (nadomestno namizje); podrobneje v test_link_deli_z.py."""
+        import io
+        from PIL import Image
         deljenje = control_backend._WindowsDeljenjeZaslona(
             "wss://127.0.0.1:8990/cast/ws", "token", "fp", "pc", "tv", "Televizor",
-            navidezni_zaslon=navidezni,
         )
-        self.assertEqual(deljenje._okvir(), jpeg)
-        navidezni.zajemi_posnetek.assert_called_once_with()
+        with mock.patch("PIL.ImageGrab.grab", return_value=Image.new("RGB", (640, 360), (200, 30, 30))) as zajem:
+            okvir = deljenje._okvir()
+        zajem.assert_called_once_with()
+        self.assertEqual(okvir[:2], b"\xff\xd8")
+        self.assertEqual(Image.open(io.BytesIO(okvir)).size, (640, 360))
 
     def test_nova_naprava_mora_dobiti_izrecno_izbrane_pravice(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:

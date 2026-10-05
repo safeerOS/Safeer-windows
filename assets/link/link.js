@@ -757,6 +757,7 @@
   var BESEDILA_DELJENJE = {
     sl: {
       napDovoljenje: "Deljenje zaslona ni bilo dovoljeno.",
+      napZaslonNiNaVoljo: "Ta naprava še ne more prikazati zaslona tega računalnika.",
       zasedenoKratko: "Zasedeno",
       zasedenoDeli: "Zasedeno — deli {ime}",
       napZasedena: "Z napravo trenutno deli {ime}. Počakaj, da konča.",
@@ -777,7 +778,7 @@
       deliBesedilo: "Besedilo",
       posljiNaNapravo: "Pošlji na napravo",
       vnesiBesedilo: "Vpiši besedilo …",
-      zaslonOpis: "Na izbrani napravi se bo prikazoval zaslon te naprave, dokler deljenja ne prekineš. Sistem te bo najprej vprašal za dovoljenje.",
+      zaslonOpis: "Na izbrani napravi se bo prikazoval zaslon tega računalnika, dokler deljenja ne prekineš.",
       datotekaOpis: "Odprlo se bo okno, v katerem poiščeš datoteko na tej napravi. Prispela bo v mapo prenosov izbrane naprave.",
       besediloOpis: "Besedilo se pokaže na izbrani napravi; povezava se da odpreti z enim dotikom.",
       prekiniZaslon: "Prekini deljenje zaslona",
@@ -808,6 +809,7 @@
     },
     en: {
       napDovoljenje: "Screen sharing was not allowed.",
+      napZaslonNiNaVoljo: "This device cannot show this computer’s screen yet.",
       zasedenoKratko: "Busy",
       zasedenoDeli: "Busy — {ime} is sharing",
       napZasedena: "{ime} is currently sharing with this device. Wait until it finishes.",
@@ -828,7 +830,7 @@
       deliBesedilo: "Text",
       posljiNaNapravo: "Send to device",
       vnesiBesedilo: "Type your text …",
-      zaslonOpis: "The selected device will show this device's screen until you stop sharing. The system will ask for permission first.",
+      zaslonOpis: "The selected device will show this computer's screen until you stop sharing.",
       datotekaOpis: "A window will open to pick a file on this device. It will arrive in the downloads folder of the selected device.",
       besediloOpis: "The text is shown on the selected device; a link can be opened with one tap.",
       prekiniZaslon: "Stop screen sharing",
@@ -859,6 +861,7 @@
     },
     de: {
       napDovoljenje: "Die Bildschirmfreigabe wurde nicht erlaubt.",
+      napZaslonNiNaVoljo: "Dieses Gerät kann den Bildschirm dieses Computers noch nicht anzeigen.",
       zasedenoKratko: "Belegt",
       zasedenoDeli: "Belegt — {ime} teilt",
       napZasedena: "{ime} teilt gerade mit diesem Gerät. Warte, bis es fertig ist.",
@@ -879,7 +882,7 @@
       deliBesedilo: "Text",
       posljiNaNapravo: "An Gerät senden",
       vnesiBesedilo: "Text eingeben …",
-      zaslonOpis: "Das gewählte Gerät zeigt den Bildschirm dieses Geräts, bis du die Freigabe beendest. Das System fragt zuerst um Erlaubnis.",
+      zaslonOpis: "Das gewählte Gerät zeigt den Bildschirm dieses Computers, bis du die Freigabe beendest.",
       datotekaOpis: "Es öffnet sich ein Fenster, in dem du eine Datei auf diesem Gerät auswählst. Sie landet im Download-Ordner des gewählten Geräts.",
       besediloOpis: "Der Text wird auf dem gewählten Gerät angezeigt; ein Link lässt sich mit einem Tipp öffnen.",
       prekiniZaslon: "Bildschirmfreigabe beenden",
@@ -905,6 +908,7 @@
     },
     es: {
       napDovoljenje: "No se permitió compartir la pantalla.",
+      napZaslonNiNaVoljo: "Este dispositivo todavía no puede mostrar la pantalla de este ordenador.",
       zasedenoKratko: "Ocupado",
       zasedenoDeli: "Ocupado — {ime} está compartiendo",
       napZasedena: "{ime} está compartiendo con este dispositivo. Espera a que termine.",
@@ -925,7 +929,7 @@
       deliBesedilo: "Texto",
       posljiNaNapravo: "Enviar al dispositivo",
       vnesiBesedilo: "Escribe el texto …",
-      zaslonOpis: "El dispositivo elegido mostrará la pantalla de este dispositivo hasta que detengas la compartición. El sistema pedirá permiso primero.",
+      zaslonOpis: "El dispositivo elegido mostrará la pantalla de este ordenador hasta que detengas la compartición.",
       datotekaOpis: "Se abrirá una ventana para elegir un archivo de este dispositivo. Llegará a la carpeta de descargas del dispositivo elegido.",
       besediloOpis: "El texto se muestra en el dispositivo elegido; un enlace se abre con un toque.",
       prekiniZaslon: "Dejar de compartir pantalla",
@@ -951,6 +955,7 @@
     },
     fr: {
       napDovoljenje: "Le partage d’écran n’a pas été autorisé.",
+      napZaslonNiNaVoljo: "Cet appareil ne peut pas encore afficher l’écran de cet ordinateur.",
       zasedenoKratko: "Occupé",
       zasedenoDeli: "Occupé — {ime} partage",
       napZasedena: "{ime} partage actuellement avec cet appareil. Attends qu’il ait fini.",
@@ -971,7 +976,7 @@
       deliBesedilo: "Texte",
       posljiNaNapravo: "Envoyer à l’appareil",
       vnesiBesedilo: "Saisis le texte …",
-      zaslonOpis: "L’appareil choisi affichera l’écran de cet appareil jusqu’à ce que tu arrêtes le partage. Le système demandera d’abord l’autorisation.",
+      zaslonOpis: "L’appareil choisi affichera l’écran de cet ordinateur jusqu’à ce que tu arrêtes le partage.",
       datotekaOpis: "Une fenêtre s’ouvrira pour choisir un fichier sur cet appareil. Il arrivera dans le dossier de téléchargements de l’appareil choisi.",
       besediloOpis: "Le texte s’affiche sur l’appareil choisi ; un lien s’ouvre d’une pression.",
       prekiniZaslon: "Arrêter le partage d’écran",
@@ -997,6 +1002,7 @@
     },
     it: {
       napDovoljenje: "La condivisione dello schermo non è stata consentita.",
+      napZaslonNiNaVoljo: "Questo dispositivo non può ancora mostrare lo schermo di questo computer.",
       zasedenoKratko: "Occupato",
       zasedenoDeli: "Occupato — {ime} sta condividendo",
       napZasedena: "{ime} sta condividendo con questo dispositivo. Aspetta che finisca.",
@@ -1014,7 +1020,7 @@
       deliBesedilo: "Testo",
       posljiNaNapravo: "Invia al dispositivo",
       vnesiBesedilo: "Scrivi il testo …",
-      zaslonOpis: "Il dispositivo scelto mostrerà lo schermo di questo dispositivo finché non interrompi la condivisione. Il sistema chiederà prima il permesso.",
+      zaslonOpis: "Il dispositivo scelto mostrerà lo schermo di questo computer finché non interrompi la condivisione.",
       datotekaOpis: "Si aprirà una finestra per scegliere un file su questo dispositivo. Arriverà nella cartella dei download del dispositivo scelto.",
       besediloOpis: "Il testo viene mostrato sul dispositivo scelto; un link si apre con un tocco.",
       prekiniZaslon: "Interrompi condivisione schermo",
@@ -3075,6 +3081,7 @@
     if (p.koda === "naprava_zasedena") return t("napZasedena", { ime: p.zasedenaOd || t("naprava") });
     if (p.koda === "napacen_odtis") return t("napOdtis");
     if (p.koda === "dovoljenje_zavrnjeno") return t("napDovoljenje");
+    if (p.koda === "zaslon_ni_na_voljo") return t("napZaslonNiNaVoljo");
     if (p.koda === "naprava_ni_povezana") return t("niDosegljiv", { ime: t("naprava") });
     return t("napDeljenje", { napaka: clovesko(p.sporocilo || "") });
   }

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import base64
 import http.client
+import io
 import json
 import os
 import secrets
@@ -56,22 +56,31 @@ TIPKE_MEDIJ = ("play_pause", "play", "pause", "stop", "next", "previous", "nasle
 
 
 class _WindowsDeljenjeZaslona(link_deljenje.DeljenjeZaslona):
-    """Hubu posreduje Safeerjev izolirani zaslon, ne uporabnikovega fizičnega namizja."""
+    """Deli glavni zaslon tega racunalnika, kot Safeer Control na Linuxu deli zaslon X11.
 
-    def __init__(self, *args, navidezni_zaslon: NavidezniZaslon, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self._navidezni_zaslon = navidezni_zaslon
+    Prej je gledalcu posiljal sliko, ki jo NavidezniZaslon.zajemi_posnetek narise (nadomestno namizje), ne zaslona;
+    plosca »Deli z« pa uporabniku pove, da bo naprava prikazovala zaslon tega racunalnika."""
 
-    def zajem_na_voljo(self) -> Tuple[bool, str]:
-        return True, ""
+    @staticmethod
+    def zajem_na_voljo() -> Tuple[bool, str]:
+        try:
+            from PIL import ImageGrab  # noqa: F401
+            return True, ""
+        except Exception:  # noqa: BLE001 - Pillow je mehka knjiznica (knjiznice.MEHKE): brez nje zajema ni
+            return False, "Zajem zaslona na tem računalniku ni na voljo."
 
     def _okvir(self) -> Optional[bytes]:
-        posnetek = self._navidezni_zaslon.zajemi_posnetek()
-        slika = str((posnetek or {}).get("image") or "")
-        if not slika:
-            return None
-        encoded = slika.split(",", 1)[1] if "," in slika else slika
-        return base64.b64decode(encoded, validate=True)
+        """Glavni zaslon kot JPEG, daljsa stranica najvec link_deljenje.NAJVEC_PX (kot na Linuxu)."""
+        from PIL import Image, ImageGrab
+        slika = ImageGrab.grab()
+        sirina, visina = slika.size
+        najvec = link_deljenje.NAJVEC_PX
+        if max(sirina, visina) > najvec:
+            faktor = najvec / max(sirina, visina)
+            slika = slika.resize((max(1, int(sirina * faktor)), max(1, int(visina * faktor))), Image.BILINEAR)
+        izhod = io.BytesIO()
+        slika.convert("RGB").save(izhod, "JPEG", quality=link_deljenje.KAKOVOST_JPEG)
+        return izhod.getvalue()
 
 
 #: Kako dolgo velja najdeni seznam hubov; prazen velja dlje (iskanje brez najdbe je najdaljse).
@@ -2326,16 +2335,41 @@ class SafeerControlBackend:
         threading.Thread(target=_delo, name="SafeerFileShare", daemon=True).start()
         return True
 
+    def _sredisce_za_zaslon(self, cilj: str) -> tuple:
+        """Sredisce, ki napravi pokaze nas zaslon (link_deljenje.sredisce_za_zaslon): Link Mesh - naprava ima svoje
+        sredisce in gledalec bere okvirje pri njem, zato deljenje zacnemo tam, s sejo s podpisom (kot datoteko).
+        Enako kot Safeer Control na Linuxu. Caka na omrezje - vedno iz delovne niti."""
+        lokalni = getattr(self, "_lokalni_hub", None)
+        nas_id = str(getattr(getattr(lokalni, "hub", None), "nas_id", "") or "") or self.device_id
+
+        def seja(naslov: str, odtis: str) -> tuple:
+            return link_hub.seja_s_podpisom(naslov, nas_id, odtis, self.device_ime), nas_id
+
+        def lastno() -> tuple:
+            if self._gostimo_lokalno():
+                return None, "zaslon_ni_na_voljo"    # sredisce racunalnika zaslona ne posreduje
+            zeton = self._zeton_http()
+            if not zeton:
+                return None, "hub_ni_znan"
+            return (self.hub_url(), zeton, self.hub_fp(), self.device_id), ""
+
+        return link_deljenje.sredisce_za_zaslon(self._sredisce_naprave, seja, lastno, cilj)
+
     def zacni_deljenje_zaslona(self, cilj: str, ime: str = "") -> bool:
-        if not cilj or not (self.hub_url() and self.zeton() and self.hub_fp()):
-            razlog = "Zaslon lahko deliš po varni povezavi s Safeer Linkom."
+        if not cilj or not (self.hub_url() and self.hub_fp()):
+            razlog = link_deljenje.SPOROCILA_ZASLONA["hub_ni_znan"]
             self._dogodek_deljenja("zaslon", "napaka", cilj, ime, razlog, koda="hub_ni_znan", tece=False, napaka=razlog)
             return False
+        na_voljo, razlog = _WindowsDeljenjeZaslona.zajem_na_voljo()
+        if not na_voljo:
+            self._dogodek_deljenja("zaslon", "napaka", cilj, ime, razlog, koda="ni_zajema", tece=False, napaka=razlog)
+            return False
         self.koncaj_deljenje_zaslona()
+        # Sredisce in sejo izbere delovna nit deljenja (cakata na omrezje); zetona tu se ni.
         deljenje = _WindowsDeljenjeZaslona(
-            self.hub_url(), self._zeton_http(), self.hub_fp(), self.device_id, cilj, ime or cilj,
+            self.hub_url(), "", self.hub_fp(), self.device_id, cilj, ime or cilj,
             ob_spremembi=self._na_spremembo_zaslona,
-            navidezni_zaslon=self.navidezni_zaslon,
+            sredisce=lambda: self._sredisce_za_zaslon(cilj),
         )
         self._deljenje_zaslona = deljenje
         deljenje.zacni()
