@@ -23,8 +23,9 @@ on:
       - 'ui/home.*'
       - 'ui/splet.*'
       - '.github/workflows/windows-package.yml'
-  release:
-    types: [published]
+  # No `release: published` trigger. Publishing a release used to start this workflow again: it rebuilt the
+  # packages and replaced the files of the release that had just been published. Builds are not bit-for-bit
+  # reproducible, so users would get files other than the ones that were tested (found in Safeer-linux, 4 Oct 2026).
   workflow_dispatch:
 permissions:
   contents: read
@@ -154,4 +155,13 @@ jobs:
         run: |
           ls -l release
           (cd release && sha256sum -c SHA256SUMS)
+          # A tag push gets a draft with the packages attached. A published release is final: its files are the
+          # ones that were tested, so a re-run of this job must never replace them.
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --draft --verify-tag --title "Safeer Browser for Windows $TAG" --notes 'Windows packages. Complete the acceptance checklist before publishing.'
+          fi
+          if [ "$(gh release view "$TAG" --json isDraft --jq .isDraft)" != "true" ]; then
+            echo "Release $TAG is already published; its packages are not replaced."
+            exit 0
+          fi
           gh release upload "$TAG" release/* --clobber
