@@ -170,6 +170,20 @@ QLabel#povezavaZnacka[ok="false"] { border-color: rgba(181,220,209,.25); color: 
 """
 
 
+def _okno_s_fokusom() -> Tuple[int, int]:
+    """(okno, proces) okna, ki ima tipkovnico Windows v niti lupine; (0, 0), ce ga ni (program ni v ospredju)."""
+    import ctypes
+    user32 = ctypes.WinDLL("user32")
+    user32.GetFocus.restype = ctypes.c_void_p
+    user32.GetWindowThreadProcessId.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong)]
+    okno = user32.GetFocus() or 0
+    if not okno:
+        return 0, 0
+    proces = ctypes.c_ulong(0)
+    user32.GetWindowThreadProcessId(okno, ctypes.byref(proces))
+    return int(okno), int(proces.value)
+
+
 def make_icon(name: str, color: str = "#e2e8f0", fill: str = "none") -> QIcon:
     icon = QIcon()
     for mode, stroke in ((QIcon.Mode.Normal, color), (QIcon.Mode.Disabled, "#4b5b52")):
@@ -704,6 +718,18 @@ class SafeerBrowserApp(QObject):
                 ctypes.windll.user32.SetFocus(okno)
         except Exception:
             pass
+
+    def fokus_v_strani(self) -> bool:
+        """Ali ima tipkovnico Windows spletna stran WebView2 in ne lupina. Stran je okno drugega procesa: po kliku
+        vanjo Qt se naprej steje za fokusiran zadnji gradnik lupine (npr. naslovno vrstico). Gostiteljev dogodek
+        »gotfocus« ob kliku z misko ne pride (izmerjeno 5. 10. 2026), zato pogledamo, cigavo okno ima fokus."""
+        if not self._wv_gostitelji or sys.platform != "win32":
+            return False
+        try:
+            okno, proces = _okno_s_fokusom()
+        except Exception:
+            return False
+        return bool(okno) and proces != os.getpid()
 
     def eventFilter(self, obj, event) -> bool:
         # Klik kamorkoli v lupino (naslovna vrstica, zavihki, stranska vrstica Safeer OS) vrne tipkovnico Safeerju.
@@ -1715,13 +1741,22 @@ class BrowserWindow(QMainWindow):
         if view is self.current_view():
             self.setWindowTitle(f"{label} — {policy.APP_NAME}" + (f" ({tr(self.app, 'private')})" if self.private else ""))
 
+    def _naslov_v_urejanju(self) -> bool:
+        """Ali uporabnik pise v naslovno vrstico - takrat je sprememba naslova strani ne sme prepisati."""
+        if not self.address.hasFocus():
+            return False
+        if self.app.fokus_v_strani():
+            self.wv_fokus_v_strani()         # v resnici je kliknil v stran: vrstica ni vec v urejanju
+            return False
+        return True
+
     def on_url_changed(self, view: QWebEngineView, url: QUrl) -> None:
         # Nase strani (safeer://) so ze temne: vsiljeni temni nacin bi jih obrnil (bela kartica »Novice«).
         dark = getattr(QWebEngineSettings.WebAttribute, "ForceDarkMode", None)
         if dark is not None:
             view.page().settings().setAttribute(
                 dark, False if url.scheme() == "safeer" else bool(self.app.settings.get("force_dark_mode")))
-        if view is self.current_view() and not self.address.hasFocus():
+        if view is self.current_view() and not self._naslov_v_urejanju():
             self.address.setText(policy.display_url(url.toString()))
         # Druga stran v istem zavihku: obvestilo o videu velja samo za stran, ki ga je javila.
         if view.property("safeer_video") and view.property("safeer_video") != self._brez_sidra(url.toString()):
