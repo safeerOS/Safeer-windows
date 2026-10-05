@@ -9,6 +9,10 @@ OKVIR_SLIKA = 1
 OKVIR_ZVOK = 2
 OKVIR_OBVESTILO = 3
 NAJVECJI_OKVIR = 8 * 1024 * 1024
+#: Najvec naslovov, ki jih gledalec poskusi za eno sejo, in cas za vsakega, kadar jih je vec. Naprava po
+#: `screen.start` caka 30 s; stirje poskusi po 4 s se izidejo z rezervo.
+NAJVEC_KANDIDATOV = 4
+CAS_KANDIDATA_S = 4.0
 
 
 class ZavrnjenaSeja(RuntimeError):
@@ -22,6 +26,8 @@ class Seja:
     odtis: str
     zeton: str
     razlicica: int = 2
+    #: Vsi naslovi, ki jih gledalec poskusi po vrsti (prvi je `naslov`); prazno = samo `naslov`.
+    naslovi: tuple = ()
 
 
 def _cisti_odtis(odtis: str) -> str:
@@ -36,6 +42,37 @@ def ima_naslov(naprava: Optional[dict]) -> bool:
     Naprava, ki je dosegljiva samo prek Global Linka, ga nima - slika zaslona gre samo neposredno."""
     naprava = naprava or {}
     return bool(str(naprava.get("naslov") or naprava.get("address") or naprava.get("host") or "").strip())
+
+
+def _naslov_naprave(naslov: str) -> bool:
+    """Ali je `naslov` iz odgovora naprave naslov IPv4, na katerem jo ima smisel iskati: stiri desetiska stevila
+    brez vodilnih nicel; zanka (127.x), 0.x ter skupinski in rezervirani naslovi (224 in vec) odpadejo. Ime
+    gostitelja ni naslov - gledalec zaradi odgovora naprave ne sprasuje DNS."""
+    deli = naslov.split(".")
+    if len(deli) != 4:
+        return False
+    for d in deli:
+        if not (d.isascii() and d.isdigit()) or len(d) > 3 or (len(d) > 1 and d[0] == "0"):
+            return False
+    stevila = [int(d) for d in deli]
+    return max(stevila) <= 255 and stevila[0] not in (0, 127) and stevila[0] < 224
+
+
+def kandidati_naslovov(naslov: str, hosts=None) -> list:
+    """Naslovi, na katerih gledalec isce napravo: najprej naslov iz seznama naprav Safeer Linka, nato tisti, ki
+    jih je naprava sama nastela v odgovoru na `screen.start` (`hosts`). Vsak samo enkrat, najvec
+    NAJVEC_KANDIDATOV (docs/LINK-MESH.md, pravilo 8)."""
+    izid = []
+    prvi = str(naslov or "").strip()
+    if prvi:
+        izid.append(prvi)
+    for h in hosts if isinstance(hosts, (list, tuple)) else ():
+        if len(izid) >= NAJVEC_KANDIDATOV:
+            break
+        h = h.strip() if isinstance(h, str) else ""
+        if h and h not in izid and _naslov_naprave(h):
+            izid.append(h)
+    return izid[:NAJVEC_KANDIDATOV]
 
 
 def razcleni_odgovor(odgovor: dict, naprava: Optional[dict] = None) -> Seja:
@@ -56,7 +93,8 @@ def razcleni_odgovor(odgovor: dict, naprava: Optional[dict] = None) -> Seja:
         vrata = 0
     odtis = _cisti_odtis(str(podatki.get("fp") or podatki.get("fingerprint") or podatki.get("odtis") or ""))
     zeton = str(podatki.get("token") or podatki.get("zeton") or "")
-    if not naslov:
+    naslovi = tuple(kandidati_naslovov(naslov, podatki.get("hosts")))
+    if not naslovi:
         raise ValueError("Naprava ni poslala omreznega naslova.")
     if not (1 <= vrata <= 65535):
         raise ValueError("Naprava ni poslala veljavnih vrat zaslona.")
@@ -64,7 +102,7 @@ def razcleni_odgovor(odgovor: dict, naprava: Optional[dict] = None) -> Seja:
         raise ValueError("Naprava ni poslala veljavnega odtisa potrdila.")
     if not zeton or "\n" in zeton or "\r" in zeton:
         raise ValueError("Naprava ni poslala veljavnega enkratnega zetona.")
-    return Seja(naslov, vrata, odtis, zeton, int(podatki.get("v") or 2))
+    return Seja(naslovi[0], vrata, odtis, zeton, int(podatki.get("v") or 2), naslovi)
 
 
 class RazclenjevalnikOkvirjev:
@@ -111,7 +149,8 @@ def preslikaj_tipko_ime(ime: str, besedilo: str = "", dol: bool = True,
     return None
 
 
-__all__ = ["MODIFIKATORJI", "je_igra", "NAJVECJI_OKVIR", "OKVIR_OBVESTILO", "OKVIR_SLIKA",
+__all__ = ["CAS_KANDIDATA_S", "MODIFIKATORJI", "NAJVEC_KANDIDATOV", "je_igra", "kandidati_naslovov",
+           "NAJVECJI_OKVIR", "OKVIR_OBVESTILO", "OKVIR_SLIKA",
            "OKVIR_ZVOK", "POSEBNE_TIPKE", "RazclenjevalnikOkvirjev", "Seja",
            "ZavrnjenaSeja", "preslikaj_tipko_ime", "razcleni_odgovor"]
 

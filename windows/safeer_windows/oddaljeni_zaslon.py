@@ -13,7 +13,7 @@ from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtWidgets import (QApplication, QHBoxLayout, QLabel, QPushButton, QSizePolicy,
                                QVBoxLayout, QWidget)
 
-from .oddaljeni_zaslon_povezava import PovezavaGledalca, PrekinjenaPovezava
+from .oddaljeni_zaslon_povezava import NiDosegljiva, PovezavaGledalca, PrekinjenaPovezava
 from .oddaljeni_zaslon_protokol import (
     OKVIR_OBVESTILO, OKVIR_SLIKA,
     RazclenjevalnikOkvirjev, Seja, ZavrnjenaSeja, preslikaj_tipko_ime,
@@ -42,37 +42,43 @@ _BESEDILA = {
            "povezujem": "Povezujem se ...", "povezano": "Povezano", "prekinjeno": "Povezava se je prekinila.",
            "koncala": "Naprava je končala povezavo.",
            "ni_doma": "{ime} zdaj ni dosegljiv neposredno. Slika zaslona deluje samo v istem omrežju (doma), "
-                      "prek Global Linka ne."},
+                      "prek Global Linka ne.",
+           "ni_dosegljiv": "{ime} ni dosegljiv. Preveri, ali sta obe napravi v istem omrežju."},
     "en": {"naslov": "Remote screen – {ime}", "pripravljam": "Preparing the connection ...", "znova": "Reconnect",
            "cel": "Full screen", "okno": "Window", "dovoljenje": "Asking the device for permission ...",
            "povezujem": "Connecting ...", "povezano": "Connected", "prekinjeno": "The connection was interrupted.",
            "koncala": "The device ended the connection.",
            "ni_doma": "{ime} cannot be reached directly right now. Screen viewing works only on the same network "
-                      "(at home), not over Global Link."},
+                      "(at home), not over Global Link.",
+           "ni_dosegljiv": "{ime} cannot be reached. Check that both devices are on the same network."},
     "de": {"naslov": "Entfernter Bildschirm – {ime}", "pripravljam": "Verbindung wird vorbereitet ...", "znova": "Neu verbinden",
            "cel": "Vollbild", "okno": "Fenster", "dovoljenje": "Gerät wird um Erlaubnis gebeten ...",
            "povezujem": "Verbinde ...", "povezano": "Verbunden", "prekinjeno": "Die Verbindung wurde unterbrochen.",
            "koncala": "Das Gerät hat die Verbindung beendet.",
            "ni_doma": "{ime} ist gerade nicht direkt erreichbar. Die Bildschirmansicht funktioniert nur im selben "
-                      "Netzwerk (zu Hause), nicht über Global Link."},
+                      "Netzwerk (zu Hause), nicht über Global Link.",
+           "ni_dosegljiv": "{ime} ist nicht erreichbar. Prüfe, ob beide Geräte im selben Netzwerk sind."},
     "es": {"naslov": "Pantalla remota – {ime}", "pripravljam": "Preparando la conexión ...", "znova": "Reconectar",
            "cel": "Pantalla completa", "okno": "Ventana", "dovoljenje": "Pidiendo permiso al dispositivo ...",
            "povezujem": "Conectando ...", "povezano": "Conectado", "prekinjeno": "La conexión se interrumpió.",
            "koncala": "El dispositivo terminó la conexión.",
            "ni_doma": "{ime} no está accesible directamente en este momento. La vista de pantalla solo funciona en "
-                      "la misma red (en casa), no a través de Global Link."},
+                      "la misma red (en casa), no a través de Global Link.",
+           "ni_dosegljiv": "{ime} no está accesible. Comprueba que ambos dispositivos estén en la misma red."},
     "fr": {"naslov": "Écran distant – {ime}", "pripravljam": "Préparation de la connexion ...", "znova": "Reconnecter",
            "cel": "Plein écran", "okno": "Fenêtre", "dovoljenje": "Demande d’autorisation à l’appareil ...",
            "povezujem": "Connexion ...", "povezano": "Connecté", "prekinjeno": "La connexion a été interrompue.",
            "koncala": "L’appareil a mis fin à la connexion.",
            "ni_doma": "{ime} n’est pas joignable directement pour le moment. L’affichage de l’écran ne fonctionne "
-                      "que sur le même réseau (à la maison), pas via Global Link."},
+                      "que sur le même réseau (à la maison), pas via Global Link.",
+           "ni_dosegljiv": "{ime} est injoignable. Vérifiez que les deux appareils sont sur le même réseau."},
     "it": {"naslov": "Schermo remoto – {ime}", "pripravljam": "Preparazione della connessione ...", "znova": "Riconnetti",
            "cel": "Schermo intero", "okno": "Finestra", "dovoljenje": "Richiesta di autorizzazione al dispositivo ...",
            "povezujem": "Connessione ...", "povezano": "Connesso", "prekinjeno": "La connessione si è interrotta.",
            "koncala": "Il dispositivo ha chiuso la connessione.",
            "ni_doma": "{ime} al momento non è raggiungibile direttamente. La visualizzazione dello schermo funziona "
-                      "solo sulla stessa rete (a casa), non tramite Global Link."},
+                      "solo sulla stessa rete (a casa), non tramite Global Link.",
+           "ni_dosegljiv": "{ime} non è raggiungibile. Controlla che entrambi i dispositivi siano sulla stessa rete."},
 }
 _JEZIK = "sl"
 
@@ -118,9 +124,10 @@ class _TokSignali(QObject):
 
 
 class _DekodirnaNit(threading.Thread):
-    def __init__(self, seja: Seja, signali: _TokSignali):
+    def __init__(self, seja: Seja, signali: _TokSignali, ime: str = ""):
         super().__init__(name="safeer-oddaljeni-zaslon", daemon=True)
         self.seja = seja
+        self.ime = str(ime or "")
         self.signali = signali
         self._tece = threading.Event()
         self._tece.set()
@@ -190,7 +197,11 @@ class _DekodirnaNit(threading.Thread):
             if self._tece.is_set():
                 # Prekinitev in casovna omejitev dobita nas stavek v jeziku uporabnika (ne "timed out").
                 tiho = isinstance(exc, (PrekinjenaPovezava, socket.timeout))
-                self.signali.stanje.emit("napaka", _b("prekinjeno") if tiho else (str(exc) or _b("prekinjeno")))
+                if isinstance(exc, NiDosegljiva):
+                    besedilo = _b("ni_dosegljiv", ime=self.ime or self.seja.naslov)
+                else:
+                    besedilo = _b("prekinjeno") if tiho else (str(exc) or _b("prekinjeno"))
+                self.signali.stanje.emit("napaka", besedilo)
         finally:
             self.ustavi()
 
@@ -341,7 +352,7 @@ class OddaljeniZaslon(QWidget):
                 if self._zapiram:
                     self.backend.ukaz_pocakaj(self.id_naprave, "screen.stop", {}, cas=5.0)
                     return
-                nit = _DekodirnaNit(seja, self.signali)
+                nit = _DekodirnaNit(seja, self.signali, self.ime)
                 self.slika._ob_prikazu = nit.prikaz_prost.set
                 self._nit = nit
                 nit.start()

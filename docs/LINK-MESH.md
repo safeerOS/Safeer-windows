@@ -49,6 +49,26 @@ računalnik, ki je ves čas prižgan. Hub je ena točka odpovedi in ena točka, 
    (Global Link) naslova ni: `ip` je prazen in odjemalec neposredne povezave (slika zaslona) ne
    poskuša, temveč pove, da ta deluje samo v istem omrežju. Naprava, ki je pri hubu prijavljena iz
    omrežja, obdrži svoj naslov.
+8. **Naprava, ki ponuja neposredno povezavo, svoje naslove našteje sama** (5. 10. 2026). Naslov v
+   seznamu naprav pripiše hub; napravi, ki jo vidi samo posredno, ga lahko pripiše narobe (pravilo 7
+   je nastalo po taki napaki). Računalnik zato v odgovoru na `screen.start` poleg `port`, `fp` in
+   `token` vrne `hosts` – svoje naslove IPv4, najverjetnejši najprej, največ štiri, brez zanke
+   (isti seznam kot v `audio.play`):
+   - naslov na poti do huba, kadar hub teče drugje;
+   - naslovi vmesnikov krajevnega omrežja, tisti na privzeti poti prvi (vmesniki vsebnikov in
+     navideznih strojev ne štejejo);
+   - naslov na privzeti poti in naslovi predorov (VPN) nazadnje – računalnik, ki ves promet pošilja
+     skozi VPN, bi sicer napravi v istem omrežju povedal samo naslov predora.
+
+   Gledalec poskusi **najprej naslov iz seznama naprav, nato naštete**: vsakega enkrat, skupaj
+   največ štiri, vsakega največ 4 s, kadar jih je več (računalnik čaka 30 s). Iz `hosts` vzame samo
+   naslove IPv4 (štiri desetiška števila brez vodilnih ničel), ki niso zanka (127.x), 0.x ali 224 in
+   več; imena gostitelja ne razrešuje. Povezavo sprejme samo, če se potrdilo ujema z odtisom iz
+   odgovora, in enkratni žeton pošlje šele po tem – naprava na napačnem naslovu ga ne vidi. Ko pravo
+   napravo najde, so napake končne (drugih naslovov ne poskuša več).
+
+   Star računalnik `hosts` ne pošlje in gledalec dela kot prej; star gledalec polje prezre. Naprave
+   brez naslova v seznamu gledalec še vedno ne prosi (pravilo 7).
 
 ## Sporočila (novo)
 
