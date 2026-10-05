@@ -70,6 +70,26 @@ računalnik, ki je ves čas prižgan. Hub je ena točka odpovedi in ena točka, 
    Star računalnik `hosts` ne pošlje in gledalec dela kot prej; star gledalec polje prezre. Naprave
    brez naslova v seznamu gledalec še vedno ne prosi (pravilo 7).
 
+9. **Kar hub posreduje sam – datoteko in zaslon – pošiljatelj odda hubu ciljne naprave** (5. 10. 2026).
+   Pot v `share.file` (`/cast/file/<id>?k=…`) in pot gledalca v `share.screen`
+   (`/cast/screen/<id>/view?k=…`) sta relativni na hub, ki je vsebino sprejel, in se čez sosede ne
+   preneseta. Zato:
+   - **datoteka**: pošiljatelj jo odda (`PUT /cast/file`) hubu ciljne naprave, prijavljen s sejo s
+     podpisom (`/cast/auth/challenge` → `/cast/auth/ticket`), kot sosednja povezava. Hub oddajo zavrne
+     (409 `naprava_pri_drugem_srediscu`), če je cilj pri sosedu. Prejemnik datoteko poišče **najprej
+     pri svojem hubu, nato pri pošiljateljevem** – iz sporočila se ne vidi, kateri jo ima; naslednji
+     pride na vrsto samo, če prejšnji odgovori 404, vsaka druga napaka je končna
+     (`link_deljenje.prevzemi_pri_srediscih`). Do 1.0.97 je Safeer Control na Linuxu vprašal samo
+     pošiljateljev hub in datoteka z drugega računalnika je ostala v zalogi njegovega huba.
+   - **zaslon**: pošiljatelj začne deljenje (`POST /cast/share/screen/start`) pri hubu ciljne naprave
+     z isto sejo in tja potiska okvirje; ta hub svoji napravi pove, kje je gledalec
+     (`link_deljenje.sredisce_za_zaslon`). Hub računalnika zaslona ne posreduje: naprava, ki je
+     prijavljena neposredno nanj, dobi `zaslon_ni_na_voljo`. Do 1.0.97 (Linux) in 1.0.38 (Windows) je
+     bil cilj deljenja hub računalnika in »Zaslon« na plošči »Deli z« ni deloval.
+
+   Zaupanje je isto kot pri sosednji povezavi: ključ v potrdilu huba mora biti ključ člana kroga
+   (`link_mesh.sredisce_naprave`).
+
 ## Sporočila (novo)
 
 ```
