@@ -162,6 +162,51 @@ class OmejitevInKonec(_Osnova):
         self.assertEqual(self.a.recv(100), b"potem pride")
         self.assertEqual(self.a.gettimeout(), 5.0)
 
+    def test_pisanje_ima_lahko_svojo_omejitev(self):
+        """Pretok v zivo: branje caka poljubno dolgo, pisanje pa ne - kdor nicesar ne vzame, ga ni vec."""
+        self.a.settimeout(None)
+        self.a.nastavi_rok_pisanja(0.4)
+        prebrano = {}
+
+        def beri():
+            try:
+                prebrano["kos"] = self.a.recv(100)
+            except Exception as e:  # noqa: BLE001
+                prebrano["napaka"] = e
+
+        bralec = threading.Thread(target=beri, daemon=True)
+        bralec.start()
+        zacetek = time.monotonic()
+        with self.assertRaises(socket.timeout):
+            self.a.sendall(bytes(32 * 1024 * 1024))          # druga stran ne bere: vticnica se napolni
+        trajalo = time.monotonic() - zacetek
+        self.assertGreaterEqual(trajalo, 0.35)
+        self.assertLess(trajalo, 5.0)
+        # Branje omejitve pisanja ni dobilo: se vedno caka in dobi, kar pride.
+        time.sleep(0.3)
+        self.assertTrue(bralec.is_alive(), "bralna nit se je koncala: %r" % (prebrano,))
+        self.b.sendall(b"pride")
+        bralec.join(5)
+        self.assertEqual(prebrano.get("kos"), b"pride")
+
+    def test_brez_svoje_omejitve_velja_za_pisanje_ista_kot_za_branje(self):
+        self.a.settimeout(0.4)
+        zacetek = time.monotonic()
+        with self.assertRaises(socket.timeout):
+            self.a.sendall(bytes(32 * 1024 * 1024))
+        self.assertLess(time.monotonic() - zacetek, 5.0)
+
+    def test_po_prekinjenem_pisanju_se_ne_pise_vec(self):
+        """Omejitev sredi zapisa: OpenSSL ima zapis ze pripravljen, drugacni podatki za njim bi tok pokvarili."""
+        self.a.settimeout(None)
+        self.a.nastavi_rok_pisanja(0.3)
+        with self.assertRaises(socket.timeout):
+            self.a.sendall(bytes(32 * 1024 * 1024))
+        zacetek = time.monotonic()
+        with self.assertRaises(ConnectionError):
+            self.a.sendall(b"naslednji okvir")
+        self.assertLess(time.monotonic() - zacetek, 0.2, "zapora mora javiti takoj, ne sele po omejitvi")
+
     def test_zaprtje_druge_strani_je_pravi_konec(self):
         self.b.sendall(b"zadnje")
         self.b.close()
@@ -193,6 +238,18 @@ class OmejitevInKonec(_Osnova):
         self.a.close()
         with self.assertRaises(OSError):
             self.a.sendall(b"x")
+
+    def test_recv_into(self):
+        self.b.sendall(b"v medpomnilnik")
+        medpomnilnik = bytearray(64)
+        n = self.a.recv_into(medpomnilnik)
+        self.assertEqual(bytes(medpomnilnik[:n]), b"v medpomnilnik")
+
+    def test_klici_mimo_kljucavnice_niso_dovoljeni(self):
+        """makefile() in podobni bi brali naravnost iz ovite vticnice: mimo kljucavnice in neblokirajoce."""
+        for ime in ("makefile", "read", "write", "sendfile", "unwrap"):
+            with self.assertRaises(AttributeError, msg=ime):
+                getattr(self.a, ime)
 
     def test_ostalo_gre_na_pravo_vticnico(self):
         self.assertEqual(self.a.getpeername()[0], "127.0.0.1")
