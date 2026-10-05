@@ -826,7 +826,7 @@ func TestPocakajNaZagon(t *testing.T) {
 	meri := func(opis string, konec <-chan error, cakaOznako bool, najmanj, najdlje time.Duration, pricakovano int, vsaj time.Duration) error {
 		t.Helper()
 		zacetek := time.Now()
-		stanje, err := pocakajNaZagon(konec, dnevnik, cakaOznako, najmanj, najdlje)
+		stanje, err := pocakajNaZagon(konec, dnevnik, 0, cakaOznako, najmanj, najdlje)
 		if trajalo := time.Since(zacetek); stanje != pricakovano || trajalo < vsaj || trajalo > vsaj+4*time.Second {
 			t.Fatalf("%s: stanje=%d (pricakovano %d), trajalo %v (vsaj %v)", opis, stanje, pricakovano, trajalo, vsaj)
 		}
@@ -971,5 +971,80 @@ func TestOdtisIzGradnje(t *testing.T) {
 		if ok, _ := razpakiraj(a, mapa2, false); ok {
 			t.Fatalf("odtis %q: razpakiraj() ne prepozna istega paketa", slab)
 		}
+	}
+}
+
+// Dnevnik se dopisuje: zagon ga ne prepise, potrditev in besedilo napake veljata samo za izpis tega zagona.
+func TestDnevnikSeDopisuje(t *testing.T) {
+	mapa := t.TempDir()
+	dnevnik := filepath.Join(mapa, "safeer_os.log")
+	os.WriteFile(dnevnik, []byte("prejsnji zagon\n"+oznakaKnjizniceOK+"\n"), 0644)
+	od := velikostDnevnika(dnevnik)
+	f, err := odpriDnevnik(dnevnik)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Oznaka prejsnjega zagona ne potrdi tega.
+	if dnevnikPotrjuje(dnevnik, od) {
+		t.Fatal("oznaka prejsnjega zagona je potrdila novega")
+	}
+	f.WriteString(oznakaKnjizniceOK + "\nnov izpis\n")
+	f.Close()
+	if !dnevnikPotrjuje(dnevnik, od) {
+		t.Fatal("oznaka tega zagona ni potrdila zagona")
+	}
+	vse := vsebina(dnevnik)
+	if !strings.HasPrefix(vse, "prejsnji zagon\n") || !strings.Contains(vse, "===== zagon 20") || !strings.HasSuffix(vse, "nov izpis\n") {
+		t.Fatalf("dnevnik: %q", vse)
+	}
+	if ta := string(preberiDnevnikOd(dnevnik, od, 1<<10)); strings.Contains(ta, "prejsnji") || !strings.Contains(ta, "nov izpis") {
+		t.Fatalf("izpis tega zagona: %q", ta)
+	}
+	// Omejitev dolzine in datoteka, krajsa od odmika (prestavljena, skrajsana): bere od zacetka.
+	if kos := preberiDnevnikOd(dnevnik, 0, 8); string(kos) != "prejsnji" {
+		t.Fatalf("omejitev: %q", kos)
+	}
+	os.WriteFile(dnevnik, []byte("kratko\n"), 0644)
+	if ta := string(preberiDnevnikOd(dnevnik, od, 1<<10)); ta != "kratko\n" {
+		t.Fatalf("skrajsana datoteka: %q", ta)
+	}
+	if preberiDnevnikOd(filepath.Join(mapa, "ni.log"), 0, 10) != nil || velikostDnevnika(filepath.Join(mapa, "ni.log")) != 0 {
+		t.Fatal("dnevnik, ki ga ni")
+	}
+
+	// Prevelik dnevnik se pred zagonom prestavi v .1 (prejsnji .1 se zavrze).
+	stara := najvecDnevnik
+	najvecDnevnik = 20
+	defer func() { najvecDnevnik = stara }()
+	os.WriteFile(dnevnik+".1", []byte("zelo star"), 0644)
+	os.WriteFile(dnevnik, []byte(strings.Repeat("x", 30)), 0644)
+	f, err = odpriDnevnik(dnevnik)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	if vsebina(dnevnik+".1") != strings.Repeat("x", 30) || !strings.HasPrefix(vsebina(dnevnik), "===== zagon ") {
+		t.Fatalf("prestavitev: .1=%q, dnevnik=%q", vsebina(dnevnik+".1"), vsebina(dnevnik))
+	}
+}
+
+// Napaka ob zagonu: v sporocilu je izpis tega zagona, ne prejsnjih.
+func TestNapakaPokazeIzpisTegaZagona(t *testing.T) {
+	dnevnik := filepath.Join(t.TempDir(), "safeer_os.log")
+	os.WriteFile(dnevnik, []byte("STARA NAPAKA iz prejsnjega zagona\n"), 0644)
+	napaka := izhodSKodo(t, 1)
+	besedila := []string{}
+	zazeni := func(preverba bool) (<-chan error, error) {
+		f, _ := os.OpenFile(dnevnik, os.O_WRONLY|os.O_APPEND, 0644)
+		f.WriteString("Traceback: nova napaka\n")
+		f.Close()
+		return koncan(napaka, 30*time.Millisecond), nil
+	}
+	if zazeniProgram(zazeni, func() error { return nil }, func(_, besedilo string, _ uint) { besedila = append(besedila, besedilo) },
+		dnevnik, 150*time.Millisecond, 5*time.Second) {
+		t.Fatal("program, ki je padel, steje kot tekoc")
+	}
+	if len(besedila) != 1 || !strings.Contains(besedila[0], "Traceback: nova napaka") || strings.Contains(besedila[0], "STARA NAPAKA") {
+		t.Fatalf("sporocilo: %q", besedila)
 	}
 }

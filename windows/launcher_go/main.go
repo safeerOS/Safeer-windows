@@ -594,20 +594,60 @@ func kodaIzhoda(err error) int {
 	return -1
 }
 
-// dnevnikPotrjuje pove, ali je program v dnevnik ze izpisal, da so knjiznice na mestu (oznaka je na zacetku dnevnika).
-func dnevnikPotrjuje(dnevnik string) bool {
-	f, err := os.Open(dnevnik)
+// najvecDnevnik: nad to velikostjo se dnevnik pred zagonom prestavi v <ime>.1.
+var najvecDnevnik int64 = 4 << 20
+
+// odpriDnevnik odpre dnevnik programa za dopisovanje in vanj zapise vrstico o zagonu.
+//
+// Prej ga je vsak zagon skrajsal na nic: drug klik na ikono je prepisal dnevnik kopije, ki ze tece (ta je pisala naprej
+// na starem odmiku - datoteka z luknjo iz nicel), in sled do napake je izginila.
+func odpriDnevnik(pot string) (*os.File, error) {
+	if info, err := os.Stat(pot); err == nil && info.Size() > najvecDnevnik {
+		// Ce ga drzi kopija, ki tece, preimenovanje na Windows ne uspe: ostane in se prestavi ob kaksnem naslednjem zagonu.
+		os.Remove(pot + ".1")
+		os.Rename(pot, pot+".1")
+	}
+	f, err := os.OpenFile(pot, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err == nil {
+		fmt.Fprintf(f, "===== zagon %s =====\n", time.Now().Format("2006-01-02 15:04:05"))
+	}
+	return f, err
+}
+
+// velikostDnevnika: kje v dnevniku se bo zacel izpis naslednjega zagona.
+func velikostDnevnika(pot string) int64 {
+	if info, err := os.Stat(pot); err == nil {
+		return info.Size()
+	}
+	return 0
+}
+
+// preberiDnevnikOd vrne najvec `najvec` bajtov dnevnika od odmika `od` (izpis tega zagona). Ce je datoteka medtem
+// krajsa od odmika (prestavljena ali skrajsana), bere od zacetka.
+func preberiDnevnikOd(pot string, od, najvec int64) []byte {
+	f, err := os.Open(pot)
 	if err != nil {
-		return false
+		return nil
 	}
 	defer f.Close()
-	b, _ := io.ReadAll(io.LimitReader(f, 64<<10))
-	return bytes.Contains(b, []byte(oznakaKnjizniceOK))
+	if info, err := f.Stat(); err != nil || info.Size() < od {
+		od = 0
+	}
+	if _, err := f.Seek(od, io.SeekStart); err != nil {
+		return nil
+	}
+	b, _ := io.ReadAll(io.LimitReader(f, najvec))
+	return b
+}
+
+// dnevnikPotrjuje pove, ali je program v tem zagonu (od odmika `od`) ze izpisal, da so knjiznice na mestu.
+func dnevnikPotrjuje(dnevnik string, od int64) bool {
+	return bytes.Contains(preberiDnevnikOd(dnevnik, od, 64<<10), []byte(oznakaKnjizniceOK))
 }
 
 // pocakajNaZagon caka, da se program konca ali da zazivi: da potrdi knjiznice (ce `cakaOznako`) in prezivi prvih
 // `najmanj`. Po `najdlje` neha cakati tudi brez potrditve (zelo pocasen zagon, program brez preverbe).
-func pocakajNaZagon(konec <-chan error, dnevnik string, cakaOznako bool, najmanj, najdlje time.Duration) (int, error) {
+func pocakajNaZagon(konec <-chan error, dnevnik string, od int64, cakaOznako bool, najmanj, najdlje time.Duration) (int, error) {
 	zacetek := time.Now()
 	potrjeno := !cakaOznako
 	tik := time.NewTicker(100 * time.Millisecond)
@@ -624,7 +664,7 @@ func pocakajNaZagon(konec <-chan error, dnevnik string, cakaOznako bool, najmanj
 			return zagonNapaka, err
 		case <-tik.C:
 			if !potrjeno {
-				potrjeno = dnevnikPotrjuje(dnevnik)
+				potrjeno = dnevnikPotrjuje(dnevnik, od)
 			}
 			if od := time.Since(zacetek); potrjeno && od >= najmanj || od >= najdlje {
 				return zagonTece, nil
@@ -638,27 +678,28 @@ func pocakajNaZagon(konec <-chan error, dnevnik string, cakaOznako bool, najmanj
 // dela tudi brez katere od njih). Vrne, ali program tece.
 func zazeniProgram(zazeni func(preverba bool) (<-chan error, error), namesti func() error, sporoci func(naslov, besedilo string, slog uint),
 	dnevnik string, najmanj, najdlje time.Duration) bool {
+	od := velikostDnevnika(dnevnik) // dnevnik se dopisuje: izpis tega zagona se zacne tu
 	konec, err := zazeni(true)
 	if err != nil {
 		sporoci("Safeer OS - Napaka", fmt.Sprintf("Zagon aplikacije ni uspel:\n%v", err), MB_ICONERROR)
 		return false
 	}
-	stanje, izid := pocakajNaZagon(konec, dnevnik, true, najmanj, najdlje)
+	stanje, izid := pocakajNaZagon(konec, dnevnik, od, true, najmanj, najdlje)
 	if stanje == zagonManjkajo {
 		if err := namesti(); err != nil {
 			sporoci("Safeer OS - Opozorilo", fmt.Sprintf("Opozorilo pri nameščanju knjižnic:\n%v\n\nPoskušam zagnati aplikacijo...", err), MB_ICONINFORMATION)
 		}
+		od = velikostDnevnika(dnevnik)
 		if konec, err = zazeni(false); err != nil {
 			sporoci("Safeer OS - Napaka", fmt.Sprintf("Zagon aplikacije ni uspel:\n%v", err), MB_ICONERROR)
 			return false
 		}
-		stanje, izid = pocakajNaZagon(konec, dnevnik, false, najmanj, najdlje)
+		stanje, izid = pocakajNaZagon(konec, dnevnik, od, false, najmanj, najdlje)
 	}
 	if stanje == zagonTece {
 		return true
 	}
-	vsebina, _ := os.ReadFile(dnevnik)
-	msg := string(vsebina)
+	msg := string(preberiDnevnikOd(dnevnik, od, 16<<10))
 	if strings.TrimSpace(msg) == "" && izid != nil {
 		msg = izid.Error()
 	}
@@ -831,7 +872,7 @@ func main() {
 			cmd.Env = append(cmd.Env, okoljePreverbe+"=1")
 		}
 		brezOkna(cmd)
-		logFile, logErr := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+		logFile, logErr := odpriDnevnik(logFilePath)
 		if logErr == nil {
 			cmd.Stdout = logFile
 			cmd.Stderr = logFile
