@@ -79,3 +79,12 @@ def test_igra_odpre_celozaslonsko():
     assert je_igra({"result": {"game": True}})
     assert not je_igra({"port": 1, "game": False})
     assert not je_igra(None)
+
+
+def test_ima_naslov_samo_z_resnicnim_naslovom():
+    # Naprava, dosegljiva samo prek Global Linka, pride v seznam brez naslova: slike zaslona je ne prosimo.
+    from safeer_windows.oddaljeni_zaslon_protokol import ima_naslov
+    assert ima_naslov({"naslov": "192.168.0.135"})
+    assert ima_naslov({"address": "192.168.0.135"})
+    for brez in (None, {}, {"naslov": ""}, {"naslov": "   "}, {"naslov": None}):
+        assert not ima_naslov(brez), brez

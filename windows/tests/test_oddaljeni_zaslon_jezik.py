@@ -18,3 +18,11 @@ def test_nastavi_jezik_in_nadomestni_anglescina():
     assert oz._b("okno") == "Window"
     oz.nastavi_jezik("sl")
     assert oz._b("koncala") == "Naprava je končala povezavo."
+
+
+def test_sporocilo_brez_naslova_imenuje_napravo_v_vseh_jezikih():
+    for jezik in oz._BESEDILA:
+        oz.nastavi_jezik(jezik)
+        besedilo = oz._b("ni_doma", ime="Linux PC")
+        assert besedilo.startswith("Linux PC ") and "Global Link" in besedilo, jezik
+    oz.nastavi_jezik("sl")

@@ -1153,6 +1153,8 @@ class SafeerControlBackend:
             nova_brez_dovoljenja = []
             dovoljenja = dict(self.nastavitve.get("dovoljenja_naprav") or {})
             for d in sporocilo.get("devices") or []:
+                # Zanka od Huba, ki tece drugje, je naslov TISTEGA Huba (core/link_hub_streznik.naslov_za_povezavo).
+                naslov = link_hub_streznik.naslov_za_povezavo(d.get("ip") or d.get("naslov"), self.hub_url())
                 seznam.append({
                     "id": d.get("id", ""),
                     "ime": d.get("name", ""),
@@ -1160,8 +1162,8 @@ class SafeerControlBackend:
                     "zmoznosti": d.get("capabilities") or [],
                     "platforma": d.get("platform") or "",
                     "vrsta": d.get("kind") or "",
-                    "naslov": d.get("ip") or d.get("naslov") or "",
-                    "ip": d.get("ip") or d.get("naslov") or "",
+                    "naslov": naslov,
+                    "ip": naslov,
                     "zasedenaOd": d.get("busy_by") or d.get("zasedenaOd") or "",
                     "zasedenaOdIme": d.get("busy_by_name") or d.get("zasedenaOdIme") or "",
                     "aplikacije": d.get("apps") if isinstance(d.get("apps"), dict) else {},

@@ -31,6 +31,24 @@ računalnik, ki je ves čas prižgan. Hub je ena točka odpovedi in ena točka, 
    velja neposredna povezava; oddaljeni zapis istega id se prezre.
 6. **Izpad vozlišča podre samo njegove naprave.** Ko sosednja povezava pade, hub odstrani vse
    njegove oddaljene naprave in objavi nov `cast.devices`. Drugi pari tečejo naprej.
+7. **Naslov naprave zunaj njene naprave ni nikoli zanka** (5. 10. 2026). Aplikacija, ki se prijavi
+   na hub svoje naprave, ima pri njem naslov `127.0.0.1`. Ta naslov velja samo na tisti napravi: kdor
+   ga dobi drugje, se z njim poveže sam nase (telefon je namesto zaslona računalnika klical svoja
+   vrata). Zato:
+   - **sosedom** (`mesh.devices`, izvoz): hub namesto zanke zapiše svoj naslov na poti do tistega
+     soseda (vsakemu sosedu svojega – krajevni konec sosednje povezave);
+   - **od sosedov** (uvoz): zanko ali prazen `ip` sosedove naprave hub zamenja z naslovom, na
+     katerem teče sosedov hub (drugi konec sosednje povezave);
+   - **svojim odjemalcem** (`cast.devices`): odjemalec z iste naprave dobi zanko (po njej prepozna
+     procese svoje naprave); odjemalec od drugod – vmesnik telefona je lahko pripet na hub druge
+     naprave – dobi naslov huba na poti do njega. Polje `here: true` pove, da je naprava na napravi
+     huba, ne glede na to, kateri naslov je odjemalec dobil (po njem odjemalec ve, kako je hubu ime);
+   - **odjemalec** zanko od huba, ki teče drugje, bere kot naslov tistega huba – tako dela tudi s
+     starejšim hubom.
+   Dovolj je, da pravilo upošteva ena stran – starejše različice pošiljajo `127.0.0.1`. Prek releja
+   (Global Link) naslova ni: `ip` je prazen in odjemalec neposredne povezave (slika zaslona) ne
+   poskuša, temveč pove, da ta deluje samo v istem omrežju. Naprava, ki je pri hubu prijavljena iz
+   omrežja, obdrži svoj naslov.
 
 ## Sporočila (novo)
 

@@ -31,6 +31,13 @@ def _cisti_odtis(odtis: str) -> str:
     return "".join(z for z in vrednost if z in "0123456789abcdef")
 
 
+def ima_naslov(naprava: Optional[dict]) -> bool:
+    """Ali ima naprava v seznamu Safeer Linka omrezni naslov, na katerega se gledalec lahko poveze.
+    Naprava, ki je dosegljiva samo prek Global Linka, ga nima - slika zaslona gre samo neposredno."""
+    naprava = naprava or {}
+    return bool(str(naprava.get("naslov") or naprava.get("address") or naprava.get("host") or "").strip())
+
+
 def razcleni_odgovor(odgovor: dict, naprava: Optional[dict] = None) -> Seja:
     if not isinstance(odgovor, dict):
         raise ValueError("Naprava je vrnila neveljaven odgovor.")
