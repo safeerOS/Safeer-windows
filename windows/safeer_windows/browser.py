@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDia
                                QMainWindow, QMenu, QMessageBox, QProxyStyle, QPushButton, QStackedWidget, QStyle, QTabBar, QToolBar,
                                QToolButton, QVBoxLayout, QWidget)
 
+from . import krajevna_povezava
 from . import policy
 from . import splet_webview2
 
@@ -769,14 +770,9 @@ class SafeerBrowserApp(QObject):
 
     @classmethod
     def forward_to_running_instance(cls, urls: List[str]) -> bool:
-        socket = QLocalSocket()
-        socket.connectToServer(cls.server_name())
-        if not socket.waitForConnected(400):
-            return False
-        socket.write(QByteArray(json.dumps({"urls": urls}).encode("utf-8") + b"\n"))
-        socket.waitForBytesWritten(1500)
-        socket.disconnectFromServer()
-        return True
+        # Brez QLocalSocket: njegova blokirajoca cakanja se na Windows lahko zataknejo za vedno (krajevna_povezava.py).
+        sporocilo = json.dumps({"urls": urls}).encode("utf-8") + b"\n"
+        return krajevna_povezava.pogovor(cls.server_name(), sporocilo, 1.5, odgovor=False) is not None
 
     def start_instance_server(self) -> None:
         QLocalServer.removeServer(self.server_name())

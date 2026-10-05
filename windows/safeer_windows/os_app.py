@@ -3008,16 +3008,20 @@ def main(argv: Optional[List[str]] = None) -> int:
     app = QApplication.instance() or QApplication(sys.argv)
     zaklep = en_primerek.zakleni()
     if zaklep is None:
-        if en_primerek.predaj_prvemu(zacetni, bool(args.ozadje) and not magnet, magnet=magnet):
+        izid = en_primerek.vprasaj_prvo(zacetni, bool(args.ozadje) and not magnet, magnet=magnet)
+        if izid == "ok":
             print("[SafeerOS] Ze tece; razdelek predan prvi kopiji.", flush=True)
             return 0
-        # Prva kopija se umika (tece starejsa koda) ali se ne odziva: pocakamo, da sprosti zaklep.
+        # Prva kopija se umika (tece starejsa koda), se zapira ali se ne odziva: pocakamo, da sprosti zaklep.
         # Ce ga ne sprosti, ne zaganjamo druge kopije, da ne podvojimo Linka.
-        zaklep = en_primerek.prevzemi_zaklep()
+        odlocitev, zaklep = en_primerek.odloci_brez_prevzema(izid)
+        if odlocitev == "zasedena":
+            print("[SafeerOS] Ze tece; prva kopija je zasedena, razdelek je prejela.", flush=True)
+            return 0
         if zaklep is None:
             print("[SafeerOS] Ze tece druga kopija, ki se ne odziva.", flush=True)
             return 1
-        print("[SafeerOS] Stara kopija se je umaknila; zaganjam novo razlicico.", flush=True)
+        print("[SafeerOS] Stara kopija se je umaknila (%s); zaganjam novo razlicico." % izid, flush=True)
         PREVZEM["cakaj_s"] = 12.0
     app.setApplicationName("SafeerOS")
     app.setOrganizationName("Safeer")
