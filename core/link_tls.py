@@ -155,6 +155,13 @@ class RokovanjeVNiti:
                 request.close()
             except Exception:
                 pass
+            # Streznik, ki steje sovrazne dogodke (sredisce: core/link_obramba), izve, od koga je prislo.
+            javi = getattr(self, "ob_neuspelem_rokovanju", None)
+            if javi is not None:
+                try:
+                    javi(client_address)
+                except Exception:
+                    pass
             return
         super().finish_request(request, client_address)  # type: ignore[misc]
 

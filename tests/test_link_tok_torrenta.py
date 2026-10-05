@@ -1,6 +1,7 @@
 """magnet.stream: racunalnik prenasa torrent, televizor dobi samo tok (core/link_datoteke.py; ukaz: windows/safeer_windows/control_backend.py)."""
 import http.client
 import http.server
+import json
 import os
 import shutil
 import ssl
@@ -285,7 +286,8 @@ class Nadzornik(unittest.TestCase):
         with open(os.path.join(self.stanje, self.hash + ".torrent"), "wb") as d:
             d.write(_benc({"info": info}))
         with open(os.path.join(self.stanje, "session.json"), "w") as d:
-            d.write('{"torrents": {"0": {"info_hash": "%s", "output_folder": "%s"}}}' % (self.hash, self.izhod))
+            # json.dump, ne oblikovanje niza: pot mape na Windows vsebuje posevnice nazaj.
+            json.dump({"torrents": {"0": {"info_hash": self.hash, "output_folder": self.izhod}}}, d)
         self.d = link_datoteke.Datoteke([], tls_mapa=os.path.join(self.mapa, "tls"))
 
     def tearDown(self):

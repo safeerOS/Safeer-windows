@@ -16,6 +16,7 @@ korenskega okna (X11); na Waylandu zajem ni na voljo in to povemo naravnost.
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 import socket
@@ -38,11 +39,23 @@ def _osnova(ws_naslov: str) -> str:
     return f"https://{u.netloc}"
 
 
+#: Razlogi, zakaj datoteke ni mogoce oddati sredisci druge naprave (core/link_mesh.sredisce_naprave).
+SPOROCILA_SREDISCA = {
+    "naprava_pri_drugem_srediscu": "Naprava je povezana prek drugega središča; datoteke ji od tu ni mogoče poslati.",
+    "sredisce_naprave_ni_dosegljivo": "Naprava v tem omrežju ni dosegljiva.",
+}
+
+
 def napaka_huba(koda: int, odgovor: dict) -> Dict[str, str]:
     """Stabilna koda napake in - pri zasedeni napravi - kdo z njo deli (kot na telefonu)."""
+    oznaka = odgovor.get("koda") or odgovor.get("error_code") or ""
+    if koda in (405, 501) or (koda == 404 and oznaka in ("", "ni_poti")):
+        # Sredisce te poti nima: racunalnik s Safeerjem pred 2.1.45 (deljenje je znal samo Hub na Androidu).
+        return {"sporocilo": "Središče tega še ne zna; posodobi Safeer na napravi, ki je središče.",
+                "koda": "sredisce_ne_zna", "zasedenaOd": ""}
     return {
         "sporocilo": odgovor.get("napaka") or odgovor.get("error") or f"Hub je odgovoril {koda}",
-        "koda": odgovor.get("koda") or odgovor.get("error_code") or "",
+        "koda": oznaka,
         "zasedenaOd": odgovor.get("busy_by_name") or odgovor.get("busy_by") or "",
     }
 
@@ -104,18 +117,30 @@ def poslji_datoteko(ws_naslov: str, zeton: str, odtis: str, moj_id: str, cilj: s
         povezava.endheaders()
         poslano = 0
         zadnji = -1
+        prekinjeno: Optional[Exception] = None
         with open(pot, "rb") as f:
             while True:
                 kos = f.read(KOS)
                 if not kos:
                     break
-                povezava.send(kos)
+                try:
+                    povezava.send(kos)
+                except OSError as e:
+                    # Sredisce je oddajo zavrnilo in zaprlo povezavo, se preden smo poslali vse (cilj ni povezan, ni
+                    # prostora ...): razlog je morda ze v odgovoru - spodaj ga poskusimo prebrati.
+                    prekinjeno = e
+                    break
                 poslano += len(kos)
                 odst = int(poslano * 100 / velikost) if velikost else 100
                 if napredek and odst != zadnji:
                     zadnji = odst
                     napredek(odst)
-        odgovor = povezava.getresponse()
+        try:
+            odgovor = povezava.getresponse()
+        except Exception:
+            if prekinjeno is not None:
+                raise prekinjeno
+            raise
         telo = odgovor.read().decode("utf-8", "replace")
         try:
             j = json.loads(telo) if telo else {}
@@ -170,6 +195,31 @@ def enolicna_pot(mapa: str, ime: str) -> str:
 def prevzemi_datoteko(ws_naslov: str, odtis: str, pot_huba: str, ime: str, pricakovan_odtis: str,
                       mapa: Optional[str] = None) -> Tuple[Optional[str], str]:
     """Prenese datoteko s Huba v mapo prenosov. Vrne (pot, "") ali (None, razlog)."""
+    cilj, razlog, _koda = _prevzemi(ws_naslov, odtis, pot_huba, ime, pricakovan_odtis, mapa)
+    return cilj, razlog
+
+
+def prevzemi_pri_srediscih(sredisca, pot_huba: str, ime: str, pricakovan_odtis: str,
+                           mapa: Optional[str] = None) -> Tuple[Optional[str], str]:
+    """Datoteko prevzame pri prvem sredisci s seznama [(naslov, odtis), ...], ki jo ima. Vrne kot prevzemi_datoteko.
+
+    Pot v `share.file` je relativna na sredisce, ki je datoteko sprejelo - to pa je lahko nase (posiljatelj jo je
+    oddal nam; tako delajo racunalniki) ali posiljateljevo (oddal jo je svojemu, sporocilo je prislo cez sosede).
+    Iz sporocila se tega ne vidi, zato vprasamo po vrsti. Naslednje sredisce pride na vrsto samo, ce prejsnje
+    odgovori, da te datoteke nima (404); vsaka druga napaka je koncna (ni prostora, napacen odtis, ni povezave)."""
+    razlog = "Središče ni znano."
+    for naslov, odtis in sredisca:
+        if not naslov or not odtis:
+            continue
+        cilj, razlog, koda = _prevzemi(naslov, odtis, pot_huba, ime, pricakovan_odtis, mapa)
+        if cilj or koda != 404:
+            return cilj, razlog
+    return None, razlog
+
+
+def _prevzemi(ws_naslov: str, odtis: str, pot_huba: str, ime: str, pricakovan_odtis: str,
+              mapa: Optional[str] = None) -> Tuple[Optional[str], str, int]:
+    """(pot, "", 200) ali (None, razlog, koda HTTP sredisca); koda 0 = do odgovora ni prislo ali prenos ni uspel."""
     u = urlparse(ws_naslov)
     gostitelj, vrata = u.hostname or "127.0.0.1", u.port or 443
     cilj = enolicna_pot(mapa or mapa_prenosov(), varno_ime(ime))
@@ -178,7 +228,7 @@ def prevzemi_datoteko(ws_naslov: str, odtis: str, pot_huba: str, ime: str, prica
         povezava.request("GET", pot_huba)
         odgovor = povezava.getresponse()
         if odgovor.status != 200:
-            return None, f"Hub je odgovoril {odgovor.status}"
+            return None, f"Hub je odgovoril {odgovor.status}", int(odgovor.status)
         h = hashlib.sha256()
         with open(cilj, "wb") as f:
             while True:
@@ -193,14 +243,14 @@ def prevzemi_datoteko(ws_naslov: str, odtis: str, pot_huba: str, ime: str, prica
                 os.remove(cilj)
             except OSError:
                 pass
-            return None, "prstni odtis se ne ujema"
-        return cilj, ""
+            return None, "prstni odtis se ne ujema", 0
+        return cilj, "", 200
     except Exception as e:  # noqa: BLE001
         try:
             os.remove(cilj)
         except OSError:
             pass
-        return None, str(e)
+        return None, str(e), 0
     finally:
         try:
             povezava.close()
