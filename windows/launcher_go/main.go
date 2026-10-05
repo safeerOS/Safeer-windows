@@ -11,10 +11,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
-	"syscall"
 	"time"
-	"unsafe"
 )
 
 //go:embed safeer-os-windows.zip
@@ -27,15 +26,6 @@ const (
 	MB_YESNO           = 0x00000004
 	IDYES              = 6
 )
-
-func showMessage(title, text string, style uint) int {
-	user32 := syscall.NewLazyDLL("user32.dll")
-	proc := user32.NewProc("MessageBoxW")
-	t, _ := syscall.UTF16PtrFromString(title)
-	m, _ := syscall.UTF16PtrFromString(text)
-	r, _, _ := proc.Call(0, uintptr(unsafe.Pointer(m)), uintptr(unsafe.Pointer(t)), uintptr(style))
-	return int(r)
-}
 
 func getAppDir() string {
 	base := os.Getenv("LOCALAPPDATA")
@@ -50,6 +40,9 @@ func getAppDir() string {
 
 // Pripona datoteke, ki je bila ob posodobitvi v rabi: umaknjena s preimenovanjem, pobrisana ob naslednjem zagonu.
 const staraPripona = ".staro-"
+
+// Pripona zacasne kopije zaganjalnika med prepisovanjem na stalno mesto (za njo je stevilka procesa).
+const novaPripona = ".novo-"
 
 // odpriZaPisanje odpre ciljno datoteko. Ce je v rabi (tece prejsnja kopija Safeer OS: SafeerMediaWebView.exe,
 // knjiznice predvajalnika), je Windows ne pusti prepisati, preimenovati pa jo: staro umaknemo in zapisemo novo.
@@ -113,30 +106,158 @@ func zabeleziUmaknjene(targetDir string) {
 	}
 }
 
-func extractIfNeeded(targetDir string) error {
-	h := sha256.Sum256(embeddedZip)
+// Seznam datotek, ki jih je namestil zadnji paket: ob naslednji namestitvi pobrisemo tiste, ki jih v novem ni vec.
+const imeSeznama = ".datoteke"
+
+// stevilke razcleni razlicico ("1.0.35") v stevila; del, ki ni stevilo, steje 0 ("1.0.35-test" -> 1, 0, 35).
+func stevilke(razlicica string) []int {
+	izid := []int{}
+	for _, del := range strings.Split(strings.TrimSpace(razlicica), ".") {
+		n := 0
+		for _, znak := range del {
+			if znak < '0' || znak > '9' {
+				break
+			}
+			n = n*10 + int(znak-'0')
+		}
+		izid = append(izid, n)
+	}
+	return izid
+}
+
+// novejsa pove, ali je razlicica a strogo novejsa od b.
+func novejsa(a, b string) bool {
+	sa, sb := stevilke(a), stevilke(b)
+	for i := 0; i < len(sa) || i < len(sb); i++ {
+		x, y := 0, 0
+		if i < len(sa) {
+			x = sa[i]
+		}
+		if i < len(sb) {
+			y = sb[i]
+		}
+		if x != y {
+			return x > y
+		}
+	}
+	return false
+}
+
+// razlicicaPaketa vrne razlicico v paketu (vnos windows/VERSION); "" ce je ni.
+func razlicicaPaketa(zr *zip.Reader) string {
+	for _, f := range zr.File {
+		if f.Name != "windows/VERSION" {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return ""
+		}
+		defer rc.Close()
+		b, _ := io.ReadAll(io.LimitReader(rc, 64))
+		return strings.TrimSpace(string(b))
+	}
+	return ""
+}
+
+// razlicicaNamescena vrne razlicico namescenega programa (app\windows\VERSION); "" ce je ni.
+func razlicicaNamescena(targetDir string) string {
+	b, err := os.ReadFile(filepath.Join(targetDir, "windows", "VERSION"))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
+}
+
+// namestitevCela pove, ali je v mapi uporabna namestitev (dokoncana razpakirava in glavni program).
+func namestitevCela(targetDir string) bool {
+	for _, ime := range []string{".version", filepath.Join("windows", "safeer_os_windows.py")} {
+		if _, err := os.Stat(filepath.Join(targetDir, ime)); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
+func vMapi(pot, mapa string) bool {
+	return strings.HasPrefix(filepath.Clean(pot), filepath.Clean(mapa)+string(os.PathSeparator))
+}
+
+// odstraniOpuscene pobrise datoteke, ki jih je namestil prejsnji paket, v novem pa jih ni vec, in mape, ki so ostale
+// prazne. Datotek, ki jih paket ni namestil (dnevnik, nastavitve), se ne dotakne.
+func odstraniOpuscene(targetDir string, nove map[string]bool) int {
+	data, err := os.ReadFile(filepath.Join(targetDir, imeSeznama))
+	if err != nil {
+		return 0
+	}
+	pobrisanih := 0
+	for _, rel := range strings.Split(string(data), "\n") {
+		rel = strings.TrimSpace(rel)
+		if rel == "" || nove[rel] {
+			continue
+		}
+		pot := filepath.Join(targetDir, filepath.FromSlash(rel))
+		if !vMapi(pot, targetDir) {
+			continue
+		}
+		if os.Remove(pot) != nil {
+			continue
+		}
+		pobrisanih++
+		for mapa := filepath.Dir(pot); vMapi(mapa, targetDir); mapa = filepath.Dir(mapa) {
+			if os.Remove(mapa) != nil {
+				break
+			}
+		}
+	}
+	return pobrisanih
+}
+
+func zapisiSeznam(targetDir string, nove map[string]bool) {
+	imena := make([]string, 0, len(nove))
+	for ime := range nove {
+		imena = append(imena, ime)
+	}
+	sort.Strings(imena)
+	os.WriteFile(filepath.Join(targetDir, imeSeznama), []byte(strings.Join(imena, "\n")+"\n"), 0644)
+}
+
+// razpakiraj namesti paket v targetDir, ce tam se ni prav ta. Vrne, ali je kaj namestil.
+//
+// Starejsi zaganjalnik novejse namestitve ne prepise: kdor odpre star preneseni exe, dobi program, ki je namescen
+// (prej je star exe brez opozorila vrnil staro kodo in pustil mesanico obeh razlicic). `vsili` (--namesti) to
+// preskoci - za namerno vrnitev na starejso razlicico.
+func razpakiraj(paket []byte, targetDir string, vsili bool) (bool, error) {
+	h := sha256.Sum256(paket)
 	currentHash := hex.EncodeToString(h[:])
 
 	pocistiUmaknjene(targetDir)
 	verFile := filepath.Join(targetDir, ".version")
 	if data, err := os.ReadFile(verFile); err == nil {
 		if strings.TrimSpace(string(data)) == currentHash {
-			return nil
+			return false, nil
+		}
+	}
+
+	zr, err := zip.NewReader(bytes.NewReader(paket), int64(len(paket)))
+	if err != nil {
+		return false, fmt.Errorf("napaka pri branju paketa: %v", err)
+	}
+	if !vsili && namestitevCela(targetDir) {
+		nasa, namescena := razlicicaPaketa(zr), razlicicaNamescena(targetDir)
+		if nasa != "" && namescena != "" && novejsa(namescena, nasa) {
+			return false, nil
 		}
 	}
 
 	if err := os.MkdirAll(targetDir, 0755); err != nil {
-		return err
+		return false, err
 	}
 
-	zr, err := zip.NewReader(bytes.NewReader(embeddedZip), int64(len(embeddedZip)))
-	if err != nil {
-		return fmt.Errorf("napaka pri branju paketa: %v", err)
-	}
-
+	nove := map[string]bool{}
 	for _, f := range zr.File {
 		outPath := filepath.Join(targetDir, f.Name)
-		if !strings.HasPrefix(filepath.Clean(outPath), filepath.Clean(targetDir)) {
+		if !vMapi(outPath, targetDir) {
 			continue
 		}
 
@@ -148,26 +269,190 @@ func extractIfNeeded(targetDir string) error {
 		os.MkdirAll(filepath.Dir(outPath), 0755)
 		rc, err := f.Open()
 		if err != nil {
-			return err
+			return false, err
 		}
 
 		outFile, err := odpriZaPisanje(outPath, f.Mode())
 		if err != nil {
 			rc.Close()
-			return err
+			return false, err
 		}
 
 		_, err = io.Copy(outFile, rc)
 		outFile.Close()
 		rc.Close()
 		if err != nil {
-			return err
+			return false, err
 		}
+		nove[filepath.ToSlash(f.Name)] = true
 	}
 
+	odstraniOpuscene(targetDir, nove)
+	zapisiSeznam(targetDir, nove)
 	zabeleziUmaknjene(targetDir)
 	os.WriteFile(verFile, []byte(currentHash), 0644)
-	return nil
+	return true, nil
+}
+
+// pocistiPosodobitve pobrise prenesene namestitvene datoteke, ki so svoje opravile: posodobitev novi exe prepise cez
+// starega in zazene tega, preneseni pa je prej ostal za vedno (84 MB na posodobitev). Datoteke, iz katere tecemo
+// (ce starega exe ni bilo mogoce prepisati), se ne dotakne; nedokoncan prenos in skripto pobrise sele, ko sta stara.
+func pocistiPosodobitve(mapa, selfExe string) int {
+	vnosi, err := os.ReadDir(mapa)
+	if err != nil {
+		return 0
+	}
+	pobrisanih := 0
+	for _, v := range vnosi {
+		if v.IsDir() {
+			continue
+		}
+		pot := filepath.Join(mapa, v.Name())
+		ime := strings.ToLower(v.Name())
+		if strings.EqualFold(filepath.Clean(pot), filepath.Clean(selfExe)) || !strings.HasPrefix(ime, "safeeros") && ime != "posodobi.cmd" {
+			continue
+		}
+		info, err := v.Info()
+		if err != nil {
+			continue
+		}
+		star := time.Since(info.ModTime()) > time.Hour
+		if strings.HasSuffix(ime, ".exe") || star && (strings.HasSuffix(ime, ".del") || ime == "posodobi.cmd") {
+			if os.Remove(pot) == nil {
+				pobrisanih++
+			}
+		}
+	}
+	return pobrisanih
+}
+
+// stalnaPot je stalno mesto zaganjalnika ob mapi programa: %LOCALAPPDATA%\SafeerOS\SafeerOS.exe.
+func stalnaPot(targetDir string) string {
+	return filepath.Join(filepath.Dir(targetDir), "SafeerOS.exe")
+}
+
+func istaPot(a, b string) bool {
+	return strings.EqualFold(filepath.Clean(a), filepath.Clean(b))
+}
+
+func jeDatoteka(pot string) bool {
+	info, err := os.Stat(pot)
+	return err == nil && info.Mode().IsRegular()
+}
+
+// kopirajDatoteko zapise cilj z vsebino vira prek zacasne datoteke: cilj je ves cas cel (star ali nov). Cilj, ki
+// tece, Windows pusti preimenovati, ne pa prepisati: umaknemo ga, pobrise ga pocistiOstankeZaganjalnika.
+func kopirajDatoteko(vir, cilj string) error {
+	in, err := os.Open(vir)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	info, err := in.Stat()
+	if err != nil {
+		return err
+	}
+	zacasna := fmt.Sprintf("%s%s%d", cilj, novaPripona, os.Getpid())
+	out, err := os.OpenFile(zacasna, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0755)
+	if err != nil {
+		return err
+	}
+	n, err := io.Copy(out, in)
+	if cerr := out.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil && n != info.Size() {
+		err = fmt.Errorf("prepisanih %d od %d bajtov", n, info.Size())
+	}
+	if err == nil {
+		if err = os.Rename(zacasna, cilj); err != nil {
+			umaknjena := fmt.Sprintf("%s%s%d", cilj, staraPripona, time.Now().UnixNano())
+			if os.Rename(cilj, umaknjena) == nil {
+				if err = os.Rename(zacasna, cilj); err != nil {
+					os.Rename(umaknjena, cilj)
+				}
+			}
+		}
+	}
+	if err != nil {
+		os.Remove(zacasna)
+	}
+	return err
+}
+
+// pocistiOstankeZaganjalnika pobrise umaknjene stare kopije zaganjalnika (tista, ki se tece, ostane do naslednjic) in
+// zacasne kopije prekinjenega prepisovanja (sele, ko so stare: drug zagon morda prav zdaj prepisuje).
+func pocistiOstankeZaganjalnika(stalna string) int {
+	vnosi, err := os.ReadDir(filepath.Dir(stalna))
+	if err != nil {
+		return 0
+	}
+	osnova := strings.ToLower(filepath.Base(stalna))
+	pobrisanih := 0
+	for _, v := range vnosi {
+		ime := strings.ToLower(v.Name())
+		if v.IsDir() || !strings.HasPrefix(ime, osnova+staraPripona) && !strings.HasPrefix(ime, osnova+novaPripona) {
+			continue
+		}
+		if strings.HasPrefix(ime, osnova+novaPripona) {
+			info, err := v.Info()
+			if err != nil || time.Since(info.ModTime()) <= time.Hour {
+				continue
+			}
+		}
+		if os.Remove(filepath.Join(filepath.Dir(stalna), v.Name())) == nil {
+			pobrisanih++
+		}
+	}
+	return pobrisanih
+}
+
+// izberiZaganjalnik poskrbi, da zaganjalnik zivi na stalnem mestu, in vrne pot, na katero naj kazejo bliznjici,
+// samodejna posodobitev (.zaganjalnik) in protokol magnet, ter ali je stalno kopijo pravkar zapisal.
+//
+// Prej je vse kazalo na datoteko, ki jo je uporabnik odprl (v Prenosih, na namizju, na kljucku): ko jo je pobrisal ali
+// premaknil, je ikona ostala mrtva, posodobitev pa je prepisovala datoteko v Prenosih. Stalno kopijo zapise, ce je se
+// ni ali ce je ta zaganjalnik pravkar namestil svojo razlicico (potem je on najnovejsi); starejsi zaganjalnik novejse
+// stalne kopije ne prepise. Zaganjalnik s posebnim imenom (SafeerControl.exe ...) se ne kopira: ime doloca, kaj zazene.
+func izberiZaganjalnik(selfExe, stalna, baseName string, razpakirano bool) (string, bool) {
+	if istaPot(selfExe, stalna) {
+		return stalna, false
+	}
+	posebna := strings.Contains(baseName, "control") || strings.Contains(baseName, "browser")
+	if !posebna && (razpakirano || !jeDatoteka(stalna)) {
+		if kopirajDatoteko(selfExe, stalna) == nil {
+			return stalna, true
+		}
+	}
+	if jeDatoteka(stalna) {
+		return stalna, false
+	}
+	return selfExe, false
+}
+
+// pripraviZaganjalnik uredi stalno kopijo zaganjalnika, zapis .zaganjalnik (pot za samodejno posodobitev: Safeer OS
+// prepise ta exe z novim in ga zazene) in po potrebi bliznjici ter pocisti mapo posodobitve. Vrne pot zaganjalnika,
+// ki jo dobi program (SAFEER_OS_EXE: registracija protokola magnet).
+//
+// Bliznjici uredimo le, kadar je kaj novega (namestitev, zaganjalnik na drugem mestu, vnosa v meniju Start ni): vsak
+// zagon PowerShella bi sicer podaljsal vsak zagon programa. Zive bliznjice preusmerimo samo na stalno kopijo, ki je
+// bila pravkar namescena ali posodobljena. Sveza namestitev (ikona na namizju nastane) je tista brez zapisa
+// .zaganjalnik - tudi prva, ki se je prekinila pred koncem (zavrnjena namestitev Pythona).
+func pripraviZaganjalnik(selfExe, targetDir, baseName, bliznjicaStart string, razpakirano bool, uredi func(exe string, sveza, premakni bool)) string {
+	stalna := stalnaPot(targetDir)
+	pocistiOstankeZaganjalnika(stalna)
+	zaganjalnik, kopirano := izberiZaganjalnik(selfExe, stalna, baseName, razpakirano)
+	premakni := (razpakirano || kopirano) && istaPot(zaganjalnik, stalna)
+	zapis := filepath.Join(targetDir, ".zaganjalnik")
+	zapisan, _ := os.ReadFile(zapis)
+	sveza := strings.TrimSpace(string(zapisan)) == ""
+	_, startErr := os.Stat(bliznjicaStart)
+	if razpakirano || kopirano || strings.TrimSpace(string(zapisan)) != zaganjalnik || startErr != nil {
+		uredi(zaganjalnik, sveza, premakni)
+	}
+	_ = os.WriteFile(zapis, []byte(zaganjalnik), 0644)
+	pocistiPosodobitve(filepath.Join(filepath.Dir(targetDir), "posodobitve"), selfExe)
+	return zaganjalnik
 }
 
 type PythonInfo struct {
@@ -230,7 +515,7 @@ func checkAndInstallPySide6(py *PythonInfo) error {
 	} else {
 		cmd = exec.Command(py.ExePath, "-c", checkScript)
 	}
-	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000}
+	brezOkna(cmd)
 	if err := cmd.Run(); err == nil {
 		return nil
 	}
@@ -242,7 +527,7 @@ func checkAndInstallPySide6(py *PythonInfo) error {
 	} else {
 		installCmd = exec.Command(py.ExePath, "-m", "pip", "install", "PySide6", "qrcode", "python-vlc", "mutagen", "av", "truststore", "zeroconf", "python-mpv==1.0.8", "winrt-runtime==3.2.1", "winrt-Windows.Foundation==3.2.1", "winrt-Windows.Foundation.Collections==3.2.1", "winrt-Windows.Media==3.2.1", "winrt-Windows.Media.Playback==3.2.1", "winrt-Windows.Storage.Streams==3.2.1")
 	}
-	installCmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000}
+	brezOkna(installCmd)
 	if err := installCmd.Run(); err != nil {
 		return fmt.Errorf("namestitev Python knjižnic ni uspela: %v", err)
 	}
@@ -266,35 +551,69 @@ func installPython() *PythonInfo {
 	}
 	cmd := exec.Command(winget, "install", "--exact", "--id", "Python.Python.3.12", "--scope", "user",
 		"--silent", "--accept-package-agreements", "--accept-source-agreements")
-	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000}
+	brezOkna(cmd)
 	_ = cmd.Run()
 	return findPython()
 }
 
-func createDesktopShortcut(selfExe string) {
-	desktop := filepath.Join(os.Getenv("USERPROFILE"), "Desktop")
-	if _, err := os.Stat(desktop); err != nil {
-		return
-	}
-	shortcutPath := filepath.Join(desktop, "Safeer OS.lnk")
-	if _, err := os.Stat(shortcutPath); err == nil {
-		return
-	}
+func psNiz(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
+}
 
-	psScript := fmt.Sprintf(
-		`$s = (New-Object -COM WScript.Shell).CreateShortcut('%s'); $s.TargetPath = '%s'; $s.WorkingDirectory = '%s'; $s.Save()`,
-		strings.ReplaceAll(shortcutPath, "'", "''"),
-		strings.ReplaceAll(selfExe, "'", "''"),
-		strings.ReplaceAll(filepath.Dir(selfExe), "'", "''"),
-	)
-	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", psScript)
-	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000}
-	_ = cmd.Run()
+// potBliznjiceStart je obicajno mesto vnosa v meniju Start (za hitro preverbo brez PowerShella).
+func potBliznjiceStart() string {
+	return filepath.Join(os.Getenv("APPDATA"), "Microsoft", "Windows", "Start Menu", "Programs", "Safeer OS.lnk")
+}
+
+// skriptaBliznjic sestavi ukaze PowerShella, ki uredijo vnos v meniju Start in ikono na namizju:
+//   - meni Start: vnos naredi, ce ga ni;
+//   - namizje: ikono naredi samo ob prvi namestitvi (uporabnik jo sme pobrisati in se ne vrne);
+//   - obstojeco bliznjico popravi, ce njen cilj ne obstaja vec (prej je za vedno kazala na izginuli exe, npr. na
+//     kljucku USB), in jo preusmeri na `exe`, kadar je `premakni` (stalna kopija zaganjalnika je bila pravkar
+//     namescena ali posodobljena: stara ikona je kazala na preneseno datoteko v Prenosih).
+//
+// Prazna `start` / `namizje` pomenita uporabnikovi mapi (tudi kadar je namizje preusmerjeno, npr. v OneDrive).
+func skriptaBliznjic(exe, ikona, start, namizje string, sveza, premakni bool) string {
+	potStart := "(Join-Path ([Environment]::GetFolderPath('Programs')) 'Safeer OS.lnk')"
+	if start != "" {
+		potStart = psNiz(start)
+	}
+	potNamizje := "(Join-Path ([Environment]::GetFolderPath('Desktop')) 'Safeer OS.lnk')"
+	if namizje != "" {
+		potNamizje = psNiz(namizje)
+	}
+	return strings.Join([]string{
+		"$ErrorActionPreference = 'SilentlyContinue'",
+		fmt.Sprintf("$exe = %s; $ikona = %s; $sveza = $%t; $premakni = $%t", psNiz(exe), psNiz(ikona), sveza, premakni),
+		"$w = New-Object -ComObject WScript.Shell",
+		"function Nastavi($pot) { $s = $w.CreateShortcut($pot); $s.TargetPath = $exe; $s.Arguments = ''; $s.WorkingDirectory = (Split-Path -Parent $exe); if (Test-Path -LiteralPath $ikona) { $s.IconLocation = $ikona + ',0' }; $s.Description = 'Safeer OS'; $s.Save() }",
+		"function Cilj($pot) { if (Test-Path -LiteralPath $pot) { $w.CreateShortcut($pot).TargetPath } else { $null } }",
+		"$start = " + potStart,
+		"$namizje = " + potNamizje,
+		"function Popravi($pot) { $c = Cilj $pot; if (-not $c -or -not (Test-Path -LiteralPath $c) -or ($premakni -and $c -ne $exe)) { Nastavi $pot } }",
+		"if (Test-Path -LiteralPath $start) { Popravi $start } else { Nastavi $start }",
+		"if (Test-Path -LiteralPath $namizje) { Popravi $namizje } elseif ($sveza) { Nastavi $namizje }",
+	}, "\n")
+}
+
+// urediBliznjice pozene skripto v ozadju in ne caka nanjo: zagon programa se zaradi tega ne podaljsa.
+func urediBliznjice(exe, targetDir string, sveza, premakni bool) {
+	ikona := filepath.Join(targetDir, "windows", "safeer.ico")
+	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", skriptaBliznjic(exe, ikona, "", "", sveza, premakni))
+	brezOkna(cmd)
+	_ = cmd.Start()
 }
 
 func main() {
 	targetDir := getAppDir()
-	if err := extractIfNeeded(targetDir); err != nil {
+	vsili := false
+	for _, a := range os.Args[1:] {
+		if a == "--namesti" {
+			vsili = true
+		}
+	}
+	razpakirano, err := razpakiraj(embeddedZip, targetDir, vsili)
+	if err != nil {
 		showMessage("Safeer OS - Napaka", fmt.Sprintf("Napaka pri pripravi datotek:\n%v", err), MB_ICONERROR)
 		return
 	}
@@ -320,14 +639,13 @@ func main() {
 		showMessage("Safeer OS - Opozorilo", fmt.Sprintf("Opozorilo pri preverjanju PySide6:\n%v\n\nPoskušam zagnati aplikacijo...", err), MB_ICONINFORMATION)
 	}
 
-	selfExe, err := os.Executable()
-	if err == nil {
-		createDesktopShortcut(selfExe)
-		// Pot zaganjalnika za samodejno posodobitev (Safeer OS prepise ta exe z novim in ga zazene).
-		_ = os.WriteFile(filepath.Join(targetDir, ".zaganjalnik"), []byte(selfExe), 0644)
+	baseName := strings.ToLower(filepath.Base(os.Args[0]))
+	zaganjalnik := ""
+	if selfExe, err := os.Executable(); err == nil {
+		zaganjalnik = pripraviZaganjalnik(selfExe, targetDir, baseName, potBliznjiceStart(), razpakirano,
+			func(exe string, sveza, premakni bool) { urediBliznjice(exe, targetDir, sveza, premakni) })
 	}
 
-	baseName := strings.ToLower(filepath.Base(os.Args[0]))
 	targetScript := "windows/safeer_os_windows.py"
 	if strings.Contains(baseName, "browser") {
 		targetScript = "windows/launcher.py"
@@ -356,6 +674,9 @@ func main() {
 			isControl = true
 			continue
 		}
+		if a == "--namesti" {
+			continue
+		}
 		args = append(args, a)
 	}
 
@@ -372,11 +693,11 @@ func main() {
 		"PYTHONUNBUFFERED=1",
 		"QTWEBENGINE_CHROMIUM_FLAGS=--autoplay-policy=no-user-gesture-required",
 	)
-	if selfExe != "" {
+	if zaganjalnik != "" {
 		// Safeer OS z njim registrira protokol magnet: (samo na uporabnikovo zahtevo): "<SafeerOS.exe>" --magnet "%1".
-		cmd.Env = append(cmd.Env, "SAFEER_OS_EXE="+selfExe)
+		cmd.Env = append(cmd.Env, "SAFEER_OS_EXE="+zaganjalnik)
 	}
-	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000}
+	brezOkna(cmd)
 
 	logFilePath := filepath.Join(targetDir, "safeer_os.log")
 	logFile, logErr := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)

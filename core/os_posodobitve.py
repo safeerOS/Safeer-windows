@@ -99,24 +99,31 @@ def prenesi(url: str, cilj: str, sha256: str, velikost: int = 0, napredek: Optio
     zacasna = cilj + ".del"
     h = hashlib.sha256()
     z = urllib.request.Request(url, headers={"User-Agent": agent})
-    with urllib.request.urlopen(z, timeout=30) as o, open(zacasna, "wb") as f:  # noqa: S310
-        skupaj = velikost or int(o.headers.get("Content-Length") or 0)
-        prebrano = 0
-        while True:
-            if prekini is not None and prekini():
-                raise InterruptedError("prekinjeno")
-            kos = o.read(1 << 16)
-            if not kos:
-                break
-            f.write(kos)
-            h.update(kos)
-            prebrano += len(kos)
-            if napredek is not None:
-                napredek(prebrano, skupaj)
-    if sha256 and h.hexdigest().lower() != str(sha256).lower():
-        os.remove(zacasna)
-        raise ValueError("SHA-256 se ne ujema")
-    os.replace(zacasna, cilj)
+    try:
+        with urllib.request.urlopen(z, timeout=30) as o, open(zacasna, "wb") as f:  # noqa: S310
+            skupaj = velikost or int(o.headers.get("Content-Length") or 0)
+            prebrano = 0
+            while True:
+                if prekini is not None and prekini():
+                    raise InterruptedError("prekinjeno")
+                kos = o.read(1 << 16)
+                if not kos:
+                    break
+                f.write(kos)
+                h.update(kos)
+                prebrano += len(kos)
+                if napredek is not None:
+                    napredek(prebrano, skupaj)
+        if sha256 and h.hexdigest().lower() != str(sha256).lower():
+            raise ValueError("SHA-256 se ne ujema")
+        os.replace(zacasna, cilj)
+    except BaseException:
+        # Preklican, prekinjen ali pokvarjen prenos ne pusti delne datoteke (paket ima vec deset MB).
+        try:
+            os.remove(zacasna)
+        except OSError:
+            pass
+        raise
     return cilj
 
 

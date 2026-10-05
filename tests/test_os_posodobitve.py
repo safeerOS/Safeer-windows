@@ -101,6 +101,26 @@ class Prenos(unittest.TestCase):
         cilj = os.path.join(self.mapa, "dol", "paket3.deb")
         with self.assertRaises(InterruptedError):
             op.prenesi(f"http://127.0.0.1:{self.vrata}/paket.deb", cilj, "", prekini=lambda: True)
+        self.assertFalse(os.path.exists(cilj))
+        self.assertFalse(os.path.exists(cilj + ".del"), "preklican prenos je pustil delno datoteko")
+
+    def test_prekinitev_sredi_prenosa_ne_pusti_delne_datoteke(self):
+        cilj = os.path.join(self.mapa, "dol", "paket4.deb")
+        prebrano = []
+
+        def prekini():
+            return len(prebrano) >= 2
+
+        with self.assertRaises(InterruptedError):
+            op.prenesi(f"http://127.0.0.1:{self.vrata}/paket.deb", cilj, "", napredek=lambda a, b: prebrano.append(a), prekini=prekini)
+        self.assertGreater(prebrano[-1], 0)
+        self.assertEqual(os.listdir(os.path.dirname(cilj)), [])
+
+    def test_napaka_povezave_ne_pusti_delne_datoteke(self):
+        cilj = os.path.join(self.mapa, "dol", "paket5.deb")
+        with self.assertRaises(Exception):
+            op.prenesi(f"http://127.0.0.1:{self.vrata}/ni-je.deb", cilj, "")
+        self.assertEqual(os.listdir(os.path.dirname(cilj)), [])
 
     def test_appimage_zamenja_samega_sebe(self):
         star = os.path.join(self.mapa, "Safeer-OS-0.4.22-x86_64.AppImage")

@@ -53,7 +53,9 @@ Safeer OS in Safeer Control **nista dva ločena programa**, temveč enotna aplik
 - **[`windows/launcher_go/main.go`](windows/launcher_go/main.go)**:
   - Samostojna binarna koda, prevedena z Go za Windows (`GOOS=windows GOARCH=amd64`).
   - Vsebuje vdelan arhiv `safeer-os-windows.zip` (`//go:embed safeer-os-windows.zip`).
-  - Ob zagonu preveri SHA-256 vsoto in po potrebi razširi datoteke v `%LOCALAPPDATA%\SafeerOS\app`.
+  - Ob zagonu preveri SHA-256 vsoto in po potrebi razširi datoteke v `%LOCALAPPDATA%\SafeerOS\app`. Starejši paket novejše namestitve ne prepiše (razen s stikalom `--namesti`); datoteke, ki jih nov paket nima več, odstrani po seznamu `app\.datoteke`.
+  - Sam se prepiše na stalno mesto `%LOCALAPPDATA%\SafeerOS\SafeerOS.exe`; nanj kažejo bližnjici, samodejna posodobitev (`app\.zaganjalnik`) in protokol `magnet:`. Podrobnosti: [`windows/README.md`](windows/README.md), razdelek »Zaganjalnik Safeer OS«.
+  - Preizkusi: `go vet ./... && go test ./...` v `windows/launcher_go` (del, vezan na Windows, je v `sistem_windows.go`, zato pravila tečejo tudi na Linuxu).
   - Samodejno poišče nameščen Python 3 (3.10+) in po potrebi namesti `PySide6`.
   - Vedno zažene `windows/safeer_os_windows.py`. Če se kliče kot `SafeerControl.exe` ali s parametrom `--control`, doda `--control --okno`.
 
