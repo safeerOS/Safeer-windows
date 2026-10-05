@@ -264,6 +264,11 @@ class MeshPovezovalec:
                 self._znani.pop(next(iter(self._znani)))
         self._shrani_znane()
 
+    def naslov_soseda(self, hid: str) -> str:
+        """Naslov (wss://ip:vrata/cast/ws) sosednjega sredisca, kot ga poznamo iz oglasa ali povezave; '' = ne poznamo."""
+        with self._zaklep:
+            return str(self._znani.get(str(hid or ""), {}).get("naslov", "") or "")
+
     def _ob_sosedu(self, hid: str, naslov: str) -> None:
         if naslov:
             # Naslov iz odhodne povezave je pravi (z vrati); iz dohodne je samo IP.
@@ -429,6 +434,38 @@ class MeshPovezovalec:
             povezava.zapri()
             self.hub.odklopi(povezava)
         return sprejet
+
+
+def sredisce_naprave(hub, mesh, id_naprave: str, potrdilo: Optional[Callable] = None,
+                     clan_za_id: Optional[Callable] = None) -> tuple:
+    """Sredisce, pri katerem je prijavljena druga naprava, kadar to NI nase (Link Mesh: vsaka naprava ima svoje).
+
+    Datoteke ne grejo cez sosede kot sporocila: pot v `share.file` je relativna na sredisce, ki je datoteko sprejelo.
+    Zato jo posiljatelj odda sredisci ciljne naprave, prejemnik pa jo prevzame pri sredisci posiljatelja.
+
+    Vrne ((naslov, odtis), "")  - naprava je pri sosedu, ki ga dosezemo in nosi kljuc clana kroga;
+         (None, "")             - naprava je pri nasem sredisci (ali sredisca ne gostimo mi);
+         (None, koda)           - "naprava_pri_drugem_srediscu" (dva skoka ali soseda ne poznamo po naslovu),
+                                  "sredisce_naprave_ni_dosegljivo" (ni ga v tem omrezju ali kljuc ni iz kroga).
+    Zaupanje je isto kot pri sosednji povezavi (MeshPovezovalec._odpri): kljuc v potrdilu mora biti kljuc clana."""
+    if hub is None:
+        return None, ""
+    naprava = hub.najdi(str(id_naprave or ""))
+    hid = str(getattr(naprava, "sosed", "") or "") if naprava is not None else ""
+    if not hid:
+        return None, ""
+    if getattr(naprava, "posredno", False) or mesh is None:
+        return None, "naprava_pri_drugem_srediscu"
+    naslov = mesh.naslov_soseda(hid)
+    if not naslov or _je_zanka(naslov):
+        return None, "naprava_pri_drugem_srediscu"
+    clan = (clan_za_id or link_krog.krog().clan_za_id)(hid)
+    if not clan or not clan.get("kljuc"):
+        return None, "sredisce_naprave_ni_dosegljivo"
+    odtis, kljuc = (potrdilo or link_tls.potrdilo_huba)(naslov)
+    if not odtis or not kljuc or kljuc != clan.get("kljuc"):
+        return None, "sredisce_naprave_ni_dosegljivo"
+    return (naslov, odtis), ""
 
 
 def brez_neposredne() -> set:

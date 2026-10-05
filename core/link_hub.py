@@ -19,10 +19,13 @@ import base64
 import json
 import os
 import socket
+import ssl
 import struct
 import threading
 import time
 import sys
+import urllib.error
+import urllib.request
 from typing import Callable, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
@@ -378,7 +381,7 @@ IDENTITETA_HUBA = "safeer-link-hub"
 
 
 def zacni_seznanitev(ws_naslov: str, device_id: str, ime: str) -> Optional[dict]:
-    """Odpre prijavo na Hubu. Vrne {"pair_id", "nacin", "hub_id", "odtis"} ali None.
+    """Odpre prijavo na Hubu. Vrne {"pair_id", "nacin", "hub_id", "odtis"}, {"napaka": ...} ali None.
 
     Samo prek TLS: odtis potrdila, ki ga vidimo zdaj, se vplete v seznanitev, zato ga
     napadalec v sredini ne more zamenjati, ne da bi seznanitev padla. Kode Hub ne
@@ -389,6 +392,9 @@ def zacni_seznanitev(ws_naslov: str, device_id: str, ime: str) -> Optional[dict]
         return {"napaka": "hub_brez_tls"}
     koda, odgovor, videni = link_tls.zahteva(osnova + "/cast/pair/start",
                                              {"device_id": device_id, "name": ime})
+    if koda == 429 and str(odgovor.get("code") or "") == "seznanitev_zaprta":
+        # Sredisce je povezovanje s kodo zaprlo (nekdo je ugibal kodo): uporabniku povemo, kaj naj naredi.
+        return {"napaka": "seznanitev_zaprta"}
     if koda != 200 or not videni:
         return None
     pair_id = str(odgovor.get("pair_id", "") or "")
@@ -450,16 +456,18 @@ def potrdi_kodo(ws_naslov: str, prijava: dict, device_id: str, koda: str) -> Tup
 
 # Povezava v QR: kamera telefona jo odpre v Safeer (aplikacija jo prestreze) ali na strani safeer.si/p,
 # ki ponudi »Odpri v Safeer«. Skrivnost je v delu za #, zato je streznik strani nikoli ne vidi.
-QR_POVEZAVA = "https://safeer.si/p#i={qr_id}&s={skrivnost}&f={odtis}"
+QR_POVEZAVA = "https://safeer.si/p#i={qr_id}&s={skrivnost}&f={odtis}&a={naslov}"
 QR_ODTIS_ZNAKOV = 16
 
 
 def zacni_qr(ws_naslov: str, device_id: str, ime: str, platforma: str = PLATFORMA) -> Optional[dict]:
-    """Odpre prijavo s QR kodo. Vrne {"qr_id", "odtis", "skrivnost", "prevzem", "povezava", "velja"},
+    """Odpre prijavo s QR kodo. Vrne {"qr_id", "odtis", "skrivnost", "prevzem", "naslov", "povezava", "velja"},
     {"napaka": ...} ali None, ce se hub ne oglasi.
 
-    V QR gre skrivnost (hub dobi samo njen SHA-256) in zacetek odtisa potrdila, ki ga vidimo zdaj -
-    telefon ga primerja s hubom, ki mu zaupa, zato vsiljivec v sredini ne more dobiti potrditve.
+    V QR gre skrivnost (hub dobi samo njen SHA-256), zacetek odtisa potrdila, ki ga vidimo zdaj, in
+    naslov Huba, ki je kodo izdal - telefon se poveze neposredno nanj (peer-to-peer), ne na huba, ki
+    mu je morda ze zaupal prej (ta je lahko medtem ze druga naprava). Vsiljivec v sredini kljub temu
+    ne more dobiti potrditve, ker se mora odtis v QR ujemati z zivim potrdilom na tem istem naslovu.
     Za prevzem zetona je druga skrivnost, ki je v QR ni.
     """
     import hashlib
@@ -482,9 +490,11 @@ def zacni_qr(ws_naslov: str, device_id: str, ime: str, platforma: str = PLATFORM
     if not qr_id:
         return None
     odtis = videni.lower()
+    u = urlparse(ws_naslov)
+    naslov = "%s:%d" % (u.hostname, u.port or 443)
     return {
-        "qr_id": qr_id, "odtis": odtis, "skrivnost": skrivnost, "prevzem": prevzem,
-        "povezava": QR_POVEZAVA.format(qr_id=qr_id, skrivnost=skrivnost, odtis=odtis[:QR_ODTIS_ZNAKOV]),
+        "qr_id": qr_id, "odtis": odtis, "skrivnost": skrivnost, "prevzem": prevzem, "naslov": naslov,
+        "povezava": QR_POVEZAVA.format(qr_id=qr_id, skrivnost=skrivnost, odtis=odtis[:QR_ODTIS_ZNAKOV], naslov=naslov),
         "velja": int(odgovor.get("expires_in_seconds", 300) or 300),
     }
 
@@ -604,9 +614,6 @@ def povabi(ws_naslov: str, zeton: str, odtis: str, preklici: str = "") -> dict:
     Vrne {"qr_id", "povezava", "velja", "pin"} ali
     {"napaka": "hub_star" | "ni_huba" | "ni_seznanjena"}.
 
-    Starejse sredisce lahko veljavno vabilo vrne brez polja pin/code. V tem
-    primeru je pin prazen, QR pa ostane uporaben.
-
     Povezava je ista kot na televizorju: https://safeer.si/p#j=<id>&s=<skrivnost>&f=<odtis>&a=<naslov:vrata>
     - skrivnost je za #, zato je streznik strani nikoli ne vidi; telefon se pripne na odtis."""
     koda, odgovor = _zahteva(_osnova(ws_naslov) + "/cast/pair/qr/invite", {"qr_id": preklici}, zeton=zeton, odtis=odtis)
@@ -622,12 +629,21 @@ def povabi(ws_naslov: str, zeton: str, odtis: str, preklici: str = "") -> dict:
         return {"napaka": "ni_huba"}
     u = urlparse(ws_naslov)
     naslov = "%s:%d" % (u.hostname, u.port or 443)
+    gostitelj = u.hostname or ""
+    # Vabilo lastnega Huba (wss://127.0.0.1): v QR mora iti naslov v domacem omrezju, ki ga sporoci Hub,
+    # sicer bi telefon iskal sredisce na samem sebi.
+    domaci = str(odgovor.get("address") or "").strip()
+    if gostitelj in ("127.0.0.1", "localhost", "::1") and ":" in domaci and not domaci.startswith("127."):
+        naslov = domaci
+        gostitelj = domaci.rsplit(":", 1)[0]
+    # Nova sredisca vrnejo isti PIN, ki pripada QR vabilu. Pri starem srediscu
+    # polja ni; prazen niz strani pove, naj pokaze samo rocni vnos kode.
     pin = str(odgovor.get("pin") or odgovor.get("code") or "")
     pin = "".join(znak for znak in pin if znak.isdigit())
     if len(pin) != 6:
         pin = ""
     return {"qr_id": qr_id, "velja": int(odgovor.get("expires_in_seconds") or 300), "pin": pin,
-            "povezava": povezava_vabila(u.hostname or "", int(odgovor.get("web_port") or 0), qr_id, skrivnost, fp, naslov)}
+            "povezava": povezava_vabila(gostitelj, int(odgovor.get("web_port") or 0), qr_id, skrivnost, fp, naslov)}
 
 
 def povezava_vabila(gostitelj: str, spletna_vrata: int, qr_id: str, skrivnost: str, fp: str, naslov: str) -> str:
@@ -1024,11 +1040,12 @@ class Povezava:
             vstopnica, koda = vzemi_vstopnico_s_podpisom(self.ws_naslov, self.device_id, self.odtis, self.ime)
             if vstopnica:
                 self.prijava_s_podpisom = True
-        if not vstopnica and not self.zeton:
-            # Brez zetona ni druge poti. Zavrnitev je samo izrecen 401/403 na podpis (hub nas v krogu nima);
-            # neuspel podpis zaradi casa (hub se ravno zaganja, rele zamudi) ni - sicer bi _pozabi_zeton
-            # izbrisal odtis in naprava bi ostala brez povezave, dokler je kdo ne poveze znova.
-            self.zavrnjena = s_podpisom and koda in (401, 403)
+        if not vstopnica and not self.zeton and s_podpisom:
+            # Podpis ni uspel, zetona pa nimamo: druge poti ni. Zavrnitev je samo izrecen 401/403 (hub nas v krogu
+            # nima). Neuspel podpis zaradi casa (hub se ravno zaganja, rele zamudi, prevec prijav) ni zavrnitev:
+            # prej smo takrat poskusili se s praznim zetonom, dobili 401 in klicatelj (safeer_link._pozabi_zeton)
+            # je izbrisal odtis - naprava je ostala brez povezave, dokler je kdo ni povezal znova.
+            self.zavrnjena = koda in (401, 403)
             return False
         if not vstopnica:
             self.prijava_s_podpisom = False
@@ -1278,18 +1295,13 @@ class Povezava:
                     except Exception:
                         pass
                     continue
-                if isinstance(sporocilo, dict) and sporocilo.get("type") == "pair.code":
-                    # Nova naprava se pridruzuje Linku: kodo pokaze tudi ta racunalnik (obvestilo).
-                    tovor = sporocilo.get("payload") if isinstance(sporocilo.get("payload"), dict) else {}
-                    koda = str(tovor.get("code") or "")
-                    if len(koda) == 6 and koda.isdigit():
-                        from core.link_hub_streznik import _obvestilo_kode
-                        _obvestilo_kode(str(tovor.get("name") or "")[:64], koda)
-                    continue
                 if self.ob_sporocilu:
                     self.ob_sporocilu(sporocilo)
-        except Exception:
-            pass
+        except Exception as e:  # noqa: BLE001
+            # Navaden odhod (sredisce je zaprlo, mi smo zaprli) ni napaka; vse drugo naj se vidi.
+            if self.tece and not self._ustavljen and not isinstance(e, ConnectionError):
+                print("[SafeerLink] povezava s srediscem se je koncala: %s: %s" % (type(e).__name__, str(e)[:160]),
+                      flush=True)
         finally:
             odjemalec = self.odjemalec
             self.odjemalec = None
