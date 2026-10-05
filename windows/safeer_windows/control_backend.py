@@ -48,6 +48,8 @@ DEJANJA_PREDAJA = ["play.state", "play.stop", "play.offer"]
 DEJANJA_SEZNAMI = ["lists.get"]
 #: Sejni zeton s podpisom velja pri srediscu 12 ur; toliko casa ga uporabljamo, preden vzamemo novega.
 SEJA_HTTP_HRANIMO_S = 1800.0
+#: Najvec znakov besedila, ki ga druga naprava poslje temu racunalniku (kot Safeer Control na Linuxu).
+NAJVEC_PREJETEGA_BESEDILA = 4000
 #: Premori (s) med ponovnimi poskusi zagona sredisca, kadar vrata se drzi kopija programa, ki se zapira.
 POSKUSI_SREDISCA = (1.0, 1.0, 2.0, 2.0, 3.0)
 TIPKE_MEDIJ = ("play_pause", "play", "pause", "stop", "next", "previous", "naslednja", "prejsnja")
@@ -1397,6 +1399,12 @@ class SafeerControlBackend:
 
         elif vrsta == "share.text":
             self._oddaj_dogodek("besedilo", sporocilo.get("payload"))
+            telo = sporocilo.get("payload") if isinstance(sporocilo.get("payload"), dict) else {}
+            besedilo = str(telo.get("text") or "")
+            if besedilo.strip():
+                # Stran in Safeer OS: kdo je poslal in kaj (prej se prejeto besedilo ni pokazalo nikjer).
+                self._oddaj_dogodek("prejeto", {"vrsta": "besedilo", "od": self._ime_posiljatelja(sporocilo),
+                                                "besedilo": besedilo[:NAJVEC_PREJETEGA_BESEDILA]})
 
         elif vrsta == "chat.send":
             if self.ob_klepetu is not None:
@@ -1458,6 +1466,9 @@ class SafeerControlBackend:
                 "od": od, "ime": os.path.basename(cilj) if cilj else ime, "pot": cilj or "",
                 "uspeh": bool(cilj), "napaka": "" if cilj else str(razlog or ""),
             })
+            if cilj:
+                self._oddaj_dogodek("prejeto", {"vrsta": "datoteka", "od": od, "ime": os.path.basename(cilj),
+                                                "mapa": os.path.dirname(cilj)})
 
         threading.Thread(target=_prenesi, name="SafeerFileReceive", daemon=True).start()
 
@@ -2165,6 +2176,9 @@ class SafeerControlBackend:
                 if d.get("id") == id_naprave:
                     d["ime"] = ime_shranjeno
             self._oddaj_dogodek("naprave", self.naprave)
+            self._oddaj_dogodek("preimenovano", {"id": id_naprave, "ime": ime_shranjeno})
+        else:
+            self._oddaj_dogodek("napaka", {"koda": "preimenovanje_ni_uspelo", "sporocilo": n.get("sporocilo", "")})
         return {"ok": bool(ok), "ime": ime_shranjeno, "message": n.get("sporocilo", "")}
 
     def ukaz(self, cilj: str, akcija: str, podatki: Any = None, ref: str = "") -> bool:
@@ -2183,15 +2197,63 @@ class SafeerControlBackend:
             "payload": {"action": akcija, "params": podatki if isinstance(podatki, dict) else {}},
         })
 
+    def _ime_posiljatelja(self, sporocilo: dict) -> str:
+        """Ime naprave, ki je poslala sporocilo: iz sporocila, sicer iz seznama naprav, sicer njen id."""
+        ime = str(sporocilo.get("sender_name") or "")
+        posiljatelj = str(sporocilo.get("sender") or "")
+        if not ime and posiljatelj:
+            ime = next((str(n.get("ime") or "") for n in list(getattr(self, "naprave", None) or [])
+                        if n.get("id") == posiljatelj), "")
+        return ime or posiljatelj or "naprava"
+
+    def _dogodek_deljenja(self, vrsta: str, stanje: str, cilj: str, ime: str = "", sporocilo: str = "",
+                          odstotek: int = -1, koda: str = "", zasedena_od: str = "", **staro: Any) -> None:
+        """Dogodek »deljenje« v obliki, ki jo bere stran Safeer Controla (assets/link/link.js; ista kot na Linuxu):
+        vrsta (datoteka | besedilo | zaslon), stanje (posiljam | poslano | napaka | tece | koncano), cilj, ime,
+        sporocilo, koda, zasedenaOd, odstotek. Dodatna polja (tece, uspeh, napaka) bere Safeer OS."""
+        podatki: Dict[str, Any] = {"vrsta": vrsta, "stanje": stanje, "cilj": cilj, "ime": ime, "sporocilo": sporocilo,
+                                   "koda": koda, "zasedenaOd": zasedena_od}
+        if odstotek >= 0:
+            podatki["odstotek"] = odstotek
+        podatki.update(staro)
+        self._oddaj_dogodek("deljenje", podatki)
+
+    def poslji_besedilo_napravi(self, cilj: str, vsebina: str) -> Tuple[bool, Dict[str, str]]:
+        """Besedilo ali povezava napravi prek sredisca (POST /cast/share/text; do naprave pri sosednjem sredisci gre
+        kot sporocilo). Sredisce, ki te poti se nima (starejsi Safeer na napravi, ki je sredisce), dobi sporocilo po
+        odprti povezavi, kot doslej. Vrne (uspeh, napaka); klic caka na odgovor - vedno iz delovne niti."""
+        cisto = (vsebina or "").strip()
+        if not cisto:
+            return False, {"sporocilo": "Besedilo je prazno.", "koda": "prazno_besedilo", "zasedenaOd": ""}
+        zeton = self._zeton_http() if (self.hub_url() and self.hub_fp()) else ""
+        if not zeton:
+            return False, {"sporocilo": "Besedila ni mogoče poslati brez varne povezave s Safeer Linkom.",
+                           "koda": "hub_ni_znan", "zasedenaOd": ""}
+        ok, napaka = link_deljenje.poslji_besedilo(self.hub_url(), zeton, self.hub_fp(), self.device_id, cilj, cisto)
+        if not ok and napaka.get("koda") == "sredisce_ne_zna" and self.je_povezan():
+            if self.povezava.poslji({"id": f"text-{int(time.time() * 1000)}", "type": "share.text", "target": cilj,
+                                     "payload": {"text": cisto}}):
+                return True, {}
+        return ok, napaka
+
     def poslji_besedilo(self, cilj: str, vsebina: str) -> bool:
-        if not self.je_povezan():
+        """Besedilo pošlje asinhrono in vmesniku javi izid (poslano ali napaka)."""
+        if not cilj or not (vsebina or "").strip():
             return False
-        return self.povezava.poslji({
-            "id": f"text-{int(time.time() * 1000)}",
-            "type": "share.text",
-            "target": cilj,
-            "payload": {"text": vsebina},
-        })
+
+        def _delo() -> None:
+            self._dogodek_deljenja("besedilo", "posiljam", cilj)
+            ok, napaka = self.poslji_besedilo_napravi(cilj, vsebina)
+            if ok:
+                self._dogodek_deljenja("besedilo", "poslano", cilj)
+            else:
+                self._dogodek_deljenja("besedilo", "napaka", cilj,
+                                       sporocilo=str(napaka.get("sporocilo") or "Pošiljanje ni uspelo."),
+                                       koda=str(napaka.get("koda") or ""),
+                                       zasedena_od=str(napaka.get("zasedenaOd") or ""))
+
+        threading.Thread(target=_delo, name="SafeerTextShare", daemon=True).start()
+        return True
 
     def poslji_url(self, cilj: str, url: str, naslov: str = "") -> bool:
         """Pošlje spletni naslov po istem protokolu kot Android Safeer Link."""
@@ -2239,46 +2301,52 @@ class SafeerControlBackend:
     def poslji_datoteko(self, cilj: str, pot: str) -> bool:
         """Datoteko pošlje asinhrono in vmesniku sproti javlja napredek."""
         if not cilj or not os.path.isfile(pot) or not (self.hub_url() and self.zeton() and self.hub_fp()):
-            self._oddaj_dogodek("deljenje", {
-                "tece": False, "cilj": cilj, "ime": os.path.basename(pot),
-                "napaka": "Datoteke ni mogoče poslati brez varne povezave s Safeer Linkom.",
-            })
+            razlog = "Datoteke ni mogoče poslati brez varne povezave s Safeer Linkom."
+            self._dogodek_deljenja("datoteka", "napaka", cilj, os.path.basename(pot), razlog, koda="hub_ni_znan",
+                                   tece=False, uspeh=False, napaka=razlog)
             return False
 
         ime = os.path.basename(pot)
 
         def _delo() -> None:
             def _napredek(odstotek: int) -> None:
-                self._oddaj_dogodek("deljenje", {
-                    "tece": True, "cilj": cilj, "ime": ime, "odstotek": odstotek, "napaka": "",
-                })
+                self._dogodek_deljenja("datoteka", "posiljam", cilj, ime, odstotek=odstotek, tece=True, napaka="")
 
             _napredek(0)
             ok, napaka = self.poslji_datoteko_napravi(cilj, pot, _napredek)
-            self._oddaj_dogodek("deljenje", {
-                "tece": False, "cilj": cilj, "ime": ime, "odstotek": 100 if ok else 0,
-                "uspeh": ok, "napaka": "" if ok else str(napaka.get("sporocilo") or "Pošiljanje ni uspelo."),
-            })
+            if ok:
+                self._dogodek_deljenja("datoteka", "poslano", cilj, ime, odstotek=100, tece=False, uspeh=True, napaka="")
+            else:
+                razlog = str(napaka.get("sporocilo") or "Pošiljanje ni uspelo.")
+                self._dogodek_deljenja("datoteka", "napaka", cilj, ime, razlog, odstotek=0,
+                                       koda=str(napaka.get("koda") or ""),
+                                       zasedena_od=str(napaka.get("zasedenaOd") or ""),
+                                       tece=False, uspeh=False, napaka=razlog)
 
         threading.Thread(target=_delo, name="SafeerFileShare", daemon=True).start()
         return True
 
     def zacni_deljenje_zaslona(self, cilj: str, ime: str = "") -> bool:
         if not cilj or not (self.hub_url() and self.zeton() and self.hub_fp()):
-            self._oddaj_dogodek("deljenje", {
-                "tece": False, "cilj": cilj, "ime": ime,
-                "napaka": "Zaslon lahko deliš po varni povezavi s Safeer Linkom.",
-            })
+            razlog = "Zaslon lahko deliš po varni povezavi s Safeer Linkom."
+            self._dogodek_deljenja("zaslon", "napaka", cilj, ime, razlog, koda="hub_ni_znan", tece=False, napaka=razlog)
             return False
         self.koncaj_deljenje_zaslona()
         deljenje = _WindowsDeljenjeZaslona(
-            self.hub_url(), self.zeton(), self.hub_fp(), self.device_id, cilj, ime or cilj,
-            ob_spremembi=lambda stanje: self._oddaj_dogodek("deljenje", stanje),
+            self.hub_url(), self._zeton_http(), self.hub_fp(), self.device_id, cilj, ime or cilj,
+            ob_spremembi=self._na_spremembo_zaslona,
             navidezni_zaslon=self.navidezni_zaslon,
         )
         self._deljenje_zaslona = deljenje
         deljenje.zacni()
         return True
+
+    def _na_spremembo_zaslona(self, s: dict) -> None:
+        """Stanje deljenja zaslona v obliki strani (vrsta, stanje, sporocilo), s starimi polji vred."""
+        razlog = str(s.get("napaka") or "")
+        self._dogodek_deljenja("zaslon", "tece" if s.get("tece") else "koncano", str(s.get("cilj") or ""),
+                               str(s.get("ime") or ""), razlog, koda=str(s.get("koda") or ""),
+                               zasedena_od=str(s.get("zasedenaOd") or ""), tece=bool(s.get("tece")), napaka=razlog)
 
     def koncaj_deljenje_zaslona(self) -> bool:
         if self._deljenje_zaslona is None:
