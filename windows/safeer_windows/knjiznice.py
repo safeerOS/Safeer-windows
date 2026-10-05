@@ -12,6 +12,7 @@ import importlib.machinery
 import importlib.util
 import os
 import sys
+import time
 
 OKOLJE = "SAFEER_OS_PREVERI_KNJIZNICE"
 KODA_MANJKAJO = 86
@@ -27,8 +28,41 @@ PAKETI = {
     "zeroconf": "zeroconf",
     "mpv": "python-mpv",
     "winrt.windows.media.playback": "winrt-Windows.Media.Playback",
+    "cryptography": "cryptography",
+    "PIL": "Pillow",
 }
 POTREBNE = tuple(PAKETI)
+#: Brez teh program tece, a brez dela zmoznosti: brez cryptography Safeer Link ne more narediti svoje identitete
+#: (kljuc in potrdilo; rezerva je program openssl, ki ga Windows nima), brez Pillow racunalnik ne zajame zaslona za
+#: oddaljeni zaslon. Do 1.0.38 ju ni preveril ne program ne namestil zaganjalnik (izmerjeno 5. 10. 2026 z izracunom
+#: odvisnosti: pip jih na cistem racunalniku ne prinese z nobenim drugim paketom).
+#: Ce namestitev ne uspe (ni povezave), uporabnika ne ustavljamo ob vsakem zagonu: nov poskus najvec enkrat na
+#: POSKUS_MEHKIH_S.
+MEHKE = ("cryptography", "PIL")
+POSKUS_MEHKIH_S = 24 * 3600
+
+
+def pot_poskusa() -> str:
+    """Kdaj je program zadnjic prosil zaganjalnik za mehke knjiznice (sekunde od 1970, besedilo)."""
+    return os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "SafeerOS", "knjiznice-poskus.txt")
+
+
+def _poskus_dovoljen(pot: str, zdaj: float) -> bool:
+    try:
+        with open(pot, encoding="ascii") as d:
+            zadnjic = float(d.read().strip() or 0)
+    except (OSError, ValueError):
+        return True
+    return not (0 <= zdaj - zadnjic < POSKUS_MEHKIH_S)
+
+
+def _zabelezi_poskus(pot: str, zdaj: float) -> None:
+    try:
+        os.makedirs(os.path.dirname(pot), exist_ok=True)
+        with open(pot, "w", encoding="ascii") as d:
+            d.write("%d" % zdaj)
+    except OSError:
+        pass
 
 
 def najdi(modul: str):
@@ -62,8 +96,12 @@ def manjkajoce(moduli=POTREBNE, najdi=najdi) -> list:
     return manjka
 
 
-def preveri_ob_zagonu(okolje=None, izpis=None, izhod=sys.exit, moduli=POTREBNE, najdi=najdi) -> bool:
+def preveri_ob_zagonu(okolje=None, izpis=None, izhod=sys.exit, moduli=POTREBNE, najdi=najdi,
+                      mehke=MEHKE, poskus=None, ura=time.time) -> bool:
     """Ce zaganjalnik to naroci, preveri knjiznice: ob manjkajocih konca program s kodo KODA_MANJKAJO.
+
+    Kadar manjkajo samo mehke knjiznice (MEHKE) in je program zaganjalnik zanje ze prosil pred manj kot
+    POSKUS_MEHKIH_S (namestitev takrat ni uspela), tece naprej brez njih. `poskus` je pot zapisa o zadnji prosnji.
 
     Vrne, ali je preverjal."""
     okolje = os.environ if okolje is None else okolje
@@ -72,6 +110,13 @@ def preveri_ob_zagonu(okolje=None, izpis=None, izhod=sys.exit, moduli=POTREBNE, 
     pisi = izpis or (lambda vrstica: print(vrstica, flush=True))
     manjka = manjkajoce(moduli, najdi)
     if manjka:
+        samo_mehke = all(m in mehke for m in manjka)
+        poskus = pot_poskusa() if poskus is None else poskus
+        if samo_mehke and not _poskus_dovoljen(poskus, ura()):
+            pisi(OZNAKA_OK + " (brez: " + ", ".join(manjka) + "; namestitev ni uspela, nov poskus pozneje)")
+            return True
+        if samo_mehke:
+            _zabelezi_poskus(poskus, ura())
         pisi(OZNAKA_MANJKAJO + " " + ", ".join(manjka))
         izhod(KODA_MANJKAJO)
         return True

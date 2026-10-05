@@ -6,8 +6,8 @@ cryptography>=43,<47
 python-vlc>=3.0.21203,<4
 mutagen>=1.47,<2
 truststore>=0.9
-pypng>=0.20220715.0,<1  # vendored qrcode (windows/qrcode) uvozi png; brez njega QR za Safeer Link ne nastane
-typing_extensions>=4.7  # vendored qrcode (main.py) ga uvozi
+# Prilozeni qrcode (windows/qrcode) ne potrebuje ne pypng ne typing_extensions (windows/qrcode/SAFEER.md): tu ju
+# namenoma ni, da preverjanje tece v istih pogojih kot uporabnikov racunalnik (windows/tests/test_qr_prilozen.py).
 zeroconf>=0.130,<1  # Link Mesh: iskanje sosednjih Hubov (mDNS)
 python-mpv==1.0.8  # libmpv ovojnica (LGPL-2.1+/GPL-2.0+ dvojna licenca); knjiznica libmpv-2.dll je prilozena v windows/vendor/mpv
 # Windows SMTC (sistemske medijske kontrole za predvajalnik): uradna projekcija Python/WinRT (Microsoft, MIT); pripeto na 3.2.1

@@ -2,7 +2,7 @@ import decimal
 from decimal import Decimal
 from typing import List, Optional, Type, Union, overload
 
-from typing_extensions import Literal
+from typing import Literal  # Safeer: iz typing (Python 3.8+), ne iz typing_extensions
 
 import qrcode.image.base
 from qrcode.compat.etree import ET

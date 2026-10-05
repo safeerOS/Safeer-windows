@@ -1,4 +1,5 @@
 """Preverba knjiznic ob zagonu: dogovor med programom (safeer_windows/knjiznice.py) in zaganjalnikom (launcher_go)."""
+import ast
 import importlib
 import importlib.machinery
 import os
@@ -7,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 from safeer_windows import knjiznice
@@ -121,7 +123,147 @@ class Knjiznice(unittest.TestCase):
     def test_modul_ne_uvaza_nicesar_tezkega(self):
         vir = (KOREN / "windows" / "safeer_windows" / "knjiznice.py").read_text(encoding="utf-8")
         uvozi = re.findall(r"^(?:import|from)\s+(\S+)", vir, re.M)
-        self.assertEqual(sorted(uvozi), ["importlib.machinery", "importlib.util", "os", "sys"])
+        self.assertEqual(sorted(uvozi), ["importlib.machinery", "importlib.util", "os", "sys", "time"])
+
+
+class MehkeKnjiznice(unittest.TestCase):
+    """cryptography in Pillow: program tece tudi brez njiju, zato neuspela namestitev ne ustavlja vsakega zagona."""
+
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.poskus = os.path.join(self._td.name, "SafeerOS", "knjiznice-poskus.txt")
+        self.zdaj = [1_800_000_000.0]
+
+    def tearDown(self):
+        self._td.cleanup()
+
+    def _preveri(self, znani, moduli=("PySide6", "cryptography", "PIL")):
+        izpisi, izhodi = [], []
+        knjiznice.preveri_ob_zagonu(okolje={knjiznice.OKOLJE: "1"}, izpis=izpisi.append, izhod=izhodi.append,
+                                    moduli=moduli, najdi=_najdi(znani), poskus=self.poskus, ura=lambda: self.zdaj[0])
+        return izpisi, izhodi
+
+    def test_sta_na_seznamu(self):
+        self.assertEqual(knjiznice.PAKETI["cryptography"], "cryptography")
+        self.assertEqual(knjiznice.PAKETI["PIL"], "Pillow")
+        self.assertEqual(set(knjiznice.MEHKE), {"cryptography", "PIL"})
+        self.assertTrue(set(knjiznice.MEHKE) <= set(knjiznice.POTREBNE))
+
+    def test_prvic_prosi_zaganjalnik(self):
+        izpisi, izhodi = self._preveri(("PySide6",))
+        self.assertEqual(izhodi, [knjiznice.KODA_MANJKAJO])
+        self.assertEqual(izpisi, [knjiznice.OZNAKA_MANJKAJO + " cryptography, PIL"])
+        with open(self.poskus, encoding="ascii") as d:
+            self.assertEqual(d.read(), "1800000000")
+
+    def test_po_neuspeli_namestitvi_tece_brez_njiju(self):
+        self._preveri(("PySide6",))
+        self.zdaj[0] += 3600
+        izpisi, izhodi = self._preveri(("PySide6",))
+        self.assertEqual(izhodi, [], "isti dan zaganjalnika ne prosimo znova")
+        self.assertEqual(len(izpisi), 1)
+        self.assertTrue(izpisi[0].startswith(knjiznice.OZNAKA_OK), "zaganjalnik v dnevniku isce to oznako")
+        self.assertIn("cryptography, PIL", izpisi[0])
+
+    def test_naslednji_dan_poskusi_znova(self):
+        self._preveri(("PySide6",))
+        self.zdaj[0] += knjiznice.POSKUS_MEHKIH_S + 1
+        izpisi, izhodi = self._preveri(("PySide6",))
+        self.assertEqual(izhodi, [knjiznice.KODA_MANJKAJO])
+        with open(self.poskus, encoding="ascii") as d:
+            self.assertEqual(float(d.read()), self.zdaj[0])
+
+    def test_trda_knjiznica_ne_caka(self):
+        self._preveri(("PySide6",))                       # zapis o poskusu je svez
+        izpisi, izhodi = self._preveri(())                # manjka tudi PySide6
+        self.assertEqual(izhodi, [knjiznice.KODA_MANJKAJO])
+        self.assertEqual(izpisi, [knjiznice.OZNAKA_MANJKAJO + " PySide6, cryptography, PIL"])
+
+    def test_ko_sta_namesceni_je_vse_v_redu(self):
+        self._preveri(("PySide6",))
+        izpisi, izhodi = self._preveri(("PySide6", "cryptography", "PIL"))
+        self.assertEqual((izpisi, izhodi), ([knjiznice.OZNAKA_OK], []))
+
+    def test_pokvarjen_zapis_ali_ura_nazaj_ne_ustavita_poskusa(self):
+        os.makedirs(os.path.dirname(self.poskus))
+        for vsebina in ("", "ni stevilo", str(self.zdaj[0] + 5000)):
+            with open(self.poskus, "w", encoding="ascii") as d:
+                d.write(vsebina)
+            self.assertEqual(self._preveri(("PySide6",))[1], [knjiznice.KODA_MANJKAJO], vsebina)
+
+    def test_zapisa_ni_mogoce_shraniti(self):
+        # Mapa je datoteka: zapis ne uspe, preverba vseeno odgovori.
+        with open(os.path.join(self._td.name, "SafeerOS"), "w") as d:
+            d.write("x")
+        self.assertEqual(self._preveri(("PySide6",))[1], [knjiznice.KODA_MANJKAJO])
+
+    def test_pot_zapisa_je_v_mapi_programa(self):
+        with unittest.mock.patch.dict(os.environ, {"LOCALAPPDATA": os.path.join("C:", "Users", "U", "AppData", "Local")}):
+            self.assertEqual(os.path.basename(os.path.dirname(knjiznice.pot_poskusa())), "SafeerOS")
+
+
+class ZunanjeKnjiznice(unittest.TestCase):
+    """Vsako knjiznico zunaj Pythona, ki jo program uvozi, mora zaganjalnik namestiti - ali pa je tu zapisano, zakaj ne.
+
+    Do 1.0.38 je program uvazal cryptography in Pillow, zaganjalnik pa ju ni namestil: na razvojnem racunalniku sta bila
+    namescena rocno, na cistem racunalniku je Safeer Link ostal brez identitete (izmerjeno 5. 10. 2026)."""
+
+    #: modul -> paket na PyPI (kot ga namesti zaganjalnik)
+    MODUL_PAKET = {"PySide6": "PySide6", "qrcode": "qrcode", "vlc": "python-vlc", "mutagen": "mutagen", "av": "av",
+                   "truststore": "truststore", "zeroconf": "zeroconf", "mpv": "python-mpv", "winrt": "winrt-runtime",
+                   "cryptography": "cryptography", "PIL": "Pillow"}
+    #: modul -> zakaj ga zaganjalnik ne namesti
+    NE_NAMESTIMO = {"gi": "GTK in D-Bus: samo Linux (deli jedra, ki jih Windows ne klice)",
+                    "pefile": "samo gradnja paketa (build_windows.py)"}
+
+    def _uvozi(self):
+        najdeni = {}
+        for koren, globoko in ((KOREN / "core", True), (KOREN / "windows" / "safeer_windows", True),
+                               (KOREN / "windows", False)):
+            for pot in (koren.rglob("*.py") if globoko else koren.glob("*.py")):
+                deli = pot.relative_to(KOREN).parts
+                if "tests" in deli or "__pycache__" in deli or "vendor" in deli:
+                    continue
+                for vozel in ast.walk(ast.parse(pot.read_text(encoding="utf-8"))):
+                    imena = []
+                    if isinstance(vozel, ast.Import):
+                        imena = [a.name for a in vozel.names]
+                    elif isinstance(vozel, ast.ImportFrom) and vozel.level == 0 and vozel.module:
+                        imena = [vozel.module]
+                    for ime in imena:
+                        najdeni.setdefault(ime.split(".")[0], str(pot.relative_to(KOREN)))
+        return najdeni
+
+    def _zunanji(self):
+        zunanji = {}
+        for modul, kje in self._uvozi().items():
+            if modul in sys.stdlib_module_names or modul in ("core", "safeer_windows", "ui"):
+                continue
+            if any((KOREN / mapa / modul).is_dir() or (KOREN / mapa / (modul + ".py")).is_file()
+                   for mapa in ("windows", ".")) and modul != "qrcode":
+                continue                                   # nas modul v repozitoriju
+            zunanji[modul] = kje
+        return zunanji
+
+    def test_vsak_zunanji_uvoz_je_namescen_ali_pojasnjen(self):
+        zunanji = self._zunanji()
+        self.assertIn("cryptography", zunanji, "preizkus mora videti uvoze programa")
+        self.assertIn("PIL", zunanji)
+        neznani = {m: kje for m, kje in zunanji.items() if m not in self.MODUL_PAKET and m not in self.NE_NAMESTIMO}
+        self.assertEqual(neznani, {}, "nova zunanja knjiznica: dodaj jo zaganjalniku (paketiPip) ali zapisi, zakaj ne")
+
+    def test_zaganjalnik_namesti_vse_kar_program_uvozi(self):
+        go = (KOREN / "windows" / "launcher_go" / "main.go").read_text(encoding="utf-8")
+        seznam = re.search(r"var paketiPip = \[\]string\{(.*?)\n\}", go, re.S)
+        paketi = [p.split("==")[0] for p in re.findall(r'"([^"]+)"', seznam.group(1))]
+        for modul in self._zunanji():
+            if modul in self.NE_NAMESTIMO:
+                continue
+            self.assertIn(self.MODUL_PAKET[modul], paketi, "zaganjalnik ne namesti paketa za modul " + modul)
+
+    def test_knjiznica_brez_katere_ni_safeer_linka_se_preveri_ob_zagonu(self):
+        for modul in ("cryptography", "PIL", "zeroconf", "qrcode"):
+            self.assertIn(modul, knjiznice.POTREBNE)
 
 
 if __name__ == "__main__":
