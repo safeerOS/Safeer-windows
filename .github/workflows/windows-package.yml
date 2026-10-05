@@ -14,11 +14,18 @@ on:
       - 'ui/splet.*'
       - 'assets/icon.png'
       - 'assets/safeer-mark.svg'
+      # Strani Safeer Linka in Safeer OS imajo preizkuse, ki jih berejo ali zares pozenejo
+      # (tests/test_link_stran_dogodki.py); potisk, ki je spremenil samo stran, preverjanja ni sprozil.
+      - 'assets/link/**'
+      - 'assets/os/**'
       - '.github/workflows/windows-package.yml'
   pull_request:
     paths:
       - 'windows/**'
       - 'core/**'
+      - 'tests/**'
+      - 'assets/link/**'
+      - 'assets/os/**'
       - 'ui/home.*'
       - 'ui/splet.*'
       - '.github/workflows/windows-package.yml'
