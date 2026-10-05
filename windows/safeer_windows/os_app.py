@@ -30,6 +30,7 @@ from PySide6.QtWidgets import QApplication, QHBoxLayout, QMainWindow, QStackedWi
 from core import os_dvd, os_media, os_posodobitve, os_scit, os_sporocila, os_torrent, os_torrent_tok, podnapisi
 
 from . import en_primerek
+from . import gledalec_zaslona
 from . import (browser, control_backend, control_window, magnet_win, os_backend_win, policy, vlc_player,
                webview2_media, zapiski)
 
@@ -802,6 +803,16 @@ class SafeerOsWindow(QMainWindow):
         self._browser_media_active = False
         self._spletni_nacin = False
         self._spletna_stran_odprta = False
+        # Deljen zaslon druge naprave: svoj zavihek Spleta, ki se ob koncu deljenja zapre (gledalec_zaslona.py).
+        self.gledalec_zaslona = gledalec_zaslona.GledalecZaslona(
+            nov_zavihek=self._nov_zavihek_gledalca,
+            zapri_zavihek=self._zapri_zavihek_gledalca,
+            je_trenutni=lambda pogled: self.browser_window.current_view() is pogled,
+            naslov=lambda pogled: pogled.url().toString(),
+            v_spletu=lambda: bool(self._spletni_nacin),
+            preberi_razdelek=self._preberi_razdelek,
+            pokazi_splet=self._pokazi_splet_za_gledalca,
+            vrni_v_os=self._zapri_browser)
         self.setCentralWidget(self.zaslon)
 
         # Tipke za celozaslonski nacin
@@ -1516,6 +1527,39 @@ class SafeerOsWindow(QMainWindow):
             self.browser_window.set_safeer_os_web_mode(True)
         self.setWindowTitle("Safeer OS · Media" if media else "Safeer OS · Splet")
 
+    # -- gledalec deljenega zaslona (gledalec_zaslona.GledalecZaslona) ----------------------------------------
+    def _nov_zavihek_gledalca(self, url: str):
+        self._browser_media_active = False
+        self.browser_window.set_media_mode(False)
+        self.browser_window.set_safeer_os_web_mode(True)
+        return self.browser_window.new_tab(url, switch=True)
+
+    def _zapri_zavihek_gledalca(self, pogled) -> bool:
+        indeks = self.browser_window.tabs.indexOf(pogled)
+        if indeks < 0:
+            return False
+        self.browser_window.close_tab(indeks)
+        return True
+
+    def _pokazi_splet_za_gledalca(self) -> None:
+        self._spletna_stran_odprta = True
+        self._pokazi_spletni_nacin()
+        self.zaslon.setCurrentWidget(self.os_vsebnik)
+        self.browser_window.set_safeer_os_web_mode(True)
+        self.setWindowTitle("Safeer OS · Splet")
+
+    def _preberi_razdelek(self, nadaljuj) -> None:
+        """Razdelek Safeer OS, v katerem je uporabnik (za vrnitev po koncu gledanja). Stran odgovori takoj; ce ne
+        (se se nalaga), po kratkem roku nadaljujemo brez odgovora (vrnitev na Domov)."""
+        opravljeno: List[bool] = []
+
+        def enkrat(razdelek: Any = "") -> None:
+            if not opravljeno:
+                opravljeno.append(True)
+                nadaljuj(razdelek if isinstance(razdelek, str) else "")
+        self.view.page().runJavaScript("window.safeerOsRazdelek ? window.safeerOsRazdelek() : ''", enkrat)
+        QTimer.singleShot(800, enkrat)
+
     def _izmeri_stransko_in_pokazi_splet(self) -> None:
         js = (
             "(function(){var s=document.getElementById('stranska'),b=document.body;"
@@ -2040,16 +2084,11 @@ class SafeerOsWindow(QMainWindow):
                     for _g in list(getattr(self.browser_app, "_wv_gostitelji", {}).values()):
                         _g.nastavi()
                 self.poslji_dogodek("zaslonZNaprave", {"od": podatki.get("od"), "dejanje": "start"})
-                self.dispatcher.dispatch(lambda: self._odpri_notranji_splet(url))
+                self.dispatcher.dispatch(lambda: self.gledalec_zaslona.odpri(url))
             elif podatki.get("dejanje") == "stop":
-                # Naprava je deljenje koncala: zadnje slike ne pustimo na zaslonu, vrnemo se v Safeer OS.
-                def _zapri_gledalca() -> None:
-                    view = self.browser_window.current_view()
-                    naslov = view.url().toString() if view is not None else ""
-                    if "/cast/screen/" in naslov:
-                        view.setUrl(QUrl("about:blank"))
-                        self._zapri_browser()
-                self.dispatcher.dispatch(_zapri_gledalca)
+                # Naprava je deljenje koncala: zadnje slike ne pustimo na zaslonu - zavihek gledalca se zapre in
+                # Safeer OS se vrne tja, kjer je bil uporabnik pred deljenjem.
+                self.dispatcher.dispatch(self.gledalec_zaslona.zapri)
                 self.poslji_dogodek("zaslonZNaprave", {"od": podatki.get("od"), "dejanje": "stop"})
         if vrsta == "dovoljenjeZahtevano" and isinstance(podatki, dict):
             self.poslji_dogodek("dovoljenjeZahtevano", {"id": podatki.get("id"), "ime": podatki.get("ime")})

@@ -757,7 +757,8 @@
   var BESEDILA_DELJENJE = {
     sl: {
       napDovoljenje: "Deljenje zaslona ni bilo dovoljeno.",
-      napZaslonNiNaVoljo: "Ta naprava še ne more prikazati zaslona tega računalnika.",
+      napZaslonNiNaVoljo: "Ta naprava zaslona še ne zna prikazati. Posodobi Safeer na njej.",
+      zaslonKonecPriNapravi: "Naprava zaslona ne prikazuje več, zato se je deljenje končalo.",
       zasedenoKratko: "Zasedeno",
       zasedenoDeli: "Zasedeno — deli {ime}",
       napZasedena: "Z napravo trenutno deli {ime}. Počakaj, da konča.",
@@ -809,7 +810,8 @@
     },
     en: {
       napDovoljenje: "Screen sharing was not allowed.",
-      napZaslonNiNaVoljo: "This device cannot show this computer’s screen yet.",
+      napZaslonNiNaVoljo: "This device cannot show the screen yet. Update Safeer on it.",
+      zaslonKonecPriNapravi: "The device is no longer showing the screen, so sharing has ended.",
       zasedenoKratko: "Busy",
       zasedenoDeli: "Busy — {ime} is sharing",
       napZasedena: "{ime} is currently sharing with this device. Wait until it finishes.",
@@ -861,7 +863,8 @@
     },
     de: {
       napDovoljenje: "Die Bildschirmfreigabe wurde nicht erlaubt.",
-      napZaslonNiNaVoljo: "Dieses Gerät kann den Bildschirm dieses Computers noch nicht anzeigen.",
+      napZaslonNiNaVoljo: "Dieses Gerät kann den Bildschirm noch nicht anzeigen. Aktualisiere Safeer auf dem Gerät.",
+      zaslonKonecPriNapravi: "Das Gerät zeigt den Bildschirm nicht mehr an; die Freigabe wurde beendet.",
       zasedenoKratko: "Belegt",
       zasedenoDeli: "Belegt — {ime} teilt",
       napZasedena: "{ime} teilt gerade mit diesem Gerät. Warte, bis es fertig ist.",
@@ -908,7 +911,8 @@
     },
     es: {
       napDovoljenje: "No se permitió compartir la pantalla.",
-      napZaslonNiNaVoljo: "Este dispositivo todavía no puede mostrar la pantalla de este ordenador.",
+      napZaslonNiNaVoljo: "Este dispositivo todavía no puede mostrar la pantalla. Actualiza Safeer en él.",
+      zaslonKonecPriNapravi: "El dispositivo ya no muestra la pantalla; se ha dejado de compartir.",
       zasedenoKratko: "Ocupado",
       zasedenoDeli: "Ocupado — {ime} está compartiendo",
       napZasedena: "{ime} está compartiendo con este dispositivo. Espera a que termine.",
@@ -955,7 +959,8 @@
     },
     fr: {
       napDovoljenje: "Le partage d’écran n’a pas été autorisé.",
-      napZaslonNiNaVoljo: "Cet appareil ne peut pas encore afficher l’écran de cet ordinateur.",
+      napZaslonNiNaVoljo: "Cet appareil ne peut pas encore afficher l’écran. Mettez Safeer à jour sur cet appareil.",
+      zaslonKonecPriNapravi: "L’appareil n’affiche plus l’écran ; le partage est terminé.",
       zasedenoKratko: "Occupé",
       zasedenoDeli: "Occupé — {ime} partage",
       napZasedena: "{ime} partage actuellement avec cet appareil. Attends qu’il ait fini.",
@@ -1002,7 +1007,8 @@
     },
     it: {
       napDovoljenje: "La condivisione dello schermo non è stata consentita.",
-      napZaslonNiNaVoljo: "Questo dispositivo non può ancora mostrare lo schermo di questo computer.",
+      napZaslonNiNaVoljo: "Questo dispositivo non può ancora mostrare lo schermo. Aggiorna Safeer su quel dispositivo.",
+      zaslonKonecPriNapravi: "Il dispositivo non mostra più lo schermo; la condivisione è terminata.",
       zasedenoKratko: "Occupato",
       zasedenoDeli: "Occupato — {ime} sta condividendo",
       napZasedena: "{ime} sta condividendo con questo dispositivo. Aspetta che finisca.",
@@ -3082,6 +3088,7 @@
     if (p.koda === "napacen_odtis") return t("napOdtis");
     if (p.koda === "dovoljenje_zavrnjeno") return t("napDovoljenje");
     if (p.koda === "zaslon_ni_na_voljo") return t("napZaslonNiNaVoljo");
+    if (p.koda === "konec_pri_napravi") return t("zaslonKonecPriNapravi");
     if (p.koda === "naprava_ni_povezana") return t("niDosegljiv", { ime: t("naprava") });
     return t("napDeljenje", { napaka: clovesko(p.sporocilo || "") });
   }
