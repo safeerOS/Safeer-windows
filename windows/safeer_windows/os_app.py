@@ -3037,6 +3037,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     window._streznik_primerka = en_primerek.streznik(window)
     window._zaklep_primerka = zaklep
 
+    try:
+        # Samozagon iz starejse razlicice je klical python.exe neposredno (konzolno okno ob prijavi v Windows).
+        if os_backend_win.osvezi_samozagon():
+            print("[SafeerOS] Samozagon: vpis posodobljen (zagon prek zaganjalnika).", flush=True)
+    except Exception as e:  # noqa: BLE001
+        print(f"[SafeerOS] Samozagon: vpisa ni bilo mogoce preveriti ({e})", flush=True)
     if args.ozadje and not magnet:
         window.hide()
     # Safeer Link: povezovanje se zacne ob zagonu programa, v svoji niti. Prej ga je sprozila sele nalozena zacetna
