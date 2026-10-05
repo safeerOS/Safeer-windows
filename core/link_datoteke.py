@@ -398,6 +398,7 @@ class _Obravnava(http.server.BaseHTTPRequestHandler):
             dolzina = -1
         if dolzina < 0 or dolzina > NAJVEC_TELESA:
             self._napaka(413, "predolgo telo")
+            self._zavrzi_telo(dolzina)
             return
         try:
             zahteva = json.loads(self.rfile.read(dolzina).decode("utf-8") or "{}")
@@ -415,6 +416,22 @@ class _Obravnava(http.server.BaseHTTPRequestHandler):
         self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(telo)
+
+    def _zavrzi_telo(self, dolzina: int, najvec: int = 4 * NAJVEC_TELESA, rok_s: float = 1.0) -> None:
+        """Po zavrnitvi prevelikega telesa prebere in zavrze, kar odjemalec se posilja - najvec `najvec` bajtov in
+        `rok_s` sekund. Brez tega zaprtje povezave med posiljanjem odjemalcu unici odgovor (RST): namesto »413«
+        vidi prekinjeno povezavo."""
+        ostane = min(max(int(dolzina), 0), najvec)
+        konec = time.monotonic() + rok_s
+        try:
+            while ostane > 0 and time.monotonic() < konec:
+                self.connection.settimeout(max(0.05, konec - time.monotonic()))
+                kos = self.rfile.read1(min(ostane, 16384)) if hasattr(self.rfile, "read1") else self.rfile.read(min(ostane, 16384))
+                if not kos:
+                    break
+                ostane -= len(kos)
+        except (OSError, ValueError):
+            pass
 
     def _napaka(self, koda: int, besedilo: str) -> None:
         telo = json.dumps({"napaka": besedilo}).encode("utf-8")
