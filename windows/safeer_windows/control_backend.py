@@ -154,6 +154,8 @@ class SafeerControlBackend:
         self._hubi_isce = False
         self._hubi_kljuc = threading.Lock()
         self._deljenje_zaslona: Optional[link_deljenje.DeljenjeZaslona] = None
+        #: Deljenje zaslona druge naprave, ki ga gledamo ali ga pravkar odpiramo (share.screen start -> stop).
+        self._gledani_zaslon_id = ""
         self._opozorjena_dovoljenja: set[str] = set()
         self._lokalni_hub: Optional[link_hub_streznik.HubStreznik] = None
 
@@ -1448,13 +1450,7 @@ class SafeerControlBackend:
         od = str(sporocilo.get("sender_name") or sporocilo.get("sender") or "naprava")
         telo = sporocilo.get("payload") if isinstance(sporocilo.get("payload"), dict) else {}
         if vrsta == "share.screen":
-            dejanje = str(telo.get("action") or "")
-            url = ""
-            if dejanje == "start":
-                pot = str(telo.get("path") or "")
-                if pot.startswith("/") and self.hub_url():
-                    url = link_deljenje._osnova(self.hub_url()) + pot
-            self._oddaj_dogodek("zaslon", {"od": od, "dejanje": dejanje, "url": url, "odtis": self.hub_fp()})
+            self._prejmi_zaslon(od, str(sporocilo.get("sender") or ""), telo)
             return
         ime = str(telo.get("name") or "datoteka")
         pot = str(telo.get("path") or "")
@@ -1480,6 +1476,42 @@ class SafeerControlBackend:
                                                 "mapa": os.path.dirname(cilj)})
 
         threading.Thread(target=_prenesi, name="SafeerFileReceive", daemon=True).start()
+
+    def _prejmi_zaslon(self, od: str, posiljatelj: str, telo: dict) -> None:
+        """share.screen: zacetek ali konec deljenja zaslona druge naprave.
+
+        Stran gledalca je pri sredisci, ki je deljenje sprejelo: nasem (racunalnik ga zacne pri nas -
+        docs/LINK-MESH.md, pravilo 9) ali posiljateljevem (telefon ga zacne pri svojem, sporocilo je prislo cez
+        sosede). Do 1.0.39 smo jo iskali samo pri nasem: telefonov zaslon se je odprl kot »Ni te poti.«.
+        Dogodek `zaslon` z dejanjem start oddamo sele, ko stran najdemo - in samo, ce deljenje se tece."""
+        dejanje = str(telo.get("action") or "")
+        id_deljenja = str(telo.get("id") or "")
+        if dejanje != "start":
+            if dejanje == "stop" and self._gledani_zaslon_id and id_deljenja and id_deljenja != self._gledani_zaslon_id:
+                return          # konec nekega drugega deljenja: gledalca ne zapiramo
+            if dejanje == "stop":
+                self._gledani_zaslon_id = ""
+            self._oddaj_dogodek("zaslon", {"od": od, "dejanje": dejanje, "url": "", "odtis": "", "id": id_deljenja})
+            return
+        pot = str(telo.get("path") or "")
+        if not pot.startswith("/") or not self.hub_url():
+            return
+        self._gledani_zaslon_id = id_deljenja
+
+        def _najdi() -> None:
+            sredisca = [(self.hub_url(), self.hub_fp())]
+            sredisce, _koda = self._sredisce_naprave(posiljatelj)
+            if sredisce is not None:
+                sredisca.append(sredisce)
+            url, odtis = link_deljenje.gledalec_pri_srediscih(sredisca, pot)
+            if not url:
+                print("[ControlBackend] Deljeni zaslon: strani gledalca ni pri nobenem sredisci (deljenje je morda ze koncano).")
+                return
+            if self._gledani_zaslon_id != id_deljenja:
+                return          # deljenje se je med iskanjem koncalo (ali se je zacelo drugo)
+            self._oddaj_dogodek("zaslon", {"od": od, "dejanje": "start", "url": url, "odtis": odtis, "id": id_deljenja})
+
+        threading.Thread(target=_najdi, name="SafeerScreenView", daemon=True).start()
 
     def _obdelaj_nadzorni_ukaz(self, sporocilo: dict) -> None:
         """Obdela dohodni ukaz daljinca z druge naprave (TV, telefon) na ločenem navideznem zaslonu."""
@@ -2346,8 +2378,8 @@ class SafeerControlBackend:
             return link_hub.seja_s_podpisom(naslov, nas_id, odtis, self.device_ime), nas_id
 
         def lastno() -> tuple:
-            if self._gostimo_lokalno():
-                return None, "zaslon_ni_na_voljo"    # sredisce racunalnika zaslona ne posreduje
+            # Naprava brez svojega sredisca: pokaze ji ga sredisce, na katero smo prijavljeni - tudi nase (od
+            # 1.0.40 zaslon posreduje tudi sredisce racunalnika).
             zeton = self._zeton_http()
             if not zeton:
                 return None, "hub_ni_znan"

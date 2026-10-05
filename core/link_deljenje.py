@@ -19,7 +19,10 @@ import hashlib
 import io
 import json
 import os
+import re
+import select
 import socket
+import ssl
 import threading
 import time
 from typing import Callable, Dict, Optional, Tuple
@@ -48,8 +51,9 @@ SPOROCILA_SREDISCA = {
 SPOROCILA_ZASLONA = {
     "naprava_pri_drugem_srediscu": "Naprava je povezana prek drugega središča; zaslona ji od tu ni mogoče pokazati.",
     "sredisce_naprave_ni_dosegljivo": "Naprava v tem omrežju ni dosegljiva.",
-    "zaslon_ni_na_voljo": "Ta naprava še ne more prikazati zaslona tega računalnika.",
+    "zaslon_ni_na_voljo": "Ta naprava zaslona še ne zna prikazati. Posodobi Safeer na njej.",
     "hub_ni_znan": "Zaslon lahko deliš po varni povezavi s Safeer Linkom.",
+    "konec_pri_napravi": "Naprava zaslona ne prikazuje več, zato se je deljenje končalo.",
 }
 
 
@@ -269,17 +273,50 @@ def _prevzemi(ws_naslov: str, odtis: str, pot_huba: str, ime: str, pricakovan_od
 # Zaslon
 # ----------------------------------------------------------------------
 
+def gledalec_pri_srediscih(sredisca, pot: str, timeout: float = 4.0) -> Tuple[str, str]:
+    """Kje je stran gledalca iz `share.screen`: (naslov strani, odtis sredisca) ali ("", ""), ce je nima nobeno.
+
+    Pot v sporocilu je relativna na sredisce, ki je deljenje sprejelo - nase (posiljatelj ga je zacel pri nas; tako
+    delajo racunalniki, docs/LINK-MESH.md pravilo 9) ali posiljateljevo (telefon ga zacne pri svojem, sporocilo je
+    prislo cez sosede). Iz sporocila se tega ne vidi, zato vprasamo po vrsti `sredisca` = [(naslov, odtis), ...];
+    zmaga prvo, ki stran ima (200). Izmerjeno 5. 10. 2026: racunalnik je iskal samo pri svojem in telefonov zaslon
+    se je odprl kot {"error": "Ni te poti."}."""
+    for naslov, odtis in sredisca:
+        if not naslov or not odtis:
+            continue
+        u = urlparse(naslov)
+        povezava = link_tls._PripetaHttps(u.hostname or "127.0.0.1", u.port or 443, odtis, timeout)
+        odgovor = None
+        try:
+            povezava.request("GET", pot)
+            odgovor = povezava.getresponse()
+            koda = odgovor.status
+        except Exception:  # noqa: BLE001 - nedosegljivo sredisce ali tuje potrdilo: vprasamo naslednje
+            koda = 0
+        finally:
+            for odprto in (odgovor, povezava):
+                try:
+                    if odprto is not None:
+                        odprto.close()
+                except Exception:
+                    pass
+        if koda == 200:
+            return _osnova(naslov) + pot, odtis
+    return "", ""
+
+
 def sredisce_za_zaslon(sredisce_naprave: Callable[[str], tuple], seja: Callable[[str, str], tuple],
                        lastno: Callable[[], tuple], cilj: str) -> tuple:
     """Pri katerem sredisci posiljatelj zacne deljenje zaslona za napravo `cilj`.
 
     Link Mesh: vsaka naprava ima svoje sredisce in zaslon ji pokaze ONO (gledalec bere okvirje pri njem), zato
-    deljenje zacnemo tam - s sejo s podpisom, kot oddamo datoteko. Sredisce racunalnika zaslona ne posreduje.
+    deljenje zacnemo tam - s sejo s podpisom, kot oddamo datoteko. Napravi brez svojega sredisca (prijavljena je
+    pri tistem, na katerega smo prijavljeni mi) zaslon pokaze to sredisce.
 
     sredisce_naprave(cilj) -> ((naslov, odtis), "") | (None, "") | (None, koda)      (link_mesh.sredisce_naprave)
     seja(naslov, odtis)    -> (sejni zeton ali None, nas id pri tem sredisci)
-    lastno()               -> ((naslov, zeton, odtis, nas id), "") za sredisce, na katero smo prijavljeni, kadar
-                              NI v tem procesu; sicer (None, koda): "zaslon_ni_na_voljo" ali "hub_ni_znan".
+    lastno()               -> ((naslov, zeton, odtis, nas id), "") za sredisce, na katero smo prijavljeni (nase ali
+                              tuje); (None, "hub_ni_znan"), ce zanj nimamo zetona.
     Vrne ((naslov, zeton, odtis, nas id), opis) ali (None, {"sporocilo", "koda", "zasedenaOd"}). V opisu je
     `pri_napravi`: True, kadar je izbrano sredisce ciljne naprave same. Caka na omrezje."""
     def napaka(koda: str) -> tuple:
@@ -340,6 +377,56 @@ class DeljenjeZaslona:
 
     def ustavi(self) -> None:
         self._ustavi.set()
+
+    # --- odgovor sredisca ------------------------------------------------
+    @staticmethod
+    def _odgovor_sredisca(vticnik, cakaj_s: float = 0.0) -> Optional[dict]:
+        """Odgovor sredisca na nas tok okvirjev, ce je ze prisel; None = sredisce se sprejema.
+
+        Sredisce med deljenjem ne poslje nicesar. Ko deljenje konca samo (nihce vec ne gleda, ustavlja se),
+        odgovori z razlogom in zapre povezavo - po tem locimo konec deljenja od padle povezave. Vrne telo odgovora;
+        {} = povezava je zaprta brez berljivega razloga."""
+        try:
+            pripravljen = bool(vticnik.pending()) or bool(select.select([vticnik], [], [], cakaj_s)[0])
+        except Exception:  # noqa: BLE001 - vticnik brez opisnika (preizkusi) ali ze zaprt
+            return None
+        if not pripravljen:
+            return None
+        surovo = b""
+        try:
+            # Prvo branje kratko: zapis TLS brez podatkov (vstopnica seje takoj po rokovanju) ne sme ustaviti okvirjev.
+            vticnik.settimeout(0.05)
+            for _ in range(8):
+                kos = vticnik.recv(8192)
+                if not kos:
+                    break
+                surovo += kos
+                vticnik.settimeout(1.0)
+                glava, locilo, telo = surovo.partition(b"\r\n\r\n")
+                dolzina = re.search(rb"(?i)content-length:\s*(\d+)", glava) if locilo else None
+                if locilo and (dolzina is None or len(telo) >= int(dolzina.group(1))):
+                    break
+        except (socket.timeout, ssl.SSLWantReadError):
+            if not surovo:
+                return None
+        except OSError:
+            pass
+        finally:
+            try:
+                vticnik.settimeout(None)
+            except Exception:
+                pass
+        try:
+            j = json.loads(surovo.partition(b"\r\n\r\n")[2].decode("utf-8"))
+        except Exception:
+            j = {}
+        return j if isinstance(j, dict) else {}
+
+    def _konec_pri_srediscu(self, odgovor: dict) -> None:
+        """Deljenje je koncalo sredisce. Ce zato, ker ga nihce vec ne gleda, to povemo; sicer je navaden konec."""
+        if str(odgovor.get("razlog") or "") == "ni_gledalcev":
+            self.koda = "konec_pri_napravi"
+            self.napaka = SPOROCILA_ZASLONA["konec_pri_napravi"]
 
     # --- zajem -----------------------------------------------------------
     @staticmethod
@@ -430,6 +517,10 @@ class DeljenjeZaslona:
                 elif zadnji and time.time() - zadnji_cas > UTRIP_S:
                     vticnik.sendall(len(zadnji).to_bytes(4, "big") + zadnji)
                     zadnji_cas = time.time()
+                konec = self._odgovor_sredisca(vticnik)
+                if konec is not None:
+                    self._konec_pri_srediscu(konec)
+                    break
                 ostane = RAZMIK_S - (time.time() - zacetek)
                 if ostane > 0:
                     self._ustavi.wait(ostane)
@@ -437,7 +528,12 @@ class DeljenjeZaslona:
             self.napaka, self.koda = "Hub ima drugo potrdilo, kot je bilo ob seznanitvi.", "odtis_se_ne_ujema"
         except Exception as e:  # noqa: BLE001
             if not self._ustavi.is_set():
-                self.napaka = f"Deljenje zaslona je padlo: {e}"
+                # Pisanje je padlo. Ce je sredisce pred tem odgovorilo, je deljenje koncalo ono - to ni napaka.
+                konec = self._odgovor_sredisca(vticnik, 1.0) if vticnik is not None else None
+                if konec:
+                    self._konec_pri_srediscu(konec)
+                else:
+                    self.napaka = f"Deljenje zaslona je padlo: {e}"
         finally:
             self.tece = False
             if vticnik is not None:

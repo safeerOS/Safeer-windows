@@ -51,6 +51,10 @@ POT_BESEDILO = "/cast/share/text"
 POT_PREIMENUJ = "/cast/devices/rename"
 POT_ODDAJA = "/cast/file"
 POT_PREVZEM = "/cast/file/"
+#: Deljenje zaslona (link_hub_deljenje.Zasloni): zacetek in konec, pod POT_ZASLON tok okvirjev in gledalec.
+POT_ZASLON_START = "/cast/share/screen/start"
+POT_ZASLON_STOP = "/cast/share/screen/stop"
+POT_ZASLON = "/cast/screen/"
 #: Toliko neprebranega telesa se preberemo in zavrzemo, da odjemalec dobi odgovor z napako; pri vecjem zapremo.
 NAJVEC_ZAVRZENEGA = 64 * 1024 * 1024
 
@@ -312,6 +316,9 @@ class Hub:
         self.ob_sosedu: Optional[Callable[[str, str], None]] = None
         #: Datoteke na poti od posiljatelja do cilja (PUT /cast/file -> share.file -> GET /cast/file/<id>).
         self.deljenje = link_hub_deljenje.Deljenje(ura=ura)
+        #: Deljeni zasloni, ki tecejo prek tega sredisca (start -> tok okvirjev posiljatelja -> gledalec pri cilju).
+        self.zasloni = link_hub_deljenje.Zasloni(ura=ura)
+        self.zasloni.ob_koncu = self._zaslon_koncan
 
     # ------------------------------------------------------------------ prijava s podpisom
 
@@ -1026,7 +1033,7 @@ class Hub:
 
     # ------------------------------------------------------------------ deljenje (besedilo, datoteka)
 
-    def cilj_deljenja(self, cilj: str, posiljatelj: str, datoteka: bool = False) -> Optional[tuple]:
+    def cilj_deljenja(self, cilj: str, posiljatelj: str, datoteka: bool = False, zaslon: bool = False) -> Optional[tuple]:
         """None, ce cilj lahko dobi deljenje; sicer (koda HTTP, sporocilo, oznaka)."""
         if not cilj:
             return 400, "Manjka target.", "manjka_target"
@@ -1038,6 +1045,11 @@ class Hub:
         if datoteka and naprava.sosed:
             # Cilj datoteko prevzame pri SVOJEM sredisci (pot v share.file je relativna), ta pa je pri nas.
             return 409, "Ciljna naprava je povezana prek drugega središča; datoteke ji od tu ni mogoče poslati.", \
+                "naprava_pri_drugem_srediscu"
+        if zaslon and naprava.sosed:
+            # Enako velja za zaslon: stran gledalca iz share.screen cilj isce pri svojem in pri posiljateljevem
+            # sredisci (docs/LINK-MESH.md, pravilo 9), ne pri tretjem.
+            return 409, "Ciljna naprava je povezana prek drugega središča; zaslona ji od tu ni mogoče pokazati.", \
                 "naprava_pri_drugem_srediscu"
         return None
 
@@ -1101,6 +1113,52 @@ class Hub:
         if not self.posreduj_deljenje("share.text", posiljatelj, cilj, {"text": besedilo}, ime):
             return 404, link_hub_deljenje.napaka("Ciljna naprava ni povezana.", "naprava_ni_povezana")
         return 200, {"sent": True}
+
+    # ------------------------------------------------------------------ deljenje (zaslon)
+
+    def zacni_zaslon(self, zeton: str, cilj: str) -> tuple:
+        """POST /cast/share/screen/start {target}. Vrne (koda HTTP, odgovor) - isti odgovor kot sredisce na Androidu
+        ({id, push_path, view_path}). Ciljni napravi zacetek pove sredisce (share.screen start)."""
+        lastnik = self.naprava_zetona(zeton)
+        if not lastnik:
+            return 401, link_hub_deljenje.napaka("Naprava ni seznanjena.", "naprava_ni_seznanjena")
+        posiljatelj, ime = lastnik
+        cilj = str(cilj or "").strip()[:NAJVEC_IMENA]
+        zavrnjeno = self.cilj_deljenja(cilj, posiljatelj, zaslon=True)
+        if zavrnjeno is not None:
+            return zavrnjeno[0], link_hub_deljenje.napaka(zavrnjeno[1], zavrnjeno[2])
+        ime_naprave = self._ime_naprave(posiljatelj)
+        z, koda, kdo = self.zasloni.zacni(posiljatelj, cilj, self.ime_v_krogu(posiljatelj)
+                                          or (ime_naprave if ime_naprave != posiljatelj else ime))
+        if z is None:
+            if koda == "naprava_zasedena":
+                ime_kdo = self._ime_naprave(kdo)
+                odgovor = link_hub_deljenje.napaka("Z napravo trenutno deli %s. Počakaj, da konča." % ime_kdo, koda)
+                odgovor.update({"busy_by": kdo, "busy_by_name": ime_kdo, "target": cilj})
+                return 409, odgovor
+            return 503, link_hub_deljenje.napaka("Preveč deljenih zaslonov.", koda)
+        # Cilj izve za deljenje od sredisca in odpre stran gledalca. Ce mu tega ni mogoce povedati, deljenja ne
+        # zacnemo - posiljatelj bi sicer delil v prazno.
+        if not self.posreduj_deljenje("share.screen", posiljatelj, cilj, z.tovor_zacetka(), ime):
+            self.zasloni.koncaj(z.id)
+            return 502, link_hub_deljenje.napaka("Ciljne naprave ni bilo mogoče obvestiti.", "posredovanje_ni_uspelo")
+        return 200, {"id": z.id, "push_path": z.pot_potiskanja(), "view_path": z.pot_gledanja()}
+
+    def koncaj_zaslon(self, zeton: str, id_deljenja: str) -> tuple:
+        """POST /cast/share/screen/stop {id}: konca ga posiljatelj (ali cilj). Vrne (koda HTTP, odgovor). Ze koncano
+        deljenje ni napaka - posiljatelj stop poslje tudi potem, ko je tok okvirjev ze zaprl."""
+        lastnik = self.naprava_zetona(zeton)
+        if not lastnik:
+            return 401, link_hub_deljenje.napaka("Naprava ni seznanjena.", "naprava_ni_seznanjena")
+        z = self.zasloni.po_idju(str(id_deljenja or "").strip())
+        if z is not None and lastnik[0] in (z.posiljatelj, z.cilj):
+            self.zasloni.koncaj(z.id, link_hub_deljenje.KONEC_USTAVLJENO)
+        return 200, {"stopped": True}
+
+    def _zaslon_koncan(self, z) -> None:
+        """Deljenje zaslona se je koncalo (posiljatelj je nehal, odsel ali ga nihce vec ne gleda): cilj naj neha
+        gledati. Ce cilja ni vec, sporocilo preprosto ne gre nikamor."""
+        self.posreduj_deljenje("share.screen", z.posiljatelj, z.cilj, z.tovor_konca())
 
     def steviloCakajocihKlepetov(self, cilj: str) -> int:  # noqa: N802 (enako ime kot na Androidu)
         with self._klepet_zaklep:
@@ -1902,6 +1960,9 @@ class _Obravnava(http.server.BaseHTTPRequestHandler):
         if pot.startswith(POT_PREVZEM):
             self._prevzem_datoteke(pot)
             return
+        if pot.startswith(POT_ZASLON):
+            self._gledalec_zaslona(pot)
+            return
         if pot in ("/cast/devices", "/cast/trust/ring"):
             # Seznam naprav in krog zaupanja (kljuci, imena, kdo je koga dodal) dobijo samo prijavljene
             # naprave, po WebSocketu (cast.devices, trust.update). Po HTTP ju ta Hub ne daje nikomur:
@@ -1913,7 +1974,8 @@ class _Obravnava(http.server.BaseHTTPRequestHandler):
                    "/cast/pair/qr/join", "/cast/pair/qr/invite", "/cast/pair/qr/invite/status",
                    "/cast/pair/qr/invite/cancel", "/cast/pair/qr/odprto",
                    "/cast/pair/qr/start", "/cast/pair/qr/info", "/cast/pair/qr/approve",
-                   "/cast/pair/qr/status", "/cast/pair/qr/cancel", POT_BESEDILO, POT_ODDAJA, POT_PREIMENUJ):
+                   "/cast/pair/qr/status", "/cast/pair/qr/cancel", POT_BESEDILO, POT_ODDAJA, POT_PREIMENUJ,
+                   POT_ZASLON_START, POT_ZASLON_STOP):
             # Pot obstaja, a ne kot GET. Po tem naprava loci Safeer Hub od poljubnega streznika.
             self._napaka(405, "Ta način za to pot ni dovoljen.", "metoda_ni_dovoljena")
             return
@@ -1989,6 +2051,117 @@ class _Obravnava(http.server.BaseHTTPRequestHandler):
             self.close_connection = True
         finally:
             zaloga.koncaj_prevzem(d, cela)
+
+    # ------------------------------------------------------------------ deljenje: zaslon
+    def _zaslon_iz_poti(self, pot: str) -> tuple:
+        """(zaslon ali None, del) za /cast/screen/<id>[/<del>]?k=<kljuc>; del je "" (tok okvirjev posiljatelja),
+        "view", "stream", "state" ... ali "?" pri predolgi poti."""
+        deli = pot[len(POT_ZASLON):].split("/")
+        kljuc = (parse_qs(urlparse(self.path).query).get("k") or [""])[0]
+        z = self._hub.zasloni.najdi(deli[0], kljuc) if deli[0] else None
+        return z, ("" if len(deli) == 1 else deli[1] if len(deli) == 2 else "?")
+
+    def _html(self, koda: int, besedilo: str) -> None:
+        podatki = besedilo.encode("utf-8")
+        self.send_response(koda)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(podatki)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        try:
+            self.wfile.write(podatki)
+        except Exception:
+            pass
+
+    def _gledalec_zaslona(self, pot: str) -> None:
+        """GET /cast/screen/<id>/view|stream|state?k=<kljuc>: stran gledalca, tok MJPEG in stanje deljenja.
+        Kljuc je iz share.screen; glave z zetonom gledalec ne more dodati (tece v spletnem pogledu)."""
+        z, del_poti = self._zaslon_iz_poti(pot)
+        if del_poti == "view":
+            if z is None:
+                self._html(404, link_hub_deljenje.STRAN_KONEC)
+            else:
+                self._html(200, link_hub_deljenje.stran_gledalca(z))
+            return
+        if del_poti == "":
+            # Pot obstaja, a ne kot GET (tok okvirjev posiljatelja je POST).
+            self._napaka(405, "Ta način za to pot ni dovoljen.", "metoda_ni_dovoljena")
+            return
+        if del_poti not in ("stream", "state"):
+            self._napaka(404, "Ni te poti.", "ni_poti")
+            return
+        if z is None:
+            self._odgovori(404, link_hub_deljenje.napaka("Tega deljenja ni.", "ni_zaslona"))
+            return
+        if del_poti == "state":
+            self._odgovori(200, {"running": True, "frames": z.okvirjev})
+            return
+        zasloni = self._hub.zasloni
+        g, koda = zasloni.dodaj_gledalca(z)
+        if g is None:
+            if koda == "prevec_gledalcev":
+                self._odgovori(503, link_hub_deljenje.napaka("Preveč gledalcev.", koda))
+            else:
+                self._odgovori(404, link_hub_deljenje.napaka("Tega deljenja ni.", koda))
+            return
+        self.close_connection = True
+        try:
+            # Gledalec, ki ne bere, ne sme za vedno drzati niti: pisanje ima rok.
+            self.connection.settimeout(link_hub_deljenje.BREZ_OKVIRJA_S)
+            self.send_response(200)
+            self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=" + link_hub_deljenje.MEJA_TOKA)
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            while z.tece and not g.konec:
+                okvir = g.naslednji(1.0)
+                if okvir is not None:
+                    self.wfile.write(link_hub_deljenje.del_toka(okvir))
+            self.wfile.write(link_hub_deljenje.KONEC_TOKA)
+        except Exception:  # noqa: BLE001 - gledalec je odsel
+            pass
+        finally:
+            zasloni.odstrani_gledalca(z, g)
+
+    def _tok_zaslona(self, pot: str) -> None:
+        """POST /cast/screen/<id>?k=<kljuc>: tok okvirjev posiljatelja. Telo nima dolzine - tece, dokler deli."""
+        self.close_connection = True          # po odgovoru te povezave ni mogoce uporabiti znova
+        z, del_poti = self._zaslon_iz_poti(pot)
+        if z is None or del_poti:
+            self._odgovori(404, link_hub_deljenje.napaka("Tega deljenja ni.", "ni_zaslona"))
+            return
+        lastnik = self._lastnik_zetona()
+        if not lastnik:
+            self._odgovori(401, link_hub_deljenje.napaka("Naprava ni seznanjena.", "naprava_ni_seznanjena"))
+            return
+        if lastnik[0] != z.posiljatelj:
+            # Okvirje sme potiskati samo naprava, ki je deljenje zacela.
+            self._odgovori(403, link_hub_deljenje.napaka("To deljenje pripada drugi napravi.", "tuje_deljenje"))
+            return
+        try:
+            self.connection.settimeout(link_hub_deljenje.BREZ_OKVIRJA_S)
+        except Exception:
+            pass
+        okvirjev = self._hub.zasloni.sprejmi(z, self.rfile.read)
+        if okvirjev < 0:
+            self._odgovori(409, link_hub_deljenje.napaka("To deljenje tok okvirjev že ima.", "tok_ze_tece"))
+            return
+        # Po razlogu posiljatelj ve, da je deljenje koncalo sredisce (npr. nihce vec ne gleda) in da povezava ni padla.
+        self._odgovori(200, {"koncano": True, "razlog": z.razlog, "okvirjev": okvirjev})
+        self._izprazni_vhod()
+
+    def _izprazni_vhod(self, najvec_s: float = 2.0) -> None:
+        """Po odgovoru na tok brez dolzine posiljatelj se posilja. Ce povezavo zapremo z neprebranimi podatki, dobi
+        RST in odgovora morda ne prebere - zato se kratek cas beremo in zavrzemo."""
+        try:
+            self.wfile.flush()
+            self.connection.settimeout(0.5)
+            konec = time.monotonic() + najvec_s
+            while time.monotonic() < konec:
+                if not self.rfile.read1(link_hub_deljenje.KOS):
+                    break
+        except Exception:
+            pass
 
     def _zavrzi_telo(self) -> None:
         """Pred odgovorom z napako: majhno telo preberemo (odjemalec ga se posilja), pri velikem zapremo povezavo."""
@@ -2070,6 +2243,19 @@ class _Obravnava(http.server.BaseHTTPRequestHandler):
             koda, odgovor = self._hub.deli_besedilo(self.headers.get("X-Safeer-Token") or "",
                                                     str(telo.get("target") or ""), str(telo.get("text") or ""))
             self._odgovori(koda, odgovor)
+            return
+        if pot == POT_ZASLON_START:
+            telo = self._telo()
+            koda, odgovor = self._hub.zacni_zaslon(self.headers.get("X-Safeer-Token") or "", str(telo.get("target") or ""))
+            self._odgovori(koda, odgovor)
+            return
+        if pot == POT_ZASLON_STOP:
+            telo = self._telo()
+            koda, odgovor = self._hub.koncaj_zaslon(self.headers.get("X-Safeer-Token") or "", str(telo.get("id") or ""))
+            self._odgovori(koda, odgovor)
+            return
+        if pot.startswith(POT_ZASLON):
+            self._tok_zaslona(pot)
             return
         if pot == "/cast/auth/challenge":
             telo = self._telo()
@@ -2896,6 +3082,11 @@ class HubStreznik:
             streznik = self._streznik
             self._streznik = None
         if streznik is not None:
+            try:
+                if self.hub is not None:
+                    self.hub.zasloni.koncaj_vse()      # cilji se pred zaprtjem povezav izvejo, da je deljenja konec
+            except Exception:
+                pass
             for n in (self.hub.povezane() if self.hub else []):
                 if n.povezava is not None:
                     try:

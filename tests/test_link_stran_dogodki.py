@@ -185,12 +185,26 @@ class DogodkiNaStrani(unittest.TestCase):
         self.assertTrue(s[0]["panelZaslonTece"]["skrit"])
 
     def test_zaslon_naprava_ga_se_ne_zna_prikazati(self):
-        """Naprava pri sredisci racunalnika (to zaslona ne posreduje): napis po kodi, v jeziku vmesnika."""
+        """Naprava s Safeerjem pred krogom 109 (njeno sredisce zaslona ne posreduje): napis po kodi, v jeziku
+        vmesnika - besedila zaledja stran ne pokaze. Zdaj posodobitev pomaga, zato napis to pove."""
         s = _stran([_deljenje("zaslon", "koncano", cilj="n-x", ime="Naprava", koda="zaslon_ni_na_voljo",
-                              sporocilo="Ta naprava še ne more prikazati zaslona tega računalnika.", tece=False)])
-        self.assertEqual(s[0]["opombaDeljenje"]["besedilo"], "Ta naprava še ne more prikazati zaslona tega računalnika.")
+                              sporocilo="besedilo zaledja", tece=False)])
+        self.assertEqual(s[0]["opombaDeljenje"]["besedilo"], "Ta naprava zaslona še ne zna prikazati. Posodobi Safeer na njej.")
         self.assertTrue(s[0]["panelZaslonTece"]["skrit"])
         self.assertEqual(_vir_strani().count("      napZaslonNiNaVoljo: "), 6, "napis v vseh sestih jezikih")
+
+    def test_zaslon_konec_ker_naprava_ne_gleda_vec(self):
+        """Sredisce je deljenje koncalo, ker ga nihce vec ne gleda (okno gledalca zaprto): to ni »Deljenje ni
+        uspelo: ...« - plosca pove, kaj se je zgodilo, in gumb »Prekini deljenje« izgine."""
+        konec = "Naprava zaslona ne prikazuje več, zato se je deljenje končalo."
+        s = _stran([["naprave", NAPRAVE],
+                    _deljenje("zaslon", "tece", cilj="n-tv", ime="Televizor", tece=True, napaka=""),
+                    _deljenje("zaslon", "koncano", cilj="n-tv", ime="Televizor", koda="konec_pri_napravi",
+                              sporocilo="besedilo zaledja", tece=False, napaka="besedilo zaledja")])
+        self.assertFalse(s[1]["panelZaslonTece"]["skrit"])
+        self.assertTrue(s[2]["panelZaslonTece"]["skrit"])
+        self.assertEqual(s[2]["opombaDeljenje"]["besedilo"], konec)
+        self.assertEqual(_vir_strani().count("      zaslonKonecPriNapravi: "), 6, "napis v vseh sestih jezikih")
 
     def test_zaslon_naprava_ni_dosegljiva(self):
         s = _stran([_deljenje("zaslon", "koncano", cilj="n-tv", ime="Televizor", koda="sredisce_naprave_ni_dosegljivo",

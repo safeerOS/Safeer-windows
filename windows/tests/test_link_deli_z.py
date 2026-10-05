@@ -198,20 +198,24 @@ class Zaslon(_Osnova):
         self.assertIsNone(izbrano)
         self.assertEqual(napaka["koda"], "sredisce_naprave_ni_dosegljivo")
 
-    def test_naprava_pri_lastnem_sredisci_pove_da_ne_gre(self):
-        """Sredisce racunalnika zaslona ne posreduje: jasna napaka namesto »posodobi Safeer na napravi, ki je središče«."""
+    def test_naprava_pri_lastnem_sredisci_dobi_zaslon_od_njega(self):
+        """Naprava brez svojega sredisca (prijavljena pri nasem): od 1.0.40 ji zaslon pokaze nase sredisce - do
+        1.0.39 ga sredisce racunalnika ni posredovalo (»Ta naprava še ne more prikazati zaslona ...«)."""
+        with mock.patch.object(self.b, "_sredisce_naprave", return_value=(None, "")), \
+                mock.patch.object(self.b, "_gostimo_lokalno", return_value=True):
+            izbrano, napaka = self.b._sredisce_za_zaslon("n-x")
+        self.assertEqual((izbrano, napaka), ((HUB, "saf_pc_moj", ODTIS, self.b.device_id), {}))
+
+    def test_brez_zetona_pri_lastnem_sredisci(self):
         self._zaplata_zetona.stop()
         try:
             with mock.patch.object(self.b, "_sredisce_naprave", return_value=(None, "")), \
-                    mock.patch.object(self.b, "_gostimo_lokalno", return_value=True), \
-                    mock.patch.object(self.b, "_zeton_http") as zeton:
+                    mock.patch.object(self.b, "_zeton_http", return_value=None):
                 izbrano, napaka = self.b._sredisce_za_zaslon("n-x")
-                zeton.assert_not_called()
         finally:
             self._zaplata_zetona.start()
         self.assertIsNone(izbrano)
-        self.assertEqual((napaka["koda"], napaka["sporocilo"]),
-                         ("zaslon_ni_na_voljo", "Ta naprava še ne more prikazati zaslona tega računalnika."))
+        self.assertEqual(napaka["koda"], "hub_ni_znan")
 
     def test_prijavljeni_na_tuje_sredisce_delimo_prek_njega(self):
         with mock.patch.object(self.b, "_sredisce_naprave", return_value=(None, "")), \
@@ -406,6 +410,95 @@ class DogodekDoOkna(unittest.TestCase):
         d(s, "deljenje", {"vrsta": "datoteka", "stanje": "poslano", "cilj": "n-tel", "ime": "a.txt", "tece": False,
                           "uspeh": True, "napaka": ""})
         self.assertEqual(poslano, [("posiljanjeKoncano", {"ime": "a.txt", "cilj": "n-tel", "uspeh": True, "napaka": ""})])
+
+
+
+class _TakojNit:
+    """Namesto niti: delo opravi ob start(), da preizkus vidi izid brez cakanja."""
+
+    def __init__(self, target=None, **_k):
+        self._delo = target
+
+    def start(self):
+        self._delo()
+
+
+class SprejemZaslona(_Osnova):
+    """share.screen z druge naprave: stran gledalca je pri sredisci, ki je deljenje sprejelo.
+
+    Izmerjeno 5. 10. 2026 (1.0.39): telefon je deljenje zacel pri SVOJEM sredisci, racunalnik je stran iskal pri svojem
+    in v Spletu odprl {"error": "Ni te poti."}; konec, ki je prisel takoj za zacetkom, zavihka ni zaprl."""
+
+    POT = "/cast/screen/abc/view?k=KLJUC"
+    PRI_TELEFONU = ("https://10.0.0.7:8990" + POT, "odtis-telefona")
+
+    def _sporocilo(self, dejanje="start", id_="abc", **tovor):
+        telo = {"action": dejanje, "id": id_}
+        if dejanje == "start":
+            telo["path"] = self.POT
+        telo.update(tovor)
+        return {"type": "share.screen", "sender": "n-tel", "sender_name": "Telefon", "payload": telo}
+
+    def _prejmi(self, sporocilo, najdeno=PRI_TELEFONU, ob_iskanju=None, sredisce=((SOSED_NASLOV, "odtis-telefona"), "")):
+        self.iskano = None
+
+        def najdi(sredisca, pot):
+            self.iskano = (list(sredisca), pot)
+            if ob_iskanju:
+                ob_iskanju()
+            return najdeno
+        with mock.patch.object(CB.link_deljenje, "gledalec_pri_srediscih", side_effect=najdi), \
+                mock.patch.object(self.b, "_sredisce_naprave", return_value=sredisce) as sredisce_naprave, \
+                mock.patch.object(CB.threading, "Thread", _TakojNit):
+            self.b._prejmi_deljenje("share.screen", sporocilo)
+        return sredisce_naprave
+
+    def _zasloni(self):
+        return [p for v, p in self.dogodki if v == "zaslon"]
+
+    def test_stran_gledalca_isce_pri_nasem_in_pri_posiljateljevem_sredisci(self):
+        sredisce_naprave = self._prejmi(self._sporocilo())
+        sredisce_naprave.assert_called_once_with("n-tel")
+        self.assertEqual(self.iskano, ([(HUB, ODTIS), (SOSED_NASLOV, "odtis-telefona")], self.POT))
+        self.assertEqual(self._zasloni(), [{"od": "Telefon", "dejanje": "start", "url": self.PRI_TELEFONU[0],
+                                            "odtis": "odtis-telefona", "id": "abc"}])
+
+    def test_posiljatelj_brez_svojega_sredisca(self):
+        self._prejmi(self._sporocilo(), najdeno=("https://127.0.0.1:45678" + self.POT, ODTIS), sredisce=(None, ""))
+        self.assertEqual(self.iskano[0], [(HUB, ODTIS)])
+        self.assertEqual(self._zasloni()[-1]["url"], "https://127.0.0.1:45678" + self.POT)
+
+    def test_strani_ni_nikjer_ne_odda_zacetka(self):
+        self._prejmi(self._sporocilo(), najdeno=("", ""))
+        self.assertEqual(self._zasloni(), [], "prazna stran z napako je slabsa kot nic")
+
+    def test_konec_med_iskanjem_zacetka_ne_odda(self):
+        self._prejmi(self._sporocilo(), ob_iskanju=lambda: self.b._prejmi_deljenje("share.screen", self._sporocilo("stop")))
+        self.assertEqual([z["dejanje"] for z in self._zasloni()], ["stop"])
+
+    def test_novo_deljenje_med_iskanjem_starega(self):
+        self._prejmi(self._sporocilo(), ob_iskanju=lambda: setattr(self.b, "_gledani_zaslon_id", "novejse"))
+        self.assertEqual(self._zasloni(), [])
+
+    def test_konec_drugega_deljenja_gledalca_ne_zapre(self):
+        self._prejmi(self._sporocilo())
+        self._prejmi(self._sporocilo("stop", id_="drugo"))
+        self.assertEqual([z["dejanje"] for z in self._zasloni()], ["start"])
+        self._prejmi(self._sporocilo("stop"))
+        self.assertEqual(self._zasloni()[-1], {"od": "Telefon", "dejanje": "stop", "url": "", "odtis": "", "id": "abc"})
+        self.assertEqual(self.b._gledani_zaslon_id, "")
+
+    def test_konec_brez_gledanja_se_vseeno_odda(self):
+        """Safeer OS zna konec brez odprtega gledalca prezreti; zaledje ga ne skriva."""
+        self._prejmi(self._sporocilo("stop", id_="karkoli"))
+        self.assertEqual([z["dejanje"] for z in self._zasloni()], ["stop"])
+
+    def test_zacetek_brez_poti_ali_brez_sredisca(self):
+        self._prejmi(self._sporocilo(path=""))
+        self._prejmi(self._sporocilo(path="https://zlobno.example/stran"))
+        self.b.nastavitve["hub_url"] = ""
+        self._prejmi(self._sporocilo())
+        self.assertEqual((self._zasloni(), self.iskano), ([], None))
 
 
 if __name__ == "__main__":
