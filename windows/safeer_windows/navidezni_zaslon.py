@@ -372,21 +372,32 @@ class NavidezniZaslon:
             return {"level": self.glasnost, "muted": self.utisano}
 
     # ------------------------------------------------------------------ Programi in URL
-    def _vsi_programi(self) -> List[dict]:
+    def _vsi_programi(self, z_ikonami: bool = True) -> List[dict]:
         """Vgrajene Safeer ploščice in dejanski Windows Start meni brez dvojnikov.
 
         Iskanje ikon je razmeroma drago, zato katalog osvežimo največ enkrat na
         minuto. ID-ji iz ``os_backend_win`` so stabilni med ponovnimi zagoni.
+
+        z_ikonami=False (katalog ob prijavi v Safeer Link): ikon ne rišemo. Svež poln seznam uporabimo, sicer
+        meni Start samo preberemo - polnega seznama s tem ne nadomestimo.
         """
         zdaj = time.monotonic()
-        if not self._sistemski_programi or zdaj - self._sistemski_osvezeni > 60:
+        svez = bool(self._sistemski_programi) and zdaj - self._sistemski_osvezeni <= 60
+        if z_ikonami or svez:
+            if not svez:
+                try:
+                    self._sistemski_programi = os_backend_win.poisci_start_menu_programe()
+                except Exception:
+                    self._sistemski_programi = []
+                self._sistemski_osvezeni = zdaj
+            sistemski = self._sistemski_programi
+        else:
             try:
-                self._sistemski_programi = os_backend_win.poisci_start_menu_programe()
+                sistemski = os_backend_win.poisci_start_menu_programe(z_ikonami=False)
             except Exception:
-                self._sistemski_programi = []
-            self._sistemski_osvezeni = zdaj
+                sistemski = []
         rezultat, videni = [], set()
-        for p in list(self.programi) + list(self._sistemski_programi):
+        for p in list(self.programi) + list(sistemski):
             kljuc = str(p.get("id") or "")
             ime = str(p.get("ime") or "").strip().casefold()
             if not kljuc or kljuc in videni or (ime and ("ime:" + ime) in videni):
@@ -460,9 +471,14 @@ class NavidezniZaslon:
             return list(self.odprti_programi.keys())
 
     def katalog_aplikacij(self) -> dict:
-        """Katalog za prijavo v Safeer Hub (Protocol v1)."""
+        """Katalog za prijavo v Safeer Hub (Protocol v1): samo ime in vrsta programov.
+
+        Brez ikon: prijava v Safeer Link je prej čakala, da so se narisale ikone vseh programov menija Start
+        (izmerjeno 5. 10. 2026 na testnem računalniku: 128 programov, prijava je zato trajala 3-5 s ob vsakem zagonu, in to
+        v omrežni niti). Ikone se pripravijo, ko druga naprava odpre seznam programov (seznam_programov_za_daljinec).
+        """
         kat = {}
-        for p in self._vsi_programi()[:200]:
+        for p in self._vsi_programi(z_ikonami=False)[:200]:
             kat[p["id"]] = {
                 "name": p["ime"],
                 "kind": p["skupina"],

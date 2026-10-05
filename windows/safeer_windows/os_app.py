@@ -3038,8 +3038,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     window._zaklep_primerka = zaklep
 
     if args.ozadje and not magnet:
-        window.control_backend.povezi_se()
         window.hide()
+    # Safeer Link: povezovanje se zacne ob zagonu programa, v svoji niti. Prej ga je sprozila sele nalozena zacetna
+    # stran; pri zagonu v ozadju je teklo tukaj, v glavni niti, in do konca zadrzalo zanko dogodkov.
+    window.control_backend.povezi_ob_zagonu(vedno=bool(args.ozadje and not magnet))
 
     koda = app.exec()
     zagotovi_izhod(koda)
