@@ -23,6 +23,8 @@ Remove-Item (Join-Path $DesktopPath "Safeer Control.lnk") -Force -ErrorAction Si
 Remove-Item (Join-Path $DesktopPath "Safeer OS.lnk") -Force -ErrorAction SilentlyContinue
 Remove-Item (Join-Path $DesktopPath "Safeer Browser.lnk") -Force -ErrorAction SilentlyContinue
 Remove-Item $SafeerStartFolder -Recurse -Force -ErrorAction SilentlyContinue
+# Vnos v meniju Start, ki ga naredi zaganjalnik (od 1.0.36)
+Remove-Item (Join-Path $StartPrograms "Safeer OS.lnk") -Force -ErrorAction SilentlyContinue
 
 # Odstrani mapo aplikacije
 if (Test-Path $InstallDir) {
