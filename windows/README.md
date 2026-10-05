@@ -61,7 +61,7 @@ Vmesnik Safeer OS (`assets/os`) kliče aplikacijo z `window.SafeerOS.klic(metoda
 - **Datoteke v rabi.** Datoteko, ki je Windows ne pusti prepisati, ker teče (`SafeerMediaWebView.exe`, stalna kopija zaganjalnika), umakne s preimenovanjem (`.staro-…`) in jo pobriše ob naslednjem zagonu.
 - **Knjižnice Pythona preveri program sam.** Zaganjalnik program zažene takoj, z okoljem `SAFEER_OS_PREVERI_KNJIZNICE=1`. Program (`safeer_windows/knjiznice.py`) pogleda, ali so knjižnice nameščene – brez uvoza, v nekaj milisekundah – in v dnevnik izpiše `[SafeerOS] knjiznice OK`. Če katera manjka, se konča s kodo 86; zaganjalnik jih namesti (`pip`) in program zažene znova. Prej je zaganjalnik pred vsakim zagonom pognal poseben Python, ki je knjižnice uvozil (okoli pol sekunde čakanja ob vsakem odpiranju programa). Seznam paketov je v `main.go` (`paketiPip`), seznam modulov v `knjiznice.py`; ujemanje preverja `windows/tests/test_knjiznice.py`.
 
-Preizkusi: `go vet ./...` in `go test ./...` v `windows/launcher_go`. Pravila tečejo tudi na Linuxu; preizkusi s pravimi bližnjicami `.lnk` in z datoteko v rabi tečejo samo na Windows (v CI opravilo `zaganjalnik`).
+Preizkusi: `go vet ./...` in `go test ./...` v `windows/launcher_go`. Pravila tečejo tudi na Linuxu; preizkusi s pravimi bližnjicami `.lnk` in z datoteko v rabi tečejo samo na Windows (v CI opravilo `zaganjalnik`, Windows Server 2022; ročno na Windows 10 Pro 22H2).
 
 ## Omejitve
 
