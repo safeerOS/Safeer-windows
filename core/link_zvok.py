@@ -86,9 +86,82 @@ def premakni_vse(izhod: str) -> None:
                 pass
 
 
-def lastni_naslovi(hub_url: str = "") -> List[str]:
-    """Naslovi IPv4, prek katerih nas naprava doseze. Najprej tisti, ki gleda proti hubu."""
-    naslovi: List[str] = []
+#: Najvec naslovov, ki jih nastejemo drugi napravi - vsakega poskusi posebej, vsak neuspeh stane nekaj sekund.
+NAJVEC_NASLOVOV = 4
+#: Vmesniki, prek katerih druge naprave v omrezju do nas ne pridejo: vsebniki, navidezni stroji, njihovi mostovi.
+#: Uporabnikov most "br0" (naslov omrezja je na njem) ni med njimi - Docker svoje imenuje "br-<oznaka>".
+NAVIDEZNI_VMESNIKI = ("docker", "br-", "veth", "virbr", "vmnet", "vboxnet", "lxc", "lxd", "podman", "cni",
+                      "flannel", "cali", "kube", "dummy")
+_IFF_UP, _IFF_LOOPBACK, _IFF_POINTOPOINT = 0x1, 0x8, 0x10
+
+
+def naslovi_vmesnikov() -> List[tuple]:
+    """(ime, naslov IPv4, zastavice) omreznih vmesnikov tega racunalnika.
+
+    Linux pove ime in zastavice (predor VPN ima POINTOPOINT). Windows da samo naslove, ki jih ima ime
+    racunalnika - ime je takrat prazno, zastavica samo "vklopljen"."""
+    try:
+        import fcntl
+        import struct
+    except ImportError:
+        try:
+            return [("", n, _IFF_UP) for n in socket.gethostbyname_ex(socket.gethostname())[2]]
+        except Exception:
+            return []
+    izid: List[tuple] = []
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    except OSError:
+        return izid
+    try:
+        for _st, ime in socket.if_nameindex():
+            zahteva = struct.pack("256s", ime.encode("utf-8", "replace")[:15])
+            try:
+                naslov = socket.inet_ntoa(fcntl.ioctl(s.fileno(), 0x8915, zahteva)[20:24])           # SIOCGIFADDR
+                zastavice = struct.unpack("H", fcntl.ioctl(s.fileno(), 0x8913, zahteva)[16:18])[0]   # SIOCGIFFLAGS
+            except OSError:
+                continue                    # vmesnik brez naslova IPv4
+            izid.append((ime, naslov, zastavice))
+    except OSError:
+        pass
+    finally:
+        s.close()
+    return izid
+
+
+def naslov_na_poti(cilj: str) -> str:
+    """Nas naslov na poti do `cilj`. Vticnica UDP ob connect() ne poslje nicesar - jedro samo izbere pot."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect((cilj, 9))
+            return str(s.getsockname()[0])
+        finally:
+            s.close()
+    except Exception:
+        return ""
+
+
+def _stevilcni(gostitelj: str) -> bool:
+    try:
+        socket.inet_aton(gostitelj)
+        return gostitelj.count(".") == 3
+    except (OSError, TypeError, ValueError):
+        return False
+
+
+def lastni_naslovi(hub_url: str = "", vmesniki=None, na_poti=None) -> List[str]:
+    """Naslovi IPv4, na katerih nas druga naprava v omrezju doseze - najverjetnejsi najprej, najvec NAJVEC_NASLOVOV.
+
+    1. naslov na poti do huba (kadar hub tece drugje);
+    2. naslovi vmesnikov krajevnega omrezja, tisti na privzeti poti prvi;
+    3. naslov na privzeti poti in naslovi predorov (VPN) - nazadnje.
+
+    Prej smo nasteli samo naslov na privzeti poti. Racunalnik, ki ves promet posilja skozi VPN, je napravi v
+    istem omrezju tako povedal naslov predora, do katerega ta ne pride (zvok na napravo, zaslon racunalnika).
+    `vmesniki` in `na_poti` sta za preizkuse."""
+    vmesniki = naslovi_vmesnikov if vmesniki is None else vmesniki
+    na_poti = naslov_na_poti if na_poti is None else na_poti
     gostitelj = ""
     if hub_url:
         try:
@@ -96,17 +169,37 @@ def lastni_naslovi(hub_url: str = "") -> List[str]:
             gostitelj = urlparse(hub_url).hostname or ""
         except Exception:
             gostitelj = ""
-    for cilj in ([gostitelj] if gostitelj else []) + ["192.168.0.1", "10.0.0.1"]:
+    kandidati: List[str] = []
+    # Samo stevilcni naslov huba: ime (rele Global Linka) bi pomenilo poizvedbo DNS, pot do njega pa je privzeta.
+    if _stevilcni(gostitelj):
+        kandidati.append(na_poti(gostitelj))
+    try:
+        znani = list(vmesniki() or [])
+    except Exception:
+        znani = []
+    privzeti = na_poti("192.0.2.1")         # naslov iz dokumentacijskega obsega: pot do njega je privzeta pot
+    krajevni, predori = [], []
+    for zapis in znani:
         try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect((cilj, 9))
-            n = s.getsockname()[0]
-            s.close()
-            if n and not n.startswith("127.") and n not in naslovi:
-                naslovi.append(n)
-        except Exception:
+            ime, naslov, zastavice = str(zapis[0] or ""), str(zapis[1] or ""), int(zapis[2])
+        except (IndexError, TypeError, ValueError):
             continue
-    return naslovi
+        if not zastavice & _IFF_UP or zastavice & _IFF_LOOPBACK or ime.startswith(NAVIDEZNI_VMESNIKI):
+            continue
+        (predori if zastavice & _IFF_POINTOPOINT else krajevni).append(naslov)
+    if privzeti in krajevni:
+        kandidati.append(privzeti)
+    kandidati += krajevni
+    kandidati.append(privzeti)
+    kandidati += predori
+    if not znani:
+        # Sistem vmesnikov ne pove: kot prej naslova na poti do dveh pogostih domacih omrezij.
+        kandidati += [na_poti("192.168.0.1"), na_poti("10.0.0.1")]
+    naslovi: List[str] = []
+    for n in kandidati:
+        if n and _stevilcni(n) and not n.startswith("127.") and n != "0.0.0.0" and n not in naslovi:
+            naslovi.append(n)
+    return naslovi[:NAJVEC_NASLOVOV]
 
 
 def ukaz_zajema(vir: str, ffmpeg: str = "ffmpeg") -> List[str]:
