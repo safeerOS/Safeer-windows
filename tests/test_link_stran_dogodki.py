@@ -19,7 +19,8 @@ STRAN = os.path.join(KOREN, "assets", "link", "link.js")
 
 OGRODJE = r"""
 const vm = require('vm'), fs = require('fs');
-const vir0 = fs.readFileSync(process.argv[1], 'utf8');
+// Git na Windows datoteko lahko izpise s CRLF; stran se obnasa enako, sidro lovilca pa je zapisano z LF.
+const vir0 = fs.readFileSync(process.argv[1], 'utf8').replace(/\r\n/g, '\n');
 const koraki = JSON.parse(process.argv[2]);
 const LOVILEC = '} catch (e) {\n      // Stran nikoli ne sme pasti zaradi odziva.\n    }';
 if (vir0.split(LOVILEC).length !== 2) { console.log(JSON.stringify({ogrodje: 'lovilca odzivov ni ali ni en sam'})); process.exit(0); }
