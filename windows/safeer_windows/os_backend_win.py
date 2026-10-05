@@ -762,13 +762,48 @@ def zmogljivost() -> dict:
     return p
 
 
+#: Vpis samozagona v HKCU Run in znacilni del starega ukaza (Python neposredno), po katerem ga prepoznamo.
+KLJUC_SAMOZAGONA = r"Software\Microsoft\Windows\CurrentVersion\Run"
+IME_SAMOZAGONA = "SafeerOS"
+STARI_SAMOZAGON = "safeer_os_windows.py"
+
+
 def _ukaz_samozagona() -> str:
-    """Ukaz za HKCU Run, pravilno citiran tudi pri poteh s presledki."""
-    if getattr(sys, "frozen", False):
-        deli = [sys.executable, "--ozadje"]
-    else:
-        deli = [sys.executable, os.path.abspath(sys.argv[0]), "--ozadje"]
-    return subprocess.list2cmdline(deli)
+    """Ukaz za HKCU Run, pravilno citiran tudi pri poteh s presledki.
+
+    Prek zaganjalnika (SafeerOS.exe --ozadje): ta zazene Python brez konzolnega okna in pred zagonom uredi datoteke
+    programa. Prej je vpis klical python.exe neposredno - ob prijavi v Windows se je odprlo crno konzolno okno z
+    izpisom programa (potrjeno 5. 10. 2026 na testnem racunalniku); ce ga je uporabnik zaprl, se je zaprl Safeer OS.
+    """
+    from safeer_windows import magnet_win      # pozno: magnet_win je majhen modul brez odvisnosti od tega
+    ukaz = magnet_win.zaganjalnik()
+    if not ukaz:
+        ukaz = [sys.executable] if getattr(sys, "frozen", False) else [sys.executable, os.path.abspath(sys.argv[0])]
+    return subprocess.list2cmdline(list(ukaz) + ["--ozadje"])
+
+
+def osvezi_samozagon() -> bool:
+    """Vpis samozagona iz starejse razlicice (Python neposredno) zamenja z danasnjim ukazom. Vrne True, ce ga je.
+
+    Samo vklopljen samozagon in samo nas stari vpis: ce uporabnik samozagona nima ali je vrednost spremenil v kaj
+    drugega, se je ne dotaknemo. Stanje »onemogoceno« iz Upravitelja opravil je zapisano drugje in ostane.
+    """
+    if sys.platform != "win32":
+        return False
+    try:
+        import winreg
+
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, KLJUC_SAMOZAGONA, 0,
+                            winreg.KEY_READ | winreg.KEY_SET_VALUE) as key:
+            vrednost, _ = winreg.QueryValueEx(key, IME_SAMOZAGONA)
+            nov = _ukaz_samozagona()
+            if not vrednost or not nov or str(vrednost) == nov or STARI_SAMOZAGON not in str(vrednost) \
+                    or STARI_SAMOZAGON in nov:
+                return False
+            winreg.SetValueEx(key, IME_SAMOZAGONA, 0, winreg.REG_SZ, nov)
+            return True
+    except (FileNotFoundError, OSError):
+        return False
 
 
 def samozagon_vklopljen() -> bool:
