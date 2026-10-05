@@ -50,10 +50,15 @@ def _jezik_vmesnika(shramba: dict) -> str:
 
 
 def _nastavi_jezik_oken(jezik: str) -> str:
-    """Isti jezik dobijo tudi okna Qt (oddaljeni zaslon), ne le spletni vmesnik."""
+    """Isti jezik dobijo tudi okna Qt (oddaljeni zaslon) in obvestila sredisca, ne le spletni vmesnik."""
     try:
         from . import oddaljeni_zaslon
         oddaljeni_zaslon.nastavi_jezik(jezik)
+    except Exception:
+        pass
+    try:
+        from core import link_hub_streznik
+        link_hub_streznik.JEZIK_OBVESTIL = jezik
     except Exception:
         pass
     return jezik
