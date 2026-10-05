@@ -27,6 +27,7 @@ from PySide6.QtCore import QTimer, QUrl, Qt
 from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent, QKeySequence
 from PySide6.QtWidgets import (QApplication, QFileDialog, QInputDialog, QMainWindow, QMessageBox, QStatusBar)
 
+from . import zacetna_mapa
 from .safeer_mpv_okno import SafeerMpvPredvajalnik
 
 _log = logging.getLogger("safeer.predvajalnik")
@@ -189,8 +190,9 @@ class SafeerPredvajalnikOkno(QMainWindow):
 
     def odpri_datoteko(self) -> None:
         filt = "Mediji (" + " ".join("*" + p for p in _PRIPONE_MEDIJEV) + ");;Vse datoteke (*)"
-        poti, _ = QFileDialog.getOpenFileNames(self, "Odpri", "", filt)
+        poti, _ = QFileDialog.getOpenFileNames(self, "Odpri", zacetna_mapa.zacetna("predvajalnik", "videi"), filt)
         if poti:
+            zacetna_mapa.zapomni("predvajalnik", poti[0])
             self.odpri(poti)
 
     def odpri_url(self) -> None:
@@ -231,7 +233,8 @@ class SafeerPredvajalnikOkno(QMainWindow):
         return True
 
     def nalozi_podnapise(self) -> None:
-        pot, _ = QFileDialog.getOpenFileName(self, "Podnapisi", "", "Podnapisi (*.srt *.vtt *.ass *.ssa *.sub)")
+        pot, _ = QFileDialog.getOpenFileName(self, "Podnapisi", zacetna_mapa.zacetna("predvajalnik", "videi"),
+                                             "Podnapisi (*.srt *.vtt *.ass *.ssa *.sub)")
         if pot and self.pred.pogon:
             if not self.pred.pogon.nalozi_podnapis(pot):
                 self.statusBar().showMessage("Podnapisov ni bilo mogoče naložiti", 4000)

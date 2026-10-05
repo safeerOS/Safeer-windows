@@ -20,9 +20,24 @@ from PySide6.QtWebEngineCore import (
 )
 from PySide6.QtWebEngineWidgets import QWebEngineView
 
-from . import control_backend, policy
+from . import control_backend, policy, zacetna_mapa
 
 BRIDGE_PREFIX = "__safeer_link_bridge__:"
+
+#: Naslova oken za izbiro (datoteka za posiljanje, mapa za deljenje) v jeziku vmesnika.
+_NASLOVI_IZBIRE = {
+    "sl": ("Pošlji datoteko z aplikacijo Safeer OS", "Izberi mapo za deljenje"),
+    "en": ("Send a file with Safeer OS", "Choose a folder to share"),
+    "de": ("Datei mit Safeer OS senden", "Ordner zum Teilen auswählen"),
+    "es": ("Enviar un archivo con Safeer OS", "Elegir una carpeta para compartir"),
+    "fr": ("Envoyer un fichier avec Safeer OS", "Choisir un dossier à partager"),
+    "it": ("Invia un file con Safeer OS", "Scegli una cartella da condividere"),
+}
+
+
+def _naslov_izbire(mapa: bool) -> str:
+    from . import oddaljeni_zaslon
+    return _NASLOVI_IZBIRE.get(oddaljeni_zaslon._JEZIK, _NASLOVI_IZBIRE["en"])[1 if mapa else 0]
 
 class GuiDispatcher(QObject):
     signal_run = Signal(object)
@@ -357,13 +372,16 @@ class SafeerControlWindow(QWidget):
                 self.dispatcher.dispatch(self.close)
 
     def _izberi_mapo(self) -> None:
-        mapa = QFileDialog.getExistingDirectory(self, "Izberi mapo za deljenje")
+        # Brez podane mape bi Qt odprl okno v mapi programa (delovna mapa procesa).
+        mapa = QFileDialog.getExistingDirectory(self, _naslov_izbire(True), zacetna_mapa.zacetna("deli-mapo", "doma"))
         if mapa:
+            zacetna_mapa.zapomni("deli-mapo", os.path.dirname(mapa.rstrip("/\\")) or mapa)
             self.backend.dodaj_deljeno_mapo(mapa)
 
     def _izberi_datoteko(self, cilj: str) -> None:
-        pot, _ = QFileDialog.getOpenFileName(self, "Pošlji datoteko z aplikacijo Safeer OS")
+        pot, _ = QFileDialog.getOpenFileName(self, _naslov_izbire(False), zacetna_mapa.zacetna("poslji"))
         if pot:
+            zacetna_mapa.zapomni("poslji", pot)
             self.backend.poslji_datoteko(cilj, pot)
 
     def closeEvent(self, event) -> None:
