@@ -49,6 +49,19 @@ Vmesnik Safeer OS (`assets/os`) kliče aplikacijo z `window.SafeerOS.klic(metoda
 - **Meni polja in odložišče.** Privzeti meni QtWebEngine je v lupini izklopljen; `os.js` pokaže svoj meni (Izreži, Kopiraj, Prilepi, Izberi vse). Odložišče gre skozi most (`kopiraj`, `odlozisceBeri`): Qt, na Windows ob neuspehu Win32; izid se zapiše v dnevnik brez vsebine.
 - Preizkus: `windows/tests/test_most_lupine.py` (tudi živi preizkus v QtWebEngine, `windows/tests/_most_zivo.py`).
 
+## Zaganjalnik Safeer OS (`windows/launcher_go`)
+
+`SafeerOS-Windows-<različica>.exe` je majhen program v Go z vdelanim paketom `safeer-os-windows.zip`. Ob zagonu paket po potrebi razpakira v `%LOCALAPPDATA%\SafeerOS\app`, poišče Python in zažene `windows/safeer_os_windows.py`.
+
+- **Stalno mesto.** Zaganjalnik se ob namestitvi sam prepiše v `%LOCALAPPDATA%\SafeerOS\SafeerOS.exe`. Nanj kažejo ikona na namizju, vnos v meniju Start, samodejna posodobitev (`app\.zaganjalnik`) in protokol `magnet:`. Preneseno datoteko sme uporabnik po prvem zagonu pobrisati ali premakniti. Zaganjalnik, ki mu ime določa drug način (`SafeerControl.exe`), se ne kopira.
+- **Starejši zaganjalnik ne prepiše novejše namestitve.** Paket se razpakira, kadar je namestitev nepopolna, kadar je njegova različica (`windows/VERSION`) novejša od nameščene ali kadar je različica ista, vsebina pa druga. Starejši paket nameščeno različico pusti in jo samo zažene, stalne kopije zaganjalnika pa ne prepiše. Namerno vrnitev na starejšo različico naredi stikalo `--namesti`.
+- **Seznam datotek (`app\.datoteke`).** Po razpakiranju zaganjalnik zapiše, kaj je namestil. Ob naslednji namestitvi odstrani datoteke s seznama, ki jih nov paket nima več, in mape, ki so ostale prazne. Datotek, ki jih ni namestil sam, se ne dotakne.
+- **Bližnjici.** Ikona na namizju nastane samo ob prvi namestitvi (pobrisana se ne vrne), vnos v meniju Start vedno, kadar ga ni. Ko zaganjalnik bližnjici ureja (namestitev, posodobitev, zagon z drugega mesta), popravi tisto, katere cilj ne obstaja več. Živo bližnjico preusmeri samo na stalno kopijo, ko je ta pravkar nameščena ali posodobljena.
+- **Mapa `posodobitve`.** Prenesene namestitvene datoteke (`SafeerOS*.exe`) zaganjalnik po zagonu odstrani, razen tiste, iz katere teče. Nedokončan prenos (`.del`) in `posodobi.cmd` odstrani, ko sta starejša od ene ure.
+- **Datoteke v rabi.** Datoteko, ki je Windows ne pusti prepisati, ker teče (`SafeerMediaWebView.exe`, stalna kopija zaganjalnika), umakne s preimenovanjem (`.staro-…`) in jo pobriše ob naslednjem zagonu.
+
+Preizkusi: `go vet ./...` in `go test ./...` v `windows/launcher_go`. Pravila tečejo tudi na Linuxu; preizkusi s pravimi bližnjicami `.lnk` in z datoteko v rabi tečejo samo na Windows (v CI opravilo `zaganjalnik`).
+
 ## Omejitve
 
 - Brez podpisa kode Windows SmartScreen ob prvem zagonu opozori na neznanega izdajatelja.

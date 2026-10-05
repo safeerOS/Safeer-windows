@@ -111,6 +111,24 @@ jobs:
             build/windows/out/*.png
             build/windows/out/*.log
           if-no-files-found: ignore
+  zaganjalnik:
+    # Go zaganjalnik Safeer OS (windows/launcher_go): razpakirava, stalno mesto, prave bliznjice .lnk, datoteke v rabi.
+    runs-on: windows-2022
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: windows/launcher_go
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: windows/launcher_go/go.mod
+          cache: false
+      - name: go vet
+        run: go vet ./...
+      - name: go test
+        run: go test -count=1 -v ./...
   release:
     if: startsWith(github.ref, 'refs/tags/windows-v')
     needs: windows
