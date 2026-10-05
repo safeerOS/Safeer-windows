@@ -68,6 +68,24 @@ class _WindowsDeljenjeZaslona(link_deljenje.DeljenjeZaslona):
         return base64.b64decode(encoded, validate=True)
 
 
+#: Kako dolgo velja najdeni seznam hubov; prazen velja dlje (iskanje brez najdbe je najdaljse).
+HUBI_VELJAJO_S = 10.0
+HUBI_PRAZNI_VELJAJO_S = 30.0
+
+
+def _se_razresi(gostitelj: str) -> bool:
+    """Ali ima gostitelj naslov: stevilcni naslov vedno, ime samo, ce ga omrezje pozna."""
+    try:
+        socket.inet_aton(gostitelj)
+        return True
+    except (OSError, TypeError, ValueError):
+        pass
+    try:
+        return bool(socket.getaddrinfo(gostitelj, None))
+    except (OSError, UnicodeError):
+        return False
+
+
 class SafeerControlBackend:
     _instance: Optional["SafeerControlBackend"] = None
     _lock = threading.Lock()
@@ -112,6 +130,10 @@ class SafeerControlBackend:
         self._povezovanje = False
         self._zadnji_hubi: List[dict] = []
         self._cas_hubi = 0.0
+        #: Iskanje hubov tece v ozadju (hubi_brez_cakanja): ali je bilo ze kdaj koncano in ali ravno tece.
+        self._hubi_iskani = False
+        self._hubi_isce = False
+        self._hubi_kljuc = threading.Lock()
         self._deljenje_zaslona: Optional[link_deljenje.DeljenjeZaslona] = None
         self._opozorjena_dovoljenja: set[str] = set()
         self._lokalni_hub: Optional[link_hub_streznik.HubStreznik] = None
@@ -203,9 +225,11 @@ class SafeerControlBackend:
         else:
             stanje = "nov"
 
-        hubi = []
+        # Iskanje hubov traja vec sekund; stanje ga ne caka (zacetna stran Safeer OS je cakala z njim).
+        # None = prvo iskanje se tece; ko se konca, stran dobi dogodek in vprasa znova.
+        hubi: Optional[List[dict]] = []
         if stanje != "povezan":
-            hubi = self.hubi_v_omrezju()
+            hubi = self.hubi_brez_cakanja()
 
         return {
             "stanje": stanje,
@@ -401,9 +425,38 @@ class SafeerControlBackend:
 
         return odprti
 
+    def hubi_brez_cakanja(self) -> Optional[List[dict]]:
+        """Zadnji znani seznam hubov TAKOJ; None, dokler prvo iskanje ni koncano.
+
+        Zastarel seznam osvezi nit v ozadju (ena naenkrat). Ko se seznam spremeni ali je prvo iskanje koncano,
+        poslusalci dobijo dogodek »povezava« - stran Safeer OS takrat stanje prebere znova."""
+        velja = HUBI_VELJAJO_S if self._zadnji_hubi else HUBI_PRAZNI_VELJAJO_S
+        svez = self._hubi_iskani and (time.time() - self._cas_hubi) < velja
+        if not svez:
+            with self._hubi_kljuc:
+                zazeni = not self._hubi_isce
+                self._hubi_isce = True
+            if zazeni:
+                threading.Thread(target=self._osvezi_hube, name="SafeerHubSearch", daemon=True).start()
+        return list(self._zadnji_hubi) if self._hubi_iskani else None
+
+    def _osvezi_hube(self) -> None:
+        try:
+            prvic = not self._hubi_iskani
+            prej = [h.get("naslov") for h in self._zadnji_hubi]
+            novi = self.hubi_v_omrezju(osvezi=True)
+            if prvic or [h.get("naslov") for h in novi] != prej:
+                self._oddaj_dogodek("povezava", None)
+        except Exception as e:  # noqa: BLE001
+            print(f"[ControlBackend] iskanje hubov: {e}")
+        finally:
+            self._hubi_isce = False
+
     def hubi_v_omrezju(self, osvezi: bool = False) -> List[dict]:
+        """Poisce Safeer Hube v omrezju in POCAKA na izid (vec sekund) - za iskanje na zahtevo (poisci_hub).
+        Za stanje vmesnika je hubi_brez_cakanja."""
         zdaj = time.time()
-        if not osvezi and (zdaj - self._cas_hubi < 10) and self._zadnji_hubi:
+        if not osvezi and (zdaj - self._cas_hubi < HUBI_VELJAJO_S) and self._zadnji_hubi:
             return list(self._zadnji_hubi)
 
         najdeni = []
@@ -429,8 +482,10 @@ class SafeerControlBackend:
             except Exception:
                 pass
 
-        # Znani hišni naslovi (Philips TV, Linux PC, telefoni)
-        for h_ip in ["192.168.0.77", "192.168.0.135", "192.168.0.143", "192.168.0.216", "192.168.0.10", "127.0.0.1", "safeer.local"]:
+        # Ta racunalnik in privzeto ime huba. (Tu so bili do 1.0.37 zapisani naslovi razvijalcevega doma: vsak
+        # uporabnik jih je ob vsakem iskanju cakal po 0,8 s na shemo, najdeni hub na takem naslovu pa je dobil
+        # ime razvijalceve naprave.)
+        for h_ip in ["127.0.0.1", link_hub.PRIVZETI_GOSTITELJ]:
             if h_ip not in kandidat_ipji:
                 kandidat_ipji.append(h_ip)
 
@@ -443,41 +498,39 @@ class SafeerControlBackend:
                 if ip not in kandidat_ipji:
                     kandidat_ipji.append(ip)
 
-        # Najprej preizkusi TLS (wss), nato ne-TLS (ws)
-        for ip in kandidat_ipji:
-            if not ip:
-                continue
+        znani = {n["naslov"] for n in najdeni}
+
+        def preveri(ip: str) -> Optional[dict]:
+            """En kandidat: najprej TLS (wss), nato brez (ws). Huba, ki ga je nasel ze mDNS, ne vprasamo znova
+            (prej ga je zanka vprasala se brez TLS in cakala na zavrnitev)."""
+            if not ip or f"wss://{ip}:8990/cast/ws" in znani or f"ws://{ip}:8990/cast/ws" in znani:
+                return None
+            if not _se_razresi(ip):
+                return None                 # ime, ki ga v tem omrezju ni: ne cakamo nanj se pri vsaki shemi
+            odtis = self.hub_fp() if (self.hub_url() and ip in self.hub_url()) else None
             for shema in ("wss", "ws"):
                 naslov = f"{shema}://{ip}:8990/cast/ws"
-                if any(n["naslov"] == naslov for n in najdeni):
-                    continue
                 try:
-                    osnova = link_hub._osnova(naslov)
-                    odtis = self.hub_fp() if (self.hub_url() and ip in self.hub_url()) else None
-                    if link_hub.je_hub(osnova, timeout=0.8, odtis=odtis):
-                        ime_h = f"Safeer Hub ({ip})"
-                        if ip == "192.168.0.77":
-                            ime_h = "Philips Android TV"
-                        elif ip == "192.168.0.135":
-                            ime_h = "Linux Centralni Hub"
-                        najdeni.append({
-                            "ime": ime_h,
-                            "naslov": naslov,
-                            "tls": shema == "wss",
-                            "fp": odtis or "",
-                        })
-                        break
+                    if link_hub.je_hub(link_hub._osnova(naslov), timeout=0.8, odtis=odtis):
+                        return {"ime": f"Safeer Hub ({ip})", "naslov": naslov, "tls": shema == "wss", "fp": odtis or ""}
                 except Exception:
                     pass
+            return None
 
-        # Sortiraj: TLS hubi in znana hišna vozlišča imajo prednost
-        najdeni.sort(key=lambda n: (
-            not n.get("tls", False),
-            0 if ("192.168.0.135" in n["naslov"] or "192.168.0.77" in n["naslov"]) else 1
-        ))
+        # Kandidate vprasamo hkrati: iskanje traja toliko kot najpocasnejsi, ne kot vsi skupaj.
+        try:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=8) as bazen:
+                najdeni.extend(h for h in bazen.map(preveri, list(dict.fromkeys(kandidat_ipji))) if h)
+        except Exception as e:  # noqa: BLE001
+            print(f"[ControlBackend] iskanje hubov po naslovih: {e}")
+
+        # Varna vozlisca (TLS) imajo prednost; sicer ostane vrstni red najdbe (mDNS z imeni naprav prvi).
+        najdeni.sort(key=lambda n: not n.get("tls", False))
 
         self._zadnji_hubi = najdeni
-        self._cas_hubi = zdaj
+        self._cas_hubi = time.time()
+        self._hubi_iskani = True
         return list(najdeni)
 
     def poisci_hub(self) -> Optional[dict]:
