@@ -1204,6 +1204,92 @@ class SafeerOsWindow(QMainWindow):
         except Exception as e:  # noqa: BLE001
             print(f"[SafeerOS] pasica ponudbe: {e}", flush=True)
 
+    # ------------------------------------------------------------------ Besedilo z druge naprave (share.text)
+    _BESEDILO_GUMBI = {
+        "sl": ("Kopiraj", "Odpri", "Zapri"),
+        "en": ("Copy", "Open", "Close"),
+        "de": ("Kopieren", "Öffnen", "Schließen"),
+        "es": ("Copiar", "Abrir", "Cerrar"),
+        "fr": ("Copier", "Ouvrir", "Fermer"),
+        "it": ("Copia", "Apri", "Chiudi"),
+    }
+    #: Toliko znakov besedila pokazemo v oknu; »Kopiraj« vzame vse.
+    NAJVEC_PRIKAZANEGA_BESEDILA = 600
+    _pasica_besedila = None
+
+    def _pokazi_besedilo(self, od: str, besedilo: str) -> None:
+        """Besedilo ali povezava, ki jo je temu racunalniku poslala druga naprava: majhno okno brez okvirja v spodnjem
+        desnem kotu, ki ne vzame fokusa. Kopiraj (celo besedilo), Odpri (ce je povezava), Zapri; po minuti se umakne.
+        Enako kot okno Safeer Controla na Linuxu, le da uporabnika ne prekine."""
+        from PySide6.QtWidgets import QLabel, QPushButton, QVBoxLayout
+        self._umakni_besedilo()
+        try:
+            cisto = (besedilo or "").strip()
+            if not cisto:
+                return
+            kopiraj, odpri, zapri = self._BESEDILO_GUMBI.get(_jezik_oken()[:2], self._BESEDILO_GUMBI["en"])
+            je_povezava = cisto.startswith(("http://", "https://")) and not any(z.isspace() for z in cisto)
+            okno = QWidget(None, Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.WindowDoesNotAcceptFocus)
+            okno.setAttribute(Qt.WA_ShowWithoutActivating, True)
+            okno.setStyleSheet("QWidget { background: #0f1a26; color: #f0f4f3; border-radius: 12px; }"
+                               "QLabel { font-size: 14px; border: none; }"
+                               "QLabel#od { font-weight: 600; color: #57d6ad; }"
+                               "QPushButton { background: #152129; color: #f0f4f3; border: 1px solid #26364a; border-radius: 10px; padding: 6px 14px; }"
+                               "QPushButton:hover { border-color: #57d6ad; }")
+            okvir = QVBoxLayout(okno)
+            okvir.setContentsMargins(16, 12, 12, 12)
+            glava = QLabel(od or "Safeer Link")
+            glava.setObjectName("od")
+            glava.setTextFormat(Qt.PlainText)
+            okvir.addWidget(glava)
+            prikaz = cisto if len(cisto) <= self.NAJVEC_PRIKAZANEGA_BESEDILA else cisto[:self.NAJVEC_PRIKAZANEGA_BESEDILA] + " …"
+            napis = QLabel(prikaz)
+            napis.setObjectName("besedilo")
+            napis.setTextFormat(Qt.PlainText)          # besedilo z druge naprave ni HTML
+            napis.setWordWrap(True)
+            napis.setMaximumWidth(420)
+            okvir.addWidget(napis)
+            gumbi = QHBoxLayout()
+            gumbi.addStretch(1)
+            g_kopiraj = QPushButton(kopiraj)
+            g_kopiraj.setObjectName("kopiraj")
+            g_kopiraj.setFocusPolicy(Qt.NoFocus)
+            g_kopiraj.clicked.connect(lambda: (QApplication.clipboard().setText(cisto), self._umakni_besedilo()))
+            gumbi.addWidget(g_kopiraj)
+            if je_povezava:
+                g_odpri = QPushButton(odpri)
+                g_odpri.setObjectName("odpri")
+                g_odpri.setFocusPolicy(Qt.NoFocus)
+                g_odpri.clicked.connect(lambda: (self._umakni_besedilo(), self._odpri_notranji_splet(cisto)))
+                gumbi.addWidget(g_odpri)
+            g_zapri = QPushButton(zapri)
+            g_zapri.setObjectName("zapri")
+            g_zapri.setFocusPolicy(Qt.NoFocus)
+            g_zapri.clicked.connect(lambda: self._umakni_besedilo())
+            gumbi.addWidget(g_zapri)
+            okvir.addLayout(gumbi)
+            okno.adjustSize()
+            zaslon = QApplication.primaryScreen()
+            if zaslon is not None:
+                g = zaslon.availableGeometry()
+                okno.move(g.x() + g.width() - okno.width() - 24, g.y() + g.height() - okno.height() - 24)
+            okno.show()
+            self._pasica_besedila = okno
+            QTimer.singleShot(60_000, lambda o=okno: self._umakni_besedilo(o))
+        except Exception as e:  # noqa: BLE001
+            print(f"[SafeerOS] pasica besedila: {e}", flush=True)
+
+    def _umakni_besedilo(self, okno=None) -> None:
+        o = self._pasica_besedila
+        if o is None or (okno is not None and okno is not o):
+            return
+        self._pasica_besedila = None
+        try:
+            o.close()
+            o.deleteLater()
+        except Exception:  # noqa: BLE001
+            pass
+
     def _umakni_pasico(self, okno=None) -> None:
         o = self._pasica_ponudbe
         if o is None or (okno is not None and okno is not o):
@@ -1975,9 +2061,15 @@ class SafeerOsWindow(QMainWindow):
             self.dispatcher.dispatch(self._sprejmi_ponudbo)
         if vrsta == "prejetaDatoteka" and isinstance(podatki, dict):
             self.poslji_dogodek("prejetaDatoteka", podatki)
-        if vrsta == "deljenje" and isinstance(podatki, dict) and not podatki.get("tece"):
-            # Konec posiljanja datoteke (ali napaka): uporabniku povemo izid.
+        if (vrsta == "deljenje" and isinstance(podatki, dict) and not podatki.get("tece")
+                and podatki.get("vrsta", "datoteka") == "datoteka"):
+            # Konec posiljanja datoteke (ali napaka): uporabniku povemo izid. Besedilo in zaslon povesta svoje na
+            # plosci »Deli z« (isti dogodek, druga vrsta).
             self.poslji_dogodek("posiljanjeKoncano", {k: podatki.get(k) for k in ("ime", "cilj", "uspeh", "napaka")})
+        if vrsta == "prejeto" and isinstance(podatki, dict) and podatki.get("vrsta") == "besedilo":
+            # Besedilo ali povezava z druge naprave: majhno okno v kotu (prej se ni pokazalo nikjer).
+            od, besedilo = str(podatki.get("od") or ""), str(podatki.get("besedilo") or "")
+            self.dispatcher.dispatch(lambda: self._pokazi_besedilo(od, besedilo))
 
     def zeton_mostu_velja(self, zeton: Any) -> bool:
         return isinstance(zeton, str) and hmac.compare_digest(zeton.encode("utf-8"), self._zeton_mostu.encode("utf-8"))

@@ -324,14 +324,20 @@ class PosljiDatotekoNapravi(unittest.TestCase):
         self.oddaja.side_effect = oddaj
         dogodki = self._dogodki_posiljanja()
         self.assertEqual([d.get("odstotek") for d in dogodki], [0, 40, 100, 100])
-        self.assertEqual(dogodki[-1], {"tece": False, "cilj": "n-tel", "ime": "slika.jpg", "odstotek": 100,
-                                       "uspeh": True, "napaka": ""})
+        # Oblika, ki jo bere stran Safeer Controla (vrsta, stanje ...), in stara polja za Safeer OS (tece, uspeh, napaka).
+        self.assertEqual([(d["vrsta"], d["stanje"], d["tece"]) for d in dogodki],
+                         [("datoteka", "posiljam", True)] * 3 + [("datoteka", "poslano", False)])
+        self.assertEqual(dogodki[-1], {"vrsta": "datoteka", "stanje": "poslano", "cilj": "n-tel", "ime": "slika.jpg",
+                                       "sporocilo": "", "koda": "", "zasedenaOd": "", "odstotek": 100,
+                                       "tece": False, "uspeh": True, "napaka": ""})
 
     def test_vmesnik_dobi_razlog_neuspeha(self):
         self.sredisce = (None, "sredisce_naprave_ni_dosegljivo")
         dogodki = self._dogodki_posiljanja()
         self.assertEqual((dogodki[-1]["uspeh"], dogodki[-1]["odstotek"]), (False, 0))
         self.assertEqual(dogodki[-1]["napaka"], "Naprava v tem omrežju ni dosegljiva.")
+        self.assertEqual((dogodki[-1]["stanje"], dogodki[-1]["koda"], dogodki[-1]["sporocilo"]),
+                         ("napaka", "sredisce_naprave_ni_dosegljivo", "Naprava v tem omrežju ni dosegljiva."))
 
     def test_brez_povezave_ali_datoteke_ne_zacne(self):
         dogodki = []
@@ -342,6 +348,7 @@ class PosljiDatotekoNapravi(unittest.TestCase):
         self.assertFalse(self.b.poslji_datoteko("n-tel", self.pot))
         self.assertEqual(len(dogodki), 3)
         self.assertTrue(all(d["napaka"] and d["tece"] is False for d in dogodki))
+        self.assertTrue(all((d["vrsta"], d["stanje"], d["sporocilo"]) == ("datoteka", "napaka", d["napaka"]) for d in dogodki))
         self.oddaja.assert_not_called()
 
 
@@ -441,7 +448,8 @@ class PrejemDatoteke(unittest.TestCase):
     def _sporocilo(self, **tovor):
         self.b._na_sporocilo({"type": "share.file", "sender": "n-drugi-control", "sender_name": "Pisarna",
                               "payload": tovor})
-        return _pocakaj(lambda: bool(self.dogodki))
+        # Ob uspehu prideta dva dogodka (za Safeer OS in za stran Safeer Controla), ob neuspehu eden.
+        return _pocakaj(lambda: len(self.dogodki) >= (2 if self.izid[0] else 1))
 
     def test_posiljatelj_z_lastnim_srediscem(self):
         self.sredisce = (SOSED, "")
@@ -449,8 +457,10 @@ class PrejemDatoteke(unittest.TestCase):
         self.sredisce_naprave.assert_called_once_with("n-drugi-control")
         self.assertEqual(self.prevzem.call_args[0],
                          ([(LASTNO, ODTIS), SOSED], "/cast/file/ab?k=cd", "Račun.pdf", "ef" * 32))
-        self.assertEqual(self.dogodki, [("prejetaDatoteka", {"od": "Pisarna", "ime": "Račun (1).pdf",
-                                                              "pot": self.izid[0], "uspeh": True, "napaka": ""})])
+        self.assertEqual(self.dogodki, [
+            ("prejetaDatoteka", {"od": "Pisarna", "ime": "Račun (1).pdf", "pot": self.izid[0], "uspeh": True, "napaka": ""}),
+            ("prejeto", {"vrsta": "datoteka", "od": "Pisarna", "ime": "Račun (1).pdf", "mapa": self._td.name}),
+        ])
 
     def test_posiljatelj_pri_nasem_srediscu(self):
         self.assertTrue(self._sporocilo(name="a.txt", path="/cast/file/ab?k=cd"))
@@ -459,8 +469,8 @@ class PrejemDatoteke(unittest.TestCase):
     def test_neuspeh_pove_razlog(self):
         self.izid = (None, "Hub je odgovoril 404")
         self.assertTrue(self._sporocilo(name="a.txt", path="/cast/file/ab?k=cd"))
-        self.assertEqual(self.dogodki[0][1], {"od": "Pisarna", "ime": "a.txt", "pot": "", "uspeh": False,
-                                              "napaka": "Hub je odgovoril 404"})
+        self.assertEqual(self.dogodki, [("prejetaDatoteka", {"od": "Pisarna", "ime": "a.txt", "pot": "", "uspeh": False,
+                                                             "napaka": "Hub je odgovoril 404"})])
 
     def test_brez_poti_ali_sredisca_nic(self):
         self.assertFalse(self._sporocilo_hitro(name="a.txt"))
