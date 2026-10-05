@@ -379,7 +379,7 @@
     if (vednoNotri) pojdi("splet");
     klic(vednoNotri ? "spletNotranji" : "splet", [url]).then(function (r) {
       // Storitve z DRM (Netflix ...) odpre Edge, ker vgrajeni pogon nima Widevine.
-      if (r && r.zunanje) { obvesti((ime || imeIzNaslova(url)) + " se odpira v " + r.brskalnik + " (zaščitena vsebina, DRM)."); return; }
+      if (r && r.zunanje) { obvesti(t("odpiraSeZunaj", { ime: ime || imeIzNaslova(url), brskalnik: r.brskalnik })); return; }
       if (!vednoNotri) pojdi("splet");
     });
   }
@@ -984,9 +984,9 @@
     return b;
   }
   function posljiNaNapravo(d, n) {
-    obvesti("Pošiljam " + d.ime + " na " + n.ime + " …");
+    obvesti(t("posiljamNa", { ime: d.ime, naprava: n.ime }));
     klic("posljiDatoteko", [n.id, d.pot]).then(function (ok) {
-      if (!ok) obvesti("Datoteke ni bilo mogoče poslati na " + n.ime + ".");
+      if (!ok) obvesti(t("niPoslanoNa", { naprava: n.ime }));
     });
   }
   function izberiNapravoZaPosiljanje(d) {
@@ -995,7 +995,7 @@
       klic("napraveSDatoteki").then(function (n) {
         S.napraveDatoteke = n || [];
         if (S.napraveDatoteke.length) izberiNapravoZaPosiljanje(d);
-        else obvesti("V Safeer Linku ni naprave, ki sprejema datoteke.");
+        else obvesti(t("niNapraveZaDatoteke"));
       });
       return;
     }
@@ -2919,7 +2919,7 @@
     else if (vrsta === "zapisek") odpriZapisek(vrednost);
     else if (vrsta === "program") {
       var p = (S.programi || []).find(function (x) { return x.id === vrednost; });
-      if (p) zazeni(p); else obvesti("Programa ni več.");
+      if (p) zazeni(p); else obvesti(t("programaNiVec"));
     }
   }
   function shraniZapisekKmalu() {
@@ -3132,16 +3132,15 @@
       naloziZapiske(); if (Z.aktivni) odpriZapisek(Z.aktivni.id);
     }
     if (vrsta === "zaslonZNaprave" && podatki) {
-      obvesti(podatki.dejanje === "stop" ? ("Naprava " + (podatki.od || "") + " je končala deljenje zaslona.")
-                                         : ("Zaslon naprave " + (podatki.od || "") + " se odpira tukaj."));
+      obvesti(t(podatki.dejanje === "stop" ? "zaslonKoncalaNaprava" : "zaslonSeOdpira", { ime: podatki.od || "" }));
     }
     if (vrsta === "dovoljenjeZahtevano" && podatki && podatki.id) vprasajZaDovoljenje(podatki);
     if (vrsta === "prejetaDatoteka" && podatki) {
-      obvesti(podatki.uspeh ? ("Prejeto z naprave " + podatki.od + ": " + podatki.ime + " (mapa Prenosi)")
-                            : ("Datoteke " + podatki.ime + " ni bilo mogoče prevzeti: " + (podatki.napaka || "")));
+      obvesti(podatki.uspeh ? t("prejetoZNaprave", { od: podatki.od, ime: podatki.ime })
+                            : t("prevzemNiUspel", { ime: podatki.ime, napaka: podatki.napaka || "" }));
     }
     if (vrsta === "posiljanjeKoncano" && podatki) {
-      obvesti(podatki.uspeh ? (podatki.ime + " je poslana.") : (podatki.napaka || "Pošiljanje ni uspelo."));
+      obvesti(podatki.uspeh ? t("datotekaPoslana", { ime: podatki.ime }) : (podatki.napaka || t("posiljanjeNiUspelo")));
     }
     if (vrsta === "naprave") {
       osveziIskalneNaprave();
@@ -4965,7 +4964,7 @@
     var item = media.aktivni;
     if (!item) return;
     klic("mediaNaKodi", [item.id]).then(function (r) {
-      if (r && r.ok) { obvesti(item.naslov + " se predvaja na " + r.kodi + "."); zapriMediaHtml(); }
+      if (r && r.ok) { obvesti(t("predvajaSeNa", { naslov: item.naslov, naprava: r.kodi })); zapriMediaHtml(); }
       else obvesti((r && r.napaka) || t("niUspelo"));
     });
   });
