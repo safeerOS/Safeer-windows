@@ -250,6 +250,22 @@ class Mesh(unittest.TestCase):
         self.assertIs(self.a._sosedje["hub-b"], prva_a)
         self.assertEqual(ids(tv), ["pc", "tv"])
 
+    def test_vecji_id_poklice_prvi_nato_se_manjsi_ostane_povezava_manjsega(self):
+        # Po zagonu Hub poklice znane sosede sam, tudi ce ima vecji id. Ce medtem poklice se sosed z manjsim id,
+        # mora na obeh straneh obveljati ista povezava (manjsega), naprave pa ostati v seznamu.
+        tv = prijava(self.a, "tv")
+        pc = prijava(self.b, "pc")
+        povezi(self.b, self.a, zacel="hub-b")
+        self.assertEqual(ids(tv), ["pc", "tv"])
+        prva_a, prva_b = self.a._sosedje["hub-b"], self.b._sosedje["hub-a"]
+        druga_a, druga_b = povezi(self.a, self.b, zacel="hub-a")
+        self.assertIs(self.a._sosedje["hub-b"], druga_a)
+        self.assertIs(self.b._sosedje["hub-a"], druga_b)
+        self.assertIsNot(self.a._sosedje["hub-b"], prva_a)
+        self.assertIsNot(self.b._sosedje["hub-a"], prva_b)
+        self.assertEqual(ids(tv), ["pc", "tv"])
+        self.assertEqual(ids(pc), ["pc", "tv"])
+
     def test_klepet_pocaka_in_pride_prek_soseda(self):
         tv = prijava(self.a, "tv")
         prijava(self.b, "tel")
@@ -404,6 +420,96 @@ class Klicanje(unittest.TestCase):
         finally:
             threading.Thread = stari
         self.assertEqual(klicani, ["n-z"])
+
+    def _po_ponovnem_zagonu(self, znani, nas="n-m"):
+        """Povezovalec, ki je v prejsnjem teku poznal sosede `znani` (id -> IP), po ponovnem zagonu."""
+        import os
+        import tempfile
+        pot = os.path.join(tempfile.mkdtemp(), "znani.json")
+        prej = self.link_mesh.MeshPovezovalec(lhs.Hub(odtis="cc" * 32, nas_id=nas), nas, pot_znanih=pot, poisci=lambda: [])
+        for hid, ip in znani.items():
+            prej.zapomni(hid, ip)
+        return self.link_mesh.MeshPovezovalec(self.hub, nas, pot_znanih=pot, poisci=lambda: [])
+
+    def _en_krog_takoj(self, m):
+        """en_krog brez niti: vrne id-je sosedov, ki bi jih poklical."""
+        import threading
+        klicani = []
+        m._klici = lambda h: klicani.append(h["id"])
+        stari = threading.Thread
+
+        class Takoj:
+            def __init__(self, target=None, args=(), **_k): self.t, self.a = target, args
+            def start(self): self.t(*self.a)
+        threading.Thread = Takoj
+        try:
+            m.en_krog()
+        finally:
+            threading.Thread = stari
+        return klicani
+
+    def test_po_zagonu_poklicemo_znanega_soseda_z_manjsim_id(self):
+        # Sosed za nas ponovni zagon ne ve: nasel bi nas sele v svojem naslednjem krogu iskanja.
+        m = self._po_ponovnem_zagonu({"n-a": "192.168.0.10", "n-z": "192.168.0.20"})
+        self.assertEqual(sorted(self._en_krog_takoj(m)), ["n-a", "n-z"])
+
+    def test_po_zagonu_ne_cakamo_na_oglase(self):
+        # Zanka najprej poklice zapomnjene sosede - brez iskanja oglasov mDNS (to vzame sekunde).
+        m = self._po_ponovnem_zagonu({"n-a": "192.168.0.10"})
+        iskanj = []
+        m.poisci = lambda: iskanj.append(1) or []
+        import threading
+        klicani = []
+        m._klici = lambda h: klicani.append(h["id"])
+        stari = threading.Thread
+
+        class Takoj:
+            def __init__(self, target=None, args=(), **_k): self.t, self.a = target, args
+            def start(self): self.t(*self.a)
+        m._ustavljen.set()                  # zanka naredi samo zacetni klic in se konca
+        threading.Thread = Takoj
+        try:
+            m._zanka()
+        finally:
+            threading.Thread = stari
+        self.assertEqual(klicani, ["n-a"])
+        self.assertEqual(iskanj, [], "zacetni klic znanih sosedov ne isce oglasov")
+        self.assertEqual(m._po_zagonu, set())
+
+    def test_brez_znanih_sosedov_zanka_zacne_kot_prej(self):
+        m = self.link_mesh.MeshPovezovalec(self.hub, "n-m", poisci=lambda: [])
+        klici = []
+        pravi = m.en_krog
+        m.en_krog = lambda isci=True: klici.append(isci) or pravi(isci)
+        m._ustavljen.set()
+        m._zanka()
+        self.assertEqual(klici, [], "brez zapomnjenih sosedov ni zacetnega klica; ustavljena zanka ne isce")
+
+    def test_prednost_po_zagonu_velja_en_krog(self):
+        m = self._po_ponovnem_zagonu({"n-a": "192.168.0.10"})
+        self.assertEqual(self._en_krog_takoj(m), ["n-a"])
+        with m._zaklep:
+            m._klicem.clear()               # klic ni uspel (soseda ni)
+        # Naslednji krog: obicajno pravilo - manjsi id klice prvi, mi pocakamo.
+        self.assertEqual(self._en_krog_takoj(m), [])
+        self.assertEqual(m.kandidati([self.oglas("n-a")]), [])
+        import time as _time
+        self.assertEqual([h["id"] for h in m.kandidati([self.oglas("n-a")], zdaj=_time.time() + self.link_mesh.VECJI_CAKA_S + 1)],
+                         ["n-a"])
+
+    def test_neznanega_soseda_z_manjsim_id_po_zagonu_pocakamo(self):
+        m = self._po_ponovnem_zagonu({"n-z": "192.168.0.20"})
+        izbrani = [h["id"] for h in m.kandidati([self.oglas("n-a"), self.oglas("n-z")], zdaj=100.0)]
+        self.assertEqual(izbrani, ["n-z"])
+
+    def test_po_zagonu_tujca_in_starega_huba_ne_klicemo(self):
+        m = self._po_ponovnem_zagonu({"tujec": "192.168.0.30", "n-a": "192.168.0.10"})
+        self.assertEqual(self._en_krog_takoj(m), ["n-a"])
+
+    def test_brez_zapomnjenih_sosedov_ostane_po_starem(self):
+        m = self.link_mesh.MeshPovezovalec(self.hub, "n-m")
+        self.assertEqual(m._po_zagonu, set())
+        self.assertEqual(m.kandidati([self.oglas("n-a")], zdaj=100.0), [])
 
     def test_premor_po_zavrnitvi(self):
         m = self.link_mesh.MeshPovezovalec(self.hub, "n-m")
