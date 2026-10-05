@@ -126,6 +126,11 @@ class MeshPovezovalec:
         #: izolacija), in za hiter ponovni priklop po ponovnem zagonu.
         self._pot_znanih = pot_znanih
         self._znani: Dict[str, dict] = self._nalozi_znane()
+        #: Sosedje iz prejsnjega teka: v prvem krogu po zagonu jih poklicemo sami, tudi ce imajo manjsi id. Sosed za
+        #: nas ponovni zagon ne ve in nas najde sele v svojem naslednjem krogu iskanja (izmerjeno 5. 10. 2026:
+        #: racunalnik je bil po zagonu programa v Safeer Linku cez 26 in cez 51 s, njegov Hub pa je tekel ze po 10 s).
+        #: Ce medtem poklice tudi sosed, Hub obdrzi povezavo, ki jo je odprl manjsi id (dodaj_soseda).
+        self._po_zagonu: set = set(self._znani)
         #: Global Link: vrata nasega Huba (za agenta), zaporedni neuspehi neposrednih klicev in releji.
         self._vrata = vrata
         self._neuspehi: Dict[str, int] = {}
@@ -270,6 +275,12 @@ class MeshPovezovalec:
         threading.Timer(PONOVNO_PO_S, self._zbudi.set).start()
 
     def _zanka(self) -> None:
+        if self._po_zagonu:
+            # Znane sosede poklicemo takoj; na oglase mDNS (cakanje in iskanje vzameta 4 s) ne cakamo.
+            try:
+                self.en_krog(isci=False)
+            except Exception as e:  # noqa: BLE001
+                print("[SafeerLink] mesh:", e)
         self._ustavljen.wait(2.0)
         while not self._ustavljen.is_set():
             try:
@@ -303,13 +314,14 @@ class MeshPovezovalec:
                 continue
             if self._zavrnjeni.get(hid, (0.0, 0.0))[0] > zdaj:
                 continue            # nas je zavrnil; pocakamo
-            if hid < self.nas_id and zdaj - prvic < VECJI_CAKA_S:
-                continue            # manjsi id klice prvi; pocakamo nanj
+            if hid < self.nas_id and zdaj - prvic < VECJI_CAKA_S and hid not in self._po_zagonu:
+                continue            # manjsi id klice prvi; pocakamo nanj (razen takoj po nasem zagonu)
             izbrani.append(h)
         return izbrani
 
-    def en_krog(self) -> None:
-        oglasi = list(self.poisci() or [])
+    def en_krog(self, isci: bool = True) -> None:
+        """En krog iskanja in klicanja sosedov. isci=False: samo zapomnjeni sosedje, brez iskanja oglasov mDNS."""
+        oglasi = list(self.poisci() or []) if isci else []
         for h in oglasi:
             if h.get("mesh") == link_hub_streznik_mesh() and h.get("tls"):
                 self.zapomni(str(h.get("id") or ""), str(h.get("naslov") or ""))
@@ -321,6 +333,8 @@ class MeshPovezovalec:
             with self._zaklep:
                 self._klicem.add(h["id"])
             threading.Thread(target=self._klici, args=(h,), name="safeer-mesh-klic", daemon=True).start()
+        # Prednost po zagonu velja en krog: kogar takrat nismo dosegli, ga caka obicajno pravilo.
+        self._po_zagonu.clear()
 
     def _klici(self, h: dict) -> None:
         hid = str(h["id"])
