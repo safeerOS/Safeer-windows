@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import socket
-import ssl
 import threading
 from typing import Optional
 
@@ -15,8 +13,9 @@ from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtWidgets import (QApplication, QHBoxLayout, QLabel, QPushButton, QSizePolicy,
                                QVBoxLayout, QWidget)
 
+from .oddaljeni_zaslon_povezava import PovezavaGledalca, PrekinjenaPovezava
 from .oddaljeni_zaslon_protokol import (
-    NAJVECJI_OKVIR, OKVIR_OBVESTILO, OKVIR_SLIKA, OKVIR_ZVOK,
+    OKVIR_OBVESTILO, OKVIR_SLIKA,
     RazclenjevalnikOkvirjev, Seja, ZavrnjenaSeja, preslikaj_tipko_ime,
     je_igra,
     razcleni_odgovor,
@@ -112,8 +111,9 @@ class _DekodirnaNit(threading.Thread):
         self.signali = signali
         self._tece = threading.Event()
         self._tece.set()
-        self._vticnica: Optional[ssl.SSLSocket] = None
-        self._pisalo = threading.Lock()
+        # Ta nit bere okvirje, glavna nit okna posilja vnos: povezava mora prenesti obe hkrati
+        # (oddaljeni_zaslon_povezava.py). S surovo vticnico TLS se je seja prekinila med premikanjem miske.
+        self._povezava = PovezavaGledalca(seja)
         # Prikaz sme zaostajati za dekodiranjem, nikoli pa se ne sme nabirati: dokler okno prejsnje slike
         # se ni narisalo, naslednjo sliko samo dekodiramo (H.264 jo potrebuje) in je ne pretvarjamo.
         # Prej je pri igrah (60 slik/s) pretvorba v BGRA zaostala in slika je obvisela, igra pa je tekla.
@@ -122,54 +122,23 @@ class _DekodirnaNit(threading.Thread):
 
     def ustavi(self) -> None:
         self._tece.clear()
-        if self._vticnica is not None:
-            try:
-                self._vticnica.shutdown(socket.SHUT_RDWR)
-            except OSError:
-                pass
-            try:
-                self._vticnica.close()
-            except OSError:
-                pass
+        self._povezava.zapri()
 
     def poslji(self, dogodek: dict) -> None:
-        vticnica = self._vticnica
-        if vticnica is None or not self._tece.is_set():
+        if not self._tece.is_set():
             return
-        podatki = (json.dumps(dogodek, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")
         try:
-            with self._pisalo:
-                vticnica.sendall(podatki)
-        except OSError as exc:
-            self.signali.stanje.emit("napaka", str(exc) or _b("prekinjeno"))
+            self._povezava.poslji(dogodek)
+        except OSError:
+            # Sistemske napake ("[WinError 10054] ...") uporabniku ne povedo nicesar: pokazemo svoj stavek.
+            if self._tece.is_set():
+                self.signali.stanje.emit("napaka", _b("prekinjeno"))
             self.ustavi()
-
-    @staticmethod
-    def _vrstica(vhod, meja: int = 4096) -> bytes:
-        vrstica = vhod.readline(meja + 1)
-        if not vrstica.endswith(b"\n") or len(vrstica) > meja:
-            raise ValueError("Neveljavna glava oddaljenega zaslona.")
-        return vrstica[:-1]
 
     def run(self) -> None:
         try:
             self.signali.stanje.emit("povezujem", _b("povezujem"))
-            goli = socket.create_connection((self.seja.naslov, self.seja.vrata), timeout=8)
-            goli.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-            kontekst = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-            kontekst.minimum_version = ssl.TLSVersion.TLSv1_2
-            kontekst.check_hostname = False
-            kontekst.verify_mode = ssl.CERT_NONE
-            tls = kontekst.wrap_socket(goli, server_hostname=self.seja.naslov)
-            dejanski = hashlib.sha256(tls.getpeercert(binary_form=True)).hexdigest()
-            if dejanski != self.seja.odtis:
-                tls.close()
-                raise ssl.SSLError("Odtis potrdila se ne ujema.")
-            tls.settimeout(10)
-            self._vticnica = tls
-            tls.sendall(("SAFEER-ZASLON " + self.seja.zeton + "\n").encode("utf-8"))
-            vhod = tls.makefile("rb", buffering=0)
-            glava = json.loads(self._vrstica(vhod).decode("utf-8"))
+            glava = self._povezava.povezi()
             sirina, visina = int(glava.get("w") or 0), int(glava.get("h") or 0)
             if sirina <= 0 or visina <= 0:
                 raise ValueError("Naprava je poslala neveljavne mere slike.")
@@ -182,31 +151,15 @@ class _DekodirnaNit(threading.Thread):
                 dekoder.thread_type = "AUTO"
             except Exception:
                 pass
-            while self._tece.is_set():
-                glava_okvirja = vhod.read(5)
-                if not glava_okvirja:
+            for vrsta, telo in self._povezava.okvirji():
+                if not self._tece.is_set():
                     break
-                while len(glava_okvirja) < 5:
-                    kos = vhod.read(5 - len(glava_okvirja))
-                    if not kos:
-                        raise ConnectionError("Povezava se je prekinila.")
-                    glava_okvirja += kos
-                vrsta = glava_okvirja[0]
-                dolzina = int.from_bytes(glava_okvirja[1:], "big")
-                if dolzina <= 0 or dolzina > NAJVECJI_OKVIR:
-                    raise ValueError("Pokvarjen okvir oddaljenega zaslona.")
-                telo = bytearray()
-                while len(telo) < dolzina:
-                    kos = vhod.read(dolzina - len(telo))
-                    if not kos:
-                        raise ConnectionError("Povezava se je prekinila.")
-                    telo.extend(kos)
                 if vrsta == OKVIR_OBVESTILO:
-                    obvestilo = json.loads(bytes(telo).decode("utf-8"))
+                    obvestilo = json.loads(telo.decode("utf-8"))
                     if obvestilo.get("konec"):
                         raise ConnectionError(str(obvestilo["konec"]))
                 elif vrsta == OKVIR_SLIKA:
-                    for paket in dekoder.parse(bytes(telo)):
+                    for paket in dekoder.parse(telo):
                         for okvir in dekoder.decode(paket):
                             if not self.prikaz_prost.is_set():
                                 continue
@@ -222,7 +175,9 @@ class _DekodirnaNit(threading.Thread):
                 raise ConnectionError(_b("koncala"))
         except Exception as exc:
             if self._tece.is_set():
-                self.signali.stanje.emit("napaka", str(exc) or _b("prekinjeno"))
+                # Prekinitev in casovna omejitev dobita nas stavek v jeziku uporabnika (ne "timed out").
+                tiho = isinstance(exc, (PrekinjenaPovezava, socket.timeout))
+                self.signali.stanje.emit("napaka", _b("prekinjeno") if tiho else (str(exc) or _b("prekinjeno")))
         finally:
             self.ustavi()
 
