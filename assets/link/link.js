@@ -1625,6 +1625,13 @@
     if (e) e.hidden = !ali;
   }
 
+  /** Besedilo za vstavljanje v innerHTML: imena naprav doloci druga naprava, zato niso zaupanja vredna. */
+  function ubezi(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (z) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[z];
+    });
+  }
+
   // Ena preimenovana oznaka v HTML ne sme podreti celotne inicializacije zaslona.
   function naKlik(id, funkcija) {
     var e = el(id);
@@ -2775,6 +2782,8 @@
         if (jePrijavnoOkno()) besedilo("opombaPrijavaKoda", sporocilo);
         // Clan kroga, ki ga sredisce ne sprejme vec: zdaj potrebuje prijavo (QR ali koda).
         var kodaNapake = podatki && typeof podatki === "object" ? podatki.koda : "";
+        // Ime je uporabnik shranjeval na plosci »Deli z« (tam pise »Posiljam …«): razlog pride tudi tja.
+        if (kodaNapake === "preimenovanje_ni_uspelo") besedilo("opombaDeljenje", sporocilo);
         if (stanje.clanKroga && !prijava.krogNeuspel && kodaNapake === "naprava_ni_znana") {
           prijava.krogNeuspel = true;
           narisiZaslon();
@@ -2789,7 +2798,8 @@
   /** Iz tehnicne napake naredi poved, ki uporabniku pove, kaj naj naredi. */
   /** Napaka pride kot besedilo ali kot {koda, sporocilo}; koda ima prednost. */
   var MEHKE_NAPAKE = { stran_ni_primerna: 1, samo_http: 1, ukaz_ni_uspel: 1, zaznamki_niso_poslani: 1,
-                       sync_ni_nastavljena: 1, zdruzevanje_ni_koncano: 1, naprava_ni_znana: 1 };
+                       sync_ni_nastavljena: 1, zdruzevanje_ni_koncano: 1, naprava_ni_znana: 1,
+                       preimenovanje_ni_uspelo: 1 };
 
   function jeMehkaNapaka(podatki) {
     return !!(podatki && typeof podatki === "object" && MEHKE_NAPAKE[String(podatki.koda || "")]);
