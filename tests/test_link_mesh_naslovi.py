@@ -256,6 +256,96 @@ class NaslovCezMejo(unittest.TestCase):
         self.assertEqual(control.naprave()["os-3"]["ip"], "")
 
 
+class SeznamZaOdjemalca(unittest.TestCase):
+    """Odjemalec, pripet neposredno na Hub DRUGE naprave (telefon, seznanjen z racunalnikom): tudi on je za program
+    z racunalnika Huba dobil 127.0.0.1."""
+
+    def setUp(self):
+        krog = mock.MagicMock()
+        krog.json.return_value = {"v": 1, "clani": {}, "umiki": {}}
+        krog.zdruzi.return_value = False
+        krog.clan_za_id.return_value = None
+        self._krog = mock.patch.object(lhs.link_krog, "krog", return_value=krog)
+        self._krog.start()
+        self._clan = mock.patch.object(lhs.Hub, "_je_clan", lambda self, i: True)
+        self._clan.start()
+        self.pc = lhs.Hub(odtis="aa" * 32, nas_id="hub-pc")
+
+    def tearDown(self):
+        self._clan.stop()
+        self._krog.stop()
+
+    def _od_drugod(self, did, naslov, nas=PC):
+        p = Odjemalec(naslov)
+        if nas is not None:
+            p.vticnik = Vticnica(nas, naslov)
+        p.podatki["id"] = did
+        odgovor = json.loads(self.pc.obdelaj(p, json.dumps({
+            "id": "r", "type": "cast.register",
+            "payload": {"device_id": did, "name": did.upper(), "role": "receiver", "capabilities": ["remote"]}})))
+        assert odgovor["status"] == "accepted", odgovor
+        return p
+
+    def test_odjemalec_od_drugod_dobi_naslov_racunalnika(self):
+        control = prijava(self.pc, "control")                    # na racunalniku Huba
+        telefon = self._od_drugod("telefon", "192.168.0.143")
+        self.assertEqual(telefon.naprave()["control"]["ip"], PC)
+        self.assertTrue(telefon.naprave()["control"]["here"])
+        # Svoj naslov vidi nespremenjen in brez oznake - ni na racunalniku Huba.
+        self.assertEqual(telefon.naprave()["telefon"]["ip"], "192.168.0.143")
+        self.assertNotIn("here", telefon.naprave()["telefon"])
+        # Odjemalcu z racunalnika Huba zanka ostane: po njej prepozna programe svoje naprave.
+        self.assertEqual(control.naprave()["control"]["ip"], "127.0.0.1")
+        self.assertTrue(control.naprave()["control"]["here"])
+        self.assertEqual(control.naprave()["telefon"]["ip"], "192.168.0.143")
+
+    def test_vsak_odjemalec_dobi_naslov_svoje_poti(self):
+        prijava(self.pc, "control")
+        doma = self._od_drugod("telefon", "192.168.0.143", nas=PC)
+        drugje = self._od_drugod("tablica", "10.0.0.7", nas="10.0.0.2")
+        prijava(self.pc, "os-pc")                                # sprememba: nov seznam vsem
+        self.assertEqual(doma.naprave()["os-pc"]["ip"], PC)
+        self.assertEqual(drugje.naprave()["os-pc"]["ip"], "10.0.0.2")
+
+    def test_brez_znanega_naslova_ni_zanke(self):
+        prijava(self.pc, "control")
+        telefon = self._od_drugod("telefon", "192.168.0.143", nas=None)      # vticnice ni mogoce prebrati
+        self.assertEqual(telefon.naprave()["control"]["ip"], "")
+        self.assertTrue(telefon.naprave()["control"]["here"])
+
+    def test_sosedova_naprava_ni_tukaj(self):
+        tv = lhs.Hub(odtis="bb" * 32, nas_id="hub-tv")
+        prijava(tv, "os-tv")
+        povezi(self.pc, tv, a_vidi_b=TV, b_vidi_a=PC)
+        telefon = self._od_drugod("telefon", "192.168.0.143")
+        self.assertEqual(telefon.naprave()["os-tv"]["ip"], TV)
+        self.assertNotIn("here", telefon.naprave()["os-tv"])
+
+    def test_surov_seznam_brez_odjemalca(self):
+        prijava(self.pc, "control")
+        naprave = {d["id"]: d for d in json.loads(self.pc.seznam_json())["devices"]}
+        self.assertEqual(naprave["control"]["ip"], "127.0.0.1")
+
+
+class OdjemalcevaStran(unittest.TestCase):
+    """Isto pravilo pri odjemalcu - da dela tudi s Hubom, ki popravka se nima."""
+
+    def test_zanka_od_huba_drugje_je_naslov_tistega_huba(self):
+        f = lhs.naslov_za_povezavo
+        self.assertEqual(f("127.0.0.1", "wss://192.168.0.135:8990/cast/ws"), "192.168.0.135")
+        self.assertEqual(f("::1", "wss://192.168.0.135:8990/cast/ws"), "192.168.0.135")
+
+    def test_zanka_od_svojega_huba_ostane(self):
+        self.assertEqual(lhs.naslov_za_povezavo("127.0.0.1", "wss://127.0.0.1:8990/cast/ws"), "127.0.0.1")
+
+    def test_pravi_naslov_in_prazen_ostaneta(self):
+        f = lhs.naslov_za_povezavo
+        self.assertEqual(f("192.168.0.220", "wss://192.168.0.135:8990/cast/ws"), "192.168.0.220")
+        self.assertEqual(f("", "wss://192.168.0.135:8990/cast/ws"), "")
+        self.assertEqual(f(None, ""), "")
+        self.assertEqual(f("127.0.0.1", ""), "127.0.0.1")
+
+
 class Pomozne(unittest.TestCase):
     def test_gostitelj_naslova(self):
         g = lhs._gostitelj_naslova

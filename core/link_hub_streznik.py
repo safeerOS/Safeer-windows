@@ -148,6 +148,27 @@ def _gostitelj_soseda(povezava) -> str:
     return "" if _samo_tukaj(sosed) else sosed
 
 
+def _nas_naslov_za_odjemalca(povezava) -> Optional[str]:
+    """Za seznam naprav, ki gre enemu odjemalcu: None, ce je odjemalec na TEM racunalniku (ali ga ne poznamo) -
+    takemu naslovov ne spreminjamo. Sicer nas naslov na poti do njega; "" pomeni, da ga ni bilo mogoce prebrati."""
+    if povezava is None or _samo_tukaj(getattr(povezava, "naslov", "")):
+        return None
+    return _nas_naslov_proti(povezava)
+
+
+def naslov_za_povezavo(ip, hub_url) -> str:
+    """Odjemalceva stran istega pravila: naslov naprave iz seznama Huba, kot velja pri odjemalcu.
+
+    Hub programu na svojem racunalniku pripise 127.0.0.1. Ce nas Hub tece drugje (`hub_url` ne kaze na ta
+    racunalnik), je naprava z zanko na NJEGOVEM racunalniku - starejsi Hubi zanko posljejo tudi odjemalcem od
+    drugod. Kadar je Hub tukaj, je zanka res ta racunalnik in ostane."""
+    ip = str(ip or "").strip()
+    if not ip or not _samo_tukaj(ip):
+        return ip
+    gostitelj = _gostitelj_naslova(hub_url)
+    return ip if _samo_tukaj(gostitelj) else gostitelj
+
+
 class Naprava:
     """Ena povezana naprava, kakor jo vidi Hub."""
 
@@ -613,10 +634,20 @@ class Hub:
         except Exception:
             return None
 
-    def seznam_json(self) -> str:
+    def seznam_json(self, za: Optional[object] = None) -> str:
+        """Seznam naprav za enega odjemalca (`za` = njegova povezava; brez nje surov seznam).
+
+        Program, ki je s Hubom povezan z ISTEGA racunalnika, ima pri nas 127.0.0.1 in dobi polje `here`. Odjemalcu z
+        istega racunalnika naslov ostane (po njem prepozna programe svoje naprave). Odjemalec od DRUGOD bi se z njim
+        povezal sam nase, zato dobi nas naslov na poti do njega - krajevni konec njegove povezave."""
+        nas = _nas_naslov_za_odjemalca(za)
         naprave = []
         for n in self.povezane():
             zapis = n.json()
+            if not n.sosed and n.naslov and _samo_tukaj(n.naslov):
+                zapis["here"] = True
+                if nas is not None:
+                    zapis["ip"] = nas
             naprava = self.naprava_iz_kljuca(n.id)
             if naprava:
                 zapis["device"] = naprava
@@ -629,11 +660,15 @@ class Hub:
         return json.dumps({"type": "cast.devices", "devices": naprave}, ensure_ascii=False)
 
     def objavi_naprave(self) -> None:
-        sporocilo = self.seznam_json()
+        # Odjemalci z istega racunalnika dobijo isti (surov) seznam; odjemalci od drugod svojega - gl. seznam_json.
+        seznami: Dict[Optional[str], str] = {}
         for n in self.povezane():
             p = n.povezava
             if p is not None and not n.sosed:
-                p.poslji(sporocilo)
+                kljuc = _nas_naslov_za_odjemalca(p)
+                if kljuc not in seznami:
+                    seznami[kljuc] = self.seznam_json(p)
+                p.poslji(seznami[kljuc])
         self._objavi_sosedom()
         if self.ob_spremembi is not None:
             try:

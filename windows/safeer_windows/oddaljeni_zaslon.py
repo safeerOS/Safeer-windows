@@ -17,6 +17,7 @@ from .oddaljeni_zaslon_povezava import PovezavaGledalca, PrekinjenaPovezava
 from .oddaljeni_zaslon_protokol import (
     OKVIR_OBVESTILO, OKVIR_SLIKA,
     RazclenjevalnikOkvirjev, Seja, ZavrnjenaSeja, preslikaj_tipko_ime,
+    ima_naslov,
     je_igra,
     razcleni_odgovor,
 )
@@ -39,27 +40,39 @@ _BESEDILA = {
     "sl": {"naslov": "Oddaljeni zaslon – {ime}", "pripravljam": "Pripravljam povezavo ...", "znova": "Poveži znova",
            "cel": "Celozaslonsko", "okno": "V okno", "dovoljenje": "Napravo prosim za dovoljenje ...",
            "povezujem": "Povezujem se ...", "povezano": "Povezano", "prekinjeno": "Povezava se je prekinila.",
-           "koncala": "Naprava je končala povezavo."},
+           "koncala": "Naprava je končala povezavo.",
+           "ni_doma": "{ime} zdaj ni dosegljiv neposredno. Slika zaslona deluje samo v istem omrežju (doma), "
+                      "prek Global Linka ne."},
     "en": {"naslov": "Remote screen – {ime}", "pripravljam": "Preparing the connection ...", "znova": "Reconnect",
            "cel": "Full screen", "okno": "Window", "dovoljenje": "Asking the device for permission ...",
            "povezujem": "Connecting ...", "povezano": "Connected", "prekinjeno": "The connection was interrupted.",
-           "koncala": "The device ended the connection."},
+           "koncala": "The device ended the connection.",
+           "ni_doma": "{ime} cannot be reached directly right now. Screen viewing works only on the same network "
+                      "(at home), not over Global Link."},
     "de": {"naslov": "Entfernter Bildschirm – {ime}", "pripravljam": "Verbindung wird vorbereitet ...", "znova": "Neu verbinden",
            "cel": "Vollbild", "okno": "Fenster", "dovoljenje": "Gerät wird um Erlaubnis gebeten ...",
            "povezujem": "Verbinde ...", "povezano": "Verbunden", "prekinjeno": "Die Verbindung wurde unterbrochen.",
-           "koncala": "Das Gerät hat die Verbindung beendet."},
+           "koncala": "Das Gerät hat die Verbindung beendet.",
+           "ni_doma": "{ime} ist gerade nicht direkt erreichbar. Die Bildschirmansicht funktioniert nur im selben "
+                      "Netzwerk (zu Hause), nicht über Global Link."},
     "es": {"naslov": "Pantalla remota – {ime}", "pripravljam": "Preparando la conexión ...", "znova": "Reconectar",
            "cel": "Pantalla completa", "okno": "Ventana", "dovoljenje": "Pidiendo permiso al dispositivo ...",
            "povezujem": "Conectando ...", "povezano": "Conectado", "prekinjeno": "La conexión se interrumpió.",
-           "koncala": "El dispositivo terminó la conexión."},
+           "koncala": "El dispositivo terminó la conexión.",
+           "ni_doma": "{ime} no está accesible directamente en este momento. La vista de pantalla solo funciona en "
+                      "la misma red (en casa), no a través de Global Link."},
     "fr": {"naslov": "Écran distant – {ime}", "pripravljam": "Préparation de la connexion ...", "znova": "Reconnecter",
            "cel": "Plein écran", "okno": "Fenêtre", "dovoljenje": "Demande d’autorisation à l’appareil ...",
            "povezujem": "Connexion ...", "povezano": "Connecté", "prekinjeno": "La connexion a été interrompue.",
-           "koncala": "L’appareil a mis fin à la connexion."},
+           "koncala": "L’appareil a mis fin à la connexion.",
+           "ni_doma": "{ime} n’est pas joignable directement pour le moment. L’affichage de l’écran ne fonctionne "
+                      "que sur le même réseau (à la maison), pas via Global Link."},
     "it": {"naslov": "Schermo remoto – {ime}", "pripravljam": "Preparazione della connessione ...", "znova": "Riconnetti",
            "cel": "Schermo intero", "okno": "Finestra", "dovoljenje": "Richiesta di autorizzazione al dispositivo ...",
            "povezujem": "Connessione ...", "povezano": "Connesso", "prekinjeno": "La connessione si è interrotta.",
-           "koncala": "Il dispositivo ha chiuso la connessione."},
+           "koncala": "Il dispositivo ha chiuso la connessione.",
+           "ni_doma": "{ime} al momento non è raggiungibile direttamente. La visualizzazione dello schermo funziona "
+                      "solo sulla stessa rete (a casa), non tramite Global Link."},
 }
 _JEZIK = "sl"
 
@@ -310,13 +323,20 @@ class OddaljeniZaslon(QWidget):
         if self._nit is not None:
             self._nit.ustavi()
         self.znova.hide()
+        # Svez zapis iz seznama naprav: okno, odprto zunaj doma, bi sicer za vedno drzalo zapis brez naslova.
+        naprava = self._poisci_napravo() or self.naprava or {}
+        if not ima_naslov(naprava):
+            # Slika gre neposredno z naprave. Brez njenega naslova (dosegljiva je samo prek Global Linka) je ne
+            # prosimo: naprava bi zaman odprla vrata in cakala na nas.
+            self._spremeni_stanje("napaka", _b("ni_doma", ime=self.ime))
+            return
         self.stanje.setText(_b("dovoljenje"))
 
         def zahteva() -> None:
             try:
                 odgovor = self.backend.ukaz_pocakaj(
                     self.id_naprave, "screen.start", {"quality": "najvisja", "screen": self.zaslon_cilj}, cas=15.0)
-                seja = razcleni_odgovor(odgovor, self.naprava or self._poisci_napravo())
+                seja = razcleni_odgovor(odgovor, naprava)
                 self._igra = je_igra(odgovor)
                 if self._zapiram:
                     self.backend.ukaz_pocakaj(self.id_naprave, "screen.stop", {}, cas=5.0)
