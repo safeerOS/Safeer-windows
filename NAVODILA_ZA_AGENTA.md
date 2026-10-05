@@ -152,7 +152,7 @@ Z orodjem Go navzkrižno prevedi binarno kodo za Windows x64:
 
 ```bash
 cd windows/launcher_go
-GOOS=windows GOARCH=amd64 go build -ldflags "-H=windowsgui" -o SafeerOS.exe .
+GOOS=windows GOARCH=amd64 go build -ldflags "-H=windowsgui -X main.paketOdtis=$(sha256sum safeer-os-windows.zip | cut -c1-64)" -o SafeerOS.exe .
 cp SafeerOS.exe ../SafeerOS.exe
 cp SafeerOS.exe ../SafeerControl.exe
 cd ../..
