@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	_ "embed"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -507,31 +508,125 @@ func findPython() *PythonInfo {
 	return nil
 }
 
-func checkAndInstallPySide6(py *PythonInfo) error {
-	var cmd *exec.Cmd
-	checkScript := "import PySide6, qrcode, mutagen, av, zeroconf, importlib.util; assert importlib.util.find_spec('mpv'); assert importlib.util.find_spec('winrt.windows.media.playback')"
-	if py.IsLauncher {
-		cmd = exec.Command(py.ExePath, "-3", "-c", checkScript)
-	} else {
-		cmd = exec.Command(py.ExePath, "-c", checkScript)
-	}
-	brezOkna(cmd)
-	if err := cmd.Run(); err == nil {
-		return nil
-	}
+// Knjiznice Pythona preveri program sam (windows/safeer_windows/knjiznice.py), kadar ga zaganjalnik zazene z okoljem
+// okoljePreverbe=1: ce kaj manjka, se konca s kodo kodaManjkajoKnjiznice, sicer v dnevnik izpise oznakaKnjizniceOK.
+// Prej jih je zaganjalnik pred vsakim zagonom preveril s posebnim zagonom Pythona: okoli pol sekunde cakanja ob
+// vsakem odpiranju programa.
+const (
+	okoljePreverbe        = "SAFEER_OS_PREVERI_KNJIZNICE"
+	kodaManjkajoKnjiznice = 86
+	oznakaKnjizniceOK     = "[SafeerOS] knjiznice OK"
+)
 
+// paketiPip so knjiznice, ki jih Safeer OS potrebuje (katere module preveri program, pove knjiznice.py).
+var paketiPip = []string{
+	"PySide6", "qrcode", "python-vlc", "mutagen", "av", "truststore", "zeroconf", "python-mpv==1.0.8",
+	"winrt-runtime==3.2.1", "winrt-Windows.Foundation==3.2.1", "winrt-Windows.Foundation.Collections==3.2.1",
+	"winrt-Windows.Media==3.2.1", "winrt-Windows.Media.Playback==3.2.1", "winrt-Windows.Storage.Streams==3.2.1",
+}
+
+func namestiKnjiznice(py *PythonInfo) error {
 	showMessage("Safeer OS", "Safeer OS pripravlja potrebne knjižnice (PySide6, python-vlc, python-mpv, mutagen, PyAV, zeroconf, WinRT za medijske tipke). Namestitev poteka v ozadju...", MB_ICONINFORMATION)
-	var installCmd *exec.Cmd
+	args := []string{"-m", "pip", "install"}
 	if py.IsLauncher {
-		installCmd = exec.Command(py.ExePath, "-3", "-m", "pip", "install", "PySide6", "qrcode", "python-vlc", "mutagen", "av", "truststore", "zeroconf", "python-mpv==1.0.8", "winrt-runtime==3.2.1", "winrt-Windows.Foundation==3.2.1", "winrt-Windows.Foundation.Collections==3.2.1", "winrt-Windows.Media==3.2.1", "winrt-Windows.Media.Playback==3.2.1", "winrt-Windows.Storage.Streams==3.2.1")
-	} else {
-		installCmd = exec.Command(py.ExePath, "-m", "pip", "install", "PySide6", "qrcode", "python-vlc", "mutagen", "av", "truststore", "zeroconf", "python-mpv==1.0.8", "winrt-runtime==3.2.1", "winrt-Windows.Foundation==3.2.1", "winrt-Windows.Foundation.Collections==3.2.1", "winrt-Windows.Media==3.2.1", "winrt-Windows.Media.Playback==3.2.1", "winrt-Windows.Storage.Streams==3.2.1")
+		args = append([]string{"-3"}, args...)
 	}
+	installCmd := exec.Command(py.ExePath, append(args, paketiPip...)...)
 	brezOkna(installCmd)
 	if err := installCmd.Run(); err != nil {
 		return fmt.Errorf("namestitev Python knjižnic ni uspela: %v", err)
 	}
 	return nil
+}
+
+const (
+	zagonTece     = iota // program tece (ali se je koncal brez napake: drugi zagon je okno prepustil prvemu)
+	zagonManjkajo        // program je javil, da mu manjkajo knjiznice
+	zagonNapaka          // program se je koncal z napako
+)
+
+// kodaIzhoda vrne izhodno kodo koncanega programa: 0 brez napake, -1, ce napaka ni izhodna koda.
+func kodaIzhoda(err error) int {
+	if err == nil {
+		return 0
+	}
+	var izhod *exec.ExitError
+	if errors.As(err, &izhod) {
+		return izhod.ExitCode()
+	}
+	return -1
+}
+
+// dnevnikPotrjuje pove, ali je program v dnevnik ze izpisal, da so knjiznice na mestu (oznaka je na zacetku dnevnika).
+func dnevnikPotrjuje(dnevnik string) bool {
+	f, err := os.Open(dnevnik)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	b, _ := io.ReadAll(io.LimitReader(f, 64<<10))
+	return bytes.Contains(b, []byte(oznakaKnjizniceOK))
+}
+
+// pocakajNaZagon caka, da se program konca ali da zazivi: da potrdi knjiznice (ce `cakaOznako`) in prezivi prvih
+// `najmanj`. Po `najdlje` neha cakati tudi brez potrditve (zelo pocasen zagon, program brez preverbe).
+func pocakajNaZagon(konec <-chan error, dnevnik string, cakaOznako bool, najmanj, najdlje time.Duration) (int, error) {
+	zacetek := time.Now()
+	potrjeno := !cakaOznako
+	tik := time.NewTicker(100 * time.Millisecond)
+	defer tik.Stop()
+	for {
+		select {
+		case err := <-konec:
+			switch {
+			case err == nil:
+				return zagonTece, nil
+			case cakaOznako && kodaIzhoda(err) == kodaManjkajoKnjiznice:
+				return zagonManjkajo, err
+			}
+			return zagonNapaka, err
+		case <-tik.C:
+			if !potrjeno {
+				potrjeno = dnevnikPotrjuje(dnevnik)
+			}
+			if od := time.Since(zacetek); potrjeno && od >= najmanj || od >= najdlje {
+				return zagonTece, nil
+			}
+		}
+	}
+}
+
+// zazeniProgram zazene program in pocaka, da zazivi. Knjiznice preveri program sam; ce javi, da manjkajo, jih
+// zaganjalnik namesti in program zazene znova - brez preverbe, kot doslej (tudi ce namestitev ni uspela: del programa
+// dela tudi brez katere od njih). Vrne, ali program tece.
+func zazeniProgram(zazeni func(preverba bool) (<-chan error, error), namesti func() error, sporoci func(naslov, besedilo string, slog uint),
+	dnevnik string, najmanj, najdlje time.Duration) bool {
+	konec, err := zazeni(true)
+	if err != nil {
+		sporoci("Safeer OS - Napaka", fmt.Sprintf("Zagon aplikacije ni uspel:\n%v", err), MB_ICONERROR)
+		return false
+	}
+	stanje, izid := pocakajNaZagon(konec, dnevnik, true, najmanj, najdlje)
+	if stanje == zagonManjkajo {
+		if err := namesti(); err != nil {
+			sporoci("Safeer OS - Opozorilo", fmt.Sprintf("Opozorilo pri nameščanju knjižnic:\n%v\n\nPoskušam zagnati aplikacijo...", err), MB_ICONINFORMATION)
+		}
+		if konec, err = zazeni(false); err != nil {
+			sporoci("Safeer OS - Napaka", fmt.Sprintf("Zagon aplikacije ni uspel:\n%v", err), MB_ICONERROR)
+			return false
+		}
+		stanje, izid = pocakajNaZagon(konec, dnevnik, false, najmanj, najdlje)
+	}
+	if stanje == zagonTece {
+		return true
+	}
+	vsebina, _ := os.ReadFile(dnevnik)
+	msg := string(vsebina)
+	if strings.TrimSpace(msg) == "" && izid != nil {
+		msg = izid.Error()
+	}
+	sporoci("Safeer OS - Napaka pri zagonu", fmt.Sprintf("Aplikacija se je nepričakovano zaključila:\n\n%s", msg), MB_ICONERROR)
+	return false
 }
 
 // installPython namesti uradni Python 3.12 (python.org) prek winget, ce uporabnik to potrdi.
@@ -635,10 +730,6 @@ func main() {
 		return
 	}
 
-	if err := checkAndInstallPySide6(py); err != nil {
-		showMessage("Safeer OS - Opozorilo", fmt.Sprintf("Opozorilo pri preverjanju PySide6:\n%v\n\nPoskušam zagnati aplikacijo...", err), MB_ICONINFORMATION)
-	}
-
 	baseName := strings.ToLower(filepath.Base(os.Args[0]))
 	zaganjalnik := ""
 	if selfExe, err := os.Executable(); err == nil {
@@ -686,50 +777,41 @@ func main() {
 		}
 	}
 
-	cmd := exec.Command(py.ExePath, args...)
-	cmd.Dir = targetDir
-	cmd.Env = append(os.Environ(),
-		"PYTHONPATH="+filepath.Join(targetDir, "windows")+";"+targetDir,
-		"PYTHONUNBUFFERED=1",
-		"QTWEBENGINE_CHROMIUM_FLAGS=--autoplay-policy=no-user-gesture-required",
-	)
-	if zaganjalnik != "" {
-		// Safeer OS z njim registrira protokol magnet: (samo na uporabnikovo zahtevo): "<SafeerOS.exe>" --magnet "%1".
-		cmd.Env = append(cmd.Env, "SAFEER_OS_EXE="+zaganjalnik)
-	}
-	brezOkna(cmd)
-
 	logFilePath := filepath.Join(targetDir, "safeer_os.log")
-	logFile, logErr := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
-	if logErr == nil {
-		cmd.Stdout = logFile
-		cmd.Stderr = logFile
-	}
-
-	if err := cmd.Start(); err != nil {
-		showMessage("Safeer OS - Napaka", fmt.Sprintf("Zagon aplikacije ni uspel:\n%v", err), MB_ICONERROR)
-		return
-	}
-
-	done := make(chan error, 1)
-	go func() {
-		done <- cmd.Wait()
-	}()
-
-	select {
-	case err := <-done:
-		if err != nil {
-			if logFile != nil {
-				logFile.Close()
-			}
-			vsebina, _ := os.ReadFile(logFilePath)
-			msg := string(vsebina)
-			if strings.TrimSpace(msg) == "" {
-				msg = err.Error()
-			}
-			showMessage("Safeer OS - Napaka pri zagonu", fmt.Sprintf("Aplikacija se je nepričakovano zaključila:\n\n%s", msg), MB_ICONERROR)
+	zazeni := func(preverba bool) (<-chan error, error) {
+		cmd := exec.Command(py.ExePath, args...)
+		cmd.Dir = targetDir
+		cmd.Env = append(os.Environ(),
+			"PYTHONPATH="+filepath.Join(targetDir, "windows")+";"+targetDir,
+			"PYTHONUNBUFFERED=1",
+			"QTWEBENGINE_CHROMIUM_FLAGS=--autoplay-policy=no-user-gesture-required",
+		)
+		if zaganjalnik != "" {
+			// Safeer OS z njim registrira protokol magnet: (samo na uporabnikovo zahtevo): "<SafeerOS.exe>" --magnet "%1".
+			cmd.Env = append(cmd.Env, "SAFEER_OS_EXE="+zaganjalnik)
 		}
-	case <-time.After(1200 * time.Millisecond):
-		// Aplikacija se je uspešno zagnala in teče
+		if preverba {
+			cmd.Env = append(cmd.Env, okoljePreverbe+"=1")
+		}
+		brezOkna(cmd)
+		logFile, logErr := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+		if logErr == nil {
+			cmd.Stdout = logFile
+			cmd.Stderr = logFile
+		}
+		err := cmd.Start()
+		if logFile != nil {
+			logFile.Close() // program ima svojo, podedovano
+		}
+		if err != nil {
+			return nil, err
+		}
+		konec := make(chan error, 1)
+		go func() { konec <- cmd.Wait() }()
+		return konec, nil
 	}
+	// Program zazivi, ko potrdi knjiznice in prezivi prvih 1,2 s (napako ob zagonu pokazemo z dnevnikom).
+	zazeniProgram(zazeni, func() error { return namestiKnjiznice(py) },
+		func(naslov, besedilo string, slog uint) { showMessage(naslov, besedilo, slog) },
+		logFilePath, 1200*time.Millisecond, 30*time.Second)
 }

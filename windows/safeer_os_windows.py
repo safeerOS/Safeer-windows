@@ -17,6 +17,10 @@ KOREN = os.path.dirname(KOREN_WIN)
 if KOREN not in sys.path:
     sys.path.append(KOREN)
 
+# Knjiznice preveri program sam, kadar ga za to prosi zaganjalnik (koda 86: zaganjalnik jih namesti in zazene znova).
+from safeer_windows import knjiznice
+knjiznice.preveri_ob_zagonu()
+
 # libmpv (pravilo 6): runtime iz paketa safeer_windows/vendor/mpv/runtime PRED PySide6; brez paketa no-op.
 try:
     from safeer_windows.safeer_mpv_pogon import predpripravi_runtime
