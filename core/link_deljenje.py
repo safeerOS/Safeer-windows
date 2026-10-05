@@ -44,6 +44,13 @@ SPOROCILA_SREDISCA = {
     "naprava_pri_drugem_srediscu": "Naprava je povezana prek drugega središča; datoteke ji od tu ni mogoče poslati.",
     "sredisce_naprave_ni_dosegljivo": "Naprava v tem omrežju ni dosegljiva.",
 }
+#: Isto za deljenje zaslona (sredisce_za_zaslon); stran prevede po kodi, to besedilo je za dnevnik in ukazno vrstico.
+SPOROCILA_ZASLONA = {
+    "naprava_pri_drugem_srediscu": "Naprava je povezana prek drugega središča; zaslona ji od tu ni mogoče pokazati.",
+    "sredisce_naprave_ni_dosegljivo": "Naprava v tem omrežju ni dosegljiva.",
+    "zaslon_ni_na_voljo": "Ta naprava še ne more prikazati zaslona tega računalnika.",
+    "hub_ni_znan": "Zaslon lahko deliš po varni povezavi s Safeer Linkom.",
+}
 
 
 def napaka_huba(koda: int, odgovor: dict) -> Dict[str, str]:
@@ -262,11 +269,45 @@ def _prevzemi(ws_naslov: str, odtis: str, pot_huba: str, ime: str, pricakovan_od
 # Zaslon
 # ----------------------------------------------------------------------
 
+def sredisce_za_zaslon(sredisce_naprave: Callable[[str], tuple], seja: Callable[[str, str], tuple],
+                       lastno: Callable[[], tuple], cilj: str) -> tuple:
+    """Pri katerem sredisci posiljatelj zacne deljenje zaslona za napravo `cilj`.
+
+    Link Mesh: vsaka naprava ima svoje sredisce in zaslon ji pokaze ONO (gledalec bere okvirje pri njem), zato
+    deljenje zacnemo tam - s sejo s podpisom, kot oddamo datoteko. Sredisce racunalnika zaslona ne posreduje.
+
+    sredisce_naprave(cilj) -> ((naslov, odtis), "") | (None, "") | (None, koda)      (link_mesh.sredisce_naprave)
+    seja(naslov, odtis)    -> (sejni zeton ali None, nas id pri tem sredisci)
+    lastno()               -> ((naslov, zeton, odtis, nas id), "") za sredisce, na katero smo prijavljeni, kadar
+                              NI v tem procesu; sicer (None, koda): "zaslon_ni_na_voljo" ali "hub_ni_znan".
+    Vrne ((naslov, zeton, odtis, nas id), {}) ali (None, {"sporocilo", "koda", "zasedenaOd"}). Caka na omrezje."""
+    def napaka(koda: str) -> tuple:
+        return None, {"sporocilo": SPOROCILA_ZASLONA.get(koda, koda), "koda": koda, "zasedenaOd": ""}
+
+    izbrano, koda = sredisce_naprave(cilj)
+    if koda:
+        return napaka(koda)
+    if izbrano is not None:
+        naslov, odtis = izbrano
+        zeton, nas_id = seja(naslov, odtis)
+        if not zeton:
+            return napaka("sredisce_naprave_ni_dosegljivo")
+        return (naslov, zeton, odtis, nas_id), {}
+    nase, koda = lastno()
+    if nase is None:
+        return napaka(koda or "zaslon_ni_na_voljo")
+    return nase, {}
+
+
 class DeljenjeZaslona:
     """Deli zaslon tega računalnika z eno napravo, dokler ga uporabnik ne prekine."""
 
     def __init__(self, ws_naslov: str, zeton: str, odtis: str, moj_id: str, cilj: str, ime_cilja: str,
-                 ob_spremembi: Optional[Callable[[dict], None]] = None) -> None:
+                 ob_spremembi: Optional[Callable[[dict], None]] = None,
+                 sredisce: Optional[Callable[[], tuple]] = None) -> None:
+        #: Link Mesh: kje deljenje zacnemo, izvemo sele v delovni niti (prijava s podpisom caka na omrezje).
+        #: Klic vrne ((naslov, zeton, odtis, moj id), {}) ali (None, napaka) - glej sredisce_za_zaslon.
+        self._sredisce = sredisce
         self.ws_naslov = ws_naslov
         self.zeton = zeton
         self.odtis = odtis
@@ -334,6 +375,13 @@ class DeljenjeZaslona:
     def _tok(self) -> None:
         vticnik = None
         try:
+            if self._sredisce is not None:
+                izbrano, n = self._sredisce()
+                if izbrano is None:
+                    self.napaka, self.koda = str(n.get("sporocilo") or ""), str(n.get("koda") or "")
+                    self.zasedena_od = str(n.get("zasedenaOd") or "")
+                    return          # stanje javi `finally`
+                self.ws_naslov, self.zeton, self.odtis, self.moj_id = izbrano
             koda, odgovor, _ = link_tls.zahteva(_osnova(self.ws_naslov) + "/cast/share/screen/start",
                                                 {"device_id": self.moj_id, "target": self.cilj},
                                                 zeton=self.zeton, timeout=8.0, pripeti=self.odtis)

@@ -183,6 +183,19 @@ class DogodkiNaStrani(unittest.TestCase):
         self.assertTrue(s[0]["opombaDeljenje"]["besedilo"])
         self.assertTrue(s[0]["panelZaslonTece"]["skrit"])
 
+    def test_zaslon_naprava_ga_se_ne_zna_prikazati(self):
+        """Naprava pri sredisci racunalnika (to zaslona ne posreduje): napis po kodi, v jeziku vmesnika."""
+        s = _stran([_deljenje("zaslon", "koncano", cilj="n-x", ime="Naprava", koda="zaslon_ni_na_voljo",
+                              sporocilo="Ta naprava še ne more prikazati zaslona tega računalnika.", tece=False)])
+        self.assertEqual(s[0]["opombaDeljenje"]["besedilo"], "Ta naprava še ne more prikazati zaslona tega računalnika.")
+        self.assertTrue(s[0]["panelZaslonTece"]["skrit"])
+        self.assertEqual(_vir_strani().count("      napZaslonNiNaVoljo: "), 6, "napis v vseh sestih jezikih")
+
+    def test_zaslon_naprava_ni_dosegljiva(self):
+        s = _stran([_deljenje("zaslon", "koncano", cilj="n-tv", ime="Televizor", koda="sredisce_naprave_ni_dosegljivo",
+                              sporocilo="Naprava v tem omrežju ni dosegljiva.", tece=False)])
+        self.assertIn("Naprava v tem omrežju ni dosegljiva.", s[0]["opombaDeljenje"]["besedilo"])
+
     def test_preimenovano(self):
         s = _stran([["__nastavi", "opombaDeljenje", "textContent", "Pošiljam …"],
                     ["__nastavi", "preimenujBlok", "hidden", False],

@@ -5,7 +5,10 @@ Zaledje za Windows je oddajalo druga polja ali nic. Videno 5. 10. 2026 na testne
 telefon, plosca pa ni pokazala ne napredka ne »Poslano«; po »Poslji besedilo« je ostalo »Pošiljam …«; besedilo, ki ga
 je racunalniku poslala druga naprava, se ni pokazalo nikjer.
 """
+import inspect
+import io
 import os
+import sys
 import tempfile
 import threading
 import time
@@ -22,6 +25,7 @@ from safeer_windows import os_app
 KOREN = Path(__file__).resolve().parents[2]
 ODTIS = "ab" * 32
 HUB = "wss://127.0.0.1:45678/cast/ws"
+SOSED_NASLOV = "wss://10.0.0.7:8990/cast/ws"
 
 
 def _backend(td: str) -> "CB.SafeerControlBackend":
@@ -148,12 +152,17 @@ class Zaslon(_Osnova):
         self.assertEqual((d[-1]["vrsta"], d[-1]["stanje"], d[-1]["tece"]), ("zaslon", "napaka", False))
         self.assertTrue(d[-1]["sporocilo"])
 
-    def test_deljenje_dobi_zeton_za_klice_http(self):
+    def test_deljenje_izbere_sredisce_v_delovni_niti(self):
+        """Klic z mostu ne caka na omrezje: sejo pri sredisci naprave dobi sele nit deljenja."""
         ustvarjen = {}
 
         class Deljenje:
-            def __init__(self, hub, zeton, odtis, moj_id, cilj, ime, ob_spremembi=None, navidezni_zaslon=None):
-                ustvarjen.update(zeton=zeton, ob_spremembi=ob_spremembi)
+            def __init__(self, hub, zeton, odtis, moj_id, cilj, ime, ob_spremembi=None, sredisce=None):
+                ustvarjen.update(zeton=zeton, cilj=cilj, ob_spremembi=ob_spremembi, sredisce=sredisce)
+
+            @staticmethod
+            def zajem_na_voljo():
+                return True, ""
 
             def zacni(self):
                 pass
@@ -161,16 +170,91 @@ class Zaslon(_Osnova):
             def ustavi(self):
                 pass
 
-        self._zaplata_zetona.stop()
-        try:
-            with mock.patch.object(CB, "_WindowsDeljenjeZaslona", Deljenje), \
-                    mock.patch.object(self.b, "_zeton_http", return_value="saf_seja_nova"):
-                self.assertTrue(self.b.zacni_deljenje_zaslona("n-tv", "Televizor"))
-        finally:
-            self._zaplata_zetona.start()
-        self.assertEqual(ustvarjen["zeton"], "saf_seja_nova")
+        with mock.patch.object(CB, "_WindowsDeljenjeZaslona", Deljenje), \
+                mock.patch.object(CB.link_hub, "seja_s_podpisom") as seja, \
+                mock.patch.object(self.b, "_sredisce_naprave") as sredisce_naprave:
+            self.assertTrue(self.b.zacni_deljenje_zaslona("n-tv", "Televizor"))
+            seja.assert_not_called()
+            sredisce_naprave.assert_not_called()
+        self.assertEqual((ustvarjen["zeton"], ustvarjen["cilj"]), ("", "n-tv"))
         ustvarjen["ob_spremembi"]({"tece": True, "cilj": "n-tv", "ime": "Televizor", "napaka": ""})
         self.assertEqual(self._deljenja()[-1]["stanje"], "tece")
+        with mock.patch.object(self.b, "_sredisce_naprave", return_value=((SOSED_NASLOV, "odtis-tv"), "")), \
+                mock.patch.object(CB.link_hub, "seja_s_podpisom", return_value="seja-pri-tv"):
+            self.assertEqual(ustvarjen["sredisce"](), ((SOSED_NASLOV, "seja-pri-tv", "odtis-tv", self.b.device_id), {}))
+
+    def test_sredisce_naprave_dobi_sejo_s_podpisom(self):
+        with mock.patch.object(self.b, "_sredisce_naprave", return_value=((SOSED_NASLOV, "odtis-tv"), "")), \
+                mock.patch.object(CB.link_hub, "seja_s_podpisom", return_value="seja-pri-tv") as seja:
+            izbrano, napaka = self.b._sredisce_za_zaslon("n-tv")
+        seja.assert_called_once_with(SOSED_NASLOV, self.b.device_id, "odtis-tv", self.b.device_ime)
+        self.assertEqual((izbrano, napaka), ((SOSED_NASLOV, "seja-pri-tv", "odtis-tv", self.b.device_id), {}))
+
+    def test_sredisce_naprave_brez_seje_je_napaka(self):
+        with mock.patch.object(self.b, "_sredisce_naprave", return_value=((SOSED_NASLOV, "odtis-tv"), "")), \
+                mock.patch.object(CB.link_hub, "seja_s_podpisom", return_value=None):
+            izbrano, napaka = self.b._sredisce_za_zaslon("n-tv")
+        self.assertIsNone(izbrano)
+        self.assertEqual(napaka["koda"], "sredisce_naprave_ni_dosegljivo")
+
+    def test_naprava_pri_lastnem_sredisci_pove_da_ne_gre(self):
+        """Sredisce racunalnika zaslona ne posreduje: jasna napaka namesto »posodobi Safeer na napravi, ki je središče«."""
+        self._zaplata_zetona.stop()
+        try:
+            with mock.patch.object(self.b, "_sredisce_naprave", return_value=(None, "")), \
+                    mock.patch.object(self.b, "_gostimo_lokalno", return_value=True), \
+                    mock.patch.object(self.b, "_zeton_http") as zeton:
+                izbrano, napaka = self.b._sredisce_za_zaslon("n-x")
+                zeton.assert_not_called()
+        finally:
+            self._zaplata_zetona.start()
+        self.assertIsNone(izbrano)
+        self.assertEqual((napaka["koda"], napaka["sporocilo"]),
+                         ("zaslon_ni_na_voljo", "Ta naprava še ne more prikazati zaslona tega računalnika."))
+
+    def test_prijavljeni_na_tuje_sredisce_delimo_prek_njega(self):
+        with mock.patch.object(self.b, "_sredisce_naprave", return_value=(None, "")), \
+                mock.patch.object(self.b, "_gostimo_lokalno", return_value=False):
+            izbrano, napaka = self.b._sredisce_za_zaslon("n-tv")
+        self.assertEqual((izbrano, napaka), ((HUB, "saf_pc_moj", ODTIS, self.b.device_id), {}))
+
+    def test_naprava_dva_skoka_dalec(self):
+        with mock.patch.object(self.b, "_sredisce_naprave", return_value=(None, "naprava_pri_drugem_srediscu")):
+            izbrano, napaka = self.b._sredisce_za_zaslon("n-tv")
+        self.assertIsNone(izbrano)
+        self.assertEqual(napaka["koda"], "naprava_pri_drugem_srediscu")
+
+    def _okvir(self, velikost, barva=(10, 120, 200)):
+        from PIL import Image
+        d = CB._WindowsDeljenjeZaslona(HUB, "", ODTIS, "n-moj", "n-tv", "TV")
+        with mock.patch("PIL.ImageGrab.grab", return_value=Image.new("RGB", velikost, barva)) as zajem:
+            okvir = d._okvir()
+        zajem.assert_called_once_with()
+        return Image.open(io.BytesIO(okvir))
+
+    def test_deli_pravi_zaslon_pomanjsan(self):
+        """Gledalec dobi zaslon racunalnika (zajem), ne narisane slike navideznega namizja."""
+        slika = self._okvir((2560, 1440))
+        self.assertEqual((slika.format, slika.size), ("JPEG", (1280, 720)))
+        r, g, m = slika.convert("RGB").getpixel((640, 360))
+        self.assertTrue(abs(r - 10) < 12 and abs(g - 120) < 12 and abs(m - 200) < 12, (r, g, m))
+
+    def test_manjsi_zaslon_ostane_pokoncen_se_pomanjsa_po_visini(self):
+        self.assertEqual(self._okvir((1024, 768)).size, (1024, 768))
+        self.assertEqual(self._okvir((1440, 2560)).size, (720, 1280))
+
+    def test_narisanega_namizja_ne_posilja_vec(self):
+        vir = inspect.getsource(CB._WindowsDeljenjeZaslona)
+        self.assertNotIn("zajemi_posnetek(", vir.split('"""')[2])
+        self.assertIn("ImageGrab.grab()", vir)
+
+    def test_brez_pillow_pove_da_zajema_ni(self):
+        with mock.patch.dict(sys.modules, {"PIL": None}):
+            self.assertEqual(CB._WindowsDeljenjeZaslona.zajem_na_voljo(), (False, "Zajem zaslona na tem računalniku ni na voljo."))
+            self.assertFalse(self.b.zacni_deljenje_zaslona("n-tv", "Televizor"))
+        d = self._deljenja()[-1]
+        self.assertEqual((d["vrsta"], d["stanje"], d["koda"], d["tece"]), ("zaslon", "napaka", "ni_zajema", False))
+        self.assertEqual(CB._WindowsDeljenjeZaslona.zajem_na_voljo(), (True, ""))
 
 
 class PrejetoBesedilo(_Osnova):
