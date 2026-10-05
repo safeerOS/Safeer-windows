@@ -181,14 +181,15 @@ class Zaslon(_Osnova):
         self.assertEqual(self._deljenja()[-1]["stanje"], "tece")
         with mock.patch.object(self.b, "_sredisce_naprave", return_value=((SOSED_NASLOV, "odtis-tv"), "")), \
                 mock.patch.object(CB.link_hub, "seja_s_podpisom", return_value="seja-pri-tv"):
-            self.assertEqual(ustvarjen["sredisce"](), ((SOSED_NASLOV, "seja-pri-tv", "odtis-tv", self.b.device_id), {}))
+            self.assertEqual(ustvarjen["sredisce"](), ((SOSED_NASLOV, "seja-pri-tv", "odtis-tv", self.b.device_id),
+                                                       {"pri_napravi": True}))
 
     def test_sredisce_naprave_dobi_sejo_s_podpisom(self):
         with mock.patch.object(self.b, "_sredisce_naprave", return_value=((SOSED_NASLOV, "odtis-tv"), "")), \
                 mock.patch.object(CB.link_hub, "seja_s_podpisom", return_value="seja-pri-tv") as seja:
             izbrano, napaka = self.b._sredisce_za_zaslon("n-tv")
         seja.assert_called_once_with(SOSED_NASLOV, self.b.device_id, "odtis-tv", self.b.device_ime)
-        self.assertEqual((izbrano, napaka), ((SOSED_NASLOV, "seja-pri-tv", "odtis-tv", self.b.device_id), {}))
+        self.assertEqual((izbrano, napaka), ((SOSED_NASLOV, "seja-pri-tv", "odtis-tv", self.b.device_id), {"pri_napravi": True}))
 
     def test_sredisce_naprave_brez_seje_je_napaka(self):
         with mock.patch.object(self.b, "_sredisce_naprave", return_value=((SOSED_NASLOV, "odtis-tv"), "")), \
