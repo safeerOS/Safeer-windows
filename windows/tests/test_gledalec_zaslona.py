@@ -16,7 +16,7 @@ GLEDALEC = "https://10.0.0.7:8990/cast/screen/abc/view?k=KLJUC"
 class Okno:
     """Nadomestek okna Safeer OS: zavihki Spleta, razdelek in kar je gledalec z njim naredil."""
 
-    def __init__(self, razdelek="datoteke", v_spletu=False):
+    def __init__(self, razdelek="datoteke", v_spletu=False, okno=""):
         self.zavihki = []
         self.trenutni = None
         self.v_spletu = v_spletu
@@ -24,10 +24,22 @@ class Okno:
         self.vrnitve = []
         self.branja = []          # povratni klici, ki cakajo na odgovor strani
         self.odgovori_takoj = True
+        self.okno = okno          # okno programa: "" = vidno, "pomanjsano", "skrito"
+        self.okno_dejanja = []
         self.g = gledalec_zaslona.GledalecZaslona(
             nov_zavihek=self.nov, zapri_zavihek=self.zapri, je_trenutni=lambda z: self.trenutni is z,
             naslov=lambda z: z.naslov(), v_spletu=lambda: self.v_spletu, preberi_razdelek=self.preberi,
-            pokazi_splet=self.pokazi, vrni_v_os=self.vrni)
+            pokazi_splet=self.pokazi, vrni_v_os=self.vrni, pokazi_okno=self.pokazi_okno,
+            vrni_okno=self.vrni_okno)
+
+    def pokazi_okno(self):
+        prej, self.okno = self.okno, ""
+        self.okno_dejanja.append("pokazi")
+        return prej
+
+    def vrni_okno(self, prej):
+        self.okno = prej
+        self.okno_dejanja.append(prej)
 
     def nov(self, url):
         z = types.SimpleNamespace(url=url, naslov=lambda: z.url)
@@ -156,7 +168,128 @@ class Gledalec(unittest.TestCase):
             self.assertFalse(gledalec_zaslona.je_gledalec(naslov))
 
 
+class StanjeOkna(unittest.TestCase):
+    """Pomanjsano ali skrito okno Safeer OS: zaslon, ki ga je nekdo poslal sem, se pokaze; po koncu je okno, kot je bilo."""
+
+    def test_pomanjsano_okno_se_pokaze_in_po_koncu_spet_pomanjsa(self):
+        o = Okno(okno="pomanjsano")
+        o.g.odpri(GLEDALEC)
+        self.assertEqual((o.okno, o.okno_dejanja, o.naslovi()), ("", ["pokazi"], [GLEDALEC]))
+        self.assertTrue(o.g.zapri())
+        self.assertEqual((o.okno, o.vrnitve), ("pomanjsano", ["datoteke"]))
+
+    def test_skrito_okno_se_po_koncu_spet_skrije(self):
+        o = Okno(okno="skrito")
+        o.g.odpri(GLEDALEC)
+        self.assertEqual(o.okno, "")
+        o.g.zapri()
+        self.assertEqual(o.okno_dejanja, ["pokazi", "skrito"])
+
+    def test_vidno_okno_gre_v_ospredje_in_po_koncu_ostane(self):
+        o = Okno()
+        o.g.odpri(GLEDALEC)
+        o.g.zapri()
+        self.assertEqual(o.okno_dejanja, ["pokazi"])
+
+    def test_uporabnik_v_spletu_s_pomanjsanim_oknom(self):
+        o = Okno(v_spletu=True, okno="pomanjsano")
+        o.g.odpri(GLEDALEC)
+        o.g.zapri()
+        self.assertEqual((o.okno, o.vrnitve, o.v_spletu), ("pomanjsano", [], True))
+
+    def test_okna_ne_pomanjsamo_ce_uporabnik_medtem_dela_v_drugem_zavihku(self):
+        o = Okno(okno="pomanjsano")
+        o.g.odpri(GLEDALEC)
+        o.nov("https://example.org/moje")
+        self.assertTrue(o.g.zapri())
+        self.assertEqual((o.okno, o.okno_dejanja), ("", ["pokazi"]))
+
+    def test_okna_ne_pomanjsamo_ce_je_uporabnik_odsel_iz_spleta(self):
+        o = Okno(okno="skrito")
+        o.g.odpri(GLEDALEC)
+        o.v_spletu = False
+        self.assertTrue(o.g.zapri())
+        self.assertEqual((o.okno, o.okno_dejanja), ("", ["pokazi"]))
+
+    def test_menjava_gledalca_ohrani_stanje_okna_pred_prvim_deljenjem(self):
+        o = Okno(okno="pomanjsano")
+        o.g.odpri(GLEDALEC)
+        o.g.odpri(GLEDALEC.replace("abc", "def"))      # okno je zdaj vidno - to ni stanje, v katero se vracamo
+        self.assertEqual(o.okno, "")
+        o.g.zapri()
+        self.assertEqual(o.okno, "pomanjsano")
+
+    def test_konec_pred_odgovorom_strani_okna_ne_pokaze(self):
+        o = Okno(okno="pomanjsano")
+        o.odgovori_takoj = False
+        o.g.odpri(GLEDALEC)
+        o.g.zapri()
+        o.branja[0]("datoteke")
+        self.assertEqual((o.okno, o.okno_dejanja), ("pomanjsano", []))
+
+    def test_po_koncu_se_stanje_okna_pozabi(self):
+        o = Okno(okno="pomanjsano")
+        o.g.odpri(GLEDALEC)
+        o.g.zapri()
+        o.okno = ""                                   # uporabnik je okno odprl sam
+        o.g.odpri(GLEDALEC)
+        o.g.zapri()
+        self.assertEqual(o.okno, "", "drugo deljenje je naslo vidno okno - ostane vidno")
+
+    def test_brez_funkcij_okna_dela_kot_prej(self):
+        o = Okno()
+        g = gledalec_zaslona.GledalecZaslona(
+            nov_zavihek=o.nov, zapri_zavihek=o.zapri, je_trenutni=lambda z: o.trenutni is z,
+            naslov=lambda z: z.naslov(), v_spletu=lambda: o.v_spletu, preberi_razdelek=o.preberi,
+            pokazi_splet=o.pokazi, vrni_v_os=o.vrni)
+        g.odpri(GLEDALEC)
+        self.assertTrue(g.zapri())
+        self.assertEqual((o.vrnitve, o.okno_dejanja), (["datoteke"], []))
+
+
 class SafeerOs(unittest.TestCase):
+    def test_gledalec_dobi_funkciji_okna(self):
+        vir = inspect.getsource(os_app.SafeerOsWindow.__init__)
+        self.assertIn("pokazi_okno=self._pokazi_okno_za_gledalca", vir)
+        self.assertIn("vrni_okno=self._vrni_okno_po_gledalcu", vir)
+
+    def test_pomanjsano_razpeto_okno_se_pokaze(self):
+        okno = mock.Mock(v_oknu=False)
+        okno.isVisible.return_value = True
+        okno.isMinimized.return_value = True
+        self.assertEqual(os_app.SafeerOsWindow._pokazi_okno_za_gledalca(okno), "pomanjsano")
+        okno.showMaximized.assert_called_once_with()
+        okno.showNormal.assert_not_called()
+        okno.raise_.assert_called_once_with()
+        okno.activateWindow.assert_called_once_with()
+
+    def test_skrito_okno_v_oknu_se_pokaze(self):
+        okno = mock.Mock(v_oknu=True)
+        okno.isVisible.return_value = False
+        self.assertEqual(os_app.SafeerOsWindow._pokazi_okno_za_gledalca(okno), "skrito")
+        okno.showNormal.assert_called_once_with()
+        okno.showMaximized.assert_not_called()
+
+    def test_vidnemu_oknu_ne_spreminjamo_velikosti(self):
+        okno = mock.Mock(v_oknu=False)
+        okno.isVisible.return_value = True
+        okno.isMinimized.return_value = False
+        self.assertEqual(os_app.SafeerOsWindow._pokazi_okno_za_gledalca(okno), "")
+        okno.showMaximized.assert_not_called()
+        okno.showNormal.assert_not_called()
+        okno.raise_.assert_called_once_with()
+
+    def test_okno_se_vrne_v_stanje_pred_deljenjem(self):
+        okno = mock.Mock()
+        os_app.SafeerOsWindow._vrni_okno_po_gledalcu(okno, "pomanjsano")
+        okno.showMinimized.assert_called_once_with()
+        okno.hide.assert_not_called()
+        os_app.SafeerOsWindow._vrni_okno_po_gledalcu(okno, "skrito")
+        okno.hide.assert_called_once_with()
+        os_app.SafeerOsWindow._vrni_okno_po_gledalcu(okno, "")
+        okno.showMinimized.assert_called_once_with()
+        okno.hide.assert_called_once_with()
+
     def test_dogodek_zaslon_odpre_in_zapre_gledalca(self):
         vir = inspect.getsource(os_app.SafeerOsWindow._na_dogodek_linka)
         self.assertIn("self.gledalec_zaslona.odpri(url)", vir)

@@ -8,7 +8,9 @@ na zaslonu je ostala stran z napako). Zdaj:
   * ob koncu deljenja se zapre natanko ta zavihek; ce uporabnik pred deljenjem ni bil v Spletu, se Safeer OS vrne v
     razdelek, kjer je bil; ce je bil v Spletu, ostane tam pri svojih zavihkih;
   * zavihka, v katerem je uporabnik medtem odprl nekaj svojega, ne zapremo; ce ga je zaprl sam, ni kaj storiti;
-  * konec, ki prehiti odpiranje, odpiranje preklice.
+  * konec, ki prehiti odpiranje, odpiranje preklice;
+  * pomanjsano ali skrito okno Safeer OS se ob zacetku pokaze (zaslon je nekdo poslal SEM), po koncu pa se vrne v
+    stanje, v katerem je bilo - ce je gledalec takrat se na zaslonu.
 
 Razred ne pozna Qt: okno dobi kot funkcije, zato je preizkusljiv brez zaslona.
 """
@@ -29,7 +31,8 @@ class GledalecZaslona:
     def __init__(self, *, nov_zavihek: Callable[[str], Any], zapri_zavihek: Callable[[Any], bool],
                  je_trenutni: Callable[[Any], bool], naslov: Callable[[Any], str], v_spletu: Callable[[], bool],
                  preberi_razdelek: Callable[[Callable[[str], None]], None], pokazi_splet: Callable[[], None],
-                 vrni_v_os: Callable[[str], None]) -> None:
+                 vrni_v_os: Callable[[str], None], pokazi_okno: Optional[Callable[[], str]] = None,
+                 vrni_okno: Optional[Callable[[str], None]] = None) -> None:
         self._nov_zavihek = nov_zavihek
         self._zapri_zavihek = zapri_zavihek
         self._je_trenutni = je_trenutni
@@ -38,47 +41,59 @@ class GledalecZaslona:
         self._preberi_razdelek = preberi_razdelek
         self._pokazi_splet = pokazi_splet
         self._vrni_v_os = vrni_v_os
+        #: pokazi_okno() pokaze okno programa in vrne, kaksno je bilo prej ("" = vidno); vrni_okno(prej) ga vrne.
+        self._pokazi_okno = pokazi_okno
+        self._vrni_okno = vrni_okno
         self._zavihek: Optional[Any] = None
         #: Stevec zahtev: konec ali novo deljenje razveljavi odpiranje, ki se caka na odgovor strani.
         self._zahteva = 0
-        #: Razdelek Safeer OS pred deljenjem ("splet" = uporabnik je bil ze v Spletu).
+        #: Razdelek Safeer OS pred deljenjem ("splet" = uporabnik je bil ze v Spletu) in stanje okna ("" = vidno).
         self._prej = ""
+        self._okno_prej = ""
 
     def odprt(self) -> bool:
         return self._zavihek is not None
 
     def odpri(self, url: str) -> None:
         """Zacetek deljenja: stran gledalca v novem zavihku. Prejsnji gledalec (novo deljenje) se zapre brez vrnitve."""
-        prej = self._prej if self.zapri(vrni=False) else ""
+        prej, okno_prej = self._prej, self._okno_prej
+        zamenjan = self.zapri(vrni=False)
         zahteva = self._zahteva
-        if prej:
-            self._odpri(zahteva, url, prej)          # gledalca menjamo: velja razdelek pred PRVIM deljenjem
+        if zamenjan:
+            self._odpri(zahteva, url, prej, okno_prej)       # gledalca menjamo: velja stanje pred PRVIM deljenjem
         elif self._v_spletu():
             self._odpri(zahteva, url, "splet")
         else:
             self._preberi_razdelek(lambda razdelek: self._odpri(zahteva, url, str(razdelek or "") or "domov"))
 
-    def _odpri(self, zahteva: int, url: str, prej: str) -> None:
+    def _odpri(self, zahteva: int, url: str, prej: str, okno_prej: Optional[str] = None) -> None:
         if zahteva != self._zahteva or self._zavihek is not None:
-            return                                   # konec ali novo deljenje je prehitelo odgovor strani
+            return                                           # konec ali novo deljenje je prehitelo odgovor strani
         self._prej = prej
         self._zavihek = self._nov_zavihek(url)
         self._pokazi_splet()
+        pokazano = self._pokazi_okno() if self._pokazi_okno is not None else ""
+        self._okno_prej = pokazano if okno_prej is None else okno_prej
 
     def zapri(self, vrni: bool = True) -> bool:
         """Konec deljenja. Vrne True, ce je zaprl zavihek gledalca."""
         self._zahteva += 1
         zavihek, self._zavihek = self._zavihek, None
+        okno_prej, self._okno_prej = self._okno_prej, ""
         if zavihek is None:
             return False
         try:
             if not je_gledalec(self._naslov(zavihek)):
-                return False                         # uporabnik je v tem zavihku odprl nekaj svojega
+                return False                                 # uporabnik je v tem zavihku odprl nekaj svojega
             bil_trenutni = bool(self._je_trenutni(zavihek))
             if not self._zapri_zavihek(zavihek):
-                return False                         # zaprl ga je ze sam
+                return False                                 # zaprl ga je ze sam
         except RuntimeError:
-            return False                             # pogled je ze unicen (zavihek zaprt)
-        if vrni and bil_trenutni and self._v_spletu() and self._prej != "splet":
-            self._vrni_v_os(self._prej or "domov")
+            return False                                     # pogled je ze unicen (zavihek zaprt)
+        if vrni and bil_trenutni and self._v_spletu():
+            # Gledalec je bil se na zaslonu: razdelek in okno vrnemo, kot sta bila pred deljenjem.
+            if self._prej != "splet":
+                self._vrni_v_os(self._prej or "domov")
+            if okno_prej and self._vrni_okno is not None:
+                self._vrni_okno(okno_prej)
         return True

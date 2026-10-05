@@ -812,7 +812,9 @@ class SafeerOsWindow(QMainWindow):
             v_spletu=lambda: bool(self._spletni_nacin),
             preberi_razdelek=self._preberi_razdelek,
             pokazi_splet=self._pokazi_splet_za_gledalca,
-            vrni_v_os=self._zapri_browser)
+            vrni_v_os=self._zapri_browser,
+            pokazi_okno=self._pokazi_okno_za_gledalca,
+            vrni_okno=self._vrni_okno_po_gledalcu)
         self.setCentralWidget(self.zaslon)
 
         # Tipke za celozaslonski nacin
@@ -1547,6 +1549,25 @@ class SafeerOsWindow(QMainWindow):
         self.zaslon.setCurrentWidget(self.os_vsebnik)
         self.browser_window.set_safeer_os_web_mode(True)
         self.setWindowTitle("Safeer OS · Splet")
+
+    def _pokazi_okno_za_gledalca(self) -> str:
+        """Zaslon je nekdo poslal SEM: pomanjsano ali skrito okno pokazemo (enako kot prebudi ob kliku ikone).
+        Vrne, kaksno je bilo okno prej ("" = vidno), da ga po koncu gledanja vrnemo v isto stanje."""
+        prej = "skrito" if not self.isVisible() else ("pomanjsano" if self.isMinimized() else "")
+        if prej:
+            if self.v_oknu:
+                self.showNormal()
+            else:
+                self.showMaximized()
+        self.raise_()
+        self.activateWindow()
+        return prej
+
+    def _vrni_okno_po_gledalcu(self, prej: str) -> None:
+        if prej == "pomanjsano":
+            self.showMinimized()
+        elif prej == "skrito":
+            self.hide()
 
     def _preberi_razdelek(self, nadaljuj) -> None:
         """Razdelek Safeer OS, v katerem je uporabnik (za vrnitev po koncu gledanja). Stran odgovori takoj; ce ne
