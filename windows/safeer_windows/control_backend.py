@@ -355,6 +355,14 @@ class SafeerControlBackend:
             return akcija in ("screenshot", "screen.capture", "screen.start", "screen.stop", "screen.status")
         return False
 
+    def _lastni_naslovi(self) -> list:
+        """Naslovi tega racunalnika za odgovor na `screen.start`. So dodatek: brez njih seja dela kot prej."""
+        try:
+            from core.link_zvok import lastni_naslovi
+            return [str(n) for n in lastni_naslovi(self.hub_url())][:4]
+        except Exception:  # noqa: BLE001
+            return []
+
     # ------------------------------------------------------------------ Odkrivanje Hubov v omrezju
     def _lokalni_ip(self) -> str:
         s = None
@@ -1421,7 +1429,9 @@ class SafeerControlBackend:
 
             elif akcija == "screen.start":
                 kakovost = str(params.get("quality") or "najvisja")
-                seja = self.navidezni_zaslon.zacni_sejo(posiljatelj, kakovost=kakovost)
+                seja = dict(self.navidezni_zaslon.zacni_sejo(posiljatelj, kakovost=kakovost))
+                # Nasi naslovi: gledalec jih poskusi poleg naslova iz seznama naprav (docs/LINK-MESH.md, pravilo 8).
+                seja["hosts"] = self._lastni_naslovi()
                 izid = {"ok": True, "message": "Navidezni zaslon se deli", "data": seja}
 
             elif akcija == "screen.stop":

@@ -26,3 +26,11 @@ def test_sporocilo_brez_naslova_imenuje_napravo_v_vseh_jezikih():
         besedilo = oz._b("ni_doma", ime="Linux PC")
         assert besedilo.startswith("Linux PC ") and "Global Link" in besedilo, jezik
     oz.nastavi_jezik("sl")
+
+
+def test_sporocilo_nedosegljive_naprave_imenuje_napravo_v_vseh_jezikih():
+    for jezik in oz._BESEDILA:
+        oz.nastavi_jezik(jezik)
+        besedilo = oz._b("ni_dosegljiv", ime="Linux PC")
+        assert "Linux PC" in besedilo and "{" not in besedilo, jezik
+    oz.nastavi_jezik("sl")

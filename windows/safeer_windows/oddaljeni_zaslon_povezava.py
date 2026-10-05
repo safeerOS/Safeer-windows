@@ -27,7 +27,7 @@ if _KOREN not in sys.path:
 
 from core import link_vticnik  # noqa: E402
 
-from .oddaljeni_zaslon_protokol import NAJVECJI_OKVIR, Seja  # noqa: E402
+from .oddaljeni_zaslon_protokol import CAS_KANDIDATA_S, NAJVECJI_OKVIR, Seja  # noqa: E402
 
 #: Slika tece ves cas (tudi mirno namizje); tisina, daljsa od tega, pomeni, da naprave ni vec.
 TISINA_S = 10.0
@@ -42,6 +42,16 @@ class PrekinjenaPovezava(ConnectionError):
     """Povezava je padla: konec sredi okvirja, tisina ali napaka omrezja.
 
     Namenoma brez besedila - okno pokaze svoje sporocilo v jeziku uporabnika, ne sistemske napake."""
+
+
+class NiDosegljiva(ConnectionError):
+    """Naprave ni bilo mogoce doseci na nobenem od njenih naslovov.
+
+    Brez besedila, kot PrekinjenaPovezava: okno pove svoj stavek v jeziku uporabnika."""
+
+
+class DrugOdtis(ssl.SSLError):
+    """Na naslovu je odgovorila naprava z drugim potrdilom, kot ga ima seja."""
 
 
 def _zapri(vticnica) -> None:
@@ -89,21 +99,52 @@ class PovezavaGledalca:
             zbrano.extend(znak)
         raise ValueError("Neveljavna glava oddaljenega zaslona.")
 
-    def povezi(self) -> dict:
-        """Poveze se, preveri pripeti odtis potrdila, poslje zeton in vrne glavo seje."""
-        goli = socket.create_connection((self.seja.naslov, self.seja.vrata), timeout=self.cas_povezave)
+    def _odpri(self, naslov: str, cas: float):
+        """TCP in TLS do enega naslova; vrne povezavo samo, ce se odtis potrdila ujema z odtisom seje. Zeton
+        gre na pot sele po tem - naprava na napacnem naslovu ga ne vidi."""
+        goli = socket.create_connection((naslov, self.seja.vrata), timeout=cas)
         self._zapomni(goli)
-        goli.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        kontekst = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-        kontekst.minimum_version = ssl.TLSVersion.TLSv1_2
-        kontekst.check_hostname = False
-        kontekst.verify_mode = ssl.CERT_NONE
-        tls = kontekst.wrap_socket(goli, server_hostname=self.seja.naslov)
-        self._zapomni(tls)
-        dejanski = hashlib.sha256(tls.getpeercert(binary_form=True)).hexdigest()
-        if dejanski != self.seja.odtis:
-            _zapri(tls)
-            raise ssl.SSLError("Odtis potrdila se ne ujema.")
+        try:
+            goli.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            kontekst = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            kontekst.minimum_version = ssl.TLSVersion.TLSv1_2
+            kontekst.check_hostname = False
+            kontekst.verify_mode = ssl.CERT_NONE
+            tls = kontekst.wrap_socket(goli, server_hostname=naslov)
+            self._zapomni(tls)
+            dejanski = hashlib.sha256(tls.getpeercert(binary_form=True)).hexdigest()
+            if dejanski != self.seja.odtis:
+                raise DrugOdtis("Odtis potrdila se ne ujema.")
+            return tls
+        except Exception:
+            _zapri(goli)
+            raise
+
+    def povezi(self) -> dict:
+        """Poveze se, preveri pripeti odtis potrdila, poslje zeton in vrne glavo seje.
+
+        Napravo isce na vseh naslovih seje po vrsti (docs/LINK-MESH.md, pravilo 8). Naslov, na katerem ni nikogar
+        ali je tam druga naprava (drug odtis), preskoci; ko pravo napravo najde, so napake koncne."""
+        naslovi = tuple(getattr(self.seja, "naslovi", ()) or ()) or (self.seja.naslov,)
+        # En naslov dobi ves cas; vec naslovov si ga razdeli, da napacen prvi ne porabi cakanja naprave.
+        cas = self.cas_povezave if len(naslovi) == 1 else min(self.cas_povezave, CAS_KANDIDATA_S)
+        tls = None
+        zadnja: Optional[BaseException] = None
+        for naslov in naslovi:
+            with self._kljuc:
+                if self._zaprta:
+                    raise PrekinjenaPovezava()
+            try:
+                tls = self._odpri(naslov, cas)
+                break
+            except PrekinjenaPovezava:
+                raise                       # okno se je medtem zaprlo
+            except DrugOdtis as exc:
+                zadnja = exc                # na tem naslovu je druga naprava; ce drugega naslova ni, to tudi povemo
+            except (OSError, ValueError):
+                zadnja = NiDosegljiva()     # nikogar na tem naslovu: okno pove svoj stavek, ne sistemske napake
+        if tls is None:
+            raise zadnja or NiDosegljiva()
         tls.settimeout(self.tisina_s)
         tls.sendall(("SAFEER-ZASLON " + self.seja.zeton + "\n").encode("utf-8"))
         glava = json.loads(self._vrstica(tls).decode("utf-8"))
@@ -170,4 +211,4 @@ class PovezavaGledalca:
         _zapri(surova)
 
 
-__all__ = ["PovezavaGledalca", "PrekinjenaPovezava", "TISINA_S"]
+__all__ = ["DrugOdtis", "NiDosegljiva", "PovezavaGledalca", "PrekinjenaPovezava", "TISINA_S"]
