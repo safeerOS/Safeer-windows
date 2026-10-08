@@ -146,14 +146,13 @@ class ScriptTests(unittest.TestCase):
             store = policy.SettingsStore(os.path.join(tmp, "s.json"))
             names = [spec["name"] for spec in policy.script_specs(store)]
             self.assertIn("safeer-youtube-keep-watching", names)
-            self.assertIn("safeer-hookshot-inserts", names)
+            self.assertNotIn("safeer-hookshot-inserts", names)   # recept za eno stran je odstranjen (CONTRIBUTING)
             self.assertIn("safeer-youtube-adblock", names)
             for spec in policy.script_specs(store):
                 self.assertNotIn("messageHandlers", spec["source"])
             store.set("adblock_enabled", False)
             reduced = [spec["name"] for spec in policy.script_specs(store)]
             self.assertIn("safeer-youtube-keep-watching", reduced)
-            self.assertNotIn("safeer-hookshot-inserts", reduced)
 
     @unittest.skipUnless(shutil.which("node"), "node is not installed")
     def test_wrapped_scripts_are_valid_javascript(self):

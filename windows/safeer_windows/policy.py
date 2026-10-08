@@ -34,6 +34,47 @@ HOME_URL = "safeer://home/"
 # Zacetna stran odseka Splet v Safeer OS (ista stran na vseh razlicicah Safeer OS).
 SPLET_URL = "safeer://home/splet"
 BRIDGE_PREFIX = "__safeer_bridge__:"
+
+#: Nakljucen zeton procesa. Skripte Safeer ga nosijo v zaprtju (stran ga ne more prebrati) in ga pripnejo vsakemu sporocilu;
+#: javni dejanji mostu (stevec oglasov, nepodprt video) brez njega ne veljata - stran z navadnim console.log tako ne more
+#: napihniti stevca (zunanji pregled kode 8. 10. 2026).
+STEVEC_ZETON = secrets.token_hex(16)
+
+
+def zeton_veljaven(payload) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    t = payload.get("t")
+    return isinstance(t, str) and secrets.compare_digest(t.encode("utf-8", "replace"), STEVEC_ZETON.encode("ascii"))
+
+
+class OmejevalnikStevca:
+    """Najvec `najvec` oglasov na `okno` sekund (drsece okno); en sam sporocilo najvec `najvec_na_sporocilo`.
+    Pravi stevec tudi na zelo oglasni strani ne preseze tega; ponarejevalcu ostane zanemarljiva hitrost."""
+
+    najvec_na_sporocilo = 50
+
+    def __init__(self, najvec: int = 300, okno: float = 60.0):
+        self.najvec = int(najvec)
+        self.okno = float(okno)
+        self._dogodki: List[Tuple[float, int]] = []
+        self._lock = threading.Lock()
+
+    def dovoli(self, stevilo, zdaj: Optional[float] = None) -> int:
+        try:
+            n = max(0, min(int(stevilo), self.najvec_na_sporocilo))
+        except (TypeError, ValueError):
+            return 0
+        if n == 0:
+            return 0
+        t = time.monotonic() if zdaj is None else float(zdaj)
+        with self._lock:
+            self._dogodki = [(ts, k) for ts, k in self._dogodki if t - ts < self.okno]
+            porabljeno = sum(k for _, k in self._dogodki)
+            dovoljeno = max(0, min(n, self.najvec - porabljeno))
+            if dovoljeno:
+                self._dogodki.append((t, dovoljeno))
+            return dovoljeno
 PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -476,12 +517,11 @@ def wrap_script(source: str, include: Optional[Iterable[str]], exclude: Optional
         "if (__safeerInclude.length && !__safeerMatches(__safeerInclude)) return;\n"
         "if (__safeerMatches(__safeerExclude)) return;\n"
         + ("if (window.top !== window) return;\n" if top_frame_only else "")
-        + "function __safeerPost(message) { try { console.log('" + BRIDGE_PREFIX + "' + JSON.stringify(message)); } catch (e) {} }\n"
+        + "function __safeerPost(message) { try { message.t = '" + STEVEC_ZETON + "'; console.log('" + BRIDGE_PREFIX + "' + JSON.stringify(message)); } catch (e) {} }\n"
     )
     return prelude + adapt_linux_script(source) + "\n})();\n"
 
 
-HOOKSHOT_SITES = ("pushsquare.com", "nintendolife.com", "purexbox.com", "timeextension.com", "digitalfoundry.net")
 YOUTUBE_PATTERNS = ["*://*.youtube.com/*", "*://youtube.com/*"]
 
 
@@ -560,9 +600,6 @@ def script_specs(settings: SettingsStore) -> List[Dict[str, Any]]:
             auth + ["*://accounts.youtube.com/*", "*://accounts.google.com/*", "*://myaccount.google.com/*"], True, True)
     add("safeer-youtube-keep-watching", adblock.YOUTUBE_KEEP_WATCHING_SCRIPT,
         YOUTUBE_PATTERNS, auth + ["*://accounts.youtube.com/*"], True, False)
-    if settings.get("adblock_enabled"):
-        add("safeer-hookshot-inserts", adblock.HOOKSHOT_INSERTS_SCRIPT,
-            [f"*://{d}/*" for site in HOOKSHOT_SITES for d in (site, "*." + site)], None, True, False)
     if settings.get("adblock_enabled") and settings.get("adguard_protection_enabled"):
         add("safeer-adguard", adblock.ADGUARD_PROTECTION_SCRIPT, None,
             auth + ["*://*.google.com/*", "*://*.google.si/*", "*://*.banka.si/*",

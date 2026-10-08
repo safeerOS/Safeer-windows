@@ -552,6 +552,7 @@ class SafeerBrowserApp(QObject):
         self.cookie_filter_status = "not-set"
         self.server: Optional[QLocalServer] = None
         self._counter_dirty = False
+        self._omejevalnik_stevca = policy.OmejevalnikStevca()
         self.download_dir = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DownloadLocation) \
             or os.path.join(os.path.expanduser("~"), "Downloads")
 
@@ -863,15 +864,14 @@ class SafeerBrowserApp(QObject):
     # -- start page bridge --------------------------------------------------
     def on_bridge_message(self, page: SafeerPage, payload: Dict[str, Any]) -> None:
         action = payload.get("action")
+        if action in ("media_unsupported", "increment_ads") and not policy.zeton_veljaven(payload):
+            return   # sporocilo ni od skripte Safeer (brez zetona): stran ne sme sprozati teh dejanj
         if action == "media_unsupported":
-            # Katerakoli stran: pogon nima zapisa, ki ga video zahteva. Splet ponudi predvajanje v Safeer predvajalniku.
+            # Skripta Safeer na kateri koli strani: pogon nima zapisa, ki ga video zahteva. Splet ponudi predvajanje v Safeer predvajalniku.
             page.window_ref.oznaci_nepodprt_video(page, bool(payload.get("napaka")))
             return
         if action == "increment_ads":
-            try:
-                count = max(0, min(int(payload.get("count", 1)), 50))
-            except (TypeError, ValueError):
-                count = 0
+            count = self._omejevalnik_stevca.dovoli(payload.get("count", 1))
             if count:
                 self.settings.set("total_ads_blocked", int(self.settings.get("total_ads_blocked") or 0) + count, save=False)
                 self._counter_dirty = True
