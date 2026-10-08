@@ -457,7 +457,10 @@ def potrdi_kodo(ws_naslov: str, prijava: dict, device_id: str, koda: str) -> Tup
 # Povezava v QR: kamera telefona jo odpre v Safeer (aplikacija jo prestreze) ali na strani safeer.si/p,
 # ki ponudi »Odpri v Safeer«. Skrivnost je v delu za #, zato je streznik strani nikoli ne vidi.
 QR_POVEZAVA = "https://safeer.si/p#i={qr_id}&s={skrivnost}&f={odtis}&a={naslov}"
-QR_ODTIS_ZNAKOV = 16
+# Cel odtis (64 znakov): naprava, ki kodo poskenira, potrdilo primerja v celoti. Prej je slo v kodo prvih 16 znakov -
+# predpona je sibkejsa od enakosti, Android pa je zahteval cel odtis, zato se prijava s tako kodo ni koncala
+# (zunanji pregled kode 8. 10. 2026).
+QR_ODTIS_ZNAKOV = 64
 
 
 def zacni_qr(ws_naslov: str, device_id: str, ime: str, platforma: str = PLATFORMA) -> Optional[dict]:

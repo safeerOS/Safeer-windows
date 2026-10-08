@@ -29,7 +29,8 @@ class QrPrijava(unittest.TestCase):
         self.assertEqual(telo["poll_secret"], p["prevzem"])
         self.assertNotIn(p["prevzem"], p["povezava"], "skrivnost za prevzem ne sme biti v QR")
         self.assertTrue(p["povezava"].startswith("https://safeer.si/p#i=" + "ab" * 12 + "&s=" + p["skrivnost"]))
-        self.assertIn("&f=" + "f" * 16 + "&a=", p["povezava"])
+        # Cel odtis potrdila (zunanji pregled kode 8. 10. 2026): naprava, ki kodo poskenira, ga primerja v celoti.
+        self.assertIn("&f=" + "f" * 64 + "&a=", p["povezava"])
         self.assertTrue(p["povezava"].endswith("&a=192.168.0.77:8990"))
         self.assertEqual(p["naslov"], "192.168.0.77:8990")
         self.assertEqual(p["odtis"], "f" * 64)
