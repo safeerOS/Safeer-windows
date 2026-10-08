@@ -18,3 +18,4 @@ dist/
 *.flatpak
 *.AppImage
 windows/safeer_windows/vendor/
+safeer-testi-tmp/
