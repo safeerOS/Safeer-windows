@@ -33,7 +33,12 @@ class _Povezava:
 
 @pytest.fixture
 def okolje(tmp_path, monkeypatch):
-    deljena = tmp_path / "Filmi"
+    import pathlib as _pl
+    # Deljeno mapo ustvarimo ZUNAJ AppData: pytest tmp je na Windows pod AppData\Local\Temp, kar _obcutljiva
+    # (pravilno) zavrne kot obcutljivo; uporabnik v resnici deli navadno mapo (kot /tmp na Linuxu).
+    _deljeno_koren = tempfile.mkdtemp(prefix="safeer-deljeno-",
+                                      dir=os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+    deljena = _pl.Path(_deljeno_koren) / "Filmi"
     deljena.mkdir()
     film = deljena / "film.mkv"
     film.write_bytes(b"x" * 100)
@@ -68,6 +73,7 @@ def okolje(tmp_path, monkeypatch):
     finally:
         for d in list(b._datoteke.values()):
             d.ustavi()
+        shutil.rmtree(_deljeno_koren, ignore_errors=True)
 
 
 def _ukaz(b, akcija, posiljatelj="tel", params=None):
