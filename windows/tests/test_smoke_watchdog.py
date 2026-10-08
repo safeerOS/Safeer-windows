@@ -63,7 +63,7 @@ class SmokeWatchdogTests(unittest.TestCase):
         self.assertIn("stacks_path(report)", block)
         armed = self.source[self.source.index("def arm_hard_watchdog("):self.source.index("def give_up(")]
         self.assertIn("arm_stack_dump(report", armed)
-        workflow = (Path(__file__).resolve().parents[2] / ".github" / "workflows" / "windows-package.yml").read_text()
+        workflow = (Path(__file__).resolve().parents[2] / ".github" / "workflows" / "windows-package.yml").read_text(encoding="utf-8")
         self.assertIn("build/windows/out/*.log", workflow)  # the dump has to reach the artifacts
 
     def test_progress_is_written_next_to_the_report(self):
