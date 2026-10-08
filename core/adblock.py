@@ -673,21 +673,38 @@ PROTI_ADBLOCK_SCRIPT = r"""
                 });
                 return proxy;
             };
-            var gt = window.googletag || {};
-            var cmd = Array.isArray(gt.cmd) ? gt.cmd : [];
-            var cakajoci = cmd.slice();
-            cmd.push = function () {
-                for (var i = 0; i < arguments.length; i++) { try { if (typeof arguments[i] === 'function') arguments[i](); } catch (_) {} }
-                return 0;
+            // Stran (npr. liveone.com) lahko googletag prepise z novim objektom ({cmd: []}); pripravljenost mora ostati.
+            var cakajoci = [];
+            var okrepi = function (gt) {
+                if (!gt || (typeof gt !== 'object' && typeof gt !== 'function')) return gt;
+                try {
+                    var cmd = Array.isArray(gt.cmd) ? gt.cmd : [];
+                    if (!cmd.__safeer) {
+                        cmd.slice().forEach(function (f) { cakajoci.push(f); });
+                        cmd.push = function () {
+                            for (var i = 0; i < arguments.length; i++) { try { if (typeof arguments[i] === 'function') arguments[i](); } catch (_) {} }
+                            return 0;
+                        };
+                        try { Object.defineProperty(cmd, '__safeer', { value: true }); } catch (_) {}
+                        gt.cmd = cmd;
+                    }
+                    if (gt.apiReady === undefined) gt.apiReady = true;
+                    if (gt.pubadsReady === undefined) gt.pubadsReady = true;
+                    ['pubads', 'companionAds', 'content', 'defineSlot', 'defineOutOfPageSlot', 'enableServices', 'display',
+                     'destroySlots', 'setConfig', 'sizeMapping', 'getVersion'].forEach(function (ime) {
+                        if (typeof gt[ime] !== 'function') gt[ime] = function () { return veriga(); };
+                    });
+                } catch (_) {}
+                return gt;
             };
-            gt.cmd = cmd;
-            gt.apiReady = true;
-            gt.pubadsReady = true;
-            ['pubads', 'companionAds', 'content', 'defineSlot', 'defineOutOfPageSlot', 'enableServices', 'display',
-             'destroySlots', 'setConfig', 'sizeMapping', 'getVersion'].forEach(function (ime) {
-                if (typeof gt[ime] !== 'function') gt[ime] = function () { return veriga(); };
-            });
-            window.googletag = gt;
+            var nas = okrepi(window.googletag || {});
+            try {
+                Object.defineProperty(window, 'googletag', {
+                    configurable: true, enumerable: true,
+                    get: function () { return nas; },
+                    set: function (v) { nas = okrepi(v); }
+                });
+            } catch (_) { window.googletag = nas; }
             setTimeout(function () { cakajoci.forEach(function (f) { try { if (typeof f === 'function') f(); } catch (_) {} }); }, 0);
         }
     } catch (_) {}
