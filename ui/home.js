@@ -249,22 +249,10 @@ window.setAppLanguage = function(lang) {
   changeHomeLanguage(lang, false);
 };
 
-let currentAdsCount = 0;
-let currentThreatsCount = 0;
+// Stevca blokiranih oglasov in groznj ni vec (odstranjen 1.0.43). Prazna funkcija ostane, da starejsi klici ne padejo.
+function renderShieldMetrics() {}
 
-function renderShieldMetrics() {
-  const dict = homeI18n[currentHomeLang] || homeI18n.sl;
-  document.getElementById('adsCount').textContent = currentAdsCount.toLocaleString(dict.locale);
-  document.getElementById('adsLbl').textContent = dict.lbl_ads;
-  document.getElementById('threatsCount').textContent = currentThreatsCount.toLocaleString(dict.locale);
-  document.getElementById('threatsLbl').textContent = dict.lbl_threats;
-}
-
-window.setShieldMetrics = function(ads, threats) {
-  currentAdsCount = Number(ads || 0);
-  currentThreatsCount = Number(threats || 0);
-  renderShieldMetrics();
-};
+window.setShieldMetrics = function() {};
 
 window.setBraveMode = function(enabled) {
   const header = document.querySelector('.shield-header');

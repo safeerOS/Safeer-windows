@@ -2496,7 +2496,7 @@ class SafeerOsWindow(QMainWindow):
                 "search_engine", "startup", "adblock_enabled", "adguard_protection_enabled",
                 "tracking_protection_enabled", "gpc_dnt_enabled", "block_third_party_cookies",
                 "doh_provider", "custom_doh_url", "force_dark_mode", "hardware_acceleration",
-                "ask_download_location", "total_ads_blocked", "total_threats_blocked",
+                "ask_download_location",
             )}
             values["engines"] = [
                 {"id": key, "name": engine.get("name", key)}

@@ -2376,7 +2376,7 @@
       toggleCard("force_dark_mode", "br_temno") +
       toggleCard("hardware_acceleration", "br_pospesevanje", "br_restart") +
       toggleCard("ask_download_location", "br_prenos") +
-      '<div class="browser-settings-card"><span class="browser-setting-title">' + ubezi(t("br_stats")) + '</span><div class="browser-settings-stats"><span><b>' + Number(data.total_ads_blocked || 0).toLocaleString() + '</b>' + ubezi(t("br_oglasiBlokirani")) + '</span><span><b>' + Number(data.total_threats_blocked || 0).toLocaleString() + '</b>' + ubezi(t("br_groznjeBlokirane")) + '</span></div><button type="button" class="gumb" id="browserClearData" style="margin-top:14px">' + ubezi(t("br_pocisti")) + '</button></div>' +
+      '<div class="browser-settings-card"><button type="button" class="gumb" id="browserClearData" style="margin-top:14px">' + ubezi(t("br_pocisti")) + '</button></div>' +
       '<p class="browser-settings-message" id="browserSettingsMessage" aria-live="polite"></p>';
     cilj.innerHTML = html;
     cilj.querySelectorAll("[data-browser-setting]").forEach(function (control) {
