@@ -30,8 +30,23 @@ def _pocisti_zapuscene(koren: str) -> None:
             pass
 
 
-def pytest_configure(config):
+def _v_appdata(pot: str) -> bool:
+    """Windows: privzeta zacasna mapa je pod AppData, ki jo Safeer Link namenoma ne deli (zascita #1)."""
+    return "appdata" in os.path.normcase(os.path.abspath(pot)).replace("\\", "/").lower().split("/")
+
+
+def _koren_testov() -> str:
+    """Zacasni koren za teke. Pod AppData ga ne smemo imeti, sicer preizkusi deljenja (ki dejansko dolocijo
+    mapo v zacasni mapi) zadenejo pravilo, da se AppData ne deli; zato takrat vzamemo mapo ob repozitoriju."""
     koren = tempfile.gettempdir()
+    if _v_appdata(koren):
+        koren = os.path.join(os.path.dirname(os.path.abspath(__file__)), "safeer-testi-tmp")
+        os.makedirs(koren, exist_ok=True)
+    return koren
+
+
+def pytest_configure(config):
+    koren = _koren_testov()
     try:
         _pocisti_zapuscene(koren)
     except OSError:
