@@ -109,6 +109,53 @@ def _skrita(pot: str) -> bool:
     return any(del_.startswith(".") for del_ in pot.replace(os.sep, "/").split("/") if del_)
 
 
+#: Mape pod domaco mapo, kjer so podatki programov (kljuci, zetoni, piskotki - tudi Safeerjevi); kjerkoli v poti.
+_APPDATA = frozenset({"appdata", "application data", "local settings"})
+#: Sistemske mape (prva komponenta za crko diska ali korenom): niso za uporabnika, so pa obcutljive.
+_SISTEMSKE_WIN = frozenset({"windows", "winnt", "program files", "program files (x86)", "programdata",
+                            "$recycle.bin", "system volume information", "recovery", "perflogs", "msocache",
+                            "config.msi", "$winreagent", "$sysreset", "documents and settings"})
+_SISTEMSKE_NIX = frozenset({"proc", "sys", "dev", "run", "etc", "root", "lost+found"})
+#: Registrski panji in podobne obcutljive datoteke po imenu (kjerkoli).
+_OBCUTLJIVE_DATOTEKE = frozenset({"ntuser.dat", "ntuser.ini", "ntuser.man", "usrclass.dat", "pagefile.sys",
+                                  "swapfile.sys", "hiberfil.sys", "bootmgr", "bootnxt"})
+
+
+def _je_unc(pot: str) -> bool:
+    """Omrezna (UNC) ali razsirjena/naprava pot: nikoli krajevni disk, zato je ne damo (zunanji pregled 8.10.2026, F2).
+
+    Pri taki poti (dve locili na zacetku) sistemska mapa ni prva komponenta za crko diska, ampak sele za imenom
+    streznika in deljene mape, zato preverjanje po prvi komponenti ne ujame npr. \\host\\C$\\Windows\\System32\\config\\SAM.
+    Poleg tega bi os.path.realpath nad UNC potjo segel v omrezje. Zajame tudi oblike \\?\\ in \\.\\.
+    """
+    return str(pot or "").replace("\\", "/").startswith("//")
+
+
+def _komponente(pot: str):
+    """Komponente poti z malimi crkami, brez crke diska (»c:«), locilo / ali \\ - neodvisno od sistema."""
+    deli = [d for d in str(pot).replace("\\", "/").split("/") if d and d not in (".", "..")]
+    if deli and len(deli[0]) == 2 and deli[0][1] == ":" and deli[0][0].isalpha():
+        deli = deli[1:]        # »C:« iz C:/...
+    return [d.strip().lower() for d in deli]
+
+
+def _obcutljiva(pot: str) -> bool:
+    """Ali razresena pot vodi v podatke programov, sistemsko mapo ali obcutljivo datoteko (ne damo je ne pri »ves disk«
+    ne v deljeni mapi). Neodvisna od locila, da jo preverimo tudi na Linuxu."""
+    if _je_unc(pot):
+        return True
+    deli = _komponente(pot)
+    if not deli:
+        return False
+    if deli[0] in _SISTEMSKE_WIN or deli[0] in _SISTEMSKE_NIX:
+        return True
+    if any(d in _APPDATA for d in deli):
+        return True
+    if deli[-1] in _OBCUTLJIVE_DATOTEKE:
+        return True
+    return False
+
+
 class DeljeneMape:
     """Izbrane mape (absolutne poti) in navidezne oznake.
 
@@ -117,8 +164,8 @@ class DeljeneMape:
     televizor brez te izbire vidi natanko tiste mape, ki mu jih je uporabnik dal.
     """
 
-    #: Mape, ki na korenu niso za uporabnika (jedro, naprave) in jih ne kazemo.
-    SISTEMSKE = {"proc", "sys", "dev", "run", "lost+found"}
+    #: Mape, ki na korenu niso za uporabnika (jedro, naprave, sistem, podatki programov) in jih ne damo.
+    SISTEMSKE = _SISTEMSKE_WIN | _SISTEMSKE_NIX | _APPDATA
 
     def __init__(self, poti: Optional[List[str]] = None, ves_disk: bool = False) -> None:
         self.poti: List[str] = []
@@ -159,8 +206,14 @@ class DeljeneMape:
         if oznaka.startswith("disk:"):
             if not self.ves_disk:
                 return None
-            pot = os.path.realpath(oznaka[len("disk:"):] or "/")
-            if _skrita(pot):
+            surova = oznaka[len("disk:"):] or "/"
+            if _je_unc(surova):
+                return None   # UNC/omrezna ali razsirjena pot: ni krajevni disk; realpath UNC bi segel v omrezje
+            try:
+                pot = os.path.realpath(surova)
+            except (OSError, ValueError):
+                return None
+            if _skrita(pot) or _obcutljiva(pot):
                 return None
             return (-1, pot) if os.path.exists(pot) else None
         deli = str(oznaka or "").split(":", 2)
@@ -172,10 +225,15 @@ class DeljeneMape:
         except (ValueError, IndexError):
             return None
         rel = deli[2].replace("\\", "/").lstrip("/")
-        pot = os.path.realpath(os.path.join(koren, rel)) if rel else koren
+        try:
+            pot = os.path.realpath(os.path.join(koren, rel)) if rel else koren
+        except (OSError, ValueError):
+            return None
         if pot != koren and not pot.startswith(koren + os.sep):
             return None
         if pot != koren and _skrita(os.path.relpath(pot, koren)):
+            return None
+        if _obcutljiva(pot):
             return None
         return (i, pot) if os.path.exists(pot) else None
 
@@ -239,9 +297,15 @@ class DeljeneMape:
                 mapa = os.path.isdir(cela)
                 if not mapa and not os.path.isfile(cela):
                     continue
-                rel = os.path.relpath(os.path.realpath(cela), koren).replace(os.sep, "/")
+                realna = os.path.realpath(cela)
+                if _obcutljiva(realna):
+                    continue  # podatki programov, sistemska mapa ali omrezna (UNC) pot
+                try:
+                    rel = os.path.relpath(realna, koren).replace(os.sep, "/")
+                except ValueError:
+                    continue  # drug (npr. omrezni) disk - ni znotraj deljene mape
                 if rel.startswith(".."):
-                    continue  # simbolna povezava ven iz deljene mape
+                    continue  # povezava ven iz deljene mape
                 v = {"id": f"share:{i}:{rel}", "name": ime, "type": "folder" if mapa else vrsta_datoteke(ime)}
                 if not mapa:
                     v["size"] = os.path.getsize(cela)
@@ -326,7 +390,10 @@ class DeljeneMape:
                 mapa = os.path.isdir(cela)
                 if not mapa and not os.path.isfile(cela):
                     continue
-                v = {"id": "disk:" + os.path.realpath(cela), "name": ime,
+                realna = os.path.realpath(cela)
+                if _obcutljiva(realna):
+                    continue  # AppData, sistemska mapa ali registrski panj: ne damo je tudi ne na vmesni ravni
+                v = {"id": "disk:" + realna, "name": ime,
                      "type": "folder" if mapa else vrsta_datoteke(ime)}
                 if not mapa:
                     v["size"] = os.path.getsize(cela)
