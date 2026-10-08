@@ -1909,13 +1909,9 @@ class SafeerMintBrowser(Gtk.Window):
             buttons=Gtk.ButtonsType.OK,
             text="🛡️ Safeer Cyber Shield — Linux Mint Aktivna Zaščita"
         )
-        ads = self.config.get("total_ads_blocked", 0)
-        threats = self.config.get("total_threats_blocked", 0)
         msg = (
-            f"📊 Statistika zaščite v živo:\n"
-            f"  • Aktivnih pravil ščita: 350.000+\n"
-            f"  • Blokirani oglasi & sledilci: {ads:,}\n"
-            f"  • Preprečene botnet / C2 grožnje: {threats:,}\n\n"
+            f"📊 Zaščita:\n"
+            f"  • Aktivnih pravil ščita: 350.000+\n\n"
             "✓ YouTube Adblock: Zero-ad hitro preskakovanje oglasov aktivno.\n"
             "✓ YouTube Background Audio: Predvajanje se nemoteno nadaljuje ob menjavi zavihkov.\n"
             "✓ Ambient Mode: Odstranjena zamegljenost in neželeni sivi okvirji.\n"
@@ -3639,13 +3635,7 @@ class SafeerMintBrowser(Gtk.Window):
     def update_shield_button_label(self):
         """Posodobi napis na gumbu ščita v orodni vrstici na podlagi statistike zaščite."""
         try:
-            total = self.config.get("total_ads_blocked", 0) + self.config.get("total_threats_blocked", 0)
-            if total >= 1000:
-                label = f"🛡️ {total // 1000}k+"
-            elif total > 0:
-                label = f"🛡️ {total}"
-            else:
-                label = "🛡️"
+            label = "🛡️"  # stevca ni vec
             if hasattr(self, 'btn_shield') and self.btn_shield:
                 self.btn_shield.set_label(label)
         except Exception:
@@ -4098,13 +4088,10 @@ class SafeerMintBrowser(Gtk.Window):
                         portals = self.config.get_portals()
                         portals_json = json.dumps(portals)
                         lang = get_current_language()
-                        ads_blocked = self.config.get("total_ads_blocked", 0)
-                        threats_blocked = self.config.get("total_threats_blocked", 0)
                         brave_on = "true" if self.config.get("brave_mode_enabled", True) else "false"
                         js = (
                             f"if (window.setCustomPortals) {{ window.setCustomPortals({portals_json}); }} "
                             f"if (window.setAppLanguage) {{ window.setAppLanguage('{lang}'); }} "
-                            f"if (window.setShieldMetrics) {{ window.setShieldMetrics({ads_blocked}, {threats_blocked}); }} "
                             f"if (window.setBraveMode) {{ window.setBraveMode({brave_on}); }}"
                         )
                         webview.run_javascript(js, None, None, None)
@@ -5785,14 +5772,8 @@ class SafeerMintBrowser(Gtk.Window):
                 self.config.set("language", lang)
                 set_language(lang)
                 self.update_ui_language()
-            elif action == "increment_ads":
-                count = int(data.get("count", 1))
-                self.config.increment_ads_blocked(count)
-                self.update_shield_button_label()
-            elif action == "increment_threats":
-                count = int(data.get("count", 1))
-                self.config.increment_threats_blocked(count)
-                self.update_shield_button_label()
+            elif action in ("increment_ads", "increment_threats"):
+                pass  # stevca ni vec; starejsi skripti sporocila le prezremo
             elif action == "set_default_browser":
                 self.set_as_default_browser(show_dialog=True)
             elif action == "open_sidebar":

@@ -91,7 +91,7 @@ class Priklop(unittest.TestCase):
         self.assertIn("policy.zeton_veljaven(payload)", telo)
         i = telo.index("policy.zeton_veljaven(payload)")
         self.assertLess(i, telo.index("oznaci_nepodprt_video"))
-        self.assertLess(i, telo.index("_omejevalnik_stevca.dovoli"))
+        self.assertNotIn("_omejevalnik_stevca.dovoli", telo)   # stevca ni vec (1.0.43)
         self.assertIn('("media_unsupported", "increment_ads")', telo)
 
 

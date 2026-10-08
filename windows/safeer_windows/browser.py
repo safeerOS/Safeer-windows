@@ -848,9 +848,6 @@ class SafeerBrowserApp(QObject):
         print(f"QT_MEDIA_REQUEST #{count + 1} kind={kind} type={info.resourceType()} host={host}", flush=True)
 
     def note_blocked(self, url: str, decision: str) -> None:
-        key = "total_threats_blocked" if decision == "block-threat" else "total_ads_blocked"
-        self.settings.set(key, int(self.settings.get(key) or 0) + 1, save=False)
-        self._counter_dirty = True
         self.blocked_log.append({"url": url, "decision": decision})
         del self.blocked_log[:-500]
         for window in self.windows:
@@ -871,11 +868,7 @@ class SafeerBrowserApp(QObject):
             page.window_ref.oznaci_nepodprt_video(page, bool(payload.get("napaka")))
             return
         if action == "increment_ads":
-            count = self._omejevalnik_stevca.dovoli(payload.get("count", 1))
-            if count:
-                self.settings.set("total_ads_blocked", int(self.settings.get("total_ads_blocked") or 0) + count, save=False)
-                self._counter_dirty = True
-            return
+            return   # stevca ni vec (1.0.43); sporocilo z zetonom le prezremo
         if page.url().scheme() != "safeer":
             return
         window = page.window_ref
@@ -1902,15 +1895,13 @@ class BrowserWindow(QMainWindow):
 
     def update_shield(self) -> None:
         settings = self.app.settings
-        total = int(settings.get("total_ads_blocked") or 0) + int(settings.get("total_threats_blocked") or 0)
-        stevilo = f"{total:,}".replace(",", ".")
         if self.safeer_os_web_mode:
             self.shield_label.setText("")
             self.shield_label.setPixmap(make_icon("shield", "#57D6AD").pixmap(20, 20))
-            self.shield_label.setToolTip(f"{tr(self.app, 'shield')}: {stevilo}")
+            self.shield_label.setToolTip(tr(self.app, 'shield'))
         else:
             self.shield_label.setPixmap(QPixmap())
-            self.shield_label.setText(f"🛡 {stevilo}")
+            self.shield_label.setText("🛡")
 
     def _splet_jezik(self) -> str:
         try:
