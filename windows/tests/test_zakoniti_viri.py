@@ -142,11 +142,11 @@ class TestZakonitiViri(unittest.TestCase):
             with mock.patch("core.os_media.media_servers.authenticate", return_value={"token": "private-token", "user_id": "u1"}):
                 result = center.add_server("jellyfin", "Domači", "https://media.example", "lastnik", "password")
             self.assertTrue(result["ok"])
-            saved = json.loads(center.store_path.read_text())
+            saved = json.loads(center.store_path.read_text(encoding="utf-8"))
             stored = saved["osebni_strezniki"][0]
             self.assertTrue(stored["secret_enc"].startswith("protected:"))
-            self.assertNotIn("private-token", center.store_path.read_text())
-            self.assertNotIn("password", center.store_path.read_text())
+            self.assertNotIn("private-token", center.store_path.read_text(encoding="utf-8"))
+            self.assertNotIn("password", center.store_path.read_text(encoding="utf-8"))
             self.assertNotIn("secret_enc", center.sources()[-1])
             self.assertEqual(center.export_json()["viri"], [])
 

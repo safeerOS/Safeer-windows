@@ -548,7 +548,7 @@ PROTI_ADBLOCK_SCRIPT = r"""
     try { Object.defineProperty(window, '__safeerProtiAdblock', { value: true }); } catch (_) { return; }
 
     var BAIT = /(^|[\s_\-.])(ad|ads|adv|advert|adsbox|adbox|adsbygoogle|ad-banner|adbanner|banner[-_]?ad|textads?|text-ad|sponsor|sponsored|pub[-_]?\d+x\d+|ad[-_]?\d+x\d+|ad[-_]?placement|adslot|ad[-_]slot|doubleclick|google[-_]?ads?)([\s_\-.]|$)/i;
-    var OGLASNI_NASLOV = /(^|\.)(googlesyndication\.com|doubleclick\.net|googleadservices\.com|adservice\.google\.[a-z.]+|adnxs\.com|taboola\.com|outbrain\.com|amazon-adsystem\.com|moatads\.com|pubmatic\.com|rubiconproject\.com|criteo\.(com|net)|adsafeprotected\.com|scorecardresearch\.com)$|\/(ads?|adframe|adsbygoogle|pagead|advert|banner)[^\/]*\.js(\?|$)/i;
+    var OGLASNI_NASLOV = /(^|\.)(googlesyndication\.com|doubleclick\.net|googleadservices\.com|adservice\.google\.[a-z.]+|adnxs\.com|taboola\.com|outbrain\.com|amazon-adsystem\.com|moatads\.com|pubmatic\.com|rubiconproject\.com|criteo\.(com|net)|adsafeprotected\.com|scorecardresearch\.com|imasdk\.googleapis\.com|google-analytics\.com|googletagservices\.com|googletagmanager\.com|2mdn\.net|adform\.net|smartadserver\.com|openx\.net|casalemedia\.com|indexww\.com|advertising\.com|quantserve\.com|chartbeat\.com)$|\/(ads?|adframe|adsbygoogle|pagead|advert|banner)[^\/]*\.js(\?|$)/i;
 
     function jeVaba(el) {
         try {
@@ -641,6 +641,57 @@ PROTI_ADBLOCK_SCRIPT = r"""
         }
     } catch (_) {}
 
+    // 2b. offsetParent vabe: element z display:none ima offsetParent null; stran to uporablja kot "skrit = blokiran".
+    try {
+        var HP2 = window.HTMLElement && window.HTMLElement.prototype;
+        var opisOP = HP2 && Object.getOwnPropertyDescriptor(HP2, 'offsetParent');
+        if (opisOP && typeof opisOP.get === 'function') {
+            var izvirniOP = opisOP.get;
+            Object.defineProperty(HP2, 'offsetParent', {
+                configurable: true, enumerable: opisOP.enumerable,
+                get: function () {
+                    var v = izvirniOP.call(this);
+                    return (v === null && jeVaba(this)) ? (document.body || document.documentElement) : v;
+                }
+            });
+        }
+    } catch (_) {}
+
+    // 2c. Google Publisher Tag: stran preverja googletag.apiReady (ali se je knjiznica nalozila). Prazen, a "delujoc" objekt.
+    try {
+        if (!window.googletag || !window.googletag.apiReady) {
+            var veriga = function () {
+                var cel = function () { return proxy; };
+                var proxy = new Proxy(cel, {
+                    get: function (t, k) {
+                        if (k === Symbol.toPrimitive) return function () { return ''; };
+                        if (k === 'then') return undefined;
+                        if (k === 'getSlots' || k === 'getTargetingKeys' || k === 'getSlotElementId') return function () { return []; };
+                        return proxy;
+                    },
+                    apply: function () { return proxy; }
+                });
+                return proxy;
+            };
+            var gt = window.googletag || {};
+            var cmd = Array.isArray(gt.cmd) ? gt.cmd : [];
+            var cakajoci = cmd.slice();
+            cmd.push = function () {
+                for (var i = 0; i < arguments.length; i++) { try { if (typeof arguments[i] === 'function') arguments[i](); } catch (_) {} }
+                return 0;
+            };
+            gt.cmd = cmd;
+            gt.apiReady = true;
+            gt.pubadsReady = true;
+            ['pubads', 'companionAds', 'content', 'defineSlot', 'defineOutOfPageSlot', 'enableServices', 'display',
+             'destroySlots', 'setConfig', 'sizeMapping', 'getVersion'].forEach(function (ime) {
+                if (typeof gt[ime] !== 'function') gt[ime] = function () { return veriga(); };
+            });
+            window.googletag = gt;
+            setTimeout(function () { cakajoci.forEach(function (f) { try { if (typeof f === 'function') f(); } catch (_) {} }); }, 0);
+        }
+    } catch (_) {}
+
     // 3. Omrezne preverbe.
     function jeOglasniNaslov(url) {
         try {
@@ -699,6 +750,30 @@ PROTI_ADBLOCK_SCRIPT = r"""
             try { t.dispatchEvent(new Event('load')); } catch (_) {}
             if (typeof t.onload === 'function') { try { t.onload(new Event('load')); } catch (_) {} }
         }, true);
+    } catch (_) {}
+    // 5. Sledilne/oglasne slike (new Image().src = ...): onerror bi pomenil "blokirano". Prava zahteva se ne poslje,
+    // stran dobi uspesno naloženo sličico 1x1, src pa ostane, kot ga je nastavila.
+    try {
+        var IP = window.HTMLImageElement && window.HTMLImageElement.prototype;
+        var opisSrc = IP && Object.getOwnPropertyDescriptor(IP, 'src');
+        var GIF = 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==';
+        if (opisSrc && typeof opisSrc.set === 'function' && typeof opisSrc.get === 'function') {
+            Object.defineProperty(IP, 'src', {
+                configurable: true, enumerable: opisSrc.enumerable,
+                get: function () {
+                    return this.__safeerSrc !== undefined ? this.__safeerSrc : opisSrc.get.call(this);
+                },
+                set: function (v) {
+                    if (jeOglasniNaslov(v)) {
+                        try { Object.defineProperty(this, '__safeerSrc', { configurable: true, writable: true, value: new URL(String(v), location.href).href }); } catch (_) {}
+                        opisSrc.set.call(this, GIF);
+                    } else {
+                        try { this.__safeerSrc = undefined; } catch (_) {}
+                        opisSrc.set.call(this, v);
+                    }
+                }
+            });
+        }
     } catch (_) {}
 })();
 """
