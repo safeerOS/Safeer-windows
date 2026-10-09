@@ -239,8 +239,10 @@ class H264Zajem:
                     zdaj = time.monotonic()
                     okvir = None
                     if self._dxgi is not None:
-                        if zdaj - zadnji < interval:
-                            time.sleep(min(0.002, interval - (zdaj - zadnji)))
+                        # Najvec ritem zaslona (DXGI da novo sliko ob osvežitvi); 0,6 intervala, sicer bi po vsaki
+                        # sliki zgrešili naslednjo osvežitev (izmerjeno: 43 namesto 60 slik/s).
+                        if zdaj - zadnji < interval * 0.6:
+                            time.sleep(0.001)
                             continue
                         surova, nova = self._dxgi.slika_nova()
                         if surova is not None:
