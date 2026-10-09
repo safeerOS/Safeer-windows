@@ -818,7 +818,7 @@ class NavidezniZaslon:
     def _posiljaj_kazalec(self, odjemalec, seja: int, izvor, slika) -> None:
         """Polozaj (v tockah slike), oblika in vidnost kazalca, vsakic ko se spremenijo (najvec ~125-krat na sekundo).
 
-        Naprava kazalec nariše sama (Safeer OS 0.5.77+), zato premik ne caka na naslednjo sliko. Starejsa naprava
+        Naprava kazalec nariše sama (Safeer OS 0.5.76+), zato premik ne caka na naslednjo sliko. Starejsa naprava
         obvestilo z obliko prezre; polozaj uporabi le za povecavo (kot pri Linuxu)."""
         sw, sv = max(1, izvor[0]), max(1, izvor[1])
         w, h = slika
