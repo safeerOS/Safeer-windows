@@ -146,7 +146,7 @@ class MehkeKnjiznice(unittest.TestCase):
     def test_sta_na_seznamu(self):
         self.assertEqual(knjiznice.PAKETI["cryptography"], "cryptography")
         self.assertEqual(knjiznice.PAKETI["PIL"], "Pillow")
-        self.assertEqual(set(knjiznice.MEHKE), {"cryptography", "PIL", "dxcam"})
+        self.assertEqual(set(knjiznice.MEHKE), {"cryptography", "PIL", "dxcam", "soundcard"})
         self.assertTrue(set(knjiznice.MEHKE) <= set(knjiznice.POTREBNE))
 
     def test_prvic_prosi_zaganjalnik(self):
@@ -211,7 +211,7 @@ class ZunanjeKnjiznice(unittest.TestCase):
     #: modul -> paket na PyPI (kot ga namesti zaganjalnik)
     MODUL_PAKET = {"PySide6": "PySide6", "qrcode": "qrcode", "vlc": "python-vlc", "mutagen": "mutagen", "av": "av",
                    "truststore": "truststore", "zeroconf": "zeroconf", "mpv": "python-mpv", "winrt": "winrt-runtime",
-                   "cryptography": "cryptography", "PIL": "Pillow", "dxcam": "dxcam"}
+                   "cryptography": "cryptography", "PIL": "Pillow", "dxcam": "dxcam", "soundcard": "soundcard"}
     #: modul -> zakaj ga zaganjalnik ne namesti
     NE_NAMESTIMO = {"gi": "GTK in D-Bus: samo Linux (deli jedra, ki jih Windows ne klice)",
                     "pefile": "samo gradnja paketa (build_windows.py)"}
