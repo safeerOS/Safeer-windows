@@ -751,7 +751,10 @@ class NavidezniZaslon:
 
             glava = {
                 "v": 2, "w": zajem.sirina, "h": zajem.visina, "fps": zajem.fps,
-                "zvok": None, "vnos": True, "plosek": False
+                "zvok": None, "vnos": True, "plosek": False,
+                # Vsak okvir slike je cela slika (en paket kodirnika): sprejemnik jo sme takoj dati dekoderju,
+                # ne da caka na zacetek naslednje (Android ZaslonOdjemalec, od Safeer OS 0.5.75).
+                "au": True,
             }
             odjemalec.sendall((json.dumps(glava) + "\n").encode("utf-8"))
             odjemalec.settimeout(None)
