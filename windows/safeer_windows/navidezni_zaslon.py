@@ -835,13 +835,15 @@ class NavidezniZaslon:
         except Exception:
             pass
 
-    def ustavi_sejo(self, seja: Optional[int] = None) -> None:
+    def ustavi_sejo(self, seja: Optional[int] = None, posiljatelj: Optional[str] = None) -> None:
         """Ustavi pretočni strežnik navideznega zaslona.
 
         Nit seje, ki pospravlja za sabo, poda svojo številko `seja`: če se je medtem začela nova seja, klic ne
-        naredi ničesar."""
+        naredi ničesar. Ukaz z naprave poda `posiljatelj`: seje druge naprave ne ustavi."""
         with self._kljuc:
             if seja is not None and seja != self._seja_st:
+                return
+            if posiljatelj and self._posiljatelj_seje and posiljatelj != self._posiljatelj_seje:
                 return
             self._tece = False
             if self._odjemalec:
