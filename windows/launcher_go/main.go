@@ -568,7 +568,9 @@ var paketiPip = []string{
 }
 
 func namestiKnjiznice(py *PythonInfo) error {
-	showMessage("Safeer OS", "Safeer OS pripravlja potrebne knjižnice (PySide6, python-vlc, python-mpv, mutagen, PyAV, zeroconf, cryptography, Pillow, dxcam, WinRT za medijske tipke). Namestitev poteka v ozadju...", MB_ICONINFORMATION)
+	// Samo obvestilo: MessageBoxW caka na klik, namestitev pa ne sme (do 1.0.46 je cakala, dokler uporabnik ni
+	// potrdil okna - ob posodobitvi z novo knjiznico bi vsak uporabnik moral najprej klikniti).
+	go showMessage("Safeer OS", "Safeer OS pripravlja potrebne knjižnice (PySide6, python-vlc, python-mpv, mutagen, PyAV, zeroconf, cryptography, Pillow, dxcam, WinRT za medijske tipke). Namestitev poteka v ozadju...", MB_ICONINFORMATION)
 	args := []string{"-m", "pip", "install"}
 	if py.IsLauncher {
 		args = append([]string{"-3"}, args...)
