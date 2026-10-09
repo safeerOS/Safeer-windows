@@ -49,20 +49,27 @@ def pot_poskusa() -> str:
     return os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "SafeerOS", "knjiznice-poskus.txt")
 
 
-def _poskus_dovoljen(pot: str, zdaj: float) -> bool:
+def _poskus_dovoljen(pot: str, zdaj: float, manjka=()) -> bool:
+    """Zapis je »cas [knjiznice,...]«. Nova mehka knjiznica (prisla s posodobitvijo) sme takoj na vrsto, tudi ce
+    je druga pred kratkim odpovedala - prej je en sam cas zadrzal vse (izmerjeno 9. 10. 2026: soundcard v 1.0.51 se
+    po posodobitvi ni namestil, ker je bil zapis star nekaj ur). Star zapis (samo cas) velja kot »brez knjiznic«."""
     try:
         with open(pot, encoding="ascii") as d:
-            zadnjic = float(d.read().strip() or 0)
+            deli = d.read().split()
+        zadnjic = float(deli[0]) if deli else 0.0
     except (OSError, ValueError):
+        return True
+    prej = set(deli[1].split(",")) if len(deli) > 1 else set()
+    if set(manjka) - prej:
         return True
     return not (0 <= zdaj - zadnjic < POSKUS_MEHKIH_S)
 
 
-def _zabelezi_poskus(pot: str, zdaj: float) -> None:
+def _zabelezi_poskus(pot: str, zdaj: float, manjka=()) -> None:
     try:
         os.makedirs(os.path.dirname(pot), exist_ok=True)
         with open(pot, "w", encoding="ascii") as d:
-            d.write("%d" % zdaj)
+            d.write("%d %s" % (zdaj, ",".join(sorted(manjka))) if manjka else "%d" % zdaj)
     except OSError:
         pass
 
@@ -114,11 +121,11 @@ def preveri_ob_zagonu(okolje=None, izpis=None, izhod=sys.exit, moduli=POTREBNE, 
     if manjka:
         samo_mehke = all(m in mehke for m in manjka)
         poskus = pot_poskusa() if poskus is None else poskus
-        if samo_mehke and not _poskus_dovoljen(poskus, ura()):
+        if samo_mehke and not _poskus_dovoljen(poskus, ura(), manjka):
             pisi(OZNAKA_OK + " (brez: " + ", ".join(manjka) + "; namestitev ni uspela, nov poskus pozneje)")
             return True
         if samo_mehke:
-            _zabelezi_poskus(poskus, ura())
+            _zabelezi_poskus(poskus, ura(), manjka)
         pisi(OZNAKA_MANJKAJO + " " + ", ".join(manjka))
         izhod(KODA_MANJKAJO)
         return True
