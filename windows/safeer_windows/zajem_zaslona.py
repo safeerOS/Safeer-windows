@@ -195,21 +195,57 @@ class H264Zajem:
         return okvir
 
     def okvirji(self, tece) -> Iterator[bytes]:
-        """Kosi H.264, dokler ``tece()`` vraca True. Hitrost omeji fps (zajem je lahko pocasnejsi)."""
+        """Kosi H.264, dokler ``tece()`` vraca True. Hitrost omeji fps (zajem je lahko pocasnejsi).
+
+        Zajem in pretvorba barv (~10 ms) tečeta v svoji niti, kodiranje in posiljanje v tej: tako se casa ne
+        sestevata (izmerjeno 9. 10. 2026: zaporedno ~50 slik/s v pravi seji, cilj 60).
+        """
+        import queue
         interval = 1.0 / self.fps
+        vrsta: "queue.Queue" = queue.Queue(maxsize=2)
+        konec = threading.Event()
+
+        def zajemaj():
+            naslednji = time.monotonic()
+            try:
+                while not konec.is_set():
+                    okvir = self._slika()
+                    while not konec.is_set():
+                        try:
+                            vrsta.put(okvir, timeout=0.2)
+                            break
+                        except queue.Full:
+                            continue
+                    naslednji += interval
+                    pocakaj = naslednji - time.monotonic()
+                    if pocakaj > 0:
+                        time.sleep(pocakaj)
+                    else:
+                        naslednji = time.monotonic()
+            except Exception as e:  # zajem ne sme obtiči tiho: kodirnik dobi napako in seja se konca
+                vrsta.put(e)
+
+        nit = threading.Thread(target=zajemaj, name="safeer-zajem-zaslona", daemon=True)
+        nit.start()
         prvi = True
-        while tece():
-            zacetek = time.monotonic()
-            for paket in self._c.encode(self._slika()):
-                podatki = bytes(paket)
-                if prvi:
-                    prvi = False
-                    podatki = self._z_nastavitvami(podatki)
-                if podatki:
-                    yield podatki
-            pocakaj = interval - (time.monotonic() - zacetek)
-            if pocakaj > 0:
-                time.sleep(pocakaj)
+        try:
+            while tece():
+                try:
+                    okvir = vrsta.get(timeout=1.0)
+                except queue.Empty:
+                    continue
+                if isinstance(okvir, Exception):
+                    raise okvir
+                for paket in self._c.encode(okvir):
+                    podatki = bytes(paket)
+                    if prvi:
+                        prvi = False
+                        podatki = self._z_nastavitvami(podatki)
+                    if podatki:
+                        yield podatki
+        finally:
+            konec.set()
+            nit.join(timeout=2.0)
 
     def _z_nastavitvami(self, podatki: bytes) -> bytes:
         """Televizor mora dobiti SPS/PPS pred prvo sliko; nekateri kodirniki jih dajo le v extradata."""
