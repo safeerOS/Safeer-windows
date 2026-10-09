@@ -292,6 +292,11 @@ class Razresevalnik:
         while self._tece and u is not None:
             try:
                 paket, od = u.recvfrom(4096)
+            except ConnectionResetError:
+                # Windows: ce odjemalec odide, preden dobi odgovor, sistem ob naslednjem branju javi napako 10054
+                # (ICMP »vrata zaprta«). To ni konec razresevalnika - prej se je zanka tu koncala in Scit je utihnil:
+                # Windows je nato vsako ime cakal ~1 s in ga razresil mimo filtra (izmerjeno 9. 10. 2026).
+                continue
             except OSError:
                 break
 
