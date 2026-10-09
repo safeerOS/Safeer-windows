@@ -188,6 +188,10 @@ def upstream_strezniki(vmesnik: str) -> List[str]:
     return strezniki
 
 
+#: Kanarcek Firefoxa: odgovor NXDOMAIN pomeni »omrezje filtrira DNS, ne vklapljaj DoH sam«.
+KANAREK_DOH = "use-application-dns.net"
+
+
 class Razresevalnik:
     """Razresevalnik DNS (UDP in TCP) na 127.0.0.1: blokirana imena zavrne, ostala posreduje."""
 
@@ -237,6 +241,11 @@ class Razresevalnik:
         ime = ime_poizvedbe(paket)
         with self._kljuc:
             self.poizvedb += 1
+        if ime and ime.lower().rstrip(".") == KANAREK_DOH:
+            # Firefox vprasa to ime, preden sam vklopi DNS prek HTTPS. Ce ga ni, ostane pri sistemskem DNS - pri
+            # Scitu. Sicer bi oglase in nevarne strani razresil mimo nas (support.mozilla.org: canary domain).
+            # Ne steje kot blokirano: ni oglas.
+            return odgovor_zavrnjeno(paket)
         if ime:
             kategorija = self.blokiraj(ime)
             if kategorija:
