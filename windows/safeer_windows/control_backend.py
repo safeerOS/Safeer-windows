@@ -1659,7 +1659,9 @@ class SafeerControlBackend:
                 izid = {"ok": True, "message": "Navidezni zaslon se deli", "data": seja}
 
             elif akcija == "screen.stop":
-                self.navidezni_zaslon.ustavi_sejo()
+                # Ustavi samo naprava, ki zaslon gleda. Naprava, ki ji je zaslon prevzela druga, ob odhodu poslje
+                # screen.stop - prej je s tem ugasnila sejo nove naprave (preizkus 9. 10. 2026: tablica -> Linux).
+                self.navidezni_zaslon.ustavi_sejo(posiljatelj=posiljatelj)
                 izid = {"ok": True, "message": "Deljenje navideznega zaslona je končano"}
 
             elif akcija == "screen.status":
