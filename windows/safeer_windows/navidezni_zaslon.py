@@ -151,6 +151,8 @@ class NavidezniZaslon:
         self._seja_nit: Optional[threading.Thread] = None
         #: Stevec sej: nit seje ob koncu pospravi samo, ce je njena seja se tekoca.
         self._seja_st = 0
+        #: Seje, ki jih je prevzela druga naprava: njihova nit gledalcu pred koncem pove, zakaj (glej zacni_sejo).
+        self._prevzete: dict = {}
         self._kljuc = threading.RLock()
 
         self.vnos = NavidezniVnos(self)
@@ -641,6 +643,12 @@ class NavidezniZaslon:
     def zacni_sejo(self, posiljatelj: str, kakovost: str = PRIVZETA_KAKOVOST) -> dict:
         """Začne visoko kakovosten pretočni strežnik za navidezni ločeni zaslon (skladno s core/link_zaslon.py)."""
         with self._kljuc:
+            # Zaslon gleda ena naprava. Ce ga zahteva druga, ga dobi ona (uporabnik ga je ravno odprl), prejsnja pa
+            # izve, zakaj se je koncal, in se NE poveze znova. Prej sta se dve napravi izmenjevali vsako sekundo:
+            # stara se je ponovno povezala in vrgla novo ven (izmerjeno 9. 10. 2026: tablica in WP28).
+            if self._odjemalec is not None and self._posiljatelj_seje and posiljatelj != self._posiljatelj_seje:
+                self._prevzete[self._seja_st] = posiljatelj
+                self._odjemalec = None        # vticnico zapre nit stare seje, ko gledalcu pove, zakaj
             self._seja_st += 1
             seja = self._seja_st
             self.ustavi_sejo()
@@ -779,6 +787,14 @@ class NavidezniZaslon:
             try:
                 for kos in zajem.okvirji(lambda: self._tece and seja == self._seja_st and nit_vnos.is_alive()):
                     odjemalec.sendall(bytes([1]) + len(kos).to_bytes(4, "big") + kos)
+                prevzel = self._prevzete.pop(seja, None)
+                if prevzel is not None:
+                    obvestilo = json.dumps({"konec": "prevzeto", "naprava": prevzel,
+                                            "sporocilo": "Zaslon zdaj gleda druga naprava."}).encode("utf-8")
+                    try:
+                        odjemalec.sendall(bytes([3]) + len(obvestilo).to_bytes(4, "big") + obvestilo)
+                    except Exception:
+                        pass
             finally:
                 zajem.zapri()
                 vnos.sprosti_vse()
