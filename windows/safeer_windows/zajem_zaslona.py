@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import ctypes
 import sys
+import threading
 import time
 from fractions import Fraction
 from typing import Iterator, Optional, Tuple
@@ -35,10 +36,72 @@ def kodirnik_na_voljo() -> Optional[str]:
         na_voljo = av.codecs_available
     except Exception:
         return None
-    for ime in ("h264_mf", "libx264"):
+    for ime in KODIRNIKI:
         if ime in na_voljo:
             return ime
     return None
+
+
+#: Vrstni red kodirnikov: najprej strojni kodirnik graficne kartice (NVIDIA, Intel Quick Sync, AMD), nato
+#: Media Foundation in programski libx264. Na seznamu PyAV so vsi, odpre pa se le tisti, ki ga kartica ima.
+#: Izmerjeno 9. 10. 2026 (i5-4590, HD 4600, 1440x900): h264_qsv 3,6 ms na sliko.
+KODIRNIKI = ("h264_nvenc", "h264_qsv", "h264_amf", "h264_mf", "libx264")
+
+
+def _moznosti(ime: str) -> dict:
+    if ime == "libx264":
+        return {"preset": "veryfast", "tune": "zerolatency", "profile": "high"}
+    if ime == "h264_mf":
+        return {"rate_control": "cbr", "scenario": "display_remoting"}
+    if ime == "h264_qsv":
+        return {"preset": "veryfast", "async_depth": "1", "look_ahead": "0"}
+    if ime == "h264_nvenc":
+        return {"preset": "p1", "tune": "ll", "zerolatency": "1", "rc": "cbr"}
+    if ime == "h264_amf":
+        return {"usage": "ultralowlatency", "rc": "cbr"}
+    return {}
+
+
+class _DxgiZajem:
+    """Zajem prek DXGI Desktop Duplication (knjiznica dxcam): ~2 ms na sliko namesto ~34 ms z GDI.
+
+    DXGI da novo sliko samo, ko se zaslon spremeni; vmes vrnemo zadnjo. Ko je monitor ugasnjen, Windows zaslona ne
+    risa in DXGI skoraj ne daje slik (izmerjeno: ~1 na sekundo) - takrat ``slika()`` vrne None in klicatelj vzame GDI.
+    """
+
+    #: Brez nove slike DXGI tako dolgo -> morda je monitor ugasnjen: preverimo z GDI.
+    TISINA_S = 0.5
+
+    #: Ena kamera DXGI za ves proces. Ustvarjanje in sproscanje vec kamer (dxcam.release) je na Windows povzrocilo
+    #: krsitev pomnilnika v comtypes (izmerjeno 9. 10. 2026), zato jo ustvarimo enkrat in je ne sproscamo.
+    _kamera_procesa = None
+    _zaklep = threading.Lock()
+
+    def __init__(self):
+        import dxcam  # noqa: F401  (ni namesceno -> ImportError, klicatelj ostane pri GDI)
+        with _DxgiZajem._zaklep:
+            if _DxgiZajem._kamera_procesa is None:
+                _DxgiZajem._kamera_procesa = dxcam.create(output_color="BGRA")
+        self._kamera = _DxgiZajem._kamera_procesa
+        if self._kamera is None:
+            raise RuntimeError("DXGI ni na voljo")
+        self._zadnja = None
+        self._zadnjic = 0.0
+
+    def slika(self):
+        with _DxgiZajem._zaklep:
+            nova = self._kamera.grab()
+        zdaj = time.monotonic()
+        if nova is not None:
+            self._zadnja, self._zadnjic = nova, zdaj
+            return nova
+        if self._zadnja is None or zdaj - self._zadnjic > self.TISINA_S:
+            return None
+        return self._zadnja
+
+    def zapri(self) -> None:
+        """Kamera ostane procesu (glej _kamera_procesa); seja samo pozabi svojo zadnjo sliko."""
+        self._zadnja = None
 
 
 def _velikost_zaslona() -> Tuple[int, int]:
@@ -67,31 +130,50 @@ class H264Zajem:
         self.izvor = _velikost_zaslona()
         self.sirina, self.visina = velikost_slike(self.izvor)
         self.fps = max(5, min(60, int(fps)))
-        ime = kodirnik or kodirnik_na_voljo()
-        if not ime:
+        kandidati = [kodirnik] if kodirnik else [k for k in KODIRNIKI if k in getattr(av, "codecs_available", ())]
+        if not kandidati:
             raise RuntimeError("Na tem racunalniku ni kodirnika H.264")
-        self.kodirnik = ime
-        self._c = self._odpri(ime, bitrate)
+        napaka = None
+        self._c = None
+        for ime in kandidati:
+            try:
+                self._c = self._odpri(ime, bitrate)
+                self.kodirnik = ime
+                break
+            except Exception as e:  # kodirnik je v PyAV, kartica pa ga nima
+                napaka = e
+        if self._c is None:
+            raise RuntimeError(f"Kodirnika H.264 ni mogoce odpreti: {napaka}")
         self._st = 0
+        try:
+            self._dxgi: Optional[_DxgiZajem] = _DxgiZajem() if sys.platform == "win32" else None
+        except Exception:
+            self._dxgi = None
+        print(f"[Zaslon] zajem {'DXGI' if self._dxgi else 'GDI'}, kodirnik {self.kodirnik}, {self.sirina}x{self.visina} @ {self.fps}")
 
     def _odpri(self, ime: str, bitrate: int):
         c = self._av.CodecContext.create(ime, "w")
         c.width, c.height = self.sirina, self.visina
-        c.pix_fmt = "nv12" if ime == "h264_mf" else "yuv420p"
+        c.pix_fmt = "yuv420p" if ime == "libx264" else "nv12"
         c.framerate = Fraction(self.fps, 1)
         c.time_base = Fraction(1, self.fps)
         # Brez B-slik in z rednim kljucnim okvirjem: televizor se prikljuci hitro, izguba se popravi v 1 s.
         c.gop_size = self.fps
         c.max_b_frames = 0
         c.bit_rate = int(bitrate)
-        if ime == "libx264":
-            c.options = {"preset": "veryfast", "tune": "zerolatency", "profile": "high"}
-        else:
-            c.options = {"rate_control": "cbr", "scenario": "display_remoting"}
+        c.options = _moznosti(ime)
         c.open()
         return c
 
     def _slika(self):
+        if self._dxgi is not None:
+            surova = self._dxgi.slika()
+            if surova is not None:
+                okvir = self._av.VideoFrame.from_ndarray(surova, format="bgra").reformat(
+                    width=self.sirina, height=self.visina, format=self._c.pix_fmt)
+                okvir.pts = self._st
+                self._st += 1
+                return okvir
         from PIL import ImageGrab
         slika = ImageGrab.grab()
         if slika.size != (self.sirina, self.visina):
@@ -133,6 +215,8 @@ class H264Zajem:
                 pass
         except Exception:
             pass
+        if getattr(self, "_dxgi", None) is not None:
+            self._dxgi.zapri()
 
 
 # ---------------------------------------------------------------------------------------- vnos

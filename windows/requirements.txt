@@ -17,3 +17,4 @@ winrt-Windows.Foundation.Collections==3.2.1
 winrt-Windows.Media==3.2.1
 winrt-Windows.Media.Playback==3.2.1
 winrt-Windows.Storage.Streams==3.2.1
+dxcam>=0.0.5  # hiter zajem zaslona (DXGI Desktop Duplication, MIT); brez njega ostane GDI
