@@ -19,6 +19,9 @@ import time
 from fractions import Fraction
 from typing import Iterator, Optional, Tuple
 
+#: Nespremenjen zaslon (DXGI ne da nove slike) posljemo znova najkasneje po tem casu: naprava ve, da seja tece.
+POLNITEV_S = 0.5
+
 #: Najvecja slika, ki jo posiljamo (kot na Linuxu: 1080p je za namizje dovolj in je hitrejsa).
 NAJVEC_SIRINA, NAJVEC_VISINA = 1920, 1080
 NAJVEC_PREMIK = 400
@@ -100,15 +103,19 @@ class _DxgiZajem:
         self._zadnjic = 0.0
 
     def slika(self):
+        return self.slika_nova()[0]
+
+    def slika_nova(self):
+        """(slika, ali je nova). Slika je None, ko DXGI predolgo molci (verjetno ugasnjen monitor)."""
         with _DxgiZajem._zaklep:
             nova = self._kamera.grab()
         zdaj = time.monotonic()
         if nova is not None:
             self._zadnja, self._zadnjic = nova, zdaj
-            return nova
+            return nova, True
         if self._zadnja is None or zdaj - self._zadnjic > self.TISINA_S:
-            return None
-        return self._zadnja
+            return None, False
+        return self._zadnja, False
 
     def zapri(self) -> None:
         """Kamera ostane procesu (glej _kamera_procesa); seja samo pozabi svojo zadnjo sliko."""
@@ -176,12 +183,29 @@ class H264Zajem:
         c.open()
         return c
 
+    def _iz_bgra(self, surova):
+        """Slika DXGI (BGRA) -> okvir za kodirnik. Kopija v obstojeci okvir (~0,4 ms) namesto novega okvirja
+        (~4,5 ms) in pretvorba z vec nitmi (~1,4 ms): izmerjeno 9. 10. 2026, skupaj ~2 ms namesto ~10 ms."""
+        v, s = int(surova.shape[0]), int(surova.shape[1])
+        okvir = getattr(self, "_bgra", None)
+        try:
+            if okvir is None or (okvir.width, okvir.height) != (s, v):
+                okvir = self._bgra = self._av.VideoFrame(s, v, "bgra")
+            if okvir.planes[0].line_size != s * 4 or not surova.flags["C_CONTIGUOUS"]:
+                raise ValueError("razlicen korak vrstice")
+            okvir.planes[0].update(surova)
+        except Exception:
+            okvir = self._av.VideoFrame.from_ndarray(surova, format="bgra")
+        try:
+            return okvir.reformat(width=self.sirina, height=self.visina, format=self._c.pix_fmt, threads=4)
+        except TypeError:  # starejsi PyAV brez niti
+            return okvir.reformat(width=self.sirina, height=self.visina, format=self._c.pix_fmt)
+
     def _slika(self):
         if self._dxgi is not None:
             surova = self._dxgi.slika()
             if surova is not None:
-                okvir = self._av.VideoFrame.from_ndarray(surova, format="bgra").reformat(
-                    width=self.sirina, height=self.visina, format=self._c.pix_fmt)
+                okvir = self._iz_bgra(surova)
                 okvir.pts = self._st
                 self._st += 1
                 return okvir
@@ -206,22 +230,38 @@ class H264Zajem:
         konec = threading.Event()
 
         def zajemaj():
-            naslednji = time.monotonic()
+            # DXGI: sliko vzamemo takoj, ko jo Windows nariše (ne v stalnem ritmu: to je dodajalo do 17 ms
+            # zamika), najvec fps-krat na sekundo; nespremenjen zaslon pošljemo znova le vsakih POLNITEV_S.
+            # GDI (ni DXGI ali je monitor ugasnjen): stalni ritem kot prej.
+            zadnji = 0.0
             try:
                 while not konec.is_set():
-                    okvir = self._slika()
+                    zdaj = time.monotonic()
+                    okvir = None
+                    if self._dxgi is not None:
+                        if zdaj - zadnji < interval:
+                            time.sleep(min(0.002, interval - (zdaj - zadnji)))
+                            continue
+                        surova, nova = self._dxgi.slika_nova()
+                        if surova is not None:
+                            if not nova and zdaj - zadnji < POLNITEV_S:
+                                time.sleep(0.001)
+                                continue
+                            okvir = self._iz_bgra(surova)
+                            okvir.pts = self._st
+                            self._st += 1
+                    if okvir is None:
+                        if zdaj - zadnji < interval:
+                            time.sleep(interval - (zdaj - zadnji))
+                            continue
+                        okvir = self._slika()
+                    zadnji = time.monotonic()
                     while not konec.is_set():
                         try:
                             vrsta.put(okvir, timeout=0.2)
                             break
                         except queue.Full:
                             continue
-                    naslednji += interval
-                    pocakaj = naslednji - time.monotonic()
-                    if pocakaj > 0:
-                        time.sleep(pocakaj)
-                    else:
-                        naslednji = time.monotonic()
             except Exception as e:  # zajem ne sme obtiči tiho: kodirnik dobi napako in seja se konca
                 vrsta.put(e)
 
