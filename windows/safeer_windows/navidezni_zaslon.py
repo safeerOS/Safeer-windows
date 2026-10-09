@@ -783,6 +783,11 @@ class NavidezniZaslon:
             nit_vnos = threading.Thread(target=self._beri_povratni_vnos, args=(odjemalec, vnos, seja),
                                         name="safeer-navidezni-zaslon-vnos", daemon=True)
             nit_vnos.start()
+            # Kazalca v sliki ni (DXGI/GDI ga ne zajameta): polozaj in obliko posiljamo posebej, ko se spremenita.
+            nit_kazalec = threading.Thread(target=self._posiljaj_kazalec,
+                                           args=(odjemalec, seja, zajem.izvor, (zajem.sirina, zajem.visina)),
+                                           name="safeer-navidezni-zaslon-kazalec", daemon=True)
+            nit_kazalec.start()
             print(f"[NavidezniZaslon] Zaslon {zajem.sirina}x{zajem.visina} @ {zajem.fps} ({zajem.kodirnik})", flush=True)
             try:
                 for kos in zajem.okvirji(lambda: self._tece and seja == self._seja_st and nit_vnos.is_alive()):
@@ -809,6 +814,34 @@ class NavidezniZaslon:
             # Seja pospravi samo za sabo. Prej je konec stare seje vedno ustavil tudi novo: ce je druga naprava
             # prevzela zaslon, medtem ko ga je prva se gledala, se ni mogla povezati (vrata je zaprla stara nit).
             self.ustavi_sejo(seja)
+
+    def _posiljaj_kazalec(self, odjemalec, seja: int, izvor, slika) -> None:
+        """Polozaj (v tockah slike), oblika in vidnost kazalca, vsakic ko se spremenijo (najvec ~125-krat na sekundo).
+
+        Naprava kazalec nariše sama (Safeer OS 0.5.77+), zato premik ne caka na naslednjo sliko. Starejsa naprava
+        obvestilo z obliko prezre; polozaj uporabi le za povecavo (kot pri Linuxu)."""
+        sw, sv = max(1, izvor[0]), max(1, izvor[1])
+        w, h = slika
+        zadnje = None
+        napak = 0
+        while self._tece and seja == self._seja_st:
+            k = zajem_zaslona.kazalec()
+            if k is None:
+                napak += 1
+                if napak > 50:
+                    return           # ni Windows ali klic stalno pada: brez lokalnega kazalca, kot prej
+                time.sleep(0.05)
+                continue
+            x, y, oblika, viden = k
+            stanje = (min(w - 1, max(0, x * w // sw)), min(h - 1, max(0, y * h // sv)), oblika, viden)
+            if stanje != zadnje:
+                zadnje = stanje
+                telo = json.dumps({"kazalec": [stanje[0], stanje[1]], "oblika": oblika, "viden": viden}).encode("utf-8")
+                try:
+                    odjemalec.sendall(bytes([3]) + len(telo).to_bytes(4, "big") + telo)
+                except Exception:
+                    return
+            time.sleep(0.008)
 
     def _beri_povratni_vnos(self, odjemalec, vnos=None, seja: Optional[int] = None) -> None:
         ostanek = b""

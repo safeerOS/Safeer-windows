@@ -125,6 +125,41 @@ class _DxgiZajem:
         self._zadnja = None
 
 
+#: Oblike sistemskih kazalcev (IDC_*) -> ime, ki ga naprava zna narisati. Neznan (lasten) kazalec je puscica.
+_OBLIKE_KAZALCA = {32512: "puscica", 32513: "besedilo", 32514: "cakanje", 32515: "kriz", 32642: "velikost_nwse",
+                   32643: "velikost_nesw", 32644: "velikost_we", 32645: "velikost_ns", 32646: "premik", 32649: "roka",
+                   32650: "puscica_cakanje", 32648: "ne"}
+_rocaji_oblik: dict = {}
+
+
+def kazalec() -> Optional[Tuple[int, int, str, bool]]:
+    """(x, y, oblika, viden) miskinega kazalca v tockah zaslona ali None (ni Windows / klic ni uspel).
+
+    Zajem DXGI in GDI kazalca NE vsebujeta (preverjeno 9. 10. 2026 na pravem toku): napravi ga povemo posebej, ona ga
+    nariše sama - takoj ob premiku, brez cakanja na sliko (zamisel Stream Decka: odziv na napravi, ukaz racunalniku)."""
+    if sys.platform != "win32":
+        return None
+    from ctypes import wintypes
+
+    class _CI(ctypes.Structure):
+        _fields_ = [("cbSize", wintypes.DWORD), ("flags", wintypes.DWORD), ("hCursor", wintypes.HANDLE),
+                    ("ptScreenPos", wintypes.POINT)]
+
+    u = ctypes.windll.user32
+    if not _rocaji_oblik:
+        u.LoadCursorW.restype = wintypes.HANDLE
+        for idc, ime in _OBLIKE_KAZALCA.items():
+            r = u.LoadCursorW(None, ctypes.c_void_p(idc))
+            if r:
+                _rocaji_oblik[int(r)] = ime
+    ci = _CI()
+    ci.cbSize = ctypes.sizeof(_CI)
+    if not u.GetCursorInfo(ctypes.byref(ci)):
+        return None
+    oblika = _rocaji_oblik.get(int(ci.hCursor or 0), "puscica")
+    return int(ci.ptScreenPos.x), int(ci.ptScreenPos.y), oblika, bool(ci.flags & 1) and bool(ci.hCursor)
+
+
 def _velikost_zaslona() -> Tuple[int, int]:
     if sys.platform != "win32":
         return 1920, 1080
