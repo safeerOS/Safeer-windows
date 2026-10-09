@@ -154,7 +154,7 @@ class MehkeKnjiznice(unittest.TestCase):
         self.assertEqual(izhodi, [knjiznice.KODA_MANJKAJO])
         self.assertEqual(izpisi, [knjiznice.OZNAKA_MANJKAJO + " cryptography, PIL"])
         with open(self.poskus, encoding="ascii") as d:
-            self.assertEqual(d.read(), "1800000000")
+            self.assertEqual(d.read(), "1800000000 PIL,cryptography")
 
     def test_po_neuspeli_namestitvi_tece_brez_njiju(self):
         self._preveri(("PySide6",))
@@ -171,7 +171,21 @@ class MehkeKnjiznice(unittest.TestCase):
         izpisi, izhodi = self._preveri(("PySide6",))
         self.assertEqual(izhodi, [knjiznice.KODA_MANJKAJO])
         with open(self.poskus, encoding="ascii") as d:
-            self.assertEqual(float(d.read()), self.zdaj[0])
+            self.assertEqual(float(d.read().split()[0]), self.zdaj[0])
+
+    def test_nova_mehka_knjiznica_ne_caka_na_staro_neuspeh(self):
+        # Posodobitev doda novo mehko knjiznico (soundcard v 1.0.51); star neuspeh je ne sme zadrzati 24 ur.
+        self._preveri(("PySide6", "PIL"))                 # neuspeh: manjkala je samo cryptography
+        self.zdaj[0] += 3600
+        izpisi, izhodi = self._preveri(("PySide6",))      # zdaj manjka tudi PIL (nova)
+        self.assertEqual(izhodi, [knjiznice.KODA_MANJKAJO])
+
+    def test_star_zapis_samo_s_casom(self):
+        os.makedirs(os.path.dirname(self.poskus), exist_ok=True)
+        with open(self.poskus, "w", encoding="ascii") as d:
+            d.write("%d" % (self.zdaj[0] - 60))
+        izpisi, izhodi = self._preveri(("PySide6",))
+        self.assertEqual(izhodi, [knjiznice.KODA_MANJKAJO], "star zapis ne pozna knjiznic: novo sme poskusiti")
 
     def test_trda_knjiznica_ne_caka(self):
         self._preveri(("PySide6",))                       # zapis o poskusu je svez
