@@ -31,15 +31,16 @@ PAKETI = {
     "cryptography": "cryptography",
     "PIL": "Pillow",
     "dxcam": "dxcam",
+    "soundcard": "soundcard",
 }
 POTREBNE = tuple(PAKETI)
 #: Brez teh program tece, a brez dela zmoznosti: brez cryptography Safeer Link ne more narediti svoje identitete
 #: (kljuc in potrdilo; rezerva je program openssl, ki ga Windows nima), brez Pillow racunalnik ne zajame zaslona za
-#: oddaljeni zaslon, brez dxcam ga zajame poceni GDI (~21 namesto ~58 slik/s, izmerjeno 9. 10. 2026). Do 1.0.38 ju ni preveril ne program ne namestil zaganjalnik (izmerjeno 5. 10. 2026 z izracunom
+#: oddaljeni zaslon, brez dxcam ga zajame poceni GDI (~21 namesto ~58 slik/s, izmerjeno 9. 10. 2026), brez soundcard je oddaljeni zaslon brez zvoka. Do 1.0.38 ju ni preveril ne program ne namestil zaganjalnik (izmerjeno 5. 10. 2026 z izracunom
 #: odvisnosti: pip jih na cistem racunalniku ne prinese z nobenim drugim paketom).
 #: Ce namestitev ne uspe (ni povezave), uporabnika ne ustavljamo ob vsakem zagonu: nov poskus najvec enkrat na
 #: POSKUS_MEHKIH_S.
-MEHKE = ("cryptography", "PIL", "dxcam")
+MEHKE = ("cryptography", "PIL", "dxcam", "soundcard")
 POSKUS_MEHKIH_S = 24 * 3600
 
 

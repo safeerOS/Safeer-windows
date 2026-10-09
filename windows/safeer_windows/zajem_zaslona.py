@@ -160,6 +160,48 @@ def kazalec() -> Optional[Tuple[int, int, str, bool]]:
     return int(ci.ptScreenPos.x), int(ci.ptScreenPos.y), oblika, bool(ci.flags & 1) and bool(ci.hCursor)
 
 
+#: Zvok oddaljenega zaslona: surov PCM 48 kHz stereo s16le v koscih po 10 ms - enako kot Safeer na Linuxu (link_zaslon),
+#: zato ga Android predvaja brez sprememb.
+ZVOK_HZ, ZVOK_KANALI, ZVOK_KOS = 48000, 2, 480
+#: Toliko zaporednih popolnoma tihih koscev se posljemo, nato utihnemo (kot Linux: dolga tisina ne stane nic).
+ZVOK_REP_TISINE = 30
+
+
+def zvok_na_voljo() -> bool:
+    """Ali lahko zajamemo zvok, ki ga racunalnik predvaja (WASAPI loopback prek knjiznice soundcard)."""
+    if sys.platform != "win32":
+        return False
+    try:
+        import soundcard  # noqa: F401
+        return soundcard.default_speaker() is not None
+    except Exception:
+        return False
+
+
+def kosi_zvoka(tece) -> Iterator[bytes]:
+    """Kar racunalnik predvaja (privzeti zvocnik), v koscih po 10 ms kot s16le, dokler ``tece()`` vraca True.
+
+    Popolna tisina po kratkem repu ne gre v tok (tako kot na Linuxu). Napaka naprave (zvocnik izkljucen, zamenjan)
+    zajem konca - slika tece naprej brez zvoka."""
+    import soundcard as sc   # vrne polja numpy (numpy pride s soundcard); posebej ga ne uvazamo
+    zvocnik = sc.default_speaker()
+    mikrofon = sc.get_microphone(id=str(zvocnik.name), include_loopback=True)
+    tihih = 0
+    with mikrofon.recorder(samplerate=ZVOK_HZ, channels=ZVOK_KANALI, blocksize=ZVOK_KOS) as zapis:
+        while tece():
+            podatki = zapis.record(numframes=ZVOK_KOS)
+            if podatki.size == 0:
+                continue
+            pcm = (podatki.clip(-1.0, 1.0) * 32767.0).astype("<i2").tobytes()
+            if not podatki.any():
+                tihih += 1
+                if tihih > ZVOK_REP_TISINE:
+                    continue
+            else:
+                tihih = 0
+            yield pcm
+
+
 def _velikost_zaslona() -> Tuple[int, int]:
     if sys.platform != "win32":
         return 1920, 1080

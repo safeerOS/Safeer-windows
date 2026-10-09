@@ -18,3 +18,4 @@ winrt-Windows.Media==3.2.1
 winrt-Windows.Media.Playback==3.2.1
 winrt-Windows.Storage.Streams==3.2.1
 dxcam>=0.0.5  # hiter zajem zaslona (DXGI Desktop Duplication, MIT); brez njega ostane GDI
+soundcard>=0.4.6  # zvok racunalnika za oddaljeni zaslon (WASAPI loopback, BSD-3); brez njega zaslon brez zvoka

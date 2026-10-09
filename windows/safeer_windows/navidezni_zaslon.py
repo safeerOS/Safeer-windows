@@ -697,7 +697,8 @@ class NavidezniZaslon:
                 "height": self._slika_seje[1],
                 "fps": fps,
                 "quality": kakovost,
-                "audio": None,
+                "audio": ({"hz": zajem_zaslona.ZVOK_HZ, "channels": zajem_zaslona.ZVOK_KANALI, "format": "s16le"}
+                          if zajem_zaslona.zvok_na_voljo() else None),
                 "input": True,
                 "gamepad": True,
                 "screen": "desktop",
@@ -757,9 +758,13 @@ class NavidezniZaslon:
                 odjemalec.sendall(bytes([3]) + len(obvestilo).to_bytes(4, "big") + obvestilo)
                 return
 
+            zvok = zajem_zaslona.zvok_na_voljo()
             glava = {
                 "v": 2, "w": zajem.sirina, "h": zajem.visina, "fps": zajem.fps,
-                "zvok": None, "vnos": True, "plosek": False,
+                # Zvok racunalnika (WASAPI loopback), ce ga lahko zajamemo; sicer slika brez zvoka kot prej.
+                "zvok": ({"hz": zajem_zaslona.ZVOK_HZ, "kanali": zajem_zaslona.ZVOK_KANALI, "oblika": "s16le"}
+                         if zvok else None),
+                "vnos": True, "plosek": False,
                 # Vsak okvir slike je cela slika (en paket kodirnika): sprejemnik jo sme takoj dati dekoderju,
                 # ne da caka na zacetek naslednje (Android ZaslonOdjemalec, od Safeer OS 0.5.75).
                 "au": True,
@@ -788,6 +793,9 @@ class NavidezniZaslon:
                                            args=(odjemalec, seja, zajem.izvor, (zajem.sirina, zajem.visina)),
                                            name="safeer-navidezni-zaslon-kazalec", daemon=True)
             nit_kazalec.start()
+            if zvok:
+                threading.Thread(target=self._posiljaj_zvok, args=(odjemalec, seja), name="safeer-navidezni-zaslon-zvok",
+                                 daemon=True).start()
             print(f"[NavidezniZaslon] Zaslon {zajem.sirina}x{zajem.visina} @ {zajem.fps} ({zajem.kodirnik})", flush=True)
             try:
                 for kos in zajem.okvirji(lambda: self._tece and seja == self._seja_st and nit_vnos.is_alive()):
@@ -814,6 +822,15 @@ class NavidezniZaslon:
             # Seja pospravi samo za sabo. Prej je konec stare seje vedno ustavil tudi novo: ce je druga naprava
             # prevzela zaslon, medtem ko ga je prva se gledala, se ni mogla povezati (vrata je zaprla stara nit).
             self.ustavi_sejo(seja)
+
+    def _posiljaj_zvok(self, odjemalec, seja: int) -> None:
+        """Zvok, ki ga racunalnik predvaja, kot okvirje 2 (surov PCM). Napaka zvoka ne konca seje: slika tece naprej."""
+        try:
+            for kos in zajem_zaslona.kosi_zvoka(lambda: self._tece and seja == self._seja_st):
+                odjemalec.sendall(bytes([2]) + len(kos).to_bytes(4, "big") + kos)
+        except Exception as e:
+            if self._tece and seja == self._seja_st:
+                print(f"[NavidezniZaslon] Zvok ustavljen: {e}", flush=True)
 
     def _posiljaj_kazalec(self, odjemalec, seja: int, izvor, slika) -> None:
         """Polozaj (v tockah slike), oblika in vidnost kazalca, vsakic ko se spremenijo (najvec ~125-krat na sekundo).
