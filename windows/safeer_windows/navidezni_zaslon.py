@@ -668,9 +668,11 @@ class NavidezniZaslon:
             self._tece = True
 
             k = KAKOVOSTI.get(kakovost) or KAKOVOSTI[PRIVZETA_KAKOVOST]
-            # Pravi zaslon Windows (zajem + H.264 v procesu): 30 sl./s je za namizje dovolj in zajem
-            # GDI hitreje ne gre; velikost je zaslon, pomanjsan v 1080p.
-            fps = min(30, int(k.get("fps", 30)))
+            # Pravi zaslon Windows (zajem + H.264 v procesu). Z zajemom DXGI gre do 60 sl./s (izmerjeno 9. 10. 2026:
+            # 57,5 na i5-4590); brez njega (GDI) najvec okoli 21, zato tam ostane meja 30. Velikost: zaslon v 1080p.
+            fps = int(k.get("fps", 30))
+            if not zajem_zaslona.dxgi_na_voljo():
+                fps = min(30, fps)
             self._slika_seje = zajem_zaslona.velikost_slike()
 
             self._seja_nit = threading.Thread(target=self._streci_sejo, args=(posluh, ctx, fps, seja),
