@@ -1,5 +1,6 @@
 """Unit testi za Safeer OS Windows zaledje, Safeer Control in Google avtentikacijo."""
 
+from safeer_windows import zajem_zaslona  # noqa: E402
 import base64
 import json
 import os
@@ -887,7 +888,7 @@ class TestNavidezniZaslon(unittest.TestCase):
         self.assertEqual(seja["codec"], "h264")
         self.assertEqual(seja["screen"], "desktop")
         self.assertEqual(seja["quality"], "najvisja")
-        self.assertEqual(seja["fps"], 30)
+        self.assertEqual(seja["fps"], 60 if zajem_zaslona.dxgi_na_voljo() else 30)  # DXGI do 60, GDI do 30
         self.assertTrue(seja["secure"])
 
         stanje = self.zaslon.stanje_seje()
@@ -1087,7 +1088,7 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
             self.assertTrue(res["payload"]["ok"])
             seja = res["payload"]["data"]
             self.assertEqual(seja["quality"], "najvisja")
-            self.assertEqual(seja["fps"], 30)
+            self.assertEqual(seja["fps"], 60 if zajem_zaslona.dxgi_na_voljo() else 30)  # DXGI do 60, GDI do 30
             self.assertTrue(seja["secure"])
             self.assertEqual(seja["screen"], "desktop")
 
