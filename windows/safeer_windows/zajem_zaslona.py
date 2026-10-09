@@ -62,6 +62,17 @@ def _moznosti(ime: str) -> dict:
     return {}
 
 
+def dxgi_na_voljo() -> bool:
+    """Ali je na tem racunalniku hiter zajem DXGI (Windows in namescena knjiznica dxcam)."""
+    if sys.platform != "win32":
+        return False
+    try:
+        import importlib.util
+        return importlib.util.find_spec("dxcam") is not None
+    except Exception:
+        return False
+
+
 class _DxgiZajem:
     """Zajem prek DXGI Desktop Duplication (knjiznica dxcam): ~2 ms na sliko namesto ~34 ms z GDI.
 
