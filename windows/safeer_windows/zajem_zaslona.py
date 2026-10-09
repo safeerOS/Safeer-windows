@@ -19,9 +19,6 @@ import time
 from fractions import Fraction
 from typing import Iterator, Optional, Tuple
 
-#: Nespremenjen zaslon (DXGI ne da nove slike) posljemo znova najkasneje po tem casu: naprava ve, da seja tece.
-POLNITEV_S = 0.5
-
 #: Najvecja slika, ki jo posiljamo (kot na Linuxu: 1080p je za namizje dovolj in je hitrejsa).
 NAJVEC_SIRINA, NAJVEC_VISINA = 1920, 1080
 NAJVEC_PREMIK = 400
@@ -231,7 +228,9 @@ class H264Zajem:
 
         def zajemaj():
             # DXGI: sliko vzamemo takoj, ko jo Windows nariše (ne v stalnem ritmu: to je dodajalo do 17 ms
-            # zamika), najvec fps-krat na sekundo; nespremenjen zaslon pošljemo znova le vsakih POLNITEV_S.
+            # zamika), najvec fps-krat na sekundo. Nespremenjen zaslon posljemo v rednem ritmu: sprejemnik na Androidu
+            # (ZaslonOdjemalec) da sliko dekoderju sele, ko pride naslednja - z redkejsim posiljanjem bi zadnja
+            # sprememba na televizorju obvisela do naslednje slike.
             # GDI (ni DXGI ali je monitor ugasnjen): stalni ritem kot prej.
             zadnji = 0.0
             try:
@@ -246,7 +245,7 @@ class H264Zajem:
                             continue
                         surova, nova = self._dxgi.slika_nova()
                         if surova is not None:
-                            if not nova and zdaj - zadnji < POLNITEV_S:
+                            if not nova and zdaj - zadnji < interval:
                                 time.sleep(0.001)
                                 continue
                             okvir = self._iz_bgra(surova)
