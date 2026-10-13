@@ -8,9 +8,14 @@ import subprocess
 import sys
 import tempfile
 import time
+import json
 import urllib.parse
 from pathlib import Path
 from typing import Callable, Optional
+
+if sys.platform == "win32":
+    import ctypes
+    from ctypes import wintypes
 
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
@@ -56,7 +61,14 @@ class WebView2MediaWidget(QWidget):
     def __init__(self, on_home: Callable[[], None], parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.on_home = on_home
-        self.executable = Path(__file__).resolve().parents[1] / "SafeerMediaWebView.exe"
+        koren_paketa = Path(__file__).resolve().parents[1]
+        # Safeer DRM (castLabs ECS, Widevine) je prvi predvajalnik, WebView2 rezerva. Oba govorita isti dogovor
+        # (--parent/--url/--profile/--state/--command), zato uporabnik vidi en sam predvajalnik.
+        self.drm_executable = koren_paketa / "SafeerDRM" / "safeer-drm.exe"
+        self.webview2_executable = koren_paketa / "SafeerMediaWebView.exe"
+        self.executable = self.drm_executable if self.drm_executable.is_file() else self.webview2_executable
+        self._vdelano_okno = 0
+        self._dogodki_odmik = 0
         self.process: Optional[subprocess.Popen] = None
         self.session_dir = ""
         self.command_path = ""
@@ -70,6 +82,7 @@ class WebView2MediaWidget(QWidget):
         # Stran, ki jo je uporabnik sam poslal iz Spleta (zapis, ki ga Qt nima): brez roka za video tok in brez
         # preklapljanja virov - uporabnik sam pritisne predvajaj, kadar stran tega ne naredi.
         self.page_mode = False
+        self.storitev = False
 
         self.setStyleSheet("background:#070b12;color:#f4f7f5;")
         outer = QVBoxLayout(self)
@@ -97,7 +110,7 @@ class WebView2MediaWidget(QWidget):
                 "QPushButton:hover{border-color:#4de6ba;background:#18332f}"
             )
             row.addWidget(button)
-        self.status_label = QLabel("Zasebno predvajanje v Safeer Media · WebView2", self.bar)
+        self.status_label = QLabel("Zasebno predvajanje v Safeer Media", self.bar)
         self.status_label.setStyleSheet("color:#9eb5ad;padding-left:8px;")
         row.addWidget(self.status_label, 1)
         outer.addWidget(self.bar)
@@ -113,16 +126,88 @@ class WebView2MediaWidget(QWidget):
     def set_fullscreen_ui(self, enabled: bool) -> None:
         """V celozaslonskem filmu skrije tudi Safeerjevo orodno vrstico."""
         self.bar.setVisible(not enabled)
+        if not enabled and self.uporablja_drm:
+            # Safeer OS je zapustil celozaslonski nacin (Esc, F11, gumb): tudi stran naj zapre svoj celozaslonski video.
+            self._command("exitfullscreen")
+        QTimer.singleShot(0, self._prilagodi_okno)
+        QTimer.singleShot(300, self._prilagodi_okno)
+
+    @property
+    def uporablja_drm(self) -> bool:
+        return self.executable == self.drm_executable
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        QTimer.singleShot(0, self._prilagodi_okno)
+
+    def _vstavi_okno(self, rocaj: int) -> None:
+        """Okno Safeer DRM vstavi v ploskev predvajalnika (isto kot WebView2 gostitelj naredi sam)."""
+        if sys.platform != "win32" or not rocaj:
+            return
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        user32.GetWindowLongPtrW.restype = ctypes.c_ssize_t
+        user32.GetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int]
+        user32.SetWindowLongPtrW.restype = ctypes.c_ssize_t
+        user32.SetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_ssize_t]
+        user32.SetParent.argtypes = [wintypes.HWND, wintypes.HWND]
+        user32.SetParent.restype = wintypes.HWND
+        gwl_style, ws_child, ws_popup, ws_caption, ws_thickframe = -16, 0x40000000, 0x80000000, 0x00C00000, 0x00040000
+        slog = user32.GetWindowLongPtrW(rocaj, gwl_style)
+        slog = (slog | ws_child) & ~ws_popup & ~ws_caption & ~ws_thickframe
+        user32.SetWindowLongPtrW(rocaj, gwl_style, slog)
+        user32.SetParent(rocaj, int(self.surface.winId()))
+        self._vdelano_okno = rocaj
+        self._prilagodi_okno()
+        user32.ShowWindow(rocaj, 5)  # SW_SHOW
+
+    def _prilagodi_okno(self) -> None:
+        if sys.platform != "win32" or not self._vdelano_okno:
+            return
+        razmerje = self.surface.devicePixelRatioF() or 1.0
+        sirina = max(1, round(self.surface.width() * razmerje))
+        visina = max(1, round(self.surface.height() * razmerje))
+        ctypes.windll.user32.MoveWindow(self._vdelano_okno, 0, 0, sirina, visina, True)
+
+    def _beri_dogodke_drm(self) -> None:
+        """Safeer DRM v dnevnik zapise rocaj svojega okna in celozaslonske zahteve strani."""
+        if not self.uporablja_drm or not self.state_path:
+            return
+        try:
+            with open(self.state_path, "r", encoding="utf-8") as datoteka:
+                datoteka.seek(self._dogodki_odmik)
+                novo = datoteka.read()
+                self._dogodki_odmik = datoteka.tell()
+        except OSError:
+            return
+        for vrstica in novo.splitlines():
+            try:
+                dogodek = json.loads(vrstica)
+            except ValueError:
+                continue
+            vrsta = dogodek.get("type")
+            if vrsta == "WINDOW_HANDLE" and not self._vdelano_okno:
+                try:
+                    self._vstavi_okno(int(str(dogodek.get("detail") or "0")))
+                except ValueError:
+                    pass
+            elif vrsta in ("FULLSCREEN_ON", "FULLSCREEN_OFF"):
+                okno = self.window()
+                zeli = vrsta == "FULLSCREEN_ON"
+                if hasattr(okno, "preklopi_celozaslonsko") and okno.isFullScreen() != zeli:
+                    okno.preklopi_celozaslonsko()
+                QTimer.singleShot(300, self._prilagodi_okno)
 
     @property
     def available(self) -> bool:
         return sys.platform == "win32" and self.executable.is_file()
 
-    def open_url(self, url: str, stran: bool = False) -> bool:
+    def open_url(self, url: str, stran: bool = False, storitev: bool = False) -> bool:
         if not self.available or not url.startswith("https://"):
             return False
         self.stop()
-        self.page_mode = bool(stran)
+        self.page_mode = bool(stran or storitev)
+        # Storitev z DRM (Netflix ...): stalen profil, da prijava ostane, in prosto premikanje po https.
+        self.storitev = bool(storitev) and self.uporablja_drm
         self.variants = [{"url": url, "vir": urllib.parse.urlsplit(url).hostname or "Spletni vir"}]
         self.variant_index = 0
         return self._open_variant()
@@ -172,6 +257,8 @@ class WebView2MediaWidget(QWidget):
         self.session_dir = ""
         self.command_path = ""
         self.state_path = ""
+        self._vdelano_okno = 0
+        self._dogodki_odmik = 0
 
     def _open_variant(self) -> bool:
         if not self.available or self.variant_index >= len(self.variants):
@@ -186,7 +273,7 @@ class WebView2MediaWidget(QWidget):
         # Ostanki prejsnjih zagonov (npr. po sesutju ali prisilnem zaprtju) - samo starejsi od ure.
         pocisti_seje(root, starejse_od_s=3600)
         self.session_dir = tempfile.mkdtemp(prefix="session-", dir=str(root))
-        profile = str(Path(self.session_dir) / "profile")
+        profile = str(_koren_sej().parent / "SafeerDRMProfil") if self.storitev else str(Path(self.session_dir) / "profile")
         self.command_path = str(Path(self.session_dir) / "command.txt")
         self.state_path = str(Path(self.session_dir) / "events.jsonl")
         args = [
@@ -197,6 +284,8 @@ class WebView2MediaWidget(QWidget):
             f"--state={self.state_path}",
             f"--command={self.command_path}",
         ]
+        if self.storitev:
+            args.append("--storitev=1")
         self.process = subprocess.Popen(args, close_fds=True)
         self.opened_at = time.monotonic()
         self.media_detected = False
@@ -218,6 +307,7 @@ class WebView2MediaWidget(QWidget):
         if self.process is None:
             self.watchdog.stop()
             return
+        self._beri_dogodke_drm()
         if self.state_path and not self.media_detected:
             try:
                 events = Path(self.state_path).read_text(encoding="utf-8")
@@ -228,15 +318,25 @@ class WebView2MediaWidget(QWidget):
                     )
             except OSError:
                 pass
-            if self.media_detected:
+            if self.media_detected and self.storitev:
+                # Uporabnik brska po storitvi (lahko tudi drugam): brez imena prvega gostitelja.
+                self.status_label.setText("Safeer predvajalnik")
+            elif self.media_detected:
                 provider = str(self.variants[self.variant_index].get("vir") or "Spletni vir")
                 self.status_label.setText(f"Predvaja se prek {provider}")
         exited = self.process.poll() is not None
+        if exited and self.uporablja_drm and not self._vdelano_okno and self.webview2_executable.is_file():
+            # Safeer DRM se ni zagnal (okna ni bilo): ista stran takoj v rezervnem predvajalniku WebView2.
+            print("[SafeerMedia] Safeer DRM se ni zagnal - rezerva WebView2", flush=True)
+            self.executable = self.webview2_executable
+            self.storitev = False
+            self._open_variant()
+            return
         if self.page_mode:
             if exited:
                 self.watchdog.stop()
                 self.status_label.setText("Predvajalnik se je zaprl")
-            elif not self.media_detected and time.monotonic() - self.opened_at >= 6:
+            elif not self.storitev and not self.media_detected and time.monotonic() - self.opened_at >= 6:
                 self.status_label.setText("Safeer predvajalnik · če se film ne začne sam, pritisni predvajaj")
             return
         timed_out = not self.media_detected and time.monotonic() - self.opened_at >= 18.0
@@ -275,6 +375,7 @@ class WebView2MediaWidget(QWidget):
         self.opened_at = 0.0
         self.media_detected = False
         self.page_mode = False
+        self.storitev = False
 
     def close_and_home(self) -> None:
         self.stop()

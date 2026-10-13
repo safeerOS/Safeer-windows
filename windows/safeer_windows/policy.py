@@ -564,6 +564,26 @@ function ovij(objekt, ime) {
     objekt[ime] = function (tip) { var r = izvirna.apply(this, arguments); try { opazi(tip, !!r); } catch (e) {} return r; };
   } catch (e) {}
 }
+// Zasciten video (Widevine/PlayReady): Qt WebEngine nima modula za DRM, Safeer predvajalnik (Safeer DRM) ga ima.
+// Sama zavrnjena poizvedba ni dovolj (strani jo pogosto naredijo le za preizkus) - Splet preklopi, ko stran po zavrnitvi
+// res ima video z virom, ki se v 4 s ne predvaja.
+try {
+  if (navigator.requestMediaKeySystemAccess) {
+    var izvirniEme = navigator.requestMediaKeySystemAccess;
+    var preveriEme = function (poskus) {
+      if (prijavljeno || nalozeno()) return;
+      var m = document.querySelectorAll('video');
+      for (var i = 0; i < m.length; i++) if (m[i].currentSrc || m[i].src) { prijavi(true); return; }
+      if (poskus < 10) setTimeout(function () { preveriEme(poskus + 1); }, 2000);
+    };
+    navigator.requestMediaKeySystemAccess = function () {
+      return izvirniEme.apply(navigator, arguments).catch(function (e) {
+        setTimeout(function () { preveriEme(0); }, 4000);
+        throw e;
+      });
+    };
+  }
+} catch (e) {}
 ovij(window.MediaSource, 'isTypeSupported');
 ovij(window.ManagedMediaSource, 'isTypeSupported');
 ovij(window.HTMLMediaElement && HTMLMediaElement.prototype, 'canPlayType');

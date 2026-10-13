@@ -380,6 +380,8 @@
     klic(vednoNotri ? "spletNotranji" : "splet", [url]).then(function (r) {
       // Storitve z DRM (Netflix ...) odpre Edge, ker vgrajeni pogon nima Widevine.
       if (r && r.zunanje) { obvesti(t("odpiraSeZunaj", { ime: ime || imeIzNaslova(url), brskalnik: r.brskalnik })); return; }
+      // Safeer DRM: storitev se predvaja v predvajalniku v tem oknu (Python ga je ze pokazal).
+      if (r && r.predvajalnik) return;
       if (!vednoNotri) pojdi("splet");
     });
   }

@@ -1712,6 +1712,13 @@ class SafeerOsWindow(QMainWindow):
         from PySide6.QtGui import QDesktopServices
         QDesktopServices.openUrl(QUrl(url))
 
+    def _odpri_drm_storitev(self, url: str) -> None:
+        if self.webview2_media.open_url(url, stran=True, storitev=True):
+            self.zaslon.setCurrentWidget(self.webview2_media)
+            self.setWindowTitle("Safeer OS · Safeer predvajalnik")
+            return
+        os_backend_win.odpri_drm_storitev(url)
+
     def _zapri_webview2_media(self) -> None:
         self.webview2_media.stop()
         self._browser_media_active = False
@@ -3015,6 +3022,10 @@ class SafeerOsWindow(QMainWindow):
         if urllib.parse.urlsplit(url).scheme.lower() not in ("http", "https"):
             return False
         if not vedno_notri and os_backend_win.je_drm_storitev(url):
+            if self.webview2_media.uporablja_drm:
+                # Safeer DRM (Widevine) v istem oknu - uporabnik ostane v Safeer OS; Edge je le rezerva.
+                self.dispatcher.dispatch(lambda: self._odpri_drm_storitev(url))
+                return {"predvajalnik": True}
             izid = os_backend_win.odpri_drm_storitev(url)
             if izid.get("zunanje"):
                 return izid

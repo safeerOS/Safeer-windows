@@ -1,0 +1,8 @@
+{
+  "name": "safeer-drm",
+  "productName": "Safeer DRM",
+  "version": "0.2.0",
+  "description": "Safeer predvajalnik za zaščitene vsebine (Widevine prek castLabs ECS)",
+  "main": "main.js",
+  "license": "MIT"
+}
