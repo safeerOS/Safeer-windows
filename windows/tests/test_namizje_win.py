@@ -38,6 +38,26 @@ class Kos(unittest.TestCase):
         self.assertEqual(nd.obnovi_iz_smeti(os.path.abspath(__file__))["ok"], False)
 
 
+class Bliznjica(unittest.TestCase):
+    def _lnk(self, osnova: bytes, pripona: bytes) -> bytes:
+        glava = bytearray(0x4C)
+        glava[0:4] = b"\x4c\x00\x00\x00"
+        struct.pack_into("<I", glava, 0x14, 0x2)            # samo HasLinkInfo
+        nizi_odmik = 0x1C + 4                                # glava LinkInfo + prazen VolumeID
+        osnova_odmik = nizi_odmik
+        pripona_odmik = osnova_odmik + len(osnova) + 1
+        velikost = pripona_odmik + len(pripona) + 1
+        li = struct.pack("<IIIIIII", velikost, 0x1C, 1, 0x1C, osnova_odmik, 0, pripona_odmik)
+        li += struct.pack("<I", 4) + osnova + b"\0" + pripona + b"\0"
+        return bytes(glava) + li
+
+    def test_osnova_in_pripona(self):
+        self.assertEqual(nd.cilj_bliznjice(self._lnk(b"C:\\Users\\x\\", b"zapis.txt")), "C:\\Users\\x\\zapis.txt")
+
+    def test_ni_bliznjica(self):
+        self.assertEqual(nd.cilj_bliznjice(b"ni lnk"), "")
+
+
 class Pregled(unittest.TestCase):
     def test_skrite_in_navadne(self):
         with tempfile.TemporaryDirectory() as d:

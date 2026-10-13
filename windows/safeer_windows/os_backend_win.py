@@ -400,7 +400,21 @@ def poisci_start_menu_programe(z_ikonami: bool = True) -> List[dict]:
     return programi
 
 
+def _pot_programa(pot: str) -> str:
+    """Stran poslje id iz seznama programov (win_app_...): poiscemo bliznjico, ki ji pripada."""
+    if not str(pot or "").startswith("win_app_"):
+        return pot
+    try:
+        for p in poisci_start_menu_programe(z_ikonami=False):
+            if p.get("id") == pot:
+                return str(p.get("pot") or pot)
+    except Exception:  # noqa: BLE001
+        pass
+    return pot
+
+
 def zazeni_program(pot: str) -> bool:
+    pot = _pot_programa(pot)
     try:
         shramba = nalozi_shrambo()
         pogosti = shramba.setdefault("pogosti", {})

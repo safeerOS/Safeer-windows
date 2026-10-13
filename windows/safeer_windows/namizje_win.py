@@ -63,6 +63,70 @@ def privzeti_brskalnik() -> str:
     return progid.split("-")[0].split(".")[0]
 
 
+#: Znane mape Windows (User Shell Folders) - lahko so prestavljene, npr. v OneDrive.
+_ZNANE_MAPE = (("DESKTOP", "Desktop"), ("DOCUMENTS", "Personal"), ("DOWNLOAD", "{374DE290-123F-4565-9164-39C4925E467B}"),
+               ("PICTURES", "My Pictures"), ("MUSIC", "My Music"), ("VIDEOS", "My Video"))
+
+
+def uporabniske_mape() -> list:
+    """Domača mapa in znane mape, kot jih ima uporabnik (iz registra; brez njega privzete poti)."""
+    dom = os.path.expanduser("~")
+    izhod = [{"vrsta": "HOME", "pot": dom, "ime": os.path.basename(dom)}]
+    registrske = {}
+    if _WIN:
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                                r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders") as k:
+                for vrsta, ime in _ZNANE_MAPE:
+                    try:
+                        registrske[vrsta] = os.path.expandvars(str(winreg.QueryValueEx(k, ime)[0]))
+                    except OSError:
+                        pass
+        except OSError:
+            pass
+    privzeto = {"DESKTOP": "Desktop", "DOCUMENTS": "Documents", "DOWNLOAD": "Downloads", "PICTURES": "Pictures",
+                "MUSIC": "Music", "VIDEOS": "Videos"}
+    for vrsta, _ in _ZNANE_MAPE:
+        pot = registrske.get(vrsta) or os.path.join(dom, privzeto[vrsta])
+        if os.path.isdir(pot):
+            izhod.append({"vrsta": vrsta, "pot": pot, "ime": os.path.basename(pot.rstrip("\\/"))})
+    return izhod
+
+
+def ozadje_windows(sirina: int = 1920) -> str:
+    """Ozadje namizja Windows kot data: URL (stran je na http://127.0.0.1 in ne bere file://); brez slike prazno."""
+    if not _WIN:
+        return ""
+    kandidati = []
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Control Panel\Desktop") as k:
+            kandidati.append(os.path.expandvars(str(winreg.QueryValueEx(k, "WallPaper")[0])))
+    except OSError:
+        pass
+    kandidati.append(os.path.join(os.environ.get("APPDATA", ""), "Microsoft", "Windows", "Themes", "TranscodedWallpaper"))
+    for pot in kandidati:
+        if pot and os.path.isfile(pot):
+            try:
+                import base64
+                from PySide6.QtCore import QBuffer, QByteArray, QIODevice, Qt
+                from PySide6.QtGui import QImage
+                slika = QImage(pot)
+                if slika.isNull():
+                    continue
+                if slika.width() > sirina:
+                    slika = slika.scaledToWidth(sirina, Qt.TransformationMode.SmoothTransformation)
+                podatki = QByteArray()
+                b = QBuffer(podatki)
+                b.open(QIODevice.OpenModeFlag.WriteOnly)
+                slika.save(b, "JPEG", 85)
+                return "data:image/jpeg;base64," + base64.b64encode(bytes(podatki)).decode("ascii")
+            except Exception:  # noqa: BLE001
+                continue
+    return ""
+
+
 _lupa: Optional[os_lupa.Ucenje] = None
 
 
@@ -84,6 +148,7 @@ def metode(okno: "NamizjeOkno") -> Dict[str, Callable[[list], Any]]:
     os_okno = okno.os_okno
     return {
         "mapa": lambda a: nd.preglej(_s(a, 0, "~")),
+        "nedavne": lambda a: nd.nedavne(),
         "isciDatoteke": lambda a: os_iskalnik.isci(_s(a), min(300, max(1, int(a[1]))) if len(a) > 1 and isinstance(a[1], (int, float))
                                                  and not isinstance(a[1], bool) else os_datoteke.NAJVEC_ZADETKOV),
         "odpriDatoteko": lambda a: nd.odpri(_s(a)),
@@ -236,11 +301,8 @@ class NamizjeOkno(QWidget):  # type: ignore[misc]
     # ------------------------------------------------------------------ metode namizja
     def zacetek(self) -> dict:
         z = dict(self.os_okno._izvedi_metodo("zacetek", []) or {})
-        mape = z.get("mape") or []
-        dom = os.path.expanduser("~")
-        if not any(m.get("vrsta") == "HOME" for m in mape):
-            mape = [{"vrsta": "HOME", "pot": dom, "ime": os.path.basename(dom)}] + list(mape)
-        z.update({"mape": mape, "zaznamki": [], "vlecenjeDatotek": False, "videz": z.get("videz") or {}})
+        z.update({"mape": uporabniske_mape(), "zaznamki": [], "vlecenjeDatotek": False, "videz": z.get("videz") or {},
+                  "ozadje": ozadje_windows()})
         return z
 
     def odpri_razdelek(self, razdelek: str) -> bool:

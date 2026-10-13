@@ -83,29 +83,42 @@ def odpri_z(pot: str) -> bool:
 
 # ------------------------------------------------------------------ Koš
 def _sid_uporabnika() -> str:
+    """SID prijavljenega uporabnika (mapa Koša v $Recycle.Bin). Najprej Win32, sicer whoami."""
     if not _WIN:
         return ""
-    from ctypes import wintypes
-    advapi, kernel = ctypes.WinDLL("advapi32"), ctypes.WinDLL("kernel32")
-    zeton = wintypes.HANDLE()
-    if not advapi.OpenProcessToken(kernel.GetCurrentProcess(), 0x0008, ctypes.byref(zeton)):  # TOKEN_QUERY
-        return ""
     try:
-        dolzina = wintypes.DWORD()
-        advapi.GetTokenInformation(zeton, 1, None, 0, ctypes.byref(dolzina))  # TokenUser
-        medpomnilnik = ctypes.create_string_buffer(dolzina.value)
-        if not advapi.GetTokenInformation(zeton, 1, medpomnilnik, dolzina, ctypes.byref(dolzina)):
-            return ""
-        sid = ctypes.cast(medpomnilnik, ctypes.POINTER(ctypes.c_void_p))[0]
-        niz = wintypes.LPWSTR()
-        if not advapi.ConvertSidToStringSidW(ctypes.c_void_p(sid), ctypes.byref(niz)):
-            return ""
-        try:
-            return niz.value or ""
-        finally:
-            kernel.LocalFree(niz)
-    finally:
-        kernel.CloseHandle(zeton)
+        from ctypes import wintypes
+        advapi, kernel = ctypes.WinDLL("advapi32", use_last_error=True), ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.GetCurrentProcess.restype = wintypes.HANDLE
+        advapi.OpenProcessToken.argtypes = [wintypes.HANDLE, wintypes.DWORD, ctypes.POINTER(wintypes.HANDLE)]
+        advapi.GetTokenInformation.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD,
+                                               ctypes.POINTER(wintypes.DWORD)]
+        advapi.ConvertSidToStringSidW.argtypes = [ctypes.c_void_p, ctypes.POINTER(wintypes.LPWSTR)]
+        kernel.LocalFree.argtypes = [ctypes.c_void_p]
+        zeton = wintypes.HANDLE()
+        if advapi.OpenProcessToken(kernel.GetCurrentProcess(), 0x0008, ctypes.byref(zeton)):
+            try:
+                dolzina = wintypes.DWORD()
+                advapi.GetTokenInformation(zeton, 1, None, 0, ctypes.byref(dolzina))
+                medpomnilnik = ctypes.create_string_buffer(dolzina.value)
+                if advapi.GetTokenInformation(zeton, 1, medpomnilnik, dolzina, ctypes.byref(dolzina)):
+                    sid = ctypes.c_void_p.from_buffer(medpomnilnik).value
+                    niz = wintypes.LPWSTR()
+                    if advapi.ConvertSidToStringSidW(sid, ctypes.byref(niz)):
+                        vrednost = niz.value or ""
+                        kernel.LocalFree(ctypes.cast(niz, ctypes.c_void_p))
+                        if vrednost:
+                            return vrednost
+            finally:
+                kernel.CloseHandle(zeton)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        r = subprocess.run(["whoami", "/user", "/fo", "csv", "/nh"], capture_output=True, text=True, timeout=5,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        return r.stdout.strip().split(",")[-1].strip('"')
+    except (OSError, subprocess.SubprocessError):
+        return ""
 
 
 def _pogoni() -> List[str]:
@@ -344,3 +357,76 @@ def slicice(poti, velikost: int = 160, rok: float = 4.0) -> dict:
         slika.save(medpomnilnik, "JPEG", 82)
         izid[pot] = "data:image/jpeg;base64," + base64.b64encode(bytes(podatki)).decode("ascii")
     return izid
+
+
+# ------------------------------------------------------------------ nedavne datoteke (Windows »Recent«)
+def cilj_bliznjice(podatki: bytes) -> str:
+    """Pot, na katero kaze bliznjica .lnk (cista funkcija; LinkInfo -> LocalBasePath[Unicode]). Prazno, ce je ni."""
+    if len(podatki) < 0x4C or podatki[:4] != b"\x4c\x00\x00\x00":
+        return ""
+    zastavice = struct.unpack_from("<I", podatki, 0x14)[0]
+    odmik = 0x4C
+    if zastavice & 0x1:                                   # HasLinkTargetIDList
+        odmik += 2 + struct.unpack_from("<H", podatki, odmik)[0]
+    if not zastavice & 0x2 or odmik + 28 > len(podatki):  # HasLinkInfo
+        return ""
+    li = odmik
+    velikost_li, glava = struct.unpack_from("<II", podatki, li)
+    li_zastavice = struct.unpack_from("<I", podatki, li + 8)[0]
+    if not li_zastavice & 0x1:                            # VolumeIDAndLocalBasePath
+        return ""
+    if glava >= 0x24 and li + 0x24 <= len(podatki):
+        unicode_odmik = struct.unpack_from("<I", podatki, li + 0x1C)[0]
+        if unicode_odmik:
+            konec = podatki.find(b"\x00\x00", li + unicode_odmik)
+            while konec != -1 and (konec - (li + unicode_odmik)) % 2:
+                konec = podatki.find(b"\x00\x00", konec + 1)
+            if konec != -1:
+                osnova = podatki[li + unicode_odmik:konec].decode("utf-16-le", "replace")
+                pripona = ""
+                pripona_odmik = struct.unpack_from("<I", podatki, li + 0x20)[0] if glava >= 0x24 else 0
+                if pripona_odmik:
+                    k2 = podatki.find(b"\x00\x00", li + pripona_odmik)
+                    while k2 != -1 and (k2 - (li + pripona_odmik)) % 2:
+                        k2 = podatki.find(b"\x00\x00", k2 + 1)
+                    if k2 != -1:
+                        pripona = podatki[li + pripona_odmik:k2].decode("utf-16-le", "replace")
+                return osnova + pripona
+    def ansi(odmik: int) -> str:
+        if not odmik or li + odmik >= li + velikost_li:
+            return ""
+        konec = podatki.find(b"\x00", li + odmik)
+        return "" if konec == -1 else podatki[li + odmik:konec].decode("mbcs" if _WIN else "latin-1", "replace")
+    # Polna pot = LocalBasePath + CommonPathSuffix.
+    return ansi(struct.unpack_from("<I", podatki, li + 0x10)[0]) + ansi(struct.unpack_from("<I", podatki, li + 0x18)[0])
+
+
+def nedavne(najvec: int = 24) -> List[dict]:
+    """Nedavno odprte datoteke (mapa Recent sistema Windows), najnovejse najprej; mape in manjkajoce izpusti."""
+    mapa = os.path.join(os.environ.get("APPDATA", ""), "Microsoft", "Windows", "Recent")
+    try:
+        vnosi = [e for e in os.scandir(mapa) if e.name.lower().endswith(".lnk") and e.is_file()]
+    except OSError:
+        return []
+    vnosi.sort(key=lambda e: -e.stat().st_mtime)
+    izhod, videno = [], set()
+    for e in vnosi[:200]:
+        try:
+            with open(e.path, "rb") as f:
+                pot = cilj_bliznjice(f.read(65536))
+        except OSError:
+            continue
+        if not pot or os.path.normcase(pot) in videno or not os.path.isfile(pot):
+            continue
+        videno.add(os.path.normcase(pot))
+        cas = e.stat().st_mtime
+        try:
+            velikost = os.path.getsize(pot)
+        except OSError:
+            velikost = 0
+        ime = os.path.basename(pot)
+        izhod.append({"ime": ime, "pot": pot, "cas": cas, "spremenjeno": cas, "velikost": velikost,
+                      "vrsta": os_datoteke.vrsta_datoteke(ime), "mapa": False})
+        if len(izhod) >= najvec:
+            break
+    return izhod
