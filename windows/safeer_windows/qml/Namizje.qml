@@ -49,7 +49,7 @@ Item {
               odpiramZ: "Odpiram {ime} z naprave {naprava} …", zazeniNa: "Zaženi na napravi", odpriNaNapravi: "Odpri na napravi",
               prenasam: "Prenašam {ime} …", mapeNaprave: "Mape naprave", brezProgramov: "Na napravi ni programov.",
               niLocenega: "Naprava nima ločenega zaslona – odpreš lahko samo, kar ne moti njenega uporabnika.",
-              oddaljeno: "Oddaljeno namizje" },
+              oddaljeno: "Oddaljeno namizje", odpriSProgramom: "Odpri s programom naprave {naprava}" },
         en: { isci: "Search apps, files and the web …", splet: "Search the web", programi: "Apps",
               isciProg: "Find an app …", vse: "All", datoteke: "Files", nedavno: "Recent", smeti: "Recycle Bin",
               mape: "Folders", naprave: "Devices", filter: "Filter …", ime: "Name", velikost: "Size",
@@ -66,7 +66,7 @@ Item {
               odpiramZ: "Opening {ime} from {naprava} …", zazeniNa: "Start on the device", odpriNaNapravi: "Open on the device",
               prenasam: "Downloading {ime} …", mapeNaprave: "Device folders", brezProgramov: "No apps on this device.",
               niLocenega: "The device has no separate screen – it can't open this without disturbing its user.",
-              oddaljeno: "Remote desktop" }
+              oddaljeno: "Remote desktop", odpriSProgramom: "Open with an app on {naprava}" }
     })
     function t(k, vr) {
         var s = (besedila[jezik] || besedila.en)[k] || besedila.en[k] || k

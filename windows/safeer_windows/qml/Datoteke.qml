@@ -85,16 +85,27 @@ Steklo {
         if (vir.vrsta === "smeti") return
         if (vir.vrsta === "naprava") {
             if (e.mapa) { pot = pot.concat([{ id: e.id, ime: e.ime }]); odpri({ vrsta: "naprava", pot: e.id }); return }
-            // Vedno prek oddaljenega namizja: naprava datoteko odpre na svojem locenem zaslonu, uporabnik tam tega ne
-            // opazi (lastnik, 13. 10. 2026). Brez locenega zaslona naprava zavrne - nicesar ne odpremo na njenem zaslonu.
-            koren.obvesti(koren.t("odpiramZ", { ime: e.ime, naprava: imeNaprave }))
-            koren.klic("odpriDatotekoTukaj", [naprava, e.id], function (r) {
-                if (!(r && r.ok)) koren.obvesti(r && r.koda === "ni_locenega_zaslona" ? koren.t("niLocenega") : ((r && r.message) || koren.t("niUspelo")))
-            })
+            // Najbolj gladko: datoteka pride sem in jo odpre program tega racunalnika (fotografije, video, urejanje).
+            // Ce prenos ni mogoc, jo odpre program naprave prek oddaljenega namizja (lastnik, 13. 10. 2026).
+            if (streznik && streznik.base_url) odpriTukaj(e)
+            else odpriSProgramomNaprave(e)
             return
         }
         if (e.mapa) odpri({ vrsta: "lokalno", pot: e.pot })
         else koren.klic("odpriDatoteko", [e.pot])
+    }
+    function odpriTukaj(e) {
+        koren.obvesti(koren.t("prenasam", { ime: e.ime }))
+        koren.klic("prenesiDatotekoNaprave", [naprava, e.id, e.ime, streznik], function (r) {
+            if (!r || !r.ok) koren.obvesti(koren.t("niUspelo"))
+        })
+    }
+    function odpriSProgramomNaprave(e) {
+        // Prek oddaljenega namizja: naprava datoteko odpre na svojem LOCENEM zaslonu - njen uporabnik tega ne opazi.
+        koren.obvesti(koren.t("odpiramZ", { ime: e.ime, naprava: imeNaprave }))
+        koren.klic("odpriDatotekoTukaj", [naprava, e.id], function (r) {
+            if (!(r && r.ok)) koren.obvesti(r && r.koda === "ni_locenega_zaslona" ? koren.t("niLocenega") : ((r && r.message) || koren.t("niUspelo")))
+        })
     }
     function vKos(e) {
         koren.klic("vSmeti", [e.pot], function (r) {
@@ -230,6 +241,9 @@ Steklo {
         id: meni
         property var e: null
         MenuItem { text: koren.t("odpri"); visible: panel.vir.vrsta !== "smeti"; height: visible ? implicitHeight : 0; onTriggered: panel.odpriElement(meni.e) }
+        MenuItem { text: koren.t("odpriSProgramom", { naprava: panel.imeNaprave })
+                   visible: panel.vir.vrsta === "naprava" && !!meni.e && !meni.e.mapa; height: visible ? implicitHeight : 0
+                   onTriggered: panel.odpriSProgramomNaprave(meni.e) }
         MenuItem { text: koren.t("pokazi"); visible: panel.vir.vrsta === "lokalno" || panel.vir.vrsta === "nedavno"; height: visible ? implicitHeight : 0; onTriggered: koren.klic("pokaziVMapi", [meni.e.pot]) }
         MenuItem { text: koren.t("preimenuj"); visible: panel.vir.vrsta === "lokalno"; height: visible ? implicitHeight : 0; onTriggered: preimenovanje.zacni(meni.e) }
         MenuItem { text: koren.t("vKos"); visible: panel.vir.vrsta === "lokalno" || panel.vir.vrsta === "nedavno"; height: visible ? implicitHeight : 0; onTriggered: panel.vKos(meni.e) }

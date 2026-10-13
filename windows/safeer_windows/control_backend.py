@@ -2141,7 +2141,9 @@ class SafeerControlBackend:
         if not id_datoteke:
             return {"ok": False, "koda": "manjka_datoteka"}
         if not streznik or not isinstance(streznik, dict) or not streznik.get("base_url"):
-            return self.odpri_datoteko_naprave(id_naprave, id_datoteke)
+            # Brez streznika datoteke ne odpiramo na zaslonu naprave (njen uporabnik bi to videl); vmesnik ponudi
+            # program naprave prek oddaljenega namizja (locen zaslon).
+            return {"ok": False, "koda": "ni_streznika"}
 
         base_url = str(streznik.get("base_url") or "").rstrip("/")
         fp = streznik.get("fp")
