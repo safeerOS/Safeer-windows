@@ -3093,13 +3093,28 @@ class SafeerOsWindow(QMainWindow):
         self.dispatcher.dispatch(lambda: self._odpri_v_brskalniku(url))
         return True
 
+    def _sistemsko_okno_brskalnika(self):
+        """Okno brskalnika kot del Safeer OS: ista seja in videz kot Splet, ikona Safeer OS, isti jezik."""
+        okno = browser.BrowserWindow(self.browser_app, private=True, sistemsko=True)
+        okno.na_magnet = self.odpri_magnet
+        okno.na_predvajalnik = self._predvajaj_stran_v_predvajalniku
+        okno.stanje_povezave = self._stanje_povezave_za_splet
+        okno.jezik_vmesnika = _jezik_oken
+        okno.setWindowIcon(self.windowIcon())
+        self.browser_app.windows.append(okno)
+        okno.set_safeer_os_web_mode(True)
+        okno.resize(1280, 820)
+        return okno
+
     def _odpri_v_brskalniku(self, url: str) -> None:
         """Nov zavihek v ze odprtem samostojnem oknu brskalnika ali novo okno (ne vdelani Splet Safeer OS)."""
         app = self.browser_app
-        okno = next((w for w in reversed(app.windows) if not getattr(w, "embedded", False) and w.isVisible()), None)
+        okno = next((w for w in reversed(app.windows) if getattr(w, "sistemsko", False) and w.isVisible()), None)
         if okno is None:
+            okno = self._sistemsko_okno_brskalnika()
             drm = os_backend_win.je_drm_storitev(url)
-            okno = app.new_window([] if drm else [url])
+            okno.new_tab(okno.home_url if drm else url)
+            okno.show()
             if drm and not okno.odpri_drm(url):
                 okno.open_input(url, new_tab=True)
         else:
