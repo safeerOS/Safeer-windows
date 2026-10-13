@@ -948,6 +948,35 @@ class SafeerOsWindow(QMainWindow):
             self.showMaximized()
         print(f"[SafeerOS] DIAG window_show_called section={self.zacetni_razdelek or 'home'}", flush=True)
 
+    # ------------------------------------------------------------------ namizje Safeer OS (namizje_win.py)
+    def namizje_vklopljeno(self) -> bool:
+        return sys.platform == "win32" and bool(os_backend_win.nalozi_shrambo().get("namizje", False))
+
+    def nastavi_namizje(self, vklop: bool) -> bool:
+        s = os_backend_win.nalozi_shrambo()
+        s["namizje"] = bool(vklop)
+        os_backend_win.shrani_shrambo(s)
+        if vklop:
+            self.dispatcher.dispatch(self.pokazi_namizje)
+        else:
+            self.dispatcher.dispatch(self._skrij_namizje)
+        return bool(vklop)
+
+    def pokazi_namizje(self) -> None:
+        from . import namizje_win
+        if getattr(self, "namizje", None) is None:
+            self.namizje = namizje_win.NamizjeOkno(self, SafeerOsPage, most_js)
+        port = getattr(self, "_asset_server_port", 0)
+        if port:
+            self.namizje.pokazi(f"http://127.0.0.1:{port}/os/delovna.html")
+
+    def _skrij_namizje(self) -> None:
+        okno = getattr(self, "namizje", None)
+        if okno is not None:
+            okno.close()
+            okno.deleteLater()
+            self.namizje = None
+
     def prebudi(self, razdelek: str = "") -> None:
         """Druga kopija je bila zagnana (ikona, bliznjica): pokazi to okno in odpri zeleni razdelek."""
         if self.isMinimized() or not self.isVisible():
@@ -2401,6 +2430,7 @@ class SafeerOsWindow(QMainWindow):
                 "razlicica": policy.APP_VERSION,
                 "sistem": f"Windows {platform.release()}",
                 "samozagon": os_backend_win.samozagon_vklopljen(),
+                "namizjeSafeer": self.namizje_vklopljeno(),
                 "povezava": self.control_backend.stanje_povezave(),
             }
 
@@ -2571,6 +2601,10 @@ class SafeerOsWindow(QMainWindow):
             novo = bool(a[0]) if a else not self.isFullScreen()
             self.dispatcher.dispatch(lambda: self._nastavi_celozaslonsko(novo))
             return novo
+
+        if metoda == "namizjeSafeer":
+            # Nastavitve: Safeer OS kot namizje Windows (vklop / izklop; brez argumenta vrne stanje).
+            return self.nastavi_namizje(bool(a[0])) if a else self.namizje_vklopljeno()
 
         if metoda == "samozagon":
             return os_backend_win.nastavi_samozagon(bool(a[0]) if a else False)
@@ -3097,6 +3131,8 @@ class SafeerOsWindow(QMainWindow):
 
     def koncaj_za_posodobitev(self) -> None:
         """Nova razlicica se zaganja: zapremo vse (Link, zaslon, predvajalnik), sprostimo zaklep in koncamo."""
+        self._koncujem = True
+        self._skrij_namizje()
         self.close()
         # Vrata vmesnika sprostimo PRED zaklepom: nova kopija jih potrebuje takoj (isti izvor strani = iste
         # shranjene nastavitve vmesnika).
@@ -3127,6 +3163,12 @@ class SafeerOsWindow(QMainWindow):
         return vlc_player.VlcPlayerWidget(self)
 
     def closeEvent(self, event) -> None:
+        if getattr(self, "namizje", None) is not None and not getattr(self, "_koncujem", False):
+            # Safeer OS je namizje: zapiranje okna ga le skrije (namizje, Link in predvajanje tecejo naprej).
+            self.webview2_media.stop()
+            self.hide()
+            event.ignore()
+            return
         try:
             if hasattr(self.media_player, "zapri_pogon"):
                 self.media_player.zapri_pogon()
@@ -3165,6 +3207,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--media-engine", choices=("auto", "qt"), default="auto",
                         help=argparse.SUPPRESS)
     parser.add_argument("--ozadje", action="store_true", help="Zazeni le v ozadju")
+    parser.add_argument("--namizje", action="store_true",
+                        help="Safeer OS kot namizje (pod vsemi okni, namesto obicajnega namizja)")
+    parser.add_argument("--brez-namizja", action="store_true", help="Izklopi namizje Safeer OS (vrne obicajno namizje)")
     parser.add_argument("--magnet", type=str, default="",
                         help="Odpri magnet povezavo v Medijskem centru (brskalnik, druga naprava v Linku)")
     parser.add_argument("--magnet-naprava", type=str, default="",
@@ -3238,6 +3283,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     # Safeer Link: povezovanje se zacne ob zagonu programa, v svoji niti. Prej ga je sprozila sele nalozena zacetna
     # stran; pri zagonu v ozadju je teklo tukaj, v glavni niti, in do konca zadrzalo zanko dogodkov.
     window.control_backend.povezi_ob_zagonu(vedno=bool(args.ozadje and not magnet))
+    # Namizje Safeer OS (po vzoru Linuxa): vklop/izklop se zapomni; ob vklopu glavno okno caka v ozadju.
+    if args.namizje or args.brez_namizja:
+        window.nastavi_namizje(bool(args.namizje))
+    if window.namizje_vklopljeno():
+        window.pokazi_namizje()
+        if not (args.razdelek or args.control or magnet or args.okno):
+            window.hide()
 
     koda = app.exec()
     zagotovi_izhod(koda)

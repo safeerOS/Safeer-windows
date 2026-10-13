@@ -1,0 +1,346 @@
+"""Datoteke za namizje Safeer OS na Windows: tisto, kar je v core/os_datoteke.py vezano na Linux.
+
+Skupne (ciste) funkcije - pregled mape, iskanje, nova mapa/datoteka, preimenovanje, lepljenje, razveljavitev,
+lastnosti, najvecje datoteke - ostanejo v core/os_datoteke.py, isto kot na Linuxu. Tukaj so Windows razlicice:
+odpiranje (privzeti program), »Pokazi v mapi« (Raziskovalec), Koš (nikoli trajno brisanje brez Koša), nosilci
+(pogoni) in izmet, skrite datoteke po atributih Windows.
+"""
+
+from __future__ import annotations
+
+import ctypes
+import os
+import shutil
+import string
+import struct
+import subprocess
+import sys
+import time
+from typing import List, Optional
+
+from core import os_datoteke
+
+_WIN = sys.platform == "win32"
+FILE_ATTRIBUTE_HIDDEN, FILE_ATTRIBUTE_SYSTEM = 0x2, 0x4
+
+
+# ------------------------------------------------------------------ pregled mape (skrite po atributih Windows)
+def _skrita(pot: str) -> bool:
+    if not _WIN:
+        return os.path.basename(pot).startswith(".")
+    try:
+        atributi = os.stat(pot, follow_symlinks=False).st_file_attributes  # type: ignore[attr-defined]
+    except (OSError, AttributeError):
+        return False
+    return bool(atributi & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM))
+
+
+def preglej(pot: str, skrite: bool = False) -> dict:
+    izid = os_datoteke.preglej(pot, skrite=True)
+    if not skrite:
+        elementi = [e for e in izid.get("elementi", []) if not _skrita(e["pot"]) and not e["ime"].startswith(".")]
+        izid["elementi"], izid["skupaj"] = elementi, len(elementi)
+    koren = os.path.splitdrive(izid.get("pot", ""))[0] + os.sep
+    if izid.get("pot") and os.path.normcase(izid["pot"]) == os.path.normcase(koren):
+        izid["stars"] = ""          # koren pogona: navzgor ni nicesar (namesto iste mape)
+    return izid
+
+
+# ------------------------------------------------------------------ odpiranje
+def odpri(pot: str) -> bool:
+    pot = os.path.abspath(os.path.expanduser(str(pot or "")))
+    if not os.path.exists(pot):
+        return False
+    try:
+        os.startfile(pot)  # type: ignore[attr-defined]
+        return True
+    except OSError:
+        return False
+
+
+def pokazi_v_mapi(pot: str) -> bool:
+    pot = os.path.abspath(os.path.expanduser(str(pot or "")))
+    if not os.path.exists(pot):
+        return False
+    try:
+        subprocess.Popen(["explorer.exe", "/select," + pot], close_fds=True)
+        return True
+    except OSError:
+        return False
+
+
+def odpri_z(pot: str) -> bool:
+    """»Odpri z …«: sistemsko okno Windows za izbiro programa."""
+    pot = os.path.abspath(str(pot or ""))
+    if not os.path.isfile(pot):
+        return False
+    try:
+        subprocess.Popen(["rundll32.exe", "shell32.dll,OpenAs_RunDLL", pot], close_fds=True)
+        return True
+    except OSError:
+        return False
+
+
+# ------------------------------------------------------------------ Koš
+def _sid_uporabnika() -> str:
+    if not _WIN:
+        return ""
+    from ctypes import wintypes
+    advapi, kernel = ctypes.WinDLL("advapi32"), ctypes.WinDLL("kernel32")
+    zeton = wintypes.HANDLE()
+    if not advapi.OpenProcessToken(kernel.GetCurrentProcess(), 0x0008, ctypes.byref(zeton)):  # TOKEN_QUERY
+        return ""
+    try:
+        dolzina = wintypes.DWORD()
+        advapi.GetTokenInformation(zeton, 1, None, 0, ctypes.byref(dolzina))  # TokenUser
+        medpomnilnik = ctypes.create_string_buffer(dolzina.value)
+        if not advapi.GetTokenInformation(zeton, 1, medpomnilnik, dolzina, ctypes.byref(dolzina)):
+            return ""
+        sid = ctypes.cast(medpomnilnik, ctypes.POINTER(ctypes.c_void_p))[0]
+        niz = wintypes.LPWSTR()
+        if not advapi.ConvertSidToStringSidW(ctypes.c_void_p(sid), ctypes.byref(niz)):
+            return ""
+        try:
+            return niz.value or ""
+        finally:
+            kernel.LocalFree(niz)
+    finally:
+        kernel.CloseHandle(zeton)
+
+
+def _pogoni() -> List[str]:
+    if not _WIN:
+        return []
+    maska = ctypes.windll.kernel32.GetLogicalDrives()
+    return [f"{c}:\\" for i, c in enumerate(string.ascii_uppercase) if maska & (1 << i)]
+
+
+def _mape_kosa() -> List[str]:
+    sid = _sid_uporabnika()
+    if not sid:
+        return []
+    mape = []
+    for pogon in _pogoni():
+        if ctypes.windll.kernel32.GetDriveTypeW(pogon) not in (2, 3):   # odstranljiv ali fiksni
+            continue
+        mapa = os.path.join(pogon, "$Recycle.Bin", sid)
+        if os.path.isdir(mapa):
+            mape.append(mapa)
+    return mape
+
+
+def beri_info(podatki: bytes) -> Optional[dict]:
+    """Zapis $I iz Koša (cista funkcija): razlicica 1 (Vista-8) ali 2 (Windows 10+)."""
+    if len(podatki) < 24:
+        return None
+    razlicica, velikost, cas = struct.unpack_from("<qqq", podatki, 0)
+    if razlicica == 2 and len(podatki) >= 28:
+        znakov = struct.unpack_from("<i", podatki, 24)[0]
+        pot = podatki[28:28 + 2 * max(0, znakov)].decode("utf-16-le", "replace")
+    elif razlicica == 1:
+        pot = podatki[24:24 + 520].decode("utf-16-le", "replace")
+    else:
+        return None
+    pot = pot.split("\x00", 1)[0]
+    izbrisano = (cas - 116444736000000000) / 1e7 if cas > 0 else 0.0     # FILETIME -> Unix
+    return {"izvirna": pot, "velikost": int(velikost), "izbrisano": izbrisano}
+
+
+def smeti() -> dict:
+    elementi = []
+    for mapa in _mape_kosa():
+        try:
+            imena = os.listdir(mapa)
+        except OSError:
+            continue
+        for ime in imena:
+            if not ime.startswith("$I"):
+                continue
+            vsebina = os.path.join(mapa, "$R" + ime[2:])
+            try:
+                with open(os.path.join(mapa, ime), "rb") as f:
+                    info = beri_info(f.read(4096))
+            except OSError:
+                continue
+            if info is None or not os.path.lexists(vsebina):
+                continue
+            prikaz = os.path.basename(info["izvirna"]) or ime
+            je_mapa = os.path.isdir(vsebina)
+            elementi.append({"id": vsebina, "ime": prikaz, "pot": vsebina, "izvirna": info["izvirna"],
+                             "izbrisano": info["izbrisano"], "mapa": je_mapa,
+                             "velikost": 0 if je_mapa else info["velikost"],
+                             "vrsta": os_datoteke.vrsta_datoteke(prikaz, je_mapa)})
+    elementi.sort(key=lambda e: -e["izbrisano"])
+    return {"skupaj": len(elementi), "elementi": elementi[:os_datoteke.NAJVEC_V_MAPI]}
+
+
+def _v_kosu(id_: str) -> Optional[str]:
+    """Varnost: obnovimo samo datoteko, ki je res v Košu tega uporabnika."""
+    pot = os.path.abspath(str(id_ or ""))
+    for mapa in _mape_kosa():
+        if os.path.normcase(os.path.dirname(pot)) == os.path.normcase(mapa) and os.path.basename(pot).startswith("$R"):
+            return pot if os.path.lexists(pot) else None
+    return None
+
+
+def v_smeti(pot: str) -> dict:
+    """V Koš (z razveljavitvijo), nikoli trajno."""
+    pot = os.path.abspath(os.path.expanduser(str(pot or "")))
+    if not os.path.lexists(pot) or os.path.normcase(pot) in (os.path.normcase(os.path.expanduser("~")),
+                                                               os.path.normcase(os.path.splitdrive(pot)[0] + os.sep)):
+        return {"ok": False, "napaka": "ni_dovoljeno"}
+    if not _WIN:
+        return {"ok": False, "napaka": "ni_podprto"}
+    from ctypes import wintypes
+
+    class SHFILEOPSTRUCTW(ctypes.Structure):
+        _fields_ = [("hwnd", wintypes.HWND), ("wFunc", wintypes.UINT), ("pFrom", wintypes.LPCWSTR),
+                    ("pTo", wintypes.LPCWSTR), ("fFlags", ctypes.c_ushort), ("fAnyOperationsAborted", wintypes.BOOL),
+                    ("hNameMappings", ctypes.c_void_p), ("lpszProgressTitle", wintypes.LPCWSTR)]
+    FO_DELETE, FOF_SILENT, FOF_NOCONFIRMATION, FOF_ALLOWUNDO, FOF_NOERRORUI = 3, 0x4, 0x10, 0x40, 0x400
+    zacetek = time.time()
+    op = SHFILEOPSTRUCTW(None, FO_DELETE, pot + "\0", None, FOF_SILENT | FOF_NOCONFIRMATION | FOF_ALLOWUNDO | FOF_NOERRORUI,
+                         False, None, None)
+    koda = ctypes.windll.shell32.SHFileOperationW(ctypes.byref(op))
+    if koda != 0 or op.fAnyOperationsAborted or os.path.lexists(pot):
+        return {"ok": False, "napaka": f"koda_{koda}"}
+    # Kateri vnos v Košu je nas (za »Razveljavi«): ista izvirna pot, izbrisan od zacetka naprej.
+    najden = ""
+    for e in smeti()["elementi"]:
+        if os.path.normcase(e["izvirna"]) == os.path.normcase(pot) and e["izbrisano"] >= zacetek - 2:
+            najden = e["id"]
+            break
+    return {"ok": True, "id": najden}
+
+
+def obnovi_iz_smeti(id_: str) -> dict:
+    vsebina = _v_kosu(id_)
+    if vsebina is None:
+        return {"ok": False, "napaka": "ni_v_smeteh"}
+    info_pot = os.path.join(os.path.dirname(vsebina), "$I" + os.path.basename(vsebina)[2:])
+    try:
+        with open(info_pot, "rb") as f:
+            info = beri_info(f.read(4096))
+    except OSError:
+        info = None
+    if not info or not info["izvirna"]:
+        return {"ok": False, "napaka": "ni_izvirne_poti"}
+    cilj = info["izvirna"]
+    os.makedirs(os.path.dirname(cilj), exist_ok=True)
+    if os.path.lexists(cilj):
+        osnova, koncnica = os.path.splitext(cilj)
+        i = 2
+        while os.path.lexists(f"{osnova} ({i}){koncnica}"):
+            i += 1
+        cilj = f"{osnova} ({i}){koncnica}"
+    try:
+        shutil.move(vsebina, cilj)
+        os.remove(info_pot)
+    except OSError as e:
+        return {"ok": False, "napaka": str(e)}
+    return {"ok": True, "pot": cilj}
+
+
+def izprazni_smeti() -> dict:
+    """Izprazni Koš (to zahteva uporabnik sam v vmesniku, ki prej vprasa)."""
+    if not _WIN:
+        return {"ok": False}
+    koda = ctypes.windll.shell32.SHEmptyRecycleBinW(None, None, 0x1 | 0x2 | 0x4)
+    return {"ok": koda in (0, -2147418113)}   # S_OK ali E_UNEXPECTED (Koš je ze prazen)
+
+
+# ------------------------------------------------------------------ pogoni
+def nosilci() -> List[dict]:
+    """Pogoni kot na Linuxu: ime, pot, velikost, prosto, ali se da izvreci (USB, SD, optika)."""
+    if not _WIN:
+        return []
+    from ctypes import wintypes
+    k32 = ctypes.windll.kernel32
+    izid = []
+    for pogon in _pogoni():
+        vrsta = k32.GetDriveTypeW(pogon)
+        if vrsta not in (2, 3, 5):      # odstranljiv, fiksni, optika
+            continue
+        oznaka = ctypes.create_unicode_buffer(261)
+        sistem = ctypes.create_unicode_buffer(261)
+        if not k32.GetVolumeInformationW(pogon, oznaka, 261, None, None, None, sistem, 261):
+            if vrsta == 5:
+                continue                # prazen optični pogon
+            oznaka.value = ""
+        prosto, skupaj = ctypes.c_ulonglong(), ctypes.c_ulonglong()
+        k32.GetDiskFreeSpaceExW(pogon, None, ctypes.byref(skupaj), ctypes.byref(prosto))
+        sistemski = os.path.normcase(pogon) == os.path.normcase(os.environ.get("SystemDrive", "C:") + "\\")
+        izid.append({"ime": oznaka.value or pogon.rstrip("\\"), "pot": pogon, "naprava": pogon if vrsta in (2, 5) else "",
+                     "velikost": skupaj.value, "prosto": prosto.value, "sistem": sistem.value,
+                     "odstranljiv": vrsta in (2, 5), "sistemski": sistemski})
+    return izid
+
+
+def izvrzi(pot: str) -> dict:
+    """Varno odstrani USB/SD ali izvrže optični disk (verb »Eject« lupine Windows)."""
+    pot = str(pot or "")
+    cilj = next((n for n in nosilci() if os.path.normcase(n["pot"]) == os.path.normcase(pot) and n["odstranljiv"]), None)
+    if cilj is None:
+        return {"ok": False, "napaka": "ni_nosilca"}
+    crka = cilj["pot"][:2]
+    skripta = ("(New-Object -ComObject Shell.Application).Namespace(17).ParseName('%s').InvokeVerb('Eject')" % crka)
+    try:
+        subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", skripta], capture_output=True,
+                       timeout=30, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except (OSError, subprocess.SubprocessError) as e:
+        return {"ok": False, "napaka": str(e)}
+    for _ in range(20):
+        if not os.path.exists(cilj["pot"]):
+            return {"ok": True}
+        time.sleep(0.25)
+    return {"ok": False, "napaka": "v_uporabi"}
+
+
+def prostor() -> dict:
+    try:
+        u = shutil.disk_usage(os.path.expanduser("~"))
+    except OSError:
+        return {"skupaj": 0, "prosto": -1, "malo": False}
+    return {"skupaj": u.total, "prosto": u.free,
+            "malo": u.free < os_datoteke.MALO_BAJTOV or (u.total > 0 and u.free < u.total * os_datoteke.MALO_DELEZ)}
+
+
+# Skupni os_datoteke.razveljavi (»Razveljavi« po brisanju) klice obnovi_iz_smeti istega modula: na Windows je to Koš.
+os_datoteke.obnovi_iz_smeti = obnovi_iz_smeti
+os_datoteke.v_smeti = v_smeti
+
+
+def slicice(poti, velikost: int = 160, rok: float = 4.0) -> dict:
+    """Slicice slik (PNG/JPEG/WebP/GIF/BMP) kot data: URL - stran namizja je na http://127.0.0.1 in ne bere file://."""
+    import base64
+    try:
+        from PySide6.QtCore import QBuffer, QByteArray, QIODevice, Qt
+        from PySide6.QtGui import QImageReader
+    except ImportError:
+        return {}
+    izid, konec = {}, time.monotonic() + rok
+    for pot in list(poti or [])[:120]:
+        if time.monotonic() > konec:
+            break
+        pot = str(pot)
+        if os.path.splitext(pot)[1].lower() not in (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"):
+            continue
+        try:
+            if os.path.getsize(pot) > 60 * 1024 * 1024:
+                continue
+        except OSError:
+            continue
+        bralnik = QImageReader(pot)
+        bralnik.setAutoTransform(True)
+        v = bralnik.size()
+        if v.isValid() and max(v.width(), v.height()) > velikost:
+            bralnik.setScaledSize(v.scaled(velikost, velikost, Qt.AspectRatioMode.KeepAspectRatio))
+        slika = bralnik.read()
+        if slika.isNull():
+            continue
+        podatki = QByteArray()
+        medpomnilnik = QBuffer(podatki)
+        medpomnilnik.open(QIODevice.OpenModeFlag.WriteOnly)
+        slika.save(medpomnilnik, "JPEG", 82)
+        izid[pot] = "data:image/jpeg;base64," + base64.b64encode(bytes(podatki)).decode("ascii")
+    return izid

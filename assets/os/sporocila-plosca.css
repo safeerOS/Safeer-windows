@@ -1,0 +1,62 @@
+/* Plosca sporocil na delovni povrsini - isti vizualni jezik kot delovna.css (temne prosojne ploscice, zaobljeni robovi). */
+:root {
+  --povrsina: rgba(16, 26, 43, 0.92);
+  --obroba: rgba(211, 229, 255, 0.23);
+  --tanka: rgba(213, 232, 250, 0.12);
+  --besedilo: #eaf2ff;
+  --tiho: #afbed4;
+  --poudarek: #8ac7ff;
+  --modra: #3b8cf0;
+  --izbrano: rgba(104, 168, 229, 0.20);
+  --fokus: #9dceff;
+  --r: 17px;
+  --r-mal: 10px;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: transparent; color: var(--besedilo);
+  font: 14px/1.35 "Ubuntu", "Noto Sans", system-ui, sans-serif; overflow: hidden; user-select: none; }
+.plosca { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 10px; padding: 14px 14px 12px;
+  background: var(--povrsina); border: 1px solid var(--obroba); border-radius: var(--r);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45); }
+.glava { display: flex; align-items: center; justify-content: space-between; }
+.glava h1 { margin: 0; font-size: 17px; font-weight: 700; }
+.zapri { width: 30px; height: 30px; border-radius: 50%; border: 0; background: transparent; color: var(--tiho); cursor: pointer; }
+.zapri:hover, .zapri:focus-visible { background: var(--izbrano); color: var(--besedilo); outline: none; }
+svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.zavihki { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 3px; border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05); border: 1px solid var(--tanka); }
+.zavihki button { border: 0; border-radius: 999px; padding: 7px 10px; background: transparent; color: var(--tiho);
+  font: inherit; font-weight: 600; cursor: pointer; }
+.zavihki button.izbran { background: var(--modra); color: #fff; }
+.zavihki button:focus-visible { outline: 2px solid var(--fokus); }
+.zavihki .stevec { margin-left: 6px; font-size: 12px; opacity: .9; }
+.iskanje { display: flex; align-items: center; gap: 8px; padding: 0 12px; height: 36px; border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06); border: 1px solid var(--tanka); color: var(--tiho); }
+.iskanje:focus-within { border-color: var(--fokus); }
+.iskanje input { flex: 1; min-width: 0; border: 0; outline: none; background: transparent; color: var(--besedilo); font: inherit; }
+.iskanje input::-webkit-search-cancel-button { filter: invert(1); }
+.seznam { list-style: none; margin: 0; padding: 0; flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+.seznam::-webkit-scrollbar { width: 6px; }
+.seznam::-webkit-scrollbar-thumb { background: var(--tanka); border-radius: 3px; }
+.vrstica { display: grid; grid-template-columns: 10px 40px 1fr auto; align-items: center; gap: 10px; width: 100%;
+  padding: 8px 10px 8px 4px; border: 1px solid transparent; border-radius: var(--r-mal); background: transparent;
+  color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.vrstica:hover, .vrstica:focus-visible { background: var(--izbrano); border-color: var(--tanka); outline: none; }
+.pika { width: 8px; height: 8px; border-radius: 50%; background: var(--modra); justify-self: center; }
+.pika.prebrano { visibility: hidden; }
+.avatar { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; font-weight: 700;
+  font-size: 15px; color: #fff; }
+.besedilo { min-width: 0; }
+.besedilo b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.besedilo small { display: block; color: var(--tiho); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vrstica.neprebrano .besedilo small { color: var(--besedilo); }
+.desno { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; color: var(--tiho); font-size: 12px; }
+.desno i { font-style: normal; min-width: 20px; padding: 1px 6px; border-radius: 999px; background: var(--modra);
+  color: #fff; text-align: center; font-weight: 700; }
+.prazno { margin: 24px 8px; color: var(--tiho); text-align: center; }
+.noga { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.gumb { height: 36px; border-radius: 999px; border: 1px solid var(--obroba); background: rgba(255, 255, 255, 0.06);
+  color: var(--besedilo); font: inherit; font-weight: 600; cursor: pointer; }
+.gumb.glavni { background: rgba(59, 140, 240, 0.25); border-color: rgba(138, 199, 255, 0.5); }
+.gumb:hover, .gumb:focus-visible { border-color: var(--fokus); outline: none; }
+body.vecji-tekst { font-size: 16px; }
