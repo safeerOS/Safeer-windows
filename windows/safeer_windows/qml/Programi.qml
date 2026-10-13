@@ -54,7 +54,7 @@ Steklo {
         anchors.fill: parent; anchors.margins: 18; spacing: 12
         RowLayout {
             Layout.fillWidth: true; spacing: 12
-            Text { text: koren.t("programi"); color: "#eef4ff"; font.pixelSize: 16; font.bold: true }
+            Text { text: koren.t("programi"); color: koren.paleta.besedilo; font.pixelSize: 16; font.bold: true }
             IzbiraNaprave {
                 zmoznost: "programi"; naprave: koren.naprave
                 onIzbrana: function (id, ime) { panel.naprava = id; panel.imeNaprave = ime; panel.nalozi() }
@@ -70,7 +70,7 @@ Steklo {
                 Lupa { x: 12; anchors.verticalCenter: parent.verticalCenter; scale: 0.8 }
                 TextField {
                     anchors.fill: parent; anchors.leftMargin: 36; anchors.rightMargin: 12
-                    placeholderText: koren.t("isciProg"); placeholderTextColor: "#8fa3bd"; color: "#eef4ff"; font.pixelSize: 13
+                    placeholderText: koren.t("isciProg"); placeholderTextColor: koren.paleta.medlo; color: koren.paleta.besedilo; font.pixelSize: 13
                     background: Item {}
                     onTextChanged: panel.niz = text
                 }
@@ -82,13 +82,13 @@ Steklo {
                 model: [""].concat(panel.skupine)
                 delegate: Rectangle {
                     height: 26; width: n.implicitWidth + 22; radius: 13
-                    color: panel.skupina === modelData ? "#4de6ba" : (ms.containsMouse ? Qt.rgba(1, 1, 1, 0.14) : Qt.rgba(1, 1, 1, 0.07))
+                    color: panel.skupina === modelData ? koren.paleta.poudarek : (ms.containsMouse ? Qt.rgba(1, 1, 1, 0.14) : Qt.rgba(1, 1, 1, 0.07))
                     Behavior on color { ColorAnimation { duration: 140 } }
                     Text {
                         id: n; anchors.centerIn: parent; font.pixelSize: 12
                         text: modelData === "" ? koren.t("vse")
                               : (panel.imenaSkupin[modelData] || (modelData.charAt(0).toUpperCase() + modelData.slice(1)))
-                        color: panel.skupina === modelData ? "#06281f" : "#dbe6f5"
+                        color: panel.skupina === modelData ? koren.paleta.poudarekTemna : koren.paleta.besedilo
                     }
                     MouseArea { id: ms; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: panel.skupina = modelData }
                 }
@@ -107,7 +107,7 @@ Steklo {
             Text {
                 anchors.centerIn: parent; visible: panel.stanje !== "" && panel.stanje !== "nalagam" || (panel.stanje === "nalagam" && mreza.count === 0)
                 text: panel.stanje === "nalagam" ? koren.t("nalagam") : panel.stanje === "napaka" ? koren.t("niOdgovorila") : koren.t("brezProgramov")
-                color: "#9fb0c6"; font.pixelSize: 13
+                color: koren.paleta.medlo; font.pixelSize: 13
             }
             delegate: Item {
                 width: mreza.cellWidth; height: mreza.cellHeight
@@ -115,7 +115,7 @@ Steklo {
                     id: ploscica
                     anchors.fill: parent; anchors.margins: 5; radius: 14
                     color: mp.containsMouse ? Qt.rgba(1, 1, 1, 0.13) : Qt.rgba(1, 1, 1, 0.05)
-                    border.color: mp.containsMouse ? Qt.rgba(0.3, 0.9, 0.73, 0.55) : Qt.rgba(1, 1, 1, 0.08)
+                    border.color: mp.containsMouse ? koren.poudarekA(0.55) : Qt.rgba(1, 1, 1, 0.08)
                     scale: mp.pressed ? 0.95 : (mp.containsMouse ? 1.04 : 1)
                     Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
                     Behavior on color { ColorAnimation { duration: 140 } }
@@ -129,7 +129,7 @@ Steklo {
                     Text {
                         anchors.horizontalCenter: parent.horizontalCenter; anchors.top: slika.bottom; anchors.topMargin: 10
                         width: parent.width - 12; horizontalAlignment: Text.AlignHCenter
-                        text: modelData.ime; color: "#e6eef9"; font.pixelSize: 12; elide: Text.ElideRight
+                        text: modelData.ime; color: koren.paleta.besedilo; font.pixelSize: 12; elide: Text.ElideRight
                     }
                     MouseArea {
                         id: mp; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor

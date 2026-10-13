@@ -1145,7 +1145,7 @@ class BrowserWindow(QMainWindow):
                 self._set_toolbar_widget_visible(self.ob_strani_button, False)
             self._naslov_kljucavnica.setVisible(True)
             self._naslov_zvezdica.setVisible(True)
-            self.setStyleSheet(SPLET_STYLE)
+            self.setStyleSheet(self._splet_slog())
             self.tabs.tabBar().setIconSize(QSize(18, 18))
             self.povezava_znacka.show()
             self.osvezi_povezavo()
@@ -1173,6 +1173,29 @@ class BrowserWindow(QMainWindow):
             if self.ob_strani_button is not None:
                 self._set_toolbar_widget_visible(self.ob_strani_button, False)
             self.address.setPlaceholderText(tr(self.app, "address"))
+
+    def _splet_slog(self) -> str:
+        """Slog Spleta: v Safeer OS v barvah izbrane teme sistema, sicer privzeti zeleni Safeer."""
+        paleta = getattr(self.app, "paleta", None)
+        if paleta:
+            try:
+                from . import tema
+                return tema.splet_slog(paleta)
+            except Exception:  # noqa: BLE001
+                pass
+        return SPLET_STYLE
+
+    def osvezi_temo(self, paleta: dict) -> None:
+        """Tema sistema se je spremenila: orodna vrstica in odprte zacetne strani Spleta dobijo nove barve."""
+        self.app.paleta = paleta
+        if self.safeer_os_web_mode:
+            self.setStyleSheet(self._splet_slog())
+        for view in self.views():
+            try:
+                if view.url().toString().startswith(policy.SPLET_URL):
+                    view.reload()
+            except Exception:  # noqa: BLE001
+                pass
 
     def _set_toolbar_widget_visible(self, widget: QWidget, visible: bool) -> None:
         """QToolBar owns embedded controls through QWidgetAction; toggle both layers."""
@@ -1835,7 +1858,7 @@ class BrowserWindow(QMainWindow):
 
     def push_home_state(self, view: QWebEngineView) -> None:
         stanje = policy.home_state(self.app.settings)
-        if self.embedded:
+        if self.embedded or self.sistemsko:
             stanje["language"] = self._splet_jezik()
         state = json.dumps(stanje, ensure_ascii=False)
         view.page().runJavaScript(f"window.safeerWindowsInit && window.safeerWindowsInit({state});")

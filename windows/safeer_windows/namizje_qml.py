@@ -126,9 +126,26 @@ class NamizjeQml(QQuickView):
             return r
         if metoda == "napraveNamizja":
             return naprave_za_izbiro(self.os_okno.control_backend)
+        if metoda == "videzNamizja":
+            return videz_za_qml(self._jezik())
+        if metoda == "nastaviVidezNamizja":
+            # Prilagodi namizje (ozadje, zameglitev, prosojnost): shrani in povej Spletu (njegovo ozadje = to ozadje).
+            v = nastavi_videz(a[0] if a and isinstance(a[0], dict) else {})
+            self.os_okno.dispatcher.dispatch(self.os_okno.uporabi_temo)
+            return dict(v, **{k: x for k, x in videz_za_qml(self._jezik()).items() if k == "ozadja"})
         if metoda in self._metode:
             return self._metode[metoda](a)
         return self.os_okno._izvedi_metodo(metoda, a)
+
+    def _jezik(self) -> str:
+        try:
+            return str((self.os_okno._izvedi_metodo("zacetek", []) or {}).get("jezik") or "sl")
+        except Exception:  # noqa: BLE001
+            return "sl"
+
+    def osvezi_videz(self) -> None:
+        """Tema ali ozadje sta se spremenila (Nastavitve Safeer OS ali Prilagodi namizje): namizje se prebarva."""
+        self.dogodek("videz", videz_za_qml(self._jezik()))
 
     def dogodek(self, vrsta: str, podatki: Any = None) -> None:
         self.most.dogodek.emit(vrsta, json.dumps(podatki, ensure_ascii=False, default=str))
@@ -136,7 +153,8 @@ class NamizjeQml(QQuickView):
     # namizje_win.metode pricakuje te metode okna
     def zacetek(self) -> dict:
         z = dict(self.os_okno._izvedi_metodo("zacetek", []) or {})
-        z.update({"mape": namizje_win.uporabniske_mape(), "ozadje": ozadje_datoteka()})
+        v = videz_za_qml(str(z.get("jezik") or "sl"))
+        z.update({"mape": namizje_win.uporabniske_mape(), "ozadje": v["ozadje"], "videz": v})
         return z
 
     def odpri_razdelek(self, razdelek: str) -> bool:
@@ -193,6 +211,102 @@ class NamizjeQml(QQuickView):
             except Exception:  # noqa: BLE001
                 pass
         return False, 0
+
+
+# ---------------------------------------------------------------------------------------- videz namizja
+#: Ozadja Safeer (ista kot na Linuxu - paket safeer-cinnamon, TV in tablica). Privzeto: gore in jezero.
+OZADJA = (("jezero", "Gore in jezero", "Mountains and lake", "safeer-jezero.jpg"),
+          ("gore", "Gore", "Mountains", "safeer-gore-3840x2160.png"),
+          ("aurora", "Aurora", "Aurora", "safeer-aurora.jpg"),
+          ("zora", "Zora", "Dawn", "safeer-zora.jpg"),
+          ("globina", "Globina", "Depth", "safeer-globina.jpg"))
+PRIVZETI_VIDEZ = {"ozadje": "safeer:jezero", "zameglitev": 1.0, "prosojnost": 0.55}
+SLIKE = (".jpg", ".jpeg", ".png", ".webp", ".bmp")
+
+
+def _pot_ozadja_safeer(kljuc: str) -> str:
+    ime = next((o[3] for o in OZADJA if o[0] == kljuc), "")
+    if not ime:
+        return ""
+    try:
+        from . import policy
+        return policy.shared_path("assets/ozadja/" + ime)
+    except Exception:  # noqa: BLE001
+        pot = Path(__file__).resolve().parents[2] / "assets" / "ozadja" / ime
+        return str(pot) if pot.is_file() else ""
+
+
+def videz() -> dict:
+    """Shranjen videz namizja (shramba Safeer OS, kljuc namizje_videz), preverjen in dopolnjen s privzetim."""
+    from . import os_backend_win
+    v = dict(PRIVZETI_VIDEZ)
+    shranjeno = os_backend_win.nalozi_shrambo().get("namizje_videz")
+    if isinstance(shranjeno, dict):
+        v.update(_preveri_videz(shranjeno))
+    return v
+
+
+def _preveri_videz(sprememba: dict) -> dict:
+    """Samo veljavne vrednosti: ozadje Safeer, ozadje Windows ali obstojeca slika; drsniki v mejah."""
+    izid: dict = {}
+    oz = sprememba.get("ozadje")
+    if isinstance(oz, str):
+        if oz.startswith("safeer:") and any(o[0] == oz[7:] for o in OZADJA):
+            izid["ozadje"] = oz
+        elif oz == "windows":
+            izid["ozadje"] = oz
+        elif os.path.isabs(oz) and oz.lower().endswith(SLIKE) and os.path.isfile(oz):
+            izid["ozadje"] = oz
+    for k, lo, hi in (("zameglitev", 0.0, 1.0), ("prosojnost", 0.2, 0.9)):
+        x = sprememba.get(k)
+        if isinstance(x, (int, float)) and not isinstance(x, bool):
+            izid[k] = round(max(lo, min(hi, float(x))), 3)
+    return izid
+
+
+def nastavi_videz(sprememba: dict) -> dict:
+    from . import os_backend_win
+    if not isinstance(sprememba, dict):
+        return videz_za_qml()
+    s = os_backend_win.nalozi_shrambo()
+    if sprememba.get("privzeto"):
+        s.pop("namizje_videz", None)
+    else:
+        trenutni = videz()
+        trenutni.update(_preveri_videz(sprememba))
+        s["namizje_videz"] = trenutni
+    os_backend_win.shrani_shrambo(s)
+    return videz_za_qml()
+
+
+def pot_ozadja() -> str:
+    """Datoteka trenutnega ozadja namizja ('' ce je ni). Izbrane slike ni vec: privzeto ozadje Safeer."""
+    oz = videz()["ozadje"]
+    if oz.startswith("safeer:"):
+        pot = _pot_ozadja_safeer(oz[7:])
+    elif oz == "windows":
+        pot = QUrl(ozadje_datoteka()).toLocalFile() if ozadje_datoteka() else ""
+    else:
+        pot = oz if os.path.isfile(oz) else ""
+    return pot or _pot_ozadja_safeer("jezero")
+
+
+def videz_za_qml(jezik: str = "sl") -> dict:
+    v = videz()
+    oz = v["ozadje"]
+    pot = pot_ozadja()
+    url = QUrl.fromLocalFile(pot).toString() if pot else ""
+    ozadja = []
+    for kljuc, sl, en, _ime in OZADJA:
+        pot = _pot_ozadja_safeer(kljuc)
+        if pot:
+            ozadja.append({"kljuc": "safeer:" + kljuc, "ime": sl if jezik == "sl" else en,
+                           "url": QUrl.fromLocalFile(pot).toString()})
+    windows = ozadje_datoteka()
+    from . import tema
+    return {"izbira": oz, "ozadje": url, "zameglitev": v["zameglitev"], "prosojnost": v["prosojnost"],
+            "ozadja": ozadja, "windows": windows, "paleta": tema.paleta(),
+            "lastna": oz if not oz.startswith("safeer:") and oz != "windows" else ""}
 
 
 def ozadje_datoteka() -> str:

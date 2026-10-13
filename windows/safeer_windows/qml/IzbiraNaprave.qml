@@ -17,22 +17,22 @@ ComboBox {
     onActivated: function (i) { izbira.izbrana(moznosti[i].id, moznosti[i].ime) }
     background: Rectangle {
         radius: 16; color: izbira.hovered ? Qt.rgba(1, 1, 1, 0.14) : Qt.rgba(1, 1, 1, 0.08)
-        border.color: izbira.currentIndex > 0 ? "#4de6ba" : Qt.rgba(1, 1, 1, 0.14)
+        border.color: izbira.currentIndex > 0 ? koren.paleta.poudarek : Qt.rgba(1, 1, 1, 0.14)
         Behavior on color { ColorAnimation { duration: 120 } }
     }
     contentItem: Row {
         leftPadding: 12; spacing: 8
         Rectangle { width: 7; height: 7; radius: 4; anchors.verticalCenter: parent.verticalCenter
-                    color: izbira.currentIndex > 0 ? "#4de6ba" : "#8fa3bd" }
-        Text { text: izbira.displayText; color: "#eef4ff"; font: izbira.font; elide: Text.ElideRight
+                    color: izbira.currentIndex > 0 ? koren.paleta.poudarek : koren.paleta.medlo }
+        Text { text: izbira.displayText; color: koren.paleta.besedilo; font: izbira.font; elide: Text.ElideRight
                width: izbira.width - 50; anchors.verticalCenter: parent.verticalCenter }
     }
-    indicator: Text { text: "▾"; color: "#9fb0c6"; x: izbira.width - 22; anchors.verticalCenter: parent.verticalCenter }
+    indicator: Text { text: "▾"; color: koren.paleta.medlo; x: izbira.width - 22; anchors.verticalCenter: parent.verticalCenter }
     delegate: ItemDelegate {
         width: izbira.width
-        contentItem: Text { text: modelData.ime; color: "#eef4ff"; font.pixelSize: 12; elide: Text.ElideRight }
-        background: Rectangle { radius: 8; color: parent.highlighted ? Qt.rgba(0.3, 0.9, 0.73, 0.22) : "transparent" }
+        contentItem: Text { text: modelData.ime; color: koren.paleta.besedilo; font.pixelSize: 12; elide: Text.ElideRight }
+        background: Rectangle { radius: 8; color: parent.highlighted ? koren.poudarekA(0.22) : "transparent" }
         highlighted: izbira.highlightedIndex === index
     }
-    popup.background: Rectangle { radius: 12; color: "#121b2a"; border.color: Qt.rgba(1, 1, 1, 0.14) }
+    popup.background: Rectangle { radius: 12; color: koren.paleta.vnos; border.color: Qt.rgba(1, 1, 1, 0.14) }
 }

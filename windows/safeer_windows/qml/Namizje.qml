@@ -29,10 +29,27 @@ Item {
             var p = null
             try { p = JSON.parse(podatki) } catch (e) {}
             if (vrsta === "datoteke" && p && p.pot === datoteke.vir.pot) datoteke.nalozi(true)
+            if (vrsta === "videz" && p) koren.uporabiVidez(p)
             if (vrsta === "iskanjeOdDrugod" && p && p.q) { polje.text = p.q; polje.forceActiveFocus() }
         }
     }
     property string jezik: "sl"
+    // Tema sistema (Nastavitve Safeer OS) in videz namizja (Prilagodi namizje) - en videz z vmesnikom, Spletom in Controlom.
+    property var paleta: ({ poudarek: "#54d6a5", poudarekTemna: "#06231a", besedilo: "#f0f4f3", medlo: "#b0bdc4",
+                            vnos: "#111b27", karticaRgb: [0.067, 0.098, 0.141], poudarekRgb: [0.329, 0.839, 0.647] })
+    property real zameglitev: 1.0
+    property real prosojnost: 0.55
+    property var videz: ({})
+    function plosca(a) { var c = paleta.karticaRgb || [0.067, 0.098, 0.141]; return Qt.rgba(c[0], c[1], c[2], a) }
+    function poudarekA(a) { var c = paleta.poudarekRgb || [0.329, 0.839, 0.647]; return Qt.rgba(c[0], c[1], c[2], a) }
+    function uporabiVidez(v) {
+        if (!v) return
+        koren.videz = v
+        if (v.paleta) koren.paleta = v.paleta
+        if (v.ozadje !== undefined) koren.ozadjeUrl = v.ozadje || ""
+        if (v.zameglitev !== undefined) koren.zameglitev = v.zameglitev
+        if (v.prosojnost !== undefined) koren.prosojnost = v.prosojnost
+    }
     readonly property var besedila: ({
         sl: { isci: "Išči po programih, datotekah in spletu …", splet: "Išči na spletu", programi: "Programi",
               isciProg: "Išči programe …", vse: "Vse", datoteke: "Datoteke", nedavno: "Nedavno", smeti: "Koš",
@@ -50,7 +67,11 @@ Item {
               odpiramZ: "Odpiram {ime} z naprave {naprava} …", zazeniNa: "Zaženi na napravi", odpriNaNapravi: "Odpri na napravi",
               prenasam: "Prenašam {ime} …", mapeNaprave: "Mape naprave", brezProgramov: "Na napravi ni programov.",
               niLocenega: "Naprava nima ločenega zaslona – odpreš lahko samo, kar ne moti njenega uporabnika.",
-              oddaljeno: "Oddaljeno namizje", odpriSProgramom: "Odpri s programom naprave {naprava}" },
+              oddaljeno: "Oddaljeno namizje", odpriSProgramom: "Odpri s programom naprave {naprava}",
+              prilagodi: "Prilagodi namizje …", temaSistema: "Tema in nastavitve sistema …", ozadje: "Ozadje",
+              ozadjeWindows: "Ozadje Windows", lastnaSlika: "Lastna slika …", zameglitevNapis: "Zameglitev plošč",
+              prosojnostNapis: "Prekrivnost plošč", privzeto: "Privzeto", zapri: "Zapri",
+              temaOpis: "Barve so iz teme sistema (Nastavitve Safeer OS › Videz) – enake v Spletu in Safeer Controlu." },
         en: { isci: "Search apps, files and the web …", splet: "Search the web", programi: "Apps",
               isciProg: "Find an app …", vse: "All", datoteke: "Files", nedavno: "Recent", smeti: "Recycle Bin",
               mape: "Folders", naprave: "Devices", filter: "Filter …", ime: "Name", velikost: "Size",
@@ -67,7 +88,11 @@ Item {
               odpiramZ: "Opening {ime} from {naprava} …", zazeniNa: "Start on the device", odpriNaNapravi: "Open on the device",
               prenasam: "Downloading {ime} …", mapeNaprave: "Device folders", brezProgramov: "No apps on this device.",
               niLocenega: "The device has no separate screen – it can't open this without disturbing its user.",
-              oddaljeno: "Remote desktop", odpriSProgramom: "Open with an app on {naprava}" }
+              oddaljeno: "Remote desktop", odpriSProgramom: "Open with an app on {naprava}",
+              prilagodi: "Customise desktop …", temaSistema: "System theme and settings …", ozadje: "Wallpaper",
+              ozadjeWindows: "Windows wallpaper", lastnaSlika: "Your own picture …", zameglitevNapis: "Panel blur",
+              prosojnostNapis: "Panel opacity", privzeto: "Default", zapri: "Close",
+              temaOpis: "Colours come from the system theme (Safeer OS Settings › Appearance) – the same in Web and Safeer Control." }
     })
     function t(k, vr) {
         var s = (besedila[jezik] || besedila.en)[k] || besedila.en[k] || k
@@ -113,7 +138,8 @@ Item {
         anchors.fill: ozadje
         source: ozadje
         blurEnabled: true
-        blur: 1.0
+        blur: koren.zameglitev
+        Behavior on blur { NumberAnimation { duration: 200 } }
         blurMax: 64
         saturation: 0.15
         brightness: -0.08
@@ -132,8 +158,8 @@ Item {
             id: polje
             anchors.fill: parent; anchors.leftMargin: 52; anchors.rightMargin: 18
             placeholderText: koren.t("isci")
-            placeholderTextColor: "#9fb0c6"
-            color: "#eef4ff"; font.pixelSize: 16
+            placeholderTextColor: koren.paleta.medlo
+            color: koren.paleta.besedilo; font.pixelSize: 16
             background: Item {}
             onTextChanged: casovnikIskanja.restart()
             Keys.onReturnPressed: zadetki.izberi(zadetki.trenutni)
@@ -154,7 +180,7 @@ Item {
         visible: polje.text.length > 0 && zadetkiModel.count > 0
         width: iskanje.width; x: iskanje.x; y: iskanje.y + iskanje.height + 8
         height: Math.min(420, seznamZadetkov.contentHeight + 16)
-        barva: Qt.rgba(0.05, 0.08, 0.13, 0.82)
+        barva: koren.plosca(Math.min(0.95, koren.prosojnost + 0.27))
         function isci(q) {
             zadetkiModel.clear(); trenutni = 0
             q = (q || "").trim(); if (!q) return
@@ -189,8 +215,8 @@ Item {
                     Image { source: model.ikona; width: 26; height: 26; visible: model.ikona !== ""; sourceSize: Qt.size(52, 52) }
                     Text { text: model.vrsta === "splet" ? "🌐" : "📄"; visible: model.ikona === ""; font.pixelSize: 20; width: 26 }
                     Column {
-                        Text { text: model.ime; color: "#eef4ff"; font.pixelSize: 14; elide: Text.ElideRight; width: seznamZadetkov.width - 70 }
-                        Text { text: model.opis; color: "#8fa3bd"; font.pixelSize: 11; elide: Text.ElideMiddle; width: seznamZadetkov.width - 70; visible: text !== "" }
+                        Text { text: model.ime; color: koren.paleta.besedilo; font.pixelSize: 14; elide: Text.ElideRight; width: seznamZadetkov.width - 70 }
+                        Text { text: model.opis; color: koren.paleta.medlo; font.pixelSize: 11; elide: Text.ElideMiddle; width: seznamZadetkov.width - 70; visible: text !== "" }
                     }
                 }
                 MouseArea { id: mz; anchors.fill: parent; hoverEnabled: true; onClicked: zadetki.izberi(index) }
@@ -206,13 +232,13 @@ Item {
         y: iskanje.y + iskanje.height + 10
         visible: !zadetki.visible
         height: 26; width: linkVrstica.width + 22; radius: 13
-        color: ml.containsMouse ? Qt.rgba(1, 1, 1, 0.16) : Qt.rgba(0.05, 0.08, 0.13, 0.55)
+        color: ml.containsMouse ? Qt.rgba(1, 1, 1, 0.16) : koren.plosca(koren.prosojnost)
         border.color: Qt.rgba(1, 1, 1, 0.12)
         Behavior on color { ColorAnimation { duration: 150 } }
         Row {
             id: linkVrstica; anchors.centerIn: parent; spacing: 7
-            Rectangle { width: 7; height: 7; radius: 4; color: koren.napravVLinku > 0 ? "#4de6ba" : "#8fa3bd"; anchors.verticalCenter: parent.verticalCenter }
-            Text { text: koren.t("link") + (koren.napravVLinku > 0 ? " · " + koren.t("napravN", { n: koren.napravVLinku }) : ""); color: "#dbe6f5"; font.pixelSize: 12 }
+            Rectangle { width: 7; height: 7; radius: 4; color: koren.napravVLinku > 0 ? koren.paleta.poudarek : koren.paleta.medlo; anchors.verticalCenter: parent.verticalCenter }
+            Text { text: koren.t("link") + (koren.napravVLinku > 0 ? " · " + koren.t("napravN", { n: koren.napravVLinku }) : ""); color: koren.paleta.besedilo; font.pixelSize: 12 }
         }
         MouseArea { id: ml; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: koren.klic("odpriRazdelek", ["naprave"]) }
     }
@@ -229,7 +255,7 @@ Item {
             anchors.fill: parent; anchors.margins: 18; spacing: 10
             RowLayout {
                 width: parent.width
-                Text { text: koren.t("medijski"); color: "#eef4ff"; font.pixelSize: 16; font.bold: true; Layout.fillWidth: true }
+                Text { text: koren.t("medijski"); color: koren.paleta.besedilo; font.pixelSize: 16; font.bold: true; Layout.fillWidth: true }
                 Gumb { besedilo: koren.t("odpriMedijski"); onKlik: koren.klic("odpriRazdelek", ["media"]) }
             }
             Row {
@@ -241,8 +267,8 @@ Item {
                 }
                 Column {
                     anchors.verticalCenter: parent.verticalCenter; spacing: 4
-                    Text { text: koren.t("niPredvajanja"); color: "#eef4ff"; font.pixelSize: 15; font.bold: true }
-                    Text { text: koren.t("medijOpis"); color: "#9fb0c6"; font.pixelSize: 12 }
+                    Text { text: koren.t("niPredvajanja"); color: koren.paleta.besedilo; font.pixelSize: 15; font.bold: true }
+                    Text { text: koren.t("medijOpis"); color: koren.paleta.medlo; font.pixelSize: 12 }
                 }
             }
         }
@@ -271,6 +297,7 @@ Item {
             z = z || {}
             koren.jezik = (z.jezik === "sl" || z.jezik === "en") ? z.jezik : "en"
             koren.ozadjeUrl = z.ozadje || ""
+            if (z.videz) koren.uporabiVidez(z.videz)
             datoteke.zacni(z.mape || [])
         })
         programi.nalozi()
@@ -305,6 +332,31 @@ Item {
         }
     }
 
+    // ------------------------------------------------------------------ prilagodi namizje (desni klik na ozadje)
+    MouseArea {
+        anchors.fill: parent
+        z: -1
+        acceptedButtons: Qt.RightButton
+        onClicked: function (m) { meniNamizja.popup() }
+    }
+    Menu {
+        id: meniNamizja
+        background: Rectangle { implicitWidth: 230; radius: 12; color: koren.paleta.vnos; border.color: Qt.rgba(1, 1, 1, 0.14) }
+        MenuItem {
+            text: koren.t("prilagodi")
+            contentItem: Text { text: parent.text; color: koren.paleta.besedilo; font.pixelSize: 13; leftPadding: 6 }
+            background: Rectangle { radius: 8; color: parent.highlighted ? koren.poudarekA(0.22) : "transparent" }
+            onTriggered: prilagodi.odpri()
+        }
+        MenuItem {
+            text: koren.t("temaSistema")
+            contentItem: Text { text: parent.text; color: koren.paleta.besedilo; font.pixelSize: 13; leftPadding: 6 }
+            background: Rectangle { radius: 8; color: parent.highlighted ? koren.poudarekA(0.22) : "transparent" }
+            onTriggered: koren.klic("odpriRazdelek", ["nastavitve"])
+        }
+    }
+    Prilagodi { id: prilagodi; z: 30; anchors.fill: parent }
+
     // ------------------------------------------------------------------ obvestilo spodaj (z dejanjem, npr. Razveljavi)
     Rectangle {
         id: obvestilo
@@ -313,7 +365,7 @@ Item {
         anchors.horizontalCenter: parent.horizontalCenter
         y: koren.height - 70
         height: 40; radius: 20; width: vrsticaObv.width + 30
-        color: Qt.rgba(0.07, 0.1, 0.16, 0.94); border.color: Qt.rgba(1, 1, 1, 0.14)
+        color: koren.plosca(0.94); border.color: Qt.rgba(1, 1, 1, 0.14)
         opacity: 0; visible: opacity > 0
         Behavior on opacity { NumberAnimation { duration: 200 } }
         function pokazi(b, dejanje, ob) {
@@ -322,7 +374,7 @@ Item {
         }
         Row {
             id: vrsticaObv; anchors.centerIn: parent; spacing: 14
-            Text { id: napisObv; color: "#eef4ff"; font.pixelSize: 13; anchors.verticalCenter: parent.verticalCenter }
+            Text { id: napisObv; color: koren.paleta.besedilo; font.pixelSize: 13; anchors.verticalCenter: parent.verticalCenter }
             Gumb { id: gumbObv; visible: besedilo !== ""; onKlik: { if (obvestilo.ob) obvestilo.ob(); obvestilo.opacity = 0 } }
         }
         Timer { id: skrijObv; interval: 6000; onTriggered: obvestilo.opacity = 0 }

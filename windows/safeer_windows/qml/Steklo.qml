@@ -6,7 +6,7 @@ Item {
     id: steklo
     property Item zamegljeno            // MultiEffect z zameglitvijo celotnega ozadja
     property real polmer: 18
-    property color barva: Qt.rgba(0.05, 0.08, 0.13, 0.55)
+    property color barva: koren.plosca(koren.prosojnost)
     default property alias vsebina: notranje.data
 
     Item {

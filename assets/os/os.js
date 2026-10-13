@@ -2424,6 +2424,8 @@
     if (id === "safeer") document.documentElement.removeAttribute("data-tema"); else document.documentElement.setAttribute("data-tema", id);
     try { localStorage.setItem("safeer_tema", id); } catch (e) {}
     narisiTeme();
+    // Ena tema za ves sistem: namizje, Splet in Safeer Control dobijo isto (lastnik, 13. 10. 2026).
+    if (imaMost()) klic("nastaviTemo", [id]).catch(function () {});
   }
   function narisiTeme() {
     var m = $("temeMreza"); if (!m) return;
@@ -3945,6 +3947,9 @@
     koMost(function () {
     klic("zacetek").then(function (z) {
       S.zacetek = z;
+      // Tema je shranjena tudi v sistemu (namizje, Splet, Control): sistem ima prednost, sicer mu damo izbiro strani.
+      if (z && z.tema && z.temaShranjena && z.tema !== trenutnaTema()) nastaviTemo(z.tema);
+      else if (z && z.tema && !z.temaShranjena && trenutnaTema() !== "safeer") klic("nastaviTemo", [trenutnaTema()]).catch(function () {});
       prilagodiPlatformo(z.namizje);
       if (BESEDILA_OS[z.jezik]) jezik = z.jezik;
       prevedi();

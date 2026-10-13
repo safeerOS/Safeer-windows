@@ -226,6 +226,19 @@ class SafeerControlWindow(QWidget):
     def _ob_nalozenem_vmesniku(self, ok: bool) -> None:
         if ok:
             self.osvezi_stran()
+            if getattr(self, "_tema_css", ""):
+                self.uporabi_temo(self._tema_css)
+
+    def uporabi_temo(self, css: str) -> None:
+        """Safeer Control v temi sistema (Nastavitve Safeer OS): isti videz kot vmesnik, namizje in Splet."""
+        self._tema_css = str(css or "")
+        js = ("(function(c){var s=document.getElementById('safeer-tema');if(!s){s=document.createElement('style');"
+              "s.id='safeer-tema';(document.head||document.documentElement).appendChild(s);}s.textContent=c;})(%s);"
+              % json.dumps(self._tema_css))
+        try:
+            self.view.page().runJavaScript(js)
+        except Exception:  # noqa: BLE001
+            pass
 
     def osvezi_stran(self, vrsta: str = "", podatki: Any = None) -> None:
         stanje = {

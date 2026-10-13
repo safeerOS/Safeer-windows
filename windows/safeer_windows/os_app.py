@@ -31,6 +31,7 @@ from core import os_dvd, os_media, os_posodobitve, os_scit, os_sporocila, os_tor
 
 from . import en_primerek
 from . import gledalec_zaslona
+from . import tema
 from . import (browser, control_backend, control_window, magnet_win, os_backend_win, policy, vlc_player,
                webview2_media, zapiski)
 
@@ -63,6 +64,20 @@ def _nastavi_jezik_oken(jezik: str) -> str:
     except Exception:
         pass
     return jezik
+
+
+def _ozadje_za_splet():
+    """Slika ozadja namizja za zacetno stran Spleta (safeer://home/ozadje): (vrsta, bajti) ali None."""
+    from . import namizje_qml
+    pot = namizje_qml.pot_ozadja()
+    if not pot:
+        return None
+    vrsta = mimetypes.guess_type(pot)[0] or "image/jpeg"
+    try:
+        with open(pot, "rb") as f:
+            return vrsta, f.read()
+    except OSError:
+        return None
 
 
 def _jezik_oken() -> str:
@@ -749,6 +764,10 @@ class SafeerOsWindow(QMainWindow):
             QApplication.instance(), browser_settings or policy.SettingsStore(), "embedded"
         )
         self.browser_app.jezik_vmesnika = _jezik_oken
+        # En videz sistema: Splet ima temo Safeer OS, zacetna stran Spleta pa ozadje namizja (lastnik, 13. 10. 2026).
+        self.browser_app.paleta = tema.paleta()
+        policy.splet_tema_css = lambda: tema.splet_css(tema.paleta())
+        policy.splet_ozadje = _ozadje_za_splet
         _korak("scit_in_profile")
         self.browser_window = browser.BrowserWindow(
             self.browser_app, private=True, embedded=True,
@@ -2291,6 +2310,7 @@ class SafeerOsWindow(QMainWindow):
                     backend=self.control_backend, parent=self, na_skritje=self._na_skritje_controla,
                     na_odpiranje=self._odpri_notranji_splet)
                 self.control_window.setWindowFlags(Qt.Widget)
+                self.control_window.uporabi_temo(tema.link_css(tema.paleta()))
                 self.zaslon.addWidget(self.control_window)
             else:
                 self.control_window.osvezi_stran()
@@ -2442,6 +2462,8 @@ class SafeerOsWindow(QMainWindow):
                 "samozagon": os_backend_win.samozagon_vklopljen(),
                 "namizjeSafeer": self.namizje_vklopljeno(),
                 "povezava": self.control_backend.stanje_povezave(),
+                "tema": tema.trenutna(),
+                "temaShranjena": "tema" in os_backend_win.nalozi_shrambo(),
             }
 
         if metoda == "programi":
@@ -2611,6 +2633,13 @@ class SafeerOsWindow(QMainWindow):
             novo = bool(a[0]) if a else not self.isFullScreen()
             self.dispatcher.dispatch(lambda: self._nastavi_celozaslonsko(novo))
             return novo
+
+        if metoda == "nastaviTemo":
+            # Ena tema za ves sistem (Nastavitve > Videz): vmesnik, namizje, Splet in Safeer Control.
+            ime = str(a[0]) if a else ""
+            if tema.nastavi(ime):
+                self.dispatcher.dispatch(self.uporabi_temo)
+            return tema.trenutna()
 
         if metoda == "namizjeSafeer":
             # Nastavitve: Safeer OS kot namizje Windows (vklop / izklop; brez argumenta vrne stanje).
@@ -3082,6 +3111,19 @@ class SafeerOsWindow(QMainWindow):
                 return izid
         self.dispatcher.dispatch(lambda: self._odpri_notranji_splet(url))
         return True
+
+    def uporabi_temo(self) -> None:
+        """Trenutna tema (in ozadje) na vseh delih sistema: Splet (vdelan in okna), namizje, Safeer Control."""
+        p = tema.paleta()
+        for okno in list(getattr(self.browser_app, "windows", [])):
+            try:
+                okno.osvezi_temo(p)
+            except Exception as e:  # noqa: BLE001
+                print("[SafeerOS] tema brskalnika:", e, flush=True)
+        if getattr(self, "namizje", None) is not None and hasattr(self.namizje, "osvezi_videz"):
+            self.namizje.osvezi_videz()
+        if getattr(self, "control_window", None) is not None and hasattr(self.control_window, "uporabi_temo"):
+            self.control_window.uporabi_temo(tema.link_css(p))
 
     def _link_stran(self, url: str) -> bool:
         """Stran z naprave v Linku (agent, daljinec): odpre se v samostojnem oknu Safeer Browserja (lastnik, 13. 10. 2026),
