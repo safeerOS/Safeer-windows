@@ -266,6 +266,12 @@ class _Namestnik:
         return None
 
 
+
+def _prek_releja(povezava) -> bool:
+    """Ali je sosednja povezava prek Global Linka (naslov je krajevni konec releja)."""
+    from core import link_mesh
+    return link_mesh._je_zanka(str(getattr(povezava, "naslov", "") or ""))
+
 class Hub:
     """Register naprav in usmerjanje sporocil. Brez omrezja - to je HubStreznik.
 
@@ -1385,8 +1391,13 @@ class Hub:
         with self._zaklep:
             obstojeca = self._sosedje.get(sosed_id)
             if obstojeca is not None and obstojeca is not povezava:
+                # Domace omrezje ima prednost pred Global Linkom (lastnik, 13. 10. 2026; isto kot na Linuxu).
+                nova_rele, stara_rele = _prek_releja(povezava), _prek_releja(obstojeca)
+                if nova_rele and not stara_rele:
+                    return False
                 zacetnik_stare = getattr(obstojeca, "podatki", {}).get("zacel", "")
-                if zacetnik_stare == min(sosed_id, self.nas_id) and zacel != zacetnik_stare:
+                if (nova_rele == stara_rele and zacetnik_stare == min(sosed_id, self.nas_id)
+                        and zacel != zacetnik_stare):
                     return False
                 stara = obstojeca
             if obstojeca is None and len(self._sosedje) >= NAJVEC_SOSEDOV:
