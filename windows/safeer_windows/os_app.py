@@ -774,6 +774,9 @@ class SafeerOsWindow(QMainWindow):
         if hasattr(self.media_player, "stanje_spremenjeno"):
             self.media_player.stanje_spremenjeno.connect(self._media_zabelezi_stanje)
         self.control_backend.ob_mediju = self._link_medij
+        # Safeer Agent / daljinec: »odpri stran na računalniku« in »poišči na računalniku« (Link open_url, search.query).
+        self.control_backend.ob_strani = self._link_stran
+        self.control_backend.ob_iskanju = self._link_iskanje
         # Seznami predvajanja so enaki na vseh napravah v Linku: druge naprave berejo nase, mi njihove (ob odprtju Glasbe).
         self.control_backend.ob_seznamih = self.media_center.seznami_izvoz
         # Moji viri z drugih naprav v Linku (core/viri_sink.py): stran osvezi vire in katalog.
@@ -3079,6 +3082,26 @@ class SafeerOsWindow(QMainWindow):
                 return izid
         self.dispatcher.dispatch(lambda: self._odpri_notranji_splet(url))
         return True
+
+    def _link_stran(self, url: str) -> bool:
+        """Stran z naprave v Linku (agent, daljinec): okno Safeer OS pride naprej, stran se odpre v Spletu."""
+        url = str(url or "").strip()
+        if not url.lower().startswith(("http://", "https://")) or len(url) > 4096:
+            return False
+        self.dispatcher.dispatch(self.prebudi)
+        return bool(self.odpri_splet(url))
+
+    def _link_iskanje(self, niz: str) -> bool:
+        """Niz z naprave v Linku (glas na telefonu): namizje se pokaze in ga isce - nic se ne odpre samo (kot Linux).
+        Brez namizja ga isce Splet Safeer OS (uporabnik vidi zadetke, nic se ne zazene)."""
+        niz = " ".join(str(niz or "").split())[:200]
+        if not niz:
+            return False
+        if getattr(self, "namizje", None) is not None and hasattr(self.namizje, "isci_od_drugod"):
+            self.dispatcher.dispatch(lambda: self.namizje.isci_od_drugod(niz))
+            return True
+        self.dispatcher.dispatch(self.prebudi)
+        return self.odpri_spletno_iskanje(niz)
 
     def odpri_spletno_iskanje(self, poizvedba: str) -> bool:
         poizvedba = str(poizvedba or "").strip()

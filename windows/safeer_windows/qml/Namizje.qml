@@ -29,6 +29,7 @@ Item {
             var p = null
             try { p = JSON.parse(podatki) } catch (e) {}
             if (vrsta === "datoteke" && p && p.pot === datoteke.vir.pot) datoteke.nalozi(true)
+            if (vrsta === "iskanjeOdDrugod" && p && p.q) { polje.text = p.q; polje.forceActiveFocus() }
         }
     }
     property string jezik: "sl"

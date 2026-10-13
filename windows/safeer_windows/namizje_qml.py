@@ -153,6 +153,16 @@ class NamizjeQml(QQuickView):
         self.os_okno.dispatcher.dispatch(nastavi)
         return True
 
+    def isci_od_drugod(self, niz: str) -> None:
+        """Glas s telefona (search.query): pokazi namizje (pomanjsaj okna) in niz vpisi v iskanje."""
+        if _WIN:
+            u = ctypes.windll.user32
+            pladenj = u.FindWindowW("Shell_TrayWnd", None)
+            if pladenj:
+                u.PostMessageW(pladenj, 0x0111, 419, 0)     # WM_COMMAND MIN_ALL: pomanjsaj vsa okna
+        self.requestActivate()
+        self.dogodek("iskanjeOdDrugod", {"q": niz})
+
     # ------------------------------------------------------------------ polozaj: pod vsemi okni
     def _postavi(self) -> None:
         self.setGeometry(QGuiApplication.primaryScreen().availableGeometry())
