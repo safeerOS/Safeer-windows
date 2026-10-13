@@ -123,15 +123,31 @@ async function preveriPredvajanje() {
   }
 }
 
+let htmlCelozaslonsko = false;
+function poslji_tipko(koda) {
+  // Linux: vstavljeno okno X11 ne dobi tipkovnice (ni XEMBED), zato Safeer OS tipke posreduje sem.
+  const wc = okno.webContents;
+  if (koda === 'Escape' && htmlCelozaslonsko) { wc.executeJavaScript('document.exitFullscreen && document.exitFullscreen()').catch(() => {}); return; }
+  wc.sendInputEvent({ type: 'keyDown', keyCode: koda });
+  if (koda.length === 1 || koda === 'Space') wc.sendInputEvent({ type: 'char', keyCode: koda === 'Space' ? ' ' : koda });
+  wc.sendInputEvent({ type: 'keyUp', keyCode: koda });
+}
+
 function obdelajUkaz() {
   if (!commandPath || !okno || !fs.existsSync(commandPath)) return;
   try {
-    const ukaz = fs.readFileSync(commandPath, 'utf8').trim().toLowerCase();
+    const vsebina = fs.readFileSync(commandPath, 'utf8');
     fs.unlinkSync(commandPath);
     const zg = okno.webContents.navigationHistory;
-    if (ukaz === 'back' && zg.canGoBack()) zg.goBack();
-    else if (ukaz === 'reload') okno.webContents.reload();
-    else if (ukaz === 'exitfullscreen') okno.webContents.executeJavaScript('document.fullscreenElement && document.exitFullscreen()').catch(() => {});
+    for (const vrstica of vsebina.split('\n')) {
+      const surov = vrstica.trim();
+      const ukaz = surov.toLowerCase();
+      if (!ukaz) continue;
+      if (ukaz === 'back' && zg.canGoBack()) zg.goBack();
+      else if (ukaz === 'reload') okno.webContents.reload();
+      else if (ukaz === 'exitfullscreen') okno.webContents.executeJavaScript('document.fullscreenElement && document.exitFullscreen()').catch(() => {});
+      else if (ukaz.startsWith('key:') && /^key:[A-Za-z0-9 ]{1,12}$/.test(surov)) poslji_tipko(surov.slice(4));
+    }
   } catch (_) {}
 }
 
@@ -196,7 +212,6 @@ function odpri(url) {
   });
   wc.on('did-finish-load', () => zapisi('NAVIGATION_OK', 'Success'));
   wc.on('did-fail-load', (_e, koda, opis, _u, glavni) => { if (glavni && koda !== -3) zapisi('NAVIGATION_FAILED', opis); });
-  let htmlCelozaslonsko = false;
   wc.on('enter-html-full-screen', () => { htmlCelozaslonsko = true; zapisi('FULLSCREEN_ON'); });
   wc.on('leave-html-full-screen', () => { htmlCelozaslonsko = false; zapisi('FULLSCREEN_OFF'); });
   wc.on('before-input-event', (e, i) => {
@@ -209,7 +224,10 @@ function odpri(url) {
   okno.on('closed', () => { okno = null; app.quit(); });
   okno.loadURL(url);
   zapisi('SESSION_READY', varenGostitelj(url));
-  if (vdelan) { setInterval(obdelajUkaz, 200); setInterval(preveriPredvajanje, 750); }
+  if (vdelan) { setInterval(obdelajUkaz, 100); setInterval(preveriPredvajanje, 750); }
+  // Ce se Safeer OS konca (tudi sesutje), se konca tudi predvajalnik - ne sme ostati nevidno teci.
+  const lastnik = parseInt(argumenti.lastnik || '', 10);
+  if (lastnik > 1) setInterval(() => { try { process.kill(lastnik, 0); } catch (_) { app.exit(0); } }, 2000);
 }
 
 if (prviUrl) {

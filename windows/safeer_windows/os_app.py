@@ -799,6 +799,10 @@ class SafeerOsWindow(QMainWindow):
         self.browser_window.set_embedded_content_visible(False)
         _korak("pred_webview2")
         self.webview2_media = webview2_media.WebView2MediaWidget(self._zapri_webview2_media, self)
+        if sys.platform == "win32":
+            # Safeer DRM (Widevine) se prenese enkrat v ozadju; do takrat predvaja WebView2.
+            from . import safeer_drm_prenos
+            safeer_drm_prenos.prenesi_v_ozadju()
         self.zaslon.addWidget(self.webview2_media)
         _korak("webview2")
         print("[SafeerOS] DIAG media_views_ready", flush=True)
@@ -3022,7 +3026,7 @@ class SafeerOsWindow(QMainWindow):
         if urllib.parse.urlsplit(url).scheme.lower() not in ("http", "https"):
             return False
         if not vedno_notri and os_backend_win.je_drm_storitev(url):
-            if self.webview2_media.uporablja_drm:
+            if self.webview2_media.ima_drm():
                 # Safeer DRM (Widevine) v istem oknu - uporabnik ostane v Safeer OS; Edge je le rezerva.
                 self.dispatcher.dispatch(lambda: self._odpri_drm_storitev(url))
                 return {"predvajalnik": True}

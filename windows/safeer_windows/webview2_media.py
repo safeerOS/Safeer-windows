@@ -20,6 +20,7 @@ if sys.platform == "win32":
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
+from . import safeer_drm_prenos
 from .media_diagnostics import source_rejection
 
 
@@ -64,9 +65,10 @@ class WebView2MediaWidget(QWidget):
         koren_paketa = Path(__file__).resolve().parents[1]
         # Safeer DRM (castLabs ECS, Widevine) je prvi predvajalnik, WebView2 rezerva. Oba govorita isti dogovor
         # (--parent/--url/--profile/--state/--command), zato uporabnik vidi en sam predvajalnik.
-        self.drm_executable = koren_paketa / "SafeerDRM" / "safeer-drm.exe"
+        self._koren_paketa = koren_paketa
         self.webview2_executable = koren_paketa / "SafeerMediaWebView.exe"
-        self.executable = self.drm_executable if self.drm_executable.is_file() else self.webview2_executable
+        self._drm_onemogocen = False
+        self.executable = self._izberi_izvrsljivo()
         self._vdelano_okno = 0
         self._dogodki_odmik = 0
         self.process: Optional[subprocess.Popen] = None
@@ -132,9 +134,25 @@ class WebView2MediaWidget(QWidget):
         QTimer.singleShot(0, self._prilagodi_okno)
         QTimer.singleShot(300, self._prilagodi_okno)
 
+    def _izberi_izvrsljivo(self) -> Path:
+        """Safeer DRM, ce je na voljo (ob paketu za razvoj ali prenesen ob prvem zagonu), sicer WebView2."""
+        if not self._drm_onemogocen:
+            ob_paketu = self._koren_paketa / "SafeerDRM" / "safeer-drm.exe"
+            if ob_paketu.is_file():
+                return ob_paketu
+            prenesen = safeer_drm_prenos.izvrsljiva()
+            if prenesen is not None:
+                safeer_drm_prenos.uskladi_logiko(prenesen, self._koren_paketa / "safeer_drm")
+                return prenesen
+        return self.webview2_executable
+
+    def ima_drm(self) -> bool:
+        """Ali bo naslednje predvajanje v Safeer DRM (tudi ce se je paket pravkar prenesel)."""
+        return self._izberi_izvrsljivo() != self.webview2_executable
+
     @property
     def uporablja_drm(self) -> bool:
-        return self.executable == self.drm_executable
+        return self.executable != self.webview2_executable
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -207,7 +225,7 @@ class WebView2MediaWidget(QWidget):
         self.stop()
         self.page_mode = bool(stran or storitev)
         # Storitev z DRM (Netflix ...): stalen profil, da prijava ostane, in prosto premikanje po https.
-        self.storitev = bool(storitev) and self.uporablja_drm
+        self.storitev = bool(storitev) and self.ima_drm()
         self.variants = [{"url": url, "vir": urllib.parse.urlsplit(url).hostname or "Spletni vir"}]
         self.variant_index = 0
         return self._open_variant()
@@ -261,9 +279,12 @@ class WebView2MediaWidget(QWidget):
         self._dogodki_odmik = 0
 
     def _open_variant(self) -> bool:
-        if not self.available or self.variant_index >= len(self.variants):
+        if self.variant_index >= len(self.variants):
             return False
         self._stop_process()
+        self.executable = self._izberi_izvrsljivo()   # Safeer DRM se je morda prenesel med tem
+        if not self.available:
+            return False
         variant = self.variants[self.variant_index]
         url = str(variant.get("url") or "")
         if not url.startswith("https://"):
@@ -286,6 +307,8 @@ class WebView2MediaWidget(QWidget):
         ]
         if self.storitev:
             args.append("--storitev=1")
+        if self.uporablja_drm:
+            args.append(f"--lastnik={os.getpid()}")   # Safeer DRM se konca tudi, ce se Safeer OS sesuje
         self.process = subprocess.Popen(args, close_fds=True)
         self.opened_at = time.monotonic()
         self.media_detected = False
@@ -328,6 +351,7 @@ class WebView2MediaWidget(QWidget):
         if exited and self.uporablja_drm and not self._vdelano_okno and self.webview2_executable.is_file():
             # Safeer DRM se ni zagnal (okna ni bilo): ista stran takoj v rezervnem predvajalniku WebView2.
             print("[SafeerMedia] Safeer DRM se ni zagnal - rezerva WebView2", flush=True)
+            self._drm_onemogocen = True
             self.executable = self.webview2_executable
             self.storitev = False
             self._open_variant()

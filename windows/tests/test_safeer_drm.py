@@ -11,8 +11,10 @@ OS_JS = (KOREN / "assets" / "os" / "os.js").read_text(encoding="utf-8")
 
 class SafeerDrmTest(unittest.TestCase):
     def test_drm_je_prvi_webview2_rezerva(self):
-        self.assertIn('koren_paketa / "SafeerDRM" / "safeer-drm.exe"', MEDIA)
-        self.assertIn("self.drm_executable if self.drm_executable.is_file() else self.webview2_executable", MEDIA)
+        self.assertIn('self._koren_paketa / "SafeerDRM" / "safeer-drm.exe"', MEDIA)
+        self.assertIn("safeer_drm_prenos.izvrsljiva()", MEDIA)
+        self.assertIn("return self.webview2_executable", MEDIA)
+        self.assertIn("safeer_drm_prenos.prenesi_v_ozadju()", APP)
 
     def test_okno_je_vdelano_v_safeer_os(self):
         # Uporabnik ne vidi drugega okna: rocaj iz dnevnika, WS_CHILD, SetParent v ploskev predvajalnika.
@@ -25,7 +27,7 @@ class SafeerDrmTest(unittest.TestCase):
         self.assertIn('self._command("exitfullscreen")', MEDIA)
 
     def test_drm_storitve_ostanejo_v_safeer_os(self):
-        self.assertIn("if self.webview2_media.uporablja_drm:", APP)
+        self.assertIn("if self.webview2_media.ima_drm():", APP)
         self.assertIn('return {"predvajalnik": True}', APP)
         self.assertIn("if (r && r.predvajalnik) return;", OS_JS)
         # Storitev ima stalen profil (prijava ostane), zacasne seje se se vedno pobrisejo.
