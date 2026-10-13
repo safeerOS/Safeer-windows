@@ -1621,6 +1621,10 @@ class SafeerControlBackend:
                 podatki.pop("apps", None)
                 izid = {"ok": True, "message": f"{len(podatki['items'])} programov", "data": podatki}
 
+            elif akcija in ("apps.launch_locen", "files.open_locen"):
+                # Windows (se) nima locenega zaslona: programa ali datoteke ne odpremo na zaslonu uporabnika.
+                izid = {"ok": False, "message": "Računalnik nima ločenega zaslona", "code": "ni_locenega_zaslona"}
+
             elif akcija in ("apps.launch", "launch_app"):
                 app_id = str(params.get("app") or params.get("package") or "").strip()
                 stream = bool(params.get("stream"))
@@ -2197,13 +2201,29 @@ class SafeerControlBackend:
         return {"ok": bool(r.get("ok")), "koda": str(r.get("koda") or r.get("code") or ""),
                 "message": str(r.get("message") or "")}
 
+    def odpri_datoteko_tukaj(self, id_naprave: str, id_datoteke: str) -> dict:
+        """Datoteko naprave odpremo na njenem LOCENEM zaslonu in jo gledamo/urejamo tukaj prek oddaljenega namizja -
+        uporabnik za tisto napravo tega ne opazi (lastnik, 13. 10. 2026). Naprava brez locenega zaslona zavrne."""
+        if not id_naprave or not id_datoteke:
+            return {"ok": False, "koda": "manjkajo_parametri"}
+        # Svoje dejanje (ne parameter): starejsa naprava ga ne pozna in ga zavrne - nikoli ne odpre vidno na svojem zaslonu.
+        r = self.ukaz_pocakaj(id_naprave, "files.open_locen", {"id": id_datoteke, "stream": True}, cas=10.0)
+        podatki = r.get("data") if isinstance(r.get("data"), dict) else {}
+        return {"ok": bool(r.get("ok")), "tu": podatki.get("stream") == "pending",
+                "koda": str(r.get("koda") or r.get("code") or ""), "message": str(r.get("message") or "")}
+
     def odpri_tukaj(self, id_naprave: str, app: str) -> dict:
-        r = self.ukaz_pocakaj(id_naprave, "apps.launch", {"app": app, "stream": True}, cas=8.0)
+        naprava = next((n for n in self.naprave if str(n.get("id") or "") == str(id_naprave)), {})
+        platforma = str(naprava.get("platforma") or naprava.get("platform") or "").lower()
+        racunalnik = platforma in ("linux", "windows", "win32", "macos") or str(id_naprave).endswith("-control")
+        # Racunalnik: program na LOCENEM zaslonu (uporabnik tam tega ne opazi). Android: deljenje zaslona s soglasjem.
+        akcija = "apps.launch_locen" if racunalnik else "apps.launch"
+        r = self.ukaz_pocakaj(id_naprave, akcija, {"app": app, "stream": True}, cas=8.0)
         podatki = r.get("data") if isinstance(r.get("data"), dict) else {}
         return {
             "ok": bool(r.get("ok")),
             "tu": podatki.get("stream") == "pending",
-            "koda": str(r.get("koda") or ""),
+            "koda": str(r.get("koda") or r.get("code") or ""),
             "message": str(r.get("message") or ""),
         }
 

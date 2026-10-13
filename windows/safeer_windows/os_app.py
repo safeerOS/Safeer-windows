@@ -2691,10 +2691,12 @@ class SafeerOsWindow(QMainWindow):
         if metoda == "oddaljeniZaslon":
             id_nap = str(a[0]) if a else ""
             ime = str(a[1]) if len(a) > 1 else ""
+            # "apps" = locen zaslon naprave (uporabnik za njo tega ne opazi), privzeto pravo namizje naprave.
+            zaslon = "apps" if len(a) > 2 and str(a[2]) == "apps" else "desktop"
             if not id_nap:
                 return False
             from . import oddaljeni_zaslon
-            self.dispatcher.dispatch(lambda: oddaljeni_zaslon.odpri(self.control_backend, id_nap, ime))
+            self.dispatcher.dispatch(lambda: oddaljeni_zaslon.odpri(self.control_backend, id_nap, ime, zaslon=zaslon))
             return True
 
         if metoda == "novaNaprava":
@@ -2772,10 +2774,11 @@ class SafeerOsWindow(QMainWindow):
             app = str(a[1]) if len(a) > 1 else ""
             return self.control_backend.zazeni_na_napravi(id_n, app)
 
-        if metoda == "odpriTukaj":
+        if metoda in ("odpriTukaj", "odpriDatotekoTukaj"):
             id_n = str(a[0]) if a else ""
             app = str(a[1]) if len(a) > 1 else ""
-            izid = self.control_backend.odpri_tukaj(id_n, app)
+            izid = (self.control_backend.odpri_tukaj(id_n, app) if metoda == "odpriTukaj"
+                    else self.control_backend.odpri_datoteko_tukaj(id_n, app))
             # Racunalnik (Linux/Windows) program samo zazene; sliko prinesemo mi - odpremo njegov oddaljeni
             # zaslon in program upravljamo od tu (Android pa sam zacne deliti zaslon, "tu": True).
             naprava = next((n for n in (self.control_backend.naprave or [])

@@ -119,6 +119,13 @@ class NamizjeQml(QQuickView):
         if metoda == "programiNamizja":
             seznam = self.os_okno._izvedi_metodo("programi", []) or []
             return [dict(p, ikona=ikona_v_datoteko(str(p.get("ikona") or ""))) for p in seznam]
+        if metoda == "programiNapraveNamizja":
+            r = self.os_okno._izvedi_metodo("programiNaprave", a) or {}
+            if isinstance(r, dict):
+                r = dict(r, programi=[dict(p, ikona=ikona_v_datoteko(str(p.get("ikona") or ""))) for p in r.get("programi") or []])
+            return r
+        if metoda == "napraveNamizja":
+            return naprave_za_izbiro(self.os_okno.control_backend)
         if metoda in self._metode:
             return self._metode[metoda](a)
         return self.os_okno._izvedi_metodo(metoda, a)
@@ -194,3 +201,25 @@ def ozadje_datoteka() -> str:
         if pot and os.path.isfile(pot):
             return QUrl.fromLocalFile(pot).toString()
     return ""
+
+
+def naprave_za_izbiro(cb) -> list:
+    """Druge naprave v Safeer Linku za izbiro na namizju. Ena vrstica na napravo: racunalnik je v Linku lahko dvakrat
+    (Safeer OS in njegov Control, id »…-control«); za programe in datoteke si zapomnimo id, ki to zna."""
+    programi = {n["id"] for n in cb.naprave_s_programi()}
+    datoteke = {n["id"] for n in cb.naprave_s_datotekami()}
+    po_kljucu: dict = {}
+    for n in cb.vse_naprave():
+        id_n = str(n.get("id") or "")
+        if n.get("ta") or not id_n or (id_n not in programi and id_n not in datoteke):
+            continue
+        kljuc = id_n[:-len("-control")] if id_n.endswith("-control") else id_n
+        v = po_kljucu.setdefault(kljuc, {"kljuc": kljuc, "ime": "", "platforma": "", "programi": "", "datoteke": ""})
+        if not v["ime"] or not id_n.endswith("-control"):
+            v["ime"] = str(n.get("ime") or id_n)
+            v["platforma"] = str(n.get("platforma") or "")
+        if id_n in programi and (not v["programi"] or not id_n.endswith("-control")):
+            v["programi"] = id_n
+        if id_n in datoteke and (not v["datoteke"] or id_n.endswith("-control")):
+            v["datoteke"] = id_n
+    return sorted(po_kljucu.values(), key=lambda v: v["ime"].lower())

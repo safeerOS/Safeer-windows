@@ -16,7 +16,36 @@ Steklo {
     readonly property var prikazani: vsi.filter(function (p) {
         return (!skupina || p.skupina === skupina) && (!niz || p.ime.toLowerCase().indexOf(niz.toLowerCase()) >= 0)
     })
-    function nalozi() { koren.klic("programiNamizja", [], function (s) { panel.vsi = s || [] }) }
+    property string naprava: ""          // "" = ta racunalnik
+    property string imeNaprave: ""
+    property string stanje: ""           // "", "nalagam", "napaka", "prazno"
+    property int zahteva: 0
+    function nalozi() {
+        var st = ++zahteva
+        panel.vsi = []; panel.skupina = ""
+        if (!naprava) {
+            stanje = "nalagam"
+            koren.klic("programiNamizja", [], function (s) { if (st !== zahteva) return; panel.vsi = s || []; stanje = "" })
+            return
+        }
+        stanje = "nalagam"
+        koren.klic("programiNapraveNamizja", [naprava], function (r) {
+            if (st !== zahteva) return
+            if (!r || !r.ok) { stanje = "napaka"; return }
+            panel.vsi = r.programi || []; stanje = panel.vsi.length ? "" : "prazno"
+        }, function () { if (st === zahteva) stanje = "napaka" })
+    }
+    function zazeni(p) {
+        if (!naprava) {
+            koren.klic("zazeni", [p.id], function (ok) { if (!ok) koren.obvesti(koren.t("niUspelo")) })
+            return
+        }
+        // Program naprave se odpre TUKAJ (naprava ga zazene in pretaka sliko), kot v Safeer OS.
+        koren.obvesti(koren.t("odpiramZ", { ime: p.ime, naprava: imeNaprave }))
+        koren.klic("odpriTukaj", [naprava, p.id], function (r) {
+            if (!(r === true || (r && r.ok))) koren.obvesti(r && r.koda === "ni_locenega_zaslona" ? koren.t("niLocenega") : ((r && r.message) || koren.t("niUspelo")))
+        })
+    }
     readonly property var imenaSkupin: ({ pisarna: "Pisarna", ustvarjanje: "Ustvarjanje", mediji: "Mediji", splet: "Splet",
                                           igre: "Igre", orodja: "Orodja", sistem: "Sistem", drugo: "Drugo",
                                           predstavnost: "Predstavnost", programiranje: "Programiranje" })
@@ -26,6 +55,15 @@ Steklo {
         RowLayout {
             Layout.fillWidth: true; spacing: 12
             Text { text: koren.t("programi"); color: "#eef4ff"; font.pixelSize: 16; font.bold: true }
+            IzbiraNaprave {
+                zmoznost: "programi"; naprave: koren.naprave
+                onIzbrana: function (id, ime) { panel.naprava = id; panel.imeNaprave = ime; panel.nalozi() }
+            }
+            Gumb {
+                // Ves loceni zaslon naprave tukaj (oddaljeno namizje) - tudi prek Global Linka.
+                besedilo: koren.t("oddaljeno"); visible: panel.naprava !== ""
+                onKlik: koren.klic("oddaljeniZaslon", [panel.naprava, panel.imeNaprave, "apps"])
+            }
             Rectangle {
                 Layout.fillWidth: true; height: 34; radius: 17
                 color: Qt.rgba(1, 1, 1, 0.07); border.color: Qt.rgba(1, 1, 1, 0.12)
@@ -66,6 +104,11 @@ Steklo {
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
             add: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 200 } }
+            Text {
+                anchors.centerIn: parent; visible: panel.stanje !== "" && panel.stanje !== "nalagam" || (panel.stanje === "nalagam" && mreza.count === 0)
+                text: panel.stanje === "nalagam" ? koren.t("nalagam") : panel.stanje === "napaka" ? koren.t("niOdgovorila") : koren.t("brezProgramov")
+                color: "#9fb0c6"; font.pixelSize: 13
+            }
             delegate: Item {
                 width: mreza.cellWidth; height: mreza.cellHeight
                 Rectangle {
@@ -90,7 +133,10 @@ Steklo {
                     }
                     MouseArea {
                         id: mp; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                        onClicked: koren.klic("zazeni", [modelData.id], function (ok) { if (!ok) koren.obvesti(koren.t("niUspelo")) })
+                        acceptedButtons: Qt.LeftButton | Qt.RightButton
+                        onClicked: function (m) {
+                            if (m.button === Qt.LeftButton) panel.zazeni(modelData)
+                        }
                     }
                 }
             }

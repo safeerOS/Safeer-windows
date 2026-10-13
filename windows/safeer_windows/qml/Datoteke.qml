@@ -12,6 +12,13 @@ Steklo {
     property string filter: ""
     property string stars: ""
     property int zahteva: 0
+    // Naprava v Safeer Linku ("" = ta racunalnik): njene mape in datoteke (files.list prek Safeer Controla).
+    property string naprava: ""
+    property string imeNaprave: ""
+    property var streznik: null
+    property var pot: []                 // [{id, ime}] mape naprave od korena navzdol
+    property var lokalniViri: []
+    property string stanje: ""           // "", "napaka", "neDeli"
     readonly property var prikazani: elementi.filter(function (e) {
         return !filter || e.ime.toLowerCase().indexOf(filter.toLowerCase()) >= 0
     })
@@ -22,15 +29,28 @@ Steklo {
                  { naslov: koren.t("mape") }]
         mape.forEach(function (m) { v.push({ oznaka: koren.t(m.vrsta) !== m.vrsta ? koren.t(m.vrsta) : m.ime, vir: { vrsta: "lokalno", pot: m.pot } }) })
         v.push({ naslov: koren.t("naprave") })
-        panel.viri = v
+        panel.viri = v; panel.lokalniViri = v
         koren.klic("nosilci", [], function (n) {
-            var z = panel.viri.slice()
+            var z = panel.lokalniViri.slice()
             ;(n || []).forEach(function (x) { z.push({ oznaka: x.ime + (x.ime === x.pot.replace("\\", "") ? "" : " (" + x.pot.replace("\\", "") + ")"), vir: { vrsta: "lokalno", pot: x.pot }, pogon: x }) })
-            panel.viri = z
+            panel.lokalniViri = z
+            if (!panel.naprava) panel.viri = z
         })
         odpri({ vrsta: "nedavno", pot: "" })
     }
     function odpri(v) { vir = v; filter = ""; poljeFilter.text = ""; nalozi(false) }
+    function izberiNapravo(id, ime) {
+        naprava = id; imeNaprave = ime; pot = []; streznik = null
+        if (!id) { viri = lokalniViri; odpri({ vrsta: "nedavno", pot: "" }); return }
+        viri = [{ naslov: koren.t("mapeNaprave") }]
+        odpri({ vrsta: "naprava", pot: "" })
+    }
+    function vnosNaprave(d) {
+        var mapa = d.type === "folder" || d.vrsta === "folder" || d.vrsta === "mapa"
+        var ime = d.name || d.ime || ""
+        return { ime: ime, id: d.id || "", mapa: mapa, velikost: d.size || d.velikost || 0,
+                 spremenjeno: d.mtime || d.spremenjeno || 0, vrsta: mapa ? "mapa" : (d.vrsta || ""), pot: d.id || "" }
+    }
     function nalozi(tiho) {
         var st = ++zahteva
         if (!tiho) elementi = []
@@ -40,12 +60,39 @@ Steklo {
             else if (vir.vrsta === "smeti") { elementi = (r && r.elementi) || []; stars = "" }
             else { elementi = r || []; stars = "" }
         }
+        stanje = ""
+        if (vir.vrsta === "naprava") {
+            koren.klic("datotekeNaprave", [naprava, vir.pot], function (r) {
+                if (st !== zahteva) return
+                if (!r || !r.ok) { stanje = "napaka"; elementi = []; return }
+                if (!r.shared) { stanje = "neDeli"; elementi = []; return }
+                if (r.server) streznik = r.server
+                var vnosi = (r.items || []).map(panel.vnosNaprave)
+                vnosi.sort(function (a, b) { return a.mapa !== b.mapa ? (a.mapa ? -1 : 1) : a.ime.toLowerCase().localeCompare(b.ime.toLowerCase()) })
+                elementi = vnosi
+                if (vir.pot === "") {   // koren naprave: mape tudi v stranski vrstici
+                    viri = [{ naslov: koren.t("mapeNaprave") }].concat(vnosi.filter(function (e) { return e.mapa })
+                        .map(function (e) { return { oznaka: e.ime, vir: { vrsta: "naprava", pot: e.id }, ime: e.ime } }))
+                }
+            }, function () { if (st === zahteva) { stanje = "napaka"; elementi = [] } })
+            return
+        }
         if (vir.vrsta === "lokalno") { koren.klic("mapa", [vir.pot], konec); koren.klic("spremljajMapo", [vir.pot]) }
         else if (vir.vrsta === "smeti") koren.klic("smeti", [], konec)
         else koren.klic("nedavne", [], konec)
     }
     function odpriElement(e) {
         if (vir.vrsta === "smeti") return
+        if (vir.vrsta === "naprava") {
+            if (e.mapa) { pot = pot.concat([{ id: e.id, ime: e.ime }]); odpri({ vrsta: "naprava", pot: e.id }); return }
+            // Vedno prek oddaljenega namizja: naprava datoteko odpre na svojem locenem zaslonu, uporabnik tam tega ne
+            // opazi (lastnik, 13. 10. 2026). Brez locenega zaslona naprava zavrne - nicesar ne odpremo na njenem zaslonu.
+            koren.obvesti(koren.t("odpiramZ", { ime: e.ime, naprava: imeNaprave }))
+            koren.klic("odpriDatotekoTukaj", [naprava, e.id], function (r) {
+                if (!(r && r.ok)) koren.obvesti(r && r.koda === "ni_locenega_zaslona" ? koren.t("niLocenega") : ((r && r.message) || koren.t("niUspelo")))
+            })
+            return
+        }
         if (e.mapa) odpri({ vrsta: "lokalno", pot: e.pot })
         else koren.klic("odpriDatoteko", [e.pot])
     }
@@ -58,6 +105,8 @@ Steklo {
         })
     }
     function prazno() {
+        if (stanje === "napaka") return koren.t("niOdgovorila")
+        if (stanje === "neDeli") return koren.t("neDeli")
         return vir.vrsta === "smeti" ? koren.t("kosPrazen") : vir.vrsta === "nedavno" ? koren.t("niNedavnih") : koren.t("prazno")
     }
 
@@ -68,7 +117,14 @@ Steklo {
             id: viriSeznam
             Layout.preferredWidth: 170; Layout.fillHeight: true
             clip: true; model: panel.viri; boundsBehavior: Flickable.StopAtBounds
-            header: Text { text: koren.t("datoteke"); color: "#eef4ff"; font.pixelSize: 16; font.bold: true; height: 34; leftPadding: 4 }
+            header: Column {
+                spacing: 8; bottomPadding: 6
+                Text { text: koren.t("datoteke"); color: "#eef4ff"; font.pixelSize: 16; font.bold: true; leftPadding: 4 }
+                IzbiraNaprave {
+                    width: viriSeznam.width; zmoznost: "datoteke"; naprave: koren.naprave
+                    onIzbrana: function (id, ime) { panel.izberiNapravo(id, ime) }
+                }
+            }
             delegate: Item {
                 width: viriSeznam.width; height: modelData.naslov ? 30 : 32
                 Text {
@@ -84,7 +140,10 @@ Steklo {
                     Text { text: modelData.oznaka || ""; color: parent.izbran ? "#bff7e6" : "#dbe6f5"; font.pixelSize: 13; elide: Text.ElideRight
                            width: parent.width - 16; x: 10; anchors.verticalCenter: parent.verticalCenter }
                     MouseArea { id: mv; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                                onClicked: if (modelData.vir) panel.odpri(modelData.vir) }
+                                onClicked: if (modelData.vir) {
+                                    if (modelData.vir.vrsta === "naprava") panel.pot = [{ id: modelData.vir.pot, ime: modelData.ime }]
+                                    panel.odpri(modelData.vir)
+                                } }
                 }
             }
         }
@@ -94,10 +153,17 @@ Steklo {
             Layout.fillWidth: true; Layout.fillHeight: true; spacing: 8
             RowLayout {
                 Layout.fillWidth: true; spacing: 8
-                Gumb { besedilo: "↑"; visible: panel.stars !== ""; onKlik: panel.odpri({ vrsta: "lokalno", pot: panel.stars }) }
+                Gumb { besedilo: "↑"; visible: panel.stars !== "" || (panel.vir.vrsta === "naprava" && panel.pot.length > 0)
+                       onKlik: {
+                           if (panel.vir.vrsta === "naprava") {
+                               var p = panel.pot.slice(0, -1); panel.pot = p
+                               panel.odpri({ vrsta: "naprava", pot: p.length ? p[p.length - 1].id : "" })
+                           } else panel.odpri({ vrsta: "lokalno", pot: panel.stars })
+                       } }
                 Text {
                     Layout.fillWidth: true; color: "#c9d6e8"; font.pixelSize: 12; elide: Text.ElideLeft
-                    text: panel.vir.vrsta === "lokalno" ? panel.vir.pot : panel.vir.vrsta === "smeti" ? koren.t("smeti") : koren.t("nedavno")
+                    text: panel.vir.vrsta === "naprava" ? [panel.imeNaprave].concat(panel.pot.map(function (x) { return x.ime })).join("  ›  ")
+                        : panel.vir.vrsta === "lokalno" ? panel.vir.pot : panel.vir.vrsta === "smeti" ? koren.t("smeti") : koren.t("nedavno")
                 }
                 Gumb { besedilo: koren.t("izprazni"); visible: panel.vir.vrsta === "smeti" && panel.elementi.length > 0; onKlik: potrdi.open() }
                 Gumb { besedilo: "+ " + koren.t("novaMapa"); visible: panel.vir.vrsta === "lokalno"
@@ -164,9 +230,9 @@ Steklo {
         id: meni
         property var e: null
         MenuItem { text: koren.t("odpri"); visible: panel.vir.vrsta !== "smeti"; height: visible ? implicitHeight : 0; onTriggered: panel.odpriElement(meni.e) }
-        MenuItem { text: koren.t("pokazi"); visible: panel.vir.vrsta !== "smeti"; height: visible ? implicitHeight : 0; onTriggered: koren.klic("pokaziVMapi", [meni.e.pot]) }
+        MenuItem { text: koren.t("pokazi"); visible: panel.vir.vrsta === "lokalno" || panel.vir.vrsta === "nedavno"; height: visible ? implicitHeight : 0; onTriggered: koren.klic("pokaziVMapi", [meni.e.pot]) }
         MenuItem { text: koren.t("preimenuj"); visible: panel.vir.vrsta === "lokalno"; height: visible ? implicitHeight : 0; onTriggered: preimenovanje.zacni(meni.e) }
-        MenuItem { text: koren.t("vKos"); visible: panel.vir.vrsta !== "smeti"; height: visible ? implicitHeight : 0; onTriggered: panel.vKos(meni.e) }
+        MenuItem { text: koren.t("vKos"); visible: panel.vir.vrsta === "lokalno" || panel.vir.vrsta === "nedavno"; height: visible ? implicitHeight : 0; onTriggered: panel.vKos(meni.e) }
         MenuItem { text: koren.t("obnovi"); visible: panel.vir.vrsta === "smeti"; height: visible ? implicitHeight : 0
                    onTriggered: koren.klic("obnoviIzSmeti", [meni.e.id], function (r) { if (r && r.ok) panel.nalozi(true); else koren.obvesti(koren.t("niUspelo")) }) }
     }

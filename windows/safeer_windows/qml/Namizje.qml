@@ -44,7 +44,12 @@ Item {
               medijOpis: "Glasba, radio, filmi in serije iz tvojih virov.", odpriMedijski: "Odpri Medijski center",
               link: "Safeer Link", napravN: "{n} naprav", nastavitve: "Nastavitve", taRacunalnik: "Ta računalnik",
               HOME: "Domača mapa", DESKTOP: "Namizje", DOCUMENTS: "Dokumenti", DOWNLOAD: "Prenosi",
-              PICTURES: "Fotografije", MUSIC: "Glasba", VIDEOS: "Videi", gor: "Navzgor", shrani: "Shrani" },
+              PICTURES: "Fotografije", MUSIC: "Glasba", VIDEOS: "Videi", gor: "Navzgor", shrani: "Shrani",
+              nalagam: "Nalagam …", niOdgovorila: "Naprava ni odgovorila.", neDeli: "Naprava ne deli datotek.",
+              odpiramZ: "Odpiram {ime} z naprave {naprava} …", zazeniNa: "Zaženi na napravi", odpriNaNapravi: "Odpri na napravi",
+              prenasam: "Prenašam {ime} …", mapeNaprave: "Mape naprave", brezProgramov: "Na napravi ni programov.",
+              niLocenega: "Naprava nima ločenega zaslona – odpreš lahko samo, kar ne moti njenega uporabnika.",
+              oddaljeno: "Oddaljeno namizje" },
         en: { isci: "Search apps, files and the web …", splet: "Search the web", programi: "Apps",
               isciProg: "Find an app …", vse: "All", datoteke: "Files", nedavno: "Recent", smeti: "Recycle Bin",
               mape: "Folders", naprave: "Devices", filter: "Filter …", ime: "Name", velikost: "Size",
@@ -56,7 +61,12 @@ Item {
               medijOpis: "Music, radio, films and series from your sources.", odpriMedijski: "Open Media centre",
               link: "Safeer Link", napravN: "{n} devices", nastavitve: "Settings", taRacunalnik: "This PC",
               HOME: "Home", DESKTOP: "Desktop", DOCUMENTS: "Documents", DOWNLOAD: "Downloads",
-              PICTURES: "Pictures", MUSIC: "Music", VIDEOS: "Videos", gor: "Up", shrani: "Save" }
+              PICTURES: "Pictures", MUSIC: "Music", VIDEOS: "Videos", gor: "Up", shrani: "Save",
+              nalagam: "Loading …", niOdgovorila: "The device didn't answer.", neDeli: "The device doesn't share files.",
+              odpiramZ: "Opening {ime} from {naprava} …", zazeniNa: "Start on the device", odpriNaNapravi: "Open on the device",
+              prenasam: "Downloading {ime} …", mapeNaprave: "Device folders", brezProgramov: "No apps on this device.",
+              niLocenega: "The device has no separate screen – it can't open this without disturbing its user.",
+              oddaljeno: "Remote desktop" }
     })
     function t(k, vr) {
         var s = (besedila[jezik] || besedila.en)[k] || besedila.en[k] || k
@@ -266,7 +276,10 @@ Item {
         osveziLink()
     }
     // Safeer Link se ob zagonu sele poveze: stevilo naprav osvezimo na 20 s.
-    function osveziLink() { koren.klic("napraveSProgrami", [], function (n) { koren.napravVLinku = (n || []).length }) }
+    property var naprave: []
+    function osveziLink() {
+        koren.klic("napraveNamizja", [], function (n) { koren.naprave = n || []; koren.napravVLinku = koren.naprave.length })
+    }
     Timer { interval: 20000; running: true; repeat: true; onTriggered: koren.osveziLink() }
     SequentialAnimation {
         id: vstop
