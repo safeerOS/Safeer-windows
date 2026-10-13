@@ -1502,6 +1502,8 @@ class BrowserWindow(QMainWindow):
                                                 bool(settings.get("tracking_protection_enabled")))
         if kind == "empty":
             return
+        if self.odpri_drm(target):
+            return
         if new_tab:
             self.new_tab(target)
             return
@@ -1529,6 +1531,11 @@ class BrowserWindow(QMainWindow):
         if not is_main_frame:
             return True
         text = url.toString()
+        if (is_main_frame and nav_type in (QWebEnginePage.NavigationType.NavigationTypeLinkClicked,
+                                           QWebEnginePage.NavigationType.NavigationTypeTyped)
+                and self._je_drm(text)):
+            QTimer.singleShot(0, lambda: self.odpri_drm(text))
+            return False
         if self.media_mode and is_main_frame and url.scheme().lower() in ("http", "https"):
             host = (url.host() or "").lower()
             allowed = self.media_allowed_host
@@ -2244,8 +2251,71 @@ class BrowserWindow(QMainWindow):
             self.on_safeer_home()
             return
         self.app.window_closed(self)
+        if getattr(self, "_drm", None) is not None:
+            self._drm.stop()
         self.dispose_tabs()
         super().closeEvent(event)
+
+    # -- Safeer DRM v brskalniku ---------------------------------------------
+    # Zasciten video (Netflix, Disney+ ...) predvaja Safeer DRM (Widevine), skrit in vdelan v okno brskalnika - kot v
+    # Spletu in predvajalniku Safeer OS (lastnik, 13. 10. 2026). Uporabnik ostane v brskalniku; »Nazaj« ga vrne na zavihke.
+    def _je_drm(self, url: str) -> bool:
+        if self.embedded or sys.platform != "win32":
+            return False                    # vdelani Splet: Safeer OS to ze naredi sam (os_app.odpri_splet)
+        try:
+            from . import os_backend_win
+            return os_backend_win.je_drm_storitev(url)
+        except Exception:  # noqa: BLE001
+            return False
+
+    def odpri_drm(self, url: str) -> bool:
+        """Storitev z DRM odpre v Safeer DRM nad zavihki tega okna. False = ni storitev z DRM ali ni na voljo."""
+        if not self._je_drm(url):
+            return False
+        try:
+            from . import webview2_media
+            if getattr(self, "_drm", None) is None:
+                self._drm = webview2_media.WebView2MediaWidget(on_home=self._zapri_drm, parent=self.tabs)
+                if getattr(self._drm, "gumb_domov", None) is not None:
+                    self._drm.gumb_domov.hide()
+                self.tabs._stack.installEventFilter(self)
+                # Drug zavihek ali nov zavihek: predvajalnik se zapre (ne igra skrit v ozadju).
+                self.tabs.currentChanged.connect(lambda _i: self._drm.isVisible() and self._drm.close_and_home())
+            if not self._drm.open_url(url, stran=True, storitev=True):
+                return False
+        except Exception as e:  # noqa: BLE001
+            print(f"[SafeerBrowser] Safeer DRM: {e}", flush=True)
+            return False
+        self._drm.setGeometry(self.tabs._stack.geometry())
+        try:
+            self.address.setText(url)       # naslovna vrstica pove, kje je uporabnik
+        except Exception:  # noqa: BLE001
+            pass
+        self._drm.show()
+        self._drm.raise_()
+        return True
+
+    def _zapri_drm(self) -> None:
+        if getattr(self, "_drm", None) is not None:
+            self._drm.hide()
+        try:
+            self.on_current_changed(self.tabs.currentIndex())     # naslovna vrstica spet kaze trenutni zavihek
+        except Exception:  # noqa: BLE001
+            pass
+        if self.isFullScreen():
+            self.toggle_fullscreen()
+
+    def preklopi_celozaslonsko(self) -> None:
+        """Gumb »Celozaslonsko« predvajalnika Safeer DRM (isto ime kot v oknu Safeer OS)."""
+        self.toggle_fullscreen()
+        if getattr(self, "_drm", None) is not None and hasattr(self._drm, "set_fullscreen_ui"):
+            self._drm.set_fullscreen_ui(self.isFullScreen())
+
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802
+        drm = getattr(self, "_drm", None)
+        if drm is not None and obj is self.tabs._stack and event.type() == QEvent.Type.Resize:
+            drm.setGeometry(self.tabs._stack.geometry())
+        return super().eventFilter(obj, event)
 
 
 class SettingsDialog(QDialog):

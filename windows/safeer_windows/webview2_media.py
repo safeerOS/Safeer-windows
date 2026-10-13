@@ -103,6 +103,7 @@ class WebView2MediaWidget(QWidget):
         fullscreen = QPushButton("⛶ Celozaslonsko", self.bar)
         fullscreen.clicked.connect(lambda: self.window().preklopi_celozaslonsko())
         home = QPushButton("Safeer OS Domov", self.bar)
+        self.gumb_domov = home        # v oknu brskalnika ga ni (tam »Nazaj« vrne na zavihke)
         home.clicked.connect(self.close_and_home)
         for button in (back, reload_button, fullscreen, home):
             button.setCursor(Qt.CursorShape.PointingHandCursor)

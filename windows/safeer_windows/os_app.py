@@ -3084,12 +3084,30 @@ class SafeerOsWindow(QMainWindow):
         return True
 
     def _link_stran(self, url: str) -> bool:
-        """Stran z naprave v Linku (agent, daljinec): okno Safeer OS pride naprej, stran se odpre v Spletu."""
+        """Stran z naprave v Linku (agent, daljinec): odpre se v samostojnem oknu Safeer Browserja (lastnik, 13. 10. 2026),
+        v istem procesu in z isto zasciteno sejo - brez dodatnega pomnilnika za nov program. Zasciten video (Netflix ...)
+        predvaja skriti Safeer DRM v tem oknu brskalnika (BrowserWindow.odpri_drm)."""
         url = str(url or "").strip()
         if not url.lower().startswith(("http://", "https://")) or len(url) > 4096:
             return False
-        self.dispatcher.dispatch(self.prebudi)
-        return bool(self.odpri_splet(url))
+        self.dispatcher.dispatch(lambda: self._odpri_v_brskalniku(url))
+        return True
+
+    def _odpri_v_brskalniku(self, url: str) -> None:
+        """Nov zavihek v ze odprtem samostojnem oknu brskalnika ali novo okno (ne vdelani Splet Safeer OS)."""
+        app = self.browser_app
+        okno = next((w for w in reversed(app.windows) if not getattr(w, "embedded", False) and w.isVisible()), None)
+        if okno is None:
+            drm = os_backend_win.je_drm_storitev(url)
+            okno = app.new_window([] if drm else [url])
+            if drm and not okno.odpri_drm(url):
+                okno.open_input(url, new_tab=True)
+        else:
+            okno.open_input(url, new_tab=True)      # storitev z DRM odpre Safeer DRM v tem oknu (open_input)
+        if okno.isMinimized():
+            okno.showNormal()
+        okno.raise_()
+        okno.activateWindow()
 
     def _link_iskanje(self, niz: str) -> bool:
         """Niz z naprave v Linku (glas na telefonu): namizje se pokaze in ga isce - nic se ne odpre samo (kot Linux).
