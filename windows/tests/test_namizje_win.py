@@ -94,3 +94,36 @@ class Stran(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Qml(unittest.TestCase):
+    def test_namizje_qml_se_nalozi_brez_napak(self):
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        try:
+            from PySide6.QtCore import QObject, QUrl, Signal, Slot
+            from PySide6.QtGui import QGuiApplication
+            from PySide6.QtQuick import QQuickView
+        except ImportError:
+            self.skipTest("PySide6 ni na voljo")
+
+        class Most(QObject):
+            odgovor = Signal(int, bool, str)
+            dogodek = Signal(str, str)
+
+            @Slot(str, str, result=int)
+            def klic(self, _m, _a):
+                return 1
+
+            @Slot(str, result=str)
+            def datotekaUrl(self, p):
+                return p
+
+        app = QGuiApplication.instance() or QGuiApplication([])
+        most = Most()
+        pogled = QQuickView()
+        pogled.rootContext().setContextProperty("Most", most)
+        pogled.setSource(QUrl.fromLocalFile(str(KOREN / "windows" / "safeer_windows" / "qml" / "Namizje.qml")))
+        self.assertEqual([e.toString() for e in pogled.errors()], [])
+        self.assertIsNotNone(pogled.rootObject())
+        pogled.deleteLater()
+        del app

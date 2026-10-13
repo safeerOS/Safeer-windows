@@ -963,12 +963,19 @@ class SafeerOsWindow(QMainWindow):
         return bool(vklop)
 
     def pokazi_namizje(self) -> None:
-        from . import namizje_win
+        # Qt Quick (lastnik, 13. 10. 2026: prilagojen videz, animacije, prosojni paneli, skupna osnova za platforme).
+        # SAFEER_NAMIZJE=splet: ista stran kot na Linuxu v QtWebEngine (za primerjavo).
         if getattr(self, "namizje", None) is None:
-            self.namizje = namizje_win.NamizjeOkno(self, SafeerOsPage, most_js)
-        port = getattr(self, "_asset_server_port", 0)
-        if port:
-            self.namizje.pokazi(f"http://127.0.0.1:{port}/os/delovna.html")
+            if os.environ.get("SAFEER_NAMIZJE", "").lower() == "splet":
+                from . import namizje_win
+                self.namizje = namizje_win.NamizjeOkno(self, SafeerOsPage, most_js)
+                port = getattr(self, "_asset_server_port", 0)
+                if port:
+                    self.namizje.pokazi(f"http://127.0.0.1:{port}/os/delovna.html")
+                return
+            from . import namizje_qml
+            self.namizje = namizje_qml.NamizjeQml(self)
+            self.namizje.pokazi()
 
     def _skrij_namizje(self) -> None:
         okno = getattr(self, "namizje", None)
