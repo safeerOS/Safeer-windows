@@ -8,6 +8,19 @@ parameter removal and a clean home page. No account, no telemetry.
 installer and portable package. The Windows edition is a **beta**: it is tested automatically
 on a Windows server, not yet on a wide range of real computers.
 
+## Current version · Trenutna različica
+
+| | |
+|---|---|
+| **Safeer OS for Windows** (browser, Safeer Control and Safeer Media in one app) | **1.0.51** — `windows/VERSION` on `main`, release [`safeer-os-windows-v1.0.51`](https://github.com/safeerOS/Safeer-windows/releases/tag/safeer-os-windows-v1.0.51) |
+| What changed · Kaj je novega | [CHANGELOG.md](CHANGELOG.md) · every version / vse različice: [docs/releases/](docs/releases/) |
+| Download · Prenos | [safeer.si/browser/windows/](https://safeer.si/browser/windows/) · [GitHub Releases](../../releases/latest) |
+
+Other editions · Druge različice: Linux 1.0.127 (Safeer OS 0.4.85) in
+[safeerOS/Safeer-linux](https://github.com/safeerOS/Safeer-linux) · Android TV browser 2.1.215,
+Safeer OS 0.5.93 and Safeer Player 0.2.77 in [safeerOS/Android-tv](https://github.com/safeerOS/Android-tv) ·
+phone browser in [safeerOS/Mobile-android](https://github.com/safeerOS/Mobile-android).
+
 The Windows application lives in [`windows/`](windows/); `core/`, `ui/` and `assets/` are
 shared with the Linux edition. Building and testing are described in
 [`windows/README.md`](windows/README.md) and run on GitHub Actions
