@@ -64,6 +64,7 @@ TEXT: Dict[str, Dict[str, str]] = {
         "perm_camera": "kamere", "perm_mic": "mikrofona", "perm_camera_mic": "kamere in mikrofona", "perm_screen": "zaslona",
         "perm_location": "lokacije", "perm_notifications": "obvestil", "perm_clipboard": "odložišča", "perm_other": "posebne funkcije",
         "external": "Odprem povezavo v drugem programu?\n{url}", "crashed": "Stran se je nepričakovano zaprla. Pritisni F5 za ponovno nalaganje.",
+        "crashed_reloaded": "Stran se je nepričakovano zaprla, zato je naložena znova.",
         "portal_title": "Ime strani", "portal_url": "Spletni naslov", "add_portal": "Dodaj priljubljeno stran",
         "edit_portals": "Uredi priljubljene strani", "remove": "Odstrani", "move_up": "Gor", "move_down": "Dol",
         "invalid_url": "Vpiši veljaven spletni naslov (http ali https).",
@@ -100,6 +101,7 @@ TEXT: Dict[str, Dict[str, str]] = {
         "perm_camera": "camera", "perm_mic": "microphone", "perm_camera_mic": "camera and microphone", "perm_screen": "screen",
         "perm_location": "location", "perm_notifications": "notifications", "perm_clipboard": "clipboard", "perm_other": "special feature",
         "external": "Open this link in another application?\n{url}", "crashed": "The page stopped unexpectedly. Press F5 to reload.",
+        "crashed_reloaded": "The page stopped unexpectedly and was reloaded.",
         "portal_title": "Site name", "portal_url": "Web address", "add_portal": "Add favourite site",
         "edit_portals": "Edit favourite sites", "remove": "Remove", "move_up": "Up", "move_down": "Down",
         "invalid_url": "Enter a valid web address (http or https).",
@@ -1928,9 +1930,19 @@ class BrowserWindow(QMainWindow):
         self.povezava_znacka.style().polish(self.povezava_znacka)
 
     def on_render_terminated(self, view: QWebEngineView, status, code: int) -> None:
+        """Kot Splet na Linuxu in TV brskalnik (14. 10. 2026): stran po padcu izrisovalnika enkrat sama nalozimo znova.
+        Ce ista stran pade se enkrat v 60 s, ne vrtimo kroga sesutij - ostane obvestilo (F5)."""
         normal = QWebEnginePage.RenderProcessTerminationStatus.NormalTerminationStatus
-        if status != normal:
+        if status == normal:
+            return
+        naslov, zdaj = view.url().toString(), time.monotonic()
+        prej = getattr(view, "_safeer_padec", None)
+        view._safeer_padec = (naslov, zdaj)
+        if not naslov or (prej is not None and prej[0] == naslov and zdaj - prej[1] < 60):
             self.statusBar().showMessage(tr(self.app, "crashed"), 15000)
+            return
+        QTimer.singleShot(400, view.reload)
+        self.statusBar().showMessage(tr(self.app, "crashed_reloaded"), 8000)
 
     def on_fullscreen_request(self, request) -> None:
         request.accept()
