@@ -56,9 +56,9 @@ class Odgovor(unittest.TestCase):
 
     def test_naslov_iz_seznama_in_nasteti(self):
         seja = razcleni_odgovor({"ok": True, "data": dict(self.PODATKI, hosts=["192.168.0.135", "10.8.0.2"])},
-                                {"naslov": "192.168.0.87"})
-        self.assertEqual(seja.naslov, "192.168.0.87")
-        self.assertEqual(seja.naslovi, ("192.168.0.87", "192.168.0.135", "10.8.0.2"))
+                                {"naslov": "192.168.0.108"})
+        self.assertEqual(seja.naslov, "192.168.0.108")
+        self.assertEqual(seja.naslovi, ("192.168.0.108", "192.168.0.135", "10.8.0.2"))
         self.assertEqual((seja.vrata, seja.odtis, seja.zeton), (40123, ODTIS, "zeton-zeton-zeton"))
 
     def test_star_racunalnik_brez_nastetih(self):
@@ -109,16 +109,16 @@ class OdgovorRacunalnika(unittest.TestCase):
         return b.povezava.poslano[-1]["payload"]
 
     def test_screen_start_nasteje_naslove(self):
-        with mock.patch("core.link_zvok.lastni_naslovi", return_value=["192.168.0.220", "172.28.96.1"]) as klic:
+        with mock.patch("core.link_zvok.lastni_naslovi", return_value=["192.168.0.120", "172.28.96.1"]) as klic:
             odgovor = self._start()
         self.assertTrue(odgovor["ok"], odgovor)
-        self.assertEqual(odgovor["data"]["hosts"], ["192.168.0.220", "172.28.96.1"])
+        self.assertEqual(odgovor["data"]["hosts"], ["192.168.0.120", "172.28.96.1"])
         self.assertEqual(klic.call_args[0][0], "wss://127.0.0.1:8990/cast/ws")
         self.assertEqual((odgovor["data"]["port"], odgovor["data"]["fp"], odgovor["data"]["token"]),
                          (40123, ODTIS, "zeton-zeton-zeton"))
         # Gledalec iz tega odgovora sestavi kandidate: naslov iz seznama naprav in nastete.
-        seja = razcleni_odgovor(odgovor, {"naslov": "192.168.0.220"})
-        self.assertEqual(seja.naslovi, ("192.168.0.220", "172.28.96.1"))
+        seja = razcleni_odgovor(odgovor, {"naslov": "192.168.0.120"})
+        self.assertEqual(seja.naslovi, ("192.168.0.120", "172.28.96.1"))
 
     def test_najvec_stirje_naslovi(self):
         with mock.patch("core.link_zvok.lastni_naslovi", return_value=["10.0.0.%d" % i for i in range(1, 9)]):

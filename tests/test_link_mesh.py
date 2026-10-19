@@ -403,10 +403,10 @@ class Klicanje(unittest.TestCase):
         import tempfile, os
         pot = os.path.join(tempfile.mkdtemp(), "znani.json")
         m = self.link_mesh.MeshPovezovalec(self.hub, "n-m", pot_znanih=pot, poisci=lambda: [])
-        m.zapomni("n-z", "192.168.0.220")          # samo IP iz dohodne povezave
+        m.zapomni("n-z", "192.168.0.120")          # samo IP iz dohodne povezave
         m2 = self.link_mesh.MeshPovezovalec(lhs.Hub(odtis="bb" * 32, nas_id="n-m"), "n-m", pot_znanih=pot,
                                             poisci=lambda: [])
-        self.assertEqual(m2._znani["n-z"]["naslov"], "wss://192.168.0.220:8990/cast/ws")
+        self.assertEqual(m2._znani["n-z"]["naslov"], "wss://192.168.0.120:8990/cast/ws")
         klicani = []
         m2._klici = lambda h: klicani.append(h["id"])
         import threading
@@ -571,7 +571,7 @@ class GlobalLinkMesh(unittest.TestCase):
         self._krog.stop()
 
     def oglas(self):
-        return {"id": self.hid, "naslov": "wss://192.168.0.77:8990/cast/ws", "tls": True, "mesh": "mesh1"}
+        return {"id": self.hid, "naslov": "wss://192.168.0.107:8990/cast/ws", "tls": True, "mesh": "mesh1"}
 
     def odpri(self, doma: bool, rele: bool):
         def f(h):
@@ -582,14 +582,14 @@ class GlobalLinkMesh(unittest.TestCase):
     def test_rele_sele_po_dveh_neuspehih(self):
         self.odpri(doma=False, rele=True)
         self.m._klici(self.oglas())
-        self.assertEqual(self.naslovi, ["wss://192.168.0.77:8990/cast/ws"])
+        self.assertEqual(self.naslovi, ["wss://192.168.0.107:8990/cast/ws"])
         self.m._klici(self.oglas())
-        self.assertEqual(self.naslovi[1:], ["wss://192.168.0.77:8990/cast/ws", "wss://127.0.0.1:45678/cast/ws"])
+        self.assertEqual(self.naslovi[1:], ["wss://192.168.0.107:8990/cast/ws", "wss://127.0.0.1:45678/cast/ws"])
         # Doma spet dosegljiv: stevec neuspehov se pobrise, rele ni vec potreben.
         self.odpri(doma=True, rele=True)
         self.naslovi.clear()
         self.m._klici(self.oglas())
-        self.assertEqual(self.naslovi, ["wss://192.168.0.77:8990/cast/ws"])
+        self.assertEqual(self.naslovi, ["wss://192.168.0.107:8990/cast/ws"])
         self.assertNotIn(self.hid, self.m._neuspehi)
 
     def test_zavrnitev_ni_neuspeh(self):
@@ -597,7 +597,7 @@ class GlobalLinkMesh(unittest.TestCase):
         self.odpri(doma=True, rele=True)
         for _ in range(3):
             self.m._klici(self.oglas())
-        self.assertTrue(all(n.startswith("wss://192.168.0.77") for n in self.naslovi))
+        self.assertTrue(all(n.startswith("wss://192.168.0.107") for n in self.naslovi))
 
     def test_premor_releja_raste(self):
         self.odpri(doma=False, rele=False)
@@ -606,7 +606,7 @@ class GlobalLinkMesh(unittest.TestCase):
         self.assertEqual(self.m._premor_releja[self.hid][1], self.link_mesh.PREMOR_RELEJA_S)
         self.naslovi.clear()
         self.m._klici(self.oglas())           # v premoru: rele ne klicemo (kvota)
-        self.assertEqual(self.naslovi, ["wss://192.168.0.77:8990/cast/ws"])
+        self.assertEqual(self.naslovi, ["wss://192.168.0.107:8990/cast/ws"])
         self.m._premor_releja[self.hid] = (0.0, self.link_mesh.PREMOR_RELEJA_S)
         self.m._klici(self.oglas())
         self.assertEqual(self.m._premor_releja[self.hid][1], 2 * self.link_mesh.PREMOR_RELEJA_S)
@@ -624,7 +624,7 @@ class GlobalLinkMesh(unittest.TestCase):
         self.m._neuspehi[self.hid] = 5
         with mock.patch.dict(os.environ, {"SAFEER_GLOBAL_LINK": "0"}):
             self.m._klici(self.oglas())
-        self.assertEqual(self.naslovi, ["wss://192.168.0.77:8990/cast/ws"])
+        self.assertEqual(self.naslovi, ["wss://192.168.0.107:8990/cast/ws"])
 
     def test_rele_samo_za_id_iz_kljuca(self):
         # Rele pozna napravo samo po id-ju iz njenega kljuca; id, ki ne izhaja iz kljuca, ne gre prek releja.
@@ -646,8 +646,8 @@ class GlobalLinkMesh(unittest.TestCase):
         self.m.zapomni(self.hid, "wss://127.0.0.1:45678/cast/ws")
         self.m.zapomni(self.hid, "::1")
         self.assertNotIn(self.hid, self.m._znani)
-        self.m.zapomni(self.hid, "192.168.0.77")
-        self.assertEqual(self.m._znani[self.hid]["naslov"], "wss://192.168.0.77:8990/cast/ws")
+        self.m.zapomni(self.hid, "192.168.0.107")
+        self.assertEqual(self.m._znani[self.hid]["naslov"], "wss://192.168.0.107:8990/cast/ws")
 
     def test_agent_samo_z_vrati_in_vklopljen(self):
         import os

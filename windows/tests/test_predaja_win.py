@@ -142,9 +142,9 @@ def test_play_offer_ponudba_caka(okolje):
     b, stanje, klici, film, _ = okolje
     dogodki = []
     b._oddaj_dogodek = lambda v, d: dogodki.append((v, d))
-    r = _ukaz(b, "play.offer", params={"item": {"id": "media:video:5", "naslov": "Film", "zvok": "https://192.168.0.87:4433/d/media%3Avideo%3A5", "video": True},
+    r = _ukaz(b, "play.offer", params={"item": {"id": "media:video:5", "naslov": "Film", "zvok": "https://192.168.0.108:4433/d/media%3Avideo%3A5", "video": True},
                                        "position_ms": 754000, "duration_ms": 5400000,
-                                       "server": {"base_url": "https://192.168.0.87:4433", "fp": "ab", "token": "t"}, "from": "Tablica"})
+                                       "server": {"base_url": "https://192.168.0.108:4433", "fp": "ab", "token": "t"}, "from": "Tablica"})
     assert r["ok"] and r["data"] == {"queued": True, "shown": "banner"}
     ponudbe = [d for v, d in dogodki if v == "predajaPonudba"]
     assert ponudbe and ponudbe[-1]["od_ime"] == "Telefon"  # ime iz seznama naprav

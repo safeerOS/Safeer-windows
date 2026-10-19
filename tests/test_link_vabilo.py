@@ -8,7 +8,7 @@ from core import link_hub
 KOREN = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 #: Preizkus z oznako bere vmesnik Safeer Controla za Linux; v repozitoriju Safeer OS za Windows (isto jedro) ga ni.
 JE_CONTROL_ZA_LINUX = os.path.isfile(os.path.join(KOREN, "core", "safeer_link.py"))
-HUB = "wss://192.168.0.77:8990/cast/ws"
+HUB = "wss://192.168.0.107:8990/cast/ws"
 
 
 def _beri(*deli):
@@ -26,9 +26,9 @@ class Vabilo(unittest.TestCase):
                          "expires_in_seconds": 300, "pin": "907870"}
         with mock.patch.object(link_hub, "_zahteva", zahteva):
             v = link_hub.povabi(HUB, "saf_tv_x", "f" * 64)
-        self.assertEqual(klici[0][0], "https://192.168.0.77:8990/cast/pair/qr/invite")
+        self.assertEqual(klici[0][0], "https://192.168.0.107:8990/cast/pair/qr/invite")
         self.assertEqual(klici[0][2], "saf_tv_x")
-        self.assertEqual(v["povezava"], "https://safeer.si/p#j=abc123&s=" + "s" * 32 + "&f=" + "f" * 64 + "&a=192.168.0.77:8990")
+        self.assertEqual(v["povezava"], "https://safeer.si/p#j=abc123&s=" + "s" * 32 + "&f=" + "f" * 64 + "&a=192.168.0.107:8990")
         self.assertEqual(v["velja"], 300)
         self.assertEqual(v["pin"], "907870")
 
@@ -55,7 +55,7 @@ class Vabilo(unittest.TestCase):
         poti = []
         with mock.patch.object(link_hub, "_zahteva", lambda url, *a, **k: (poti.append(url), (200, {"left": True}))[1]):
             self.assertTrue(link_hub.odidi(HUB, "z", "f"))
-        self.assertEqual(poti, ["https://192.168.0.77:8990/cast/devices/leave"])
+        self.assertEqual(poti, ["https://192.168.0.107:8990/cast/devices/leave"])
         with mock.patch.object(link_hub, "_zahteva", lambda *a, **k: (404, {})):
             self.assertFalse(link_hub.odidi(HUB, "z", "f"))
 

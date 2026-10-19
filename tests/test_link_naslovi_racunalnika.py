@@ -92,9 +92,9 @@ class BrezVmesnikov(unittest.TestCase):
         self.assertEqual(naslovi, ["192.168.5.20", "192.168.0.20", "10.0.0.4"])
 
     def test_windows_naslovi_brez_imen(self):
-        vmesniki = [("", "192.168.0.220", UP), ("", "172.28.96.1", UP)]
-        naslovi = link_zvok.lastni_naslovi(HUB_TU, lambda: vmesniki, _poti("192.168.0.220"))
-        self.assertEqual(naslovi, ["192.168.0.220", "172.28.96.1"])
+        vmesniki = [("", "192.168.0.120", UP), ("", "172.28.96.1", UP)]
+        naslovi = link_zvok.lastni_naslovi(HUB_TU, lambda: vmesniki, _poti("192.168.0.120"))
+        self.assertEqual(naslovi, ["192.168.0.120", "172.28.96.1"])
 
 
 class HubZImenom(unittest.TestCase):

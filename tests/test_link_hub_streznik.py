@@ -104,7 +104,7 @@ class Register(unittest.TestCase):
 class Usmerjanje(unittest.TestCase):
     def setUp(self):
         self.hub = link_hub_streznik.Hub(odtis="ab" * 32)
-        self.tv = LaznaPovezava("192.168.0.77")
+        self.tv = LaznaPovezava("192.168.0.107")
         self.pc = LaznaPovezava("192.168.0.10")
         self.hub.obdelaj(self.tv, _prijava("tv1", "Televizor"))
         self.hub.obdelaj(self.pc, _prijava("pc1", "Racunalnik", vloga="sender"))

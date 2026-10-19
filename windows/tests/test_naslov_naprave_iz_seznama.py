@@ -24,8 +24,8 @@ def _naslovi(hub):
 
 
 def test_zanka_od_huba_drugje_je_naslov_tistega_huba():
-    naslovi = _naslovi("wss://192.168.0.87:8990/cast/ws")
-    assert naslovi["tablica"] == ("192.168.0.87", "192.168.0.87")
+    naslovi = _naslovi("wss://192.168.0.108:8990/cast/ws")
+    assert naslovi["tablica"] == ("192.168.0.108", "192.168.0.108")
     assert naslovi["pc-2"] == ("192.168.0.135", "192.168.0.135")
     assert naslovi["dalec"] == ("", "")
 

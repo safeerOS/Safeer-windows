@@ -21,7 +21,7 @@ class QrPrijava(unittest.TestCase):
             return 200, {"qr_id": "ab" * 12, "expires_in_seconds": 300}, "F" * 64
 
         with mock.patch.object(link_hub.link_tls, "zahteva", zahteva):
-            p = link_hub.zacni_qr("wss://192.168.0.77:8990/cast/ws", "n-pc-control", "Računalnik")
+            p = link_hub.zacni_qr("wss://192.168.0.107:8990/cast/ws", "n-pc-control", "Računalnik")
         self.assertTrue(poslano["url"].endswith("/cast/pair/qr/start"))
         telo = poslano["telo"]
         self.assertNotIn(p["skrivnost"], str(telo), "skrivnost iz QR ne sme na hub")
@@ -31,12 +31,12 @@ class QrPrijava(unittest.TestCase):
         self.assertTrue(p["povezava"].startswith("https://safeer.si/p#i=" + "ab" * 12 + "&s=" + p["skrivnost"]))
         # Cel odtis potrdila (zunanji pregled kode 8. 10. 2026): naprava, ki kodo poskenira, ga primerja v celoti.
         self.assertIn("&f=" + "f" * 64 + "&a=", p["povezava"])
-        self.assertTrue(p["povezava"].endswith("&a=192.168.0.77:8990"))
-        self.assertEqual(p["naslov"], "192.168.0.77:8990")
+        self.assertTrue(p["povezava"].endswith("&a=192.168.0.107:8990"))
+        self.assertEqual(p["naslov"], "192.168.0.107:8990")
         self.assertEqual(p["odtis"], "f" * 64)
 
     def test_brez_tls_in_star_hub(self):
-        self.assertEqual(link_hub.zacni_qr("ws://192.168.0.77:8990/cast/ws", "x", "y"), {"napaka": "hub_brez_tls"})
+        self.assertEqual(link_hub.zacni_qr("ws://192.168.0.107:8990/cast/ws", "x", "y"), {"napaka": "hub_brez_tls"})
         with mock.patch.object(link_hub.link_tls, "zahteva", lambda *a, **k: (404, {}, "f" * 64)):
             self.assertEqual(link_hub.zacni_qr("wss://h:8990/cast/ws", "x", "y"), {"napaka": "hub_star"})
         with mock.patch.object(link_hub.link_tls, "zahteva", lambda *a, **k: (0, {}, "")):

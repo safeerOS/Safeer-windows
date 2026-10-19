@@ -741,7 +741,7 @@ class TestOsWindows(unittest.TestCase):
                         "capabilities": ["remote", "apps"],
                         "platform": "tv",
                         "kind": "screen",
-                        "ip": "192.168.0.77",
+                        "ip": "192.168.0.107",
                         "busy_by": "phone-1",
                         "busy_by_name": "Galaxy S25"
                     }
@@ -750,8 +750,8 @@ class TestOsWindows(unittest.TestCase):
             backend._na_sporocilo(msg)
             self.assertEqual(len(backend.naprave), 1)
             tv = backend.naprave[0]
-            self.assertEqual(tv["naslov"], "192.168.0.77")
-            self.assertEqual(tv["ip"], "192.168.0.77")
+            self.assertEqual(tv["naslov"], "192.168.0.107")
+            self.assertEqual(tv["ip"], "192.168.0.107")
             self.assertEqual(tv["zasedenaOd"], "phone-1")
             self.assertEqual(tv["zasedenaOdIme"], "Galaxy S25")
             self.assertIn("remote", tv["zmoznosti"])

@@ -386,8 +386,8 @@ class GumbiNaObvestilu(unittest.TestCase):
             self.assertEqual(vodilo.signal_subscribe.call_args[0][2], "ActionInvoked")
 
     def test_besedila(self):
-        self.assertEqual(link_hub_streznik.besedilo_sprostitve("»Tablica« (192.168.0.87)", False),
-                         ("Safeer Link: device released", "»Tablica« (192.168.0.87) is released. It can connect again."))
+        self.assertEqual(link_hub_streznik.besedilo_sprostitve("»Tablica« (192.168.0.108)", False),
+                         ("Safeer Link: device released", "»Tablica« (192.168.0.108) is released. It can connect again."))
         self.assertEqual(link_hub_streznik.besedilo_odprtja_kode(False)[0], "Safeer Link: pairing by code is open")
 
 

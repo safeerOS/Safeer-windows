@@ -14,8 +14,8 @@ from unittest import mock
 from core import link_hub_streznik as lhs
 
 PC = "192.168.0.135"
-TV = "192.168.0.77"
-TABLICA = "192.168.0.87"
+TV = "192.168.0.107"
+TABLICA = "192.168.0.108"
 
 
 class Odjemalec:
@@ -288,20 +288,20 @@ class SeznamZaOdjemalca(unittest.TestCase):
 
     def test_odjemalec_od_drugod_dobi_naslov_racunalnika(self):
         control = prijava(self.pc, "control")                    # na racunalniku Huba
-        telefon = self._od_drugod("telefon", "192.168.0.143")
+        telefon = self._od_drugod("telefon", "192.168.0.113")
         self.assertEqual(telefon.naprave()["control"]["ip"], PC)
         self.assertTrue(telefon.naprave()["control"]["here"])
         # Svoj naslov vidi nespremenjen in brez oznake - ni na racunalniku Huba.
-        self.assertEqual(telefon.naprave()["telefon"]["ip"], "192.168.0.143")
+        self.assertEqual(telefon.naprave()["telefon"]["ip"], "192.168.0.113")
         self.assertNotIn("here", telefon.naprave()["telefon"])
         # Odjemalcu z racunalnika Huba zanka ostane: po njej prepozna programe svoje naprave.
         self.assertEqual(control.naprave()["control"]["ip"], "127.0.0.1")
         self.assertTrue(control.naprave()["control"]["here"])
-        self.assertEqual(control.naprave()["telefon"]["ip"], "192.168.0.143")
+        self.assertEqual(control.naprave()["telefon"]["ip"], "192.168.0.113")
 
     def test_vsak_odjemalec_dobi_naslov_svoje_poti(self):
         prijava(self.pc, "control")
-        doma = self._od_drugod("telefon", "192.168.0.143", nas=PC)
+        doma = self._od_drugod("telefon", "192.168.0.113", nas=PC)
         drugje = self._od_drugod("tablica", "10.0.0.7", nas="10.0.0.2")
         prijava(self.pc, "os-pc")                                # sprememba: nov seznam vsem
         self.assertEqual(doma.naprave()["os-pc"]["ip"], PC)
@@ -309,7 +309,7 @@ class SeznamZaOdjemalca(unittest.TestCase):
 
     def test_brez_znanega_naslova_ni_zanke(self):
         prijava(self.pc, "control")
-        telefon = self._od_drugod("telefon", "192.168.0.143", nas=None)      # vticnice ni mogoce prebrati
+        telefon = self._od_drugod("telefon", "192.168.0.113", nas=None)      # vticnice ni mogoce prebrati
         self.assertEqual(telefon.naprave()["control"]["ip"], "")
         self.assertTrue(telefon.naprave()["control"]["here"])
 
@@ -317,7 +317,7 @@ class SeznamZaOdjemalca(unittest.TestCase):
         tv = lhs.Hub(odtis="bb" * 32, nas_id="hub-tv")
         prijava(tv, "os-tv")
         povezi(self.pc, tv, a_vidi_b=TV, b_vidi_a=PC)
-        telefon = self._od_drugod("telefon", "192.168.0.143")
+        telefon = self._od_drugod("telefon", "192.168.0.113")
         self.assertEqual(telefon.naprave()["os-tv"]["ip"], TV)
         self.assertNotIn("here", telefon.naprave()["os-tv"])
 
@@ -340,7 +340,7 @@ class OdjemalcevaStran(unittest.TestCase):
 
     def test_pravi_naslov_in_prazen_ostaneta(self):
         f = lhs.naslov_za_povezavo
-        self.assertEqual(f("192.168.0.220", "wss://192.168.0.135:8990/cast/ws"), "192.168.0.220")
+        self.assertEqual(f("192.168.0.120", "wss://192.168.0.135:8990/cast/ws"), "192.168.0.120")
         self.assertEqual(f("", "wss://192.168.0.135:8990/cast/ws"), "")
         self.assertEqual(f(None, ""), "")
         self.assertEqual(f("127.0.0.1", ""), "127.0.0.1")
@@ -349,10 +349,10 @@ class OdjemalcevaStran(unittest.TestCase):
 class Pomozne(unittest.TestCase):
     def test_gostitelj_naslova(self):
         g = lhs._gostitelj_naslova
-        self.assertEqual(g("192.168.0.77"), "192.168.0.77")
-        self.assertEqual(g("wss://192.168.0.77:8765/cast/ws"), "192.168.0.77")
+        self.assertEqual(g("192.168.0.107"), "192.168.0.107")
+        self.assertEqual(g("wss://192.168.0.107:8765/cast/ws"), "192.168.0.107")
         self.assertEqual(g("wss://[fd00::7]:8765/cast/ws"), "fd00::7")
-        self.assertEqual(g("::ffff:192.168.0.77"), "192.168.0.77")
+        self.assertEqual(g("::ffff:192.168.0.107"), "192.168.0.107")
         self.assertEqual(g("fe80::1%enp1s0"), "fe80::1")
         self.assertEqual(g(None), "")
 
@@ -360,7 +360,7 @@ class Pomozne(unittest.TestCase):
         for n in ("", None, "127.0.0.1", "127.0.1.1", "::1", "localhost", "wss://127.0.0.1:4/cast/ws", "fe80::1%eth0",
                   "::ffff:127.0.0.1"):
             self.assertTrue(lhs._samo_tukaj(n), n)
-        for n in ("192.168.0.77", "10.0.0.2", "fd00::7", "wss://192.168.0.77:8765/cast/ws", "safeer-tv.local"):
+        for n in ("192.168.0.107", "10.0.0.2", "fd00::7", "wss://192.168.0.107:8765/cast/ws", "safeer-tv.local"):
             self.assertFalse(lhs._samo_tukaj(n), n)
 
     def test_naslov_za_druge(self):

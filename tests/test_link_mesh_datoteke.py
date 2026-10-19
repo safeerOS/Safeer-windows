@@ -8,7 +8,7 @@ import unittest
 from core import link_deljenje, link_mesh
 
 KLJUC = "kljuc-telefona"
-NASLOV = "wss://192.168.0.143:8990/cast/ws"
+NASLOV = "wss://192.168.0.113:8990/cast/ws"
 
 
 class Hub:
@@ -35,7 +35,7 @@ class SredisceNaprave(unittest.TestCase):
     def setUp(self):
         self.hub = Hub({"n-tel": _naprava("n-tel"), "n-brskalnik": _naprava(""), "n-dalec": _naprava("n-tv", posredno=True),
                         "n-neznan-naslov": _naprava("n-x"), "n-zunaj": _naprava("n-zunaj")})
-        self.mesh = Mesh({"n-tel": NASLOV, "n-tv": "wss://192.168.0.77:8990/cast/ws", "n-zunaj": "wss://127.0.0.1:41000/cast/ws"})
+        self.mesh = Mesh({"n-tel": NASLOV, "n-tv": "wss://192.168.0.107:8990/cast/ws", "n-zunaj": "wss://127.0.0.1:41000/cast/ws"})
         self.clani = {"n-tel": {"kljuc": KLJUC}, "n-tv": {"kljuc": "kljuc-tv"}}
         self.potrdila = {NASLOV: ("ab" * 32, KLJUC)}
 

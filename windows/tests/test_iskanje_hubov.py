@@ -205,17 +205,17 @@ class KandidatiIskanja(unittest.TestCase):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             b = _backend(td)
             with mock.patch.object(CB.link_hub, "poisci_hube_mdns", return_value=[]), \
-                    mock.patch.object(b, "_preisci_subnet_8990", return_value=["192.168.0.135", "192.168.0.77"]), \
+                    mock.patch.object(b, "_preisci_subnet_8990", return_value=["192.168.0.135", "192.168.0.107"]), \
                     mock.patch.object(b, "_lokalni_ip", return_value="192.168.0.50"), \
                     mock.patch.object(CB.link_hub, "je_hub", lambda osnova, timeout=0.8, odtis=None: osnova.startswith("https")), \
                     mock.patch.object(CB, "_se_razresi", lambda g: g != CB.link_hub.PRIVZETI_GOSTITELJ):
                 najdeni = b.hubi_v_omrezju(osvezi=True)
         imena = {h["naslov"]: h["ime"] for h in najdeni}
         self.assertEqual(imena.get("wss://192.168.0.135:8990/cast/ws"), "Safeer Hub (192.168.0.135)")
-        self.assertEqual(imena.get("wss://192.168.0.77:8990/cast/ws"), "Safeer Hub (192.168.0.77)")
+        self.assertEqual(imena.get("wss://192.168.0.107:8990/cast/ws"), "Safeer Hub (192.168.0.107)")
         # Vrstni red je vrstni red najdbe - noben naslov nima prednosti.
         naslovi = [h["naslov"] for h in najdeni]
-        self.assertLess(naslovi.index("wss://192.168.0.135:8990/cast/ws"), naslovi.index("wss://192.168.0.77:8990/cast/ws"))
+        self.assertLess(naslovi.index("wss://192.168.0.135:8990/cast/ws"), naslovi.index("wss://192.168.0.107:8990/cast/ws"))
 
 
 class BrezHisnihNaslovov(unittest.TestCase):

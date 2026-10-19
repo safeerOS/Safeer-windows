@@ -443,10 +443,10 @@ Mejnik 1 je s tem izpolnjen tudi na GUI ravni. Odprto: Windows SMTC; končni pak
 - Povezani zasloni (Android): vidni gumbi v pasu predvajalnika (⏮ −10 s ▶/❚❚ +10 s ⏭ ⏹) — prevedeno, brez živega preizkusa
   (potrebuje sejo Link z računalnikom).
 - Medijski center: opomba pri viru Kodi (dodatki Kodija tečejo le v Kodiju).
-- TV: nova različica os (Sporočila + teme) nameščena v ozadju (192.168.0.77), preizkus na zaslonu odložen — TV je bil v uporabi (živa TV).
+- TV: nova različica os (Sporočila + teme) nameščena v ozadju (TV v domačem omrežju), preizkus na zaslonu odložen — TV je bil v uporabi (živa TV).
 
 ## 2026-09-30 – zagon Safeer OS na Windows (meritev in popravki)
-- Meritev (Windows PC 192.168.0.220, topel zagon iz izvorne kode, `-X importtime` + DIAG koraki v `SafeerOsWindow.__init__`): pred popravki klik→okno 5,3–6,4 s.
+- Meritev (testni računalnik z Windows, topel zagon iz izvorne kode, `-X importtime` + DIAG koraki v `SafeerOsWindow.__init__`): pred popravki klik→okno 5,3–6,4 s.
 - Vzroki: (1) SMTC uvaza `winrt` sinhrono ob zagonu predvajalnika; (2) `ThreatIntelService.store.load()` v niti takoj ob zagonu – cisti Python (GIL) tekmuje z glavno nitjo, `_check_values` je preverjal vsak znak seznama (do 7 s CPU); (3) uvoz Qt/WebEngine ~1,45 s.
 - Popravki: `predvajalnik_smtc.py` uvoz winrt v ozadju; `threat_intel.py` `load_delay` (Safeer OS: 3 s); `signed_feed._check_values` ne preverja vec znakov (ze zagotovi `_check_text`: surovi bajti 0x20–0x7E + \t\n\r zunaj nizov, edina escapa `\\` in `\"`).
 - Po popravkih: main_start 1453 ms (uvozi), sestava okna +1023 ms (browser_window 995 ms, prej 2632), `event_loop_start` **2881 ms** (prej 4842 po prvem popravku, 5286–6390 izhodisce). Preostanek je uvoz PySide6/WebEngine.

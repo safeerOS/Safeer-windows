@@ -170,7 +170,7 @@ class Pretok(unittest.TestCase):
         self.assertIsNone(link_pretok.vir_iz_streznika({"base_url": "https://x:1", "fp": "", "token": "t"}, "id"))
         self.assertIsNone(link_pretok.vir_iz_streznika({"base_url": "https://x:1", "fp": "a", "token": ""}, "id"))
         # Samo naslovi v domacem omrezju (naprava racunalnika ne pošlje na internet) ...
-        dobri = {"base_url": "https://192.168.0.77:40000", "fp": "a", "token": "t"}
+        dobri = {"base_url": "https://192.168.0.107:40000", "fp": "a", "token": "t"}
         self.assertIsNotNone(link_pretok.vir_iz_streznika(dobri, "id"))
         for osnova in ("https://8.8.8.8:443", "https://primer.si:443", "https://[2001:4860::1]:443"):
             self.assertIsNone(link_pretok.vir_iz_streznika(dict(dobri, base_url=osnova), "id"), osnova)
