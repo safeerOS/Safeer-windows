@@ -17,12 +17,16 @@ import shutil
 import subprocess
 from typing import Dict, List, Optional
 
+from core import root_ukaz, zasebni_webkit
+
 CAS = 4.0
 
 
 def _zazeni(ukaz: List[str], cas: float = CAS) -> Optional[str]:
-    """Pozene ukaz in vrne izpis (None ob napaki ali ce ukaza ni)."""
-    if not ukaz or shutil.which(ukaz[0]) is None:
+    """Pozene ukaz in vrne izpis (None ob napaki ali ce ukaza ni). Program samo iz sistemskih map (nmcli ...
+    lahko vprasa za geslo prek polkita - core/root_ukaz.sistemski_program)."""
+    ukaz = root_ukaz.sistemski_ukaz(ukaz)
+    if not ukaz:
         return None
     try:
         r = subprocess.run(ukaz, capture_output=True, text=True, timeout=cas)
@@ -34,10 +38,22 @@ def _zazeni(ukaz: List[str], cas: float = CAS) -> Optional[str]:
 
 
 def _v_ozadju(ukaz: List[str]) -> bool:
-    if not ukaz or shutil.which(ukaz[0]) is None:
+    # Program z absolutno potjo iz sistemskih map, ne po PATH: orodja Minta, Nastavitve in systemctl lahko sama vprasajo
+    # za geslo - podtaknjen program v ~/.local/bin bi ga dobil (core/root_ukaz.sistemski_program).
+    ukaz = root_ukaz.sistemski_ukaz(ukaz)
+    if not ukaz:
         return False
+    from core import varuh_procesov
     try:
-        subprocess.Popen(ukaz, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        pid = varuh_procesov.zazeni_program(ukaz, zasebni_webkit.okolje_za_zunanje())
+        if pid:
+            return True
+    except Exception:
+        pass
+    try:
+        # Nastavitve sistema so zunanji program: brez nasih zasebnih poti (core/zasebni_webkit.py).
+        subprocess.Popen(ukaz, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True,
+                         env=zasebni_webkit.okolje_za_zunanje())
         return True
     except Exception:
         return False
@@ -47,13 +63,13 @@ def _v_ozadju(ukaz: List[str]) -> bool:
 def baterija(koren: str = "/sys/class/power_supply") -> Optional[dict]:
     for pot in sorted(glob.glob(os.path.join(koren, "BAT*"))):
         try:
-            with open(os.path.join(pot, "capacity")) as f:
+            with open(os.path.join(pot, "capacity"), encoding="utf-8") as f:
                 odstotek = int(f.read().strip())
         except Exception:
             continue
         stanje = ""
         try:
-            with open(os.path.join(pot, "status")) as f:
+            with open(os.path.join(pot, "status"), encoding="utf-8") as f:
                 stanje = f.read().strip()
         except Exception:
             pass
@@ -161,9 +177,9 @@ def svetlost(koren: str = "/sys/class/backlight") -> Optional[int]:
             return int(m.group(1))
     for pot in sorted(glob.glob(os.path.join(koren, "*"))):
         try:
-            with open(os.path.join(pot, "brightness")) as f:
+            with open(os.path.join(pot, "brightness"), encoding="utf-8") as f:
                 zdaj = int(f.read().strip())
-            with open(os.path.join(pot, "max_brightness")) as f:
+            with open(os.path.join(pot, "max_brightness"), encoding="utf-8") as f:
                 najvec = int(f.read().strip())
             if najvec > 0:
                 return int(round(zdaj * 100 / najvec))
@@ -193,14 +209,25 @@ def nastavi_nocno_luc(vklop: bool) -> bool:
 
 
 def ozadje_namizja() -> str:
-    """Pot do slike ozadja namizja Cinnamon ('' ce je ni) - Safeer OS jo uporabi za svoje ozadje."""
+    """Pot do slike ozadja namizja Cinnamon ali GNOME ('' ce je ni) - Safeer OS jo uporabi za svoje ozadje.
+
+    GNOME (Ubuntu 24.04): ozadje je v org.gnome.desktop.background, v temnem slogu picture-uri-dark. Prej je Safeer OS
+    tam ostal brez ozadja (bral je samo Cinnamon)."""
     izpis = _zazeni(["gsettings", "get", "org.cinnamon.desktop.background", "picture-uri"]) or ""
     uri = izpis.strip().strip("'")
+    if not uri.startswith("file://"):
+        temno = "prefer-dark" in (_zazeni(["gsettings", "get", "org.gnome.desktop.interface", "color-scheme"]) or "")
+        kljuc = "picture-uri-dark" if temno else "picture-uri"
+        uri = (_zazeni(["gsettings", "get", "org.gnome.desktop.background", kljuc]) or "").strip().strip("'")
     if uri.startswith("file://"):
         from urllib.parse import unquote
         pot = unquote(uri[len("file://"):])
         if os.path.isfile(pot):
             return pot
+        # Flatpak: /usr racunalnika (ozadja Safeer, Minta) je v peskovniku pod /run/host/usr (--filesystem=host-os:ro).
+        # Brez tega je delovna povrsina v Flatpaku ostala brez ozadja (testni PC, 14. 10. 2026).
+        if pot.startswith("/usr/") and os.path.isfile("/run/host" + pot):
+            return "/run/host" + pot
     return ""
 
 
@@ -210,51 +237,196 @@ def stanje() -> dict:
 
 
 # ---------------------------------------------------------------------- nastavitve Minta
-#: Moduli cinnamon-settings, ki jih Safeer OS ponuja (oznaka modula = argument ukaza).
+# Lastnik, 19. 10. 2026: »Nastavitve morajo odrazati celotne nastavitve operacijskega sistema.« Safeer OS pokaze vsak
+# modul Cinnamona, vsako orodje Minta in vsako plosco Nastavitev GNOME, ki jih ta racunalnik RES ima (brez mrtvih gumbov).
+#: Moduli cinnamon-settings (oznaka = argument ukaza) v Cinnamonu 5.2-6.6 (Mint 21-22.x). Seznam je iz izvorne kode
+#: Cinnamona (files/usr/share/cinnamon/cinnamon-settings/modules/cs_*.py, oznake 5.2.7, 5.8.4, 6.0.4, 6.2.9 in master,
+#: preverjeno 19. 10. 2026): tiling je do 6.2, online-accounts do 6.0, nightlight in thunderbolt od 6.4.
 MODULI = {
     "backgrounds", "themes", "fonts", "effects", "desktop", "desklets", "applets", "extensions", "panel",
     "display", "nightlight", "screensaver", "sound", "power", "mouse", "keyboard", "gestures",
     "thunderbolt", "accessibility", "user", "privacy", "startup", "default", "calendar", "notifications",
-    "windows", "workspaces", "hotcorner", "general", "actions",
+    "windows", "workspaces", "hotcorner", "general", "actions", "info", "tiling", "online-accounts",
 }
+#: Moduli, ki jih imajo vse te razlicice: rezerva, kadar mape modulov ni mogoce prebrati (Flatpak brez dostopa do /usr).
+MODULI_VEDNO = {
+    "accessibility", "applets", "backgrounds", "calendar", "default", "desklets", "desktop", "display", "effects",
+    "extensions", "fonts", "general", "hotcorner", "info", "keyboard", "mouse", "notifications", "panel", "power",
+    "privacy", "screensaver", "sound", "startup", "themes", "user", "windows", "workspaces",
+}
+#: Kje so moduli Cinnamona in namizne datoteke sistema (v Flatpaku je /usr gostitelja pod /run/host/usr).
+MAPE_MODULOV = ("/usr/share/cinnamon/cinnamon-settings/modules", "/run/host/usr/share/cinnamon/cinnamon-settings/modules")
+MAPE_PROGRAMOV = ("/usr/share/applications", "/run/host/usr/share/applications")
 
-#: Samostojna orodja Minta in GNOME, ki jih nastavitve ponujajo (oznaka -> mozni ukazi).
+#: Samostojna orodja Minta, Cinnamona, GNOME in Ubuntuja (oznaka -> mozni ukazi, prvi namesceni velja). Ukazi so iz
+#: namiznih datotek v izvorni kodi teh programov (Exec=, preverjeno 19. 10. 2026); pkexec kot v njihovi namizni datoteki.
 ORODJA: Dict[str, List[List[str]]] = {
-    "posodobitve": [["mintupdate"]],
-    "programska-oprema": [["mintinstall"]],
-    "gonilniki": [["driver-manager"], ["mintdrivers"]],
+    "posodobitve": [["mintupdate"], ["update-manager"]],
+    "programska-oprema": [["mintinstall"], ["gnome-software"]],
+    "gonilniki": [["driver-manager"], ["mintdrivers"], ["software-properties-gtk", "--open-tab=4"]],
     "varnostne-kopije": [["timeshift-launcher"], ["timeshift-gtk"]],
     "kopije-datotek": [["mintbackup"]],
     "sistemsko-porocilo": [["mintreport"]],
     "opravila": [["gnome-system-monitor"]],
     "diski": [["gnome-disks"]],
+    "poraba-diska": [["baobab"]],
     "omrezje": [["nm-connection-editor"]],
     "bluetooth": [["blueman-manager"], ["blueberry"]],
     "tiskalniki": [["system-config-printer"]],
     "jezik": [["mintlocale"]],
-    "viri-programov": [["mintsources"]],
+    "vnosna-metoda": [["mintlocale-im"]],
+    "viri-programov": [["pkexec", root_ukaz.MINTSOURCES], ["software-properties-gtk"]],
+    "paketi": [["pkexec", root_ukaz.SYNAPTIC]],      # ovoj synaptic-pkexec bi pkexec poiskal po PATH
+    "uporabniki": [["cinnamon-settings-users"]],
+    "prijavno-okno": [["pkexec", root_ukaz.LIGHTDM_SETTINGS]],
+    "pozarni-zid": [["gufw"]],
+    "spletni-racuni": [["gnome-online-accounts-gtk"]],
+    "gesla": [["seahorse"]],
+    "urejevalnik-menija": [["cinnamon-menu-editor"]],
+    "usb-slika": [["mintstick", "-m", "iso"]],
+    "usb-formatiranje": [["mintstick", "-m", "format"]],
+    "dobrodoslica": [["mintwelcome"]],
     "terminal": [["gnome-terminal"], ["x-terminal-emulator"]],
-    "posnetek-zaslona": [["gnome-screenshot", "--interactive"]],
+    "posnetek-zaslona": [["cinnamon-screenshot", "--interactive"], ["gnome-screenshot", "--interactive"]],
     "datoteke": [["nemo"]],
     "warpinator": [["warpinator"]],
 }
 
+#: Plosce Nastavitev GNOME (gnome-control-center 46, panels/*/gnome-<plosca>-panel.desktop; Ubuntu doda »ubuntu«).
+#: Katere ima ta racunalnik in s katerimi argumenti se odprejo (46: »system about«), pove namizna datoteka plosce.
+PLOSCE_GNOME = (
+    "wifi", "network", "wwan", "bluetooth", "display", "sound", "power", "multitasking", "background", "ubuntu",
+    "notifications", "search", "applications", "privacy", "online-accounts", "sharing", "mouse", "keyboard",
+    "printers", "wacom", "color", "universal-access", "system", "region", "datetime", "users", "about",
+    # GNOME 42-45 (Ubuntu 22.04): ista vsebina pod starimi imeni.
+    "info-overview", "user-accounts", "default-apps", "removable-media", "location", "camera", "microphone",
+    "usage", "lock", "thunderbolt", "diagnostics",
+)
+_ARGUMENT = re.compile(r"^[a-z][a-z0-9-]{0,40}$")
 
-def razpolozljivo() -> dict:
-    """Kaj od nastavitev in orodij ta racunalnik res ima (stran skrije ostalo)."""
-    moduli = sorted(MODULI) if shutil.which("cinnamon-settings") else []
-    orodja = sorted(o for o, ukazi in ORODJA.items() if any(shutil.which(u[0]) for u in ukazi))
-    return {"moduli": moduli, "orodja": orodja}
+
+def _program(ukaz: List[str]) -> str:
+    """Program, ki mora obstajati, da ukaz deluje (pri »pkexec program« je to program, ne pkexec)."""
+    return ukaz[1] if ukaz and ukaz[0] == "pkexec" and len(ukaz) > 1 else (ukaz[0] if ukaz else "")
+
+
+def _ukaz_orodja(oznaka: str) -> Optional[List[str]]:
+    for ukaz in ORODJA.get(oznaka, []):
+        if ukaz[0] == "pkexec":
+            # Kot root: pkexec in program z absolutno potjo, ne po uporabnikovem PATH (core/root_ukaz.py).
+            if shutil.which(_program(ukaz)) and root_ukaz.na_voljo():
+                return root_ukaz.ukaz(*ukaz[1:])
+            continue
+        if root_ukaz.sistemski_program(ukaz[0]):       # samo sistemske mape (zagon v _v_ozadju), ne PATH
+            return ukaz
+    return None
+
+
+def _namizna(pot: str) -> Dict[str, str]:
+    """Vnosi razdelka [Desktop Entry] namizne datoteke (kljuc -> vrednost); prazno ob napaki."""
+    vnosi: Dict[str, str] = {}
+    try:
+        with open(pot, encoding="utf-8", errors="replace") as f:
+            razdelek = ""
+            for vrstica in f.read(65536).splitlines():
+                vrstica = vrstica.strip()
+                if vrstica.startswith("["):
+                    razdelek = vrstica
+                elif razdelek == "[Desktop Entry]" and "=" in vrstica and not vrstica.startswith("#"):
+                    k, _, v = vrstica.partition("=")
+                    vnosi.setdefault(k.strip(), v.strip())
+    except OSError:
+        return {}
+    return vnosi
+
+
+def _ime_iz_namizne(vnosi: Dict[str, str], jezik: str) -> Dict[str, str]:
+    """Krajevno ime in kljucne besede iz namizne datoteke (rezerva za plosce, ki jih Safeer se ne pozna)."""
+    ime = vnosi.get("Name[%s]" % jezik) or vnosi.get("Name") or ""
+    kljucne = " ".join(x for x in (vnosi.get("Keywords[%s]" % jezik, ""), vnosi.get("Keywords", "")) if x)
+    return {"ime": ime[:80], "kljucne": kljucne.replace(";", " ").strip()[:300]}
+
+
+def moduli_cinnamon(mape: Optional[tuple] = None, mape_programov: Optional[tuple] = None) -> set:
+    """Moduli Cinnamona, ki jih ta racunalnik ima. Vir je mapa modulov (cs_<modul>.py), sicer namizne datoteke
+    cinnamon-settings-<modul>.desktop; brez obojega samo moduli vseh razlicic. Prej je Safeer OS pokazal vseh 30 (tudi
+    Nocno luc in Thunderbolt v Mintu 22.1, ki ju se ni bilo - gumb ni naredil nicesar)."""
+    najdeni = set()
+    for mapa in MAPE_MODULOV if mape is None else mape:
+        try:
+            imena = os.listdir(mapa)
+        except OSError:
+            continue
+        najdeni |= {i[3:-3].replace("_", "-") for i in imena if i.startswith("cs_") and i.endswith(".py")}
+    if not najdeni:
+        for mapa in MAPE_PROGRAMOV if mape_programov is None else mape_programov:
+            try:
+                imena = os.listdir(mapa)
+            except OSError:
+                continue
+            najdeni |= {i[len("cinnamon-settings-"):-len(".desktop")] for i in imena
+                        if i.startswith("cinnamon-settings-") and i.endswith(".desktop")}
+    return (najdeni & MODULI) if najdeni else set(MODULI_VEDNO)
+
+
+def plosce_gnome(mape_programov: Optional[tuple] = None, jezik: str = "") -> Dict[str, dict]:
+    """Plosce Nastavitev GNOME, ki jih ta racunalnik ima: oznaka -> {"ukaz": [...], "ime", "kljucne"}. Ukaz je iz vrstice
+    Exec namizne datoteke gnome-<oznaka>-panel.desktop - sprejmemo samo »gnome-control-center« z oznakami (brez lupine)."""
+    plosce: Dict[str, dict] = {}
+    for mapa in MAPE_PROGRAMOV if mape_programov is None else mape_programov:
+        try:
+            imena = sorted(os.listdir(mapa))
+        except OSError:
+            continue
+        for ime in imena:
+            if not (ime.startswith("gnome-") and ime.endswith("-panel.desktop")):
+                continue
+            oznaka = ime[len("gnome-"):-len("-panel.desktop")]
+            if oznaka in plosce or not _ARGUMENT.match(oznaka):
+                continue
+            vnosi = _namizna(os.path.join(mapa, ime))
+            deli = vnosi.get("Exec", "").split()
+            if len(deli) < 2 or os.path.basename(deli[0]) != "gnome-control-center" or len(deli) > 4 \
+                    or not all(_ARGUMENT.match(d) for d in deli[1:]):
+                continue
+            plosce[oznaka] = dict(_ime_iz_namizne(vnosi, jezik), ukaz=["gnome-control-center"] + deli[1:])
+    return plosce
+
+
+def _gnome_seja() -> bool:
+    try:
+        from core import seja_prikaza
+        return seja_prikaza.namizje() == "gnome"
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def razpolozljivo(jezik: str = "") -> dict:
+    """Kaj od nastavitev in orodij ta racunalnik res ima (stran skrije ostalo).
+
+    moduli: moduli Cinnamona (ne v seji GNOME - cinnamon-settings tam ne dela prav); plosce: plosce Nastavitev GNOME (samo
+    v seji GNOME ali brez Cinnamona); orodja: samostojni programi; imena: krajevno ime plosce iz sistema, kadar ga
+    Safeer nima v svojih besedilih (plosca, ki pride z novo razlicico GNOME)."""
+    gnome = _gnome_seja()
+    cinnamon = bool(root_ukaz.sistemski_program("cinnamon-settings")) and not gnome
+    moduli = sorted(moduli_cinnamon()) if cinnamon else []
+    plosce = plosce_gnome(jezik=jezik) if (not cinnamon and root_ukaz.sistemski_program("gnome-control-center")) else {}
+    orodja = sorted(o for o in ORODJA if _ukaz_orodja(o))
+    return {"moduli": moduli, "orodja": orodja, "plosce": sorted(plosce),
+            "imena": {"p:" + k: {"ime": v["ime"], "kljucne": v["kljucne"]} for k, v in plosce.items()
+                      if k not in PLOSCE_GNOME and v["ime"]}}
 
 
 def odpri_nastavitve(modul: str) -> bool:
+    """Odpre modul Cinnamona, orodje ali plosco GNOME (»p:<oznaka>«). Samo, kar je na seznamu in na tem racunalniku."""
     modul = str(modul or "")
+    if modul.startswith("p:"):
+        plosca = plosce_gnome().get(modul[2:])
+        return bool(plosca) and _v_ozadju(plosca["ukaz"])
     if modul in MODULI:
         return _v_ozadju(["cinnamon-settings", modul])
-    for ukaz in ORODJA.get(modul, []):
-        if shutil.which(ukaz[0]):
-            return _v_ozadju(ukaz)
-    return False
+    ukaz = _ukaz_orodja(modul)
+    return bool(ukaz) and _v_ozadju(ukaz)
 
 
 # ---------------------------------------------------------------------- napajanje
@@ -269,6 +441,6 @@ DEJANJA = {
 
 def napajanje(dejanje: str) -> bool:
     for ukaz in DEJANJA.get(str(dejanje or ""), []):
-        if shutil.which(ukaz[0]) and _v_ozadju(ukaz):
+        if root_ukaz.sistemski_program(ukaz[0]) and _v_ozadju(ukaz):
             return True
     return False
