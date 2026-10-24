@@ -17,10 +17,15 @@ from __future__ import annotations
 
 import datetime
 import os
+import re
 import subprocess
 import tempfile
 from typing import Optional
 
+
+#: openssl (rezerva brez modula cryptography) dela lokalno v delcku sekunde; zataknjen podproces ne sme ustaviti
+#: Linka za vedno (revizija stabilnosti 20. 10. 2026: 7 klicev subprocess brez roka).
+OPENSSL_S = 30
 
 def _crypto():
     """Vrne module knjiznice cryptography ali None, ce je ni."""
@@ -43,13 +48,18 @@ def _nalozi_zasebni(pot_kljuca: str):
         return serialization.load_pem_private_key(d.read(), password=None)
 
 
+def _ime_za_subj(ime: str) -> str:
+    """Ime naprave za openssl -subj: znaka / in = ter nova vrstica bi v DN dodala polje (npr. /O=...) - samo varen nabor."""
+    return re.sub(r"[^A-Za-z0-9 ._-]", "_", str(ime or ""))[:64].strip() or "naprava"
+
+
 def ustvari_kljuc_in_potrdilo(pot_kljuca: str, pot_potrdila: str, ime: str) -> None:
     """Nov EC P-256 kljuc in samopodpisano potrdilo (ce se ne obstajata)."""
     c = _crypto()
     if c is None:
         subprocess.run(["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1",
-                        "-nodes", "-days", "3650", "-subj", f"/CN=Safeer Control {ime}",
-                        "-keyout", pot_kljuca, "-out", pot_potrdila], check=True, capture_output=True)
+                        "-nodes", "-days", "3650", "-subj", f"/CN=Safeer Control {_ime_za_subj(ime)}",
+                        "-keyout", pot_kljuca, "-out", pot_potrdila], check=True, capture_output=True, timeout=OPENSSL_S)
         return
     x509, hashes, serialization, ec, NameOID = c
     kljuc = ec.generate_private_key(ec.SECP256R1())
@@ -78,7 +88,7 @@ def javni_kljuc_der(pot_kljuca: str) -> bytes:
     zasebni = _nalozi_zasebni(pot_kljuca)
     if zasebni is None:
         return subprocess.run(["openssl", "pkey", "-in", pot_kljuca, "-pubout", "-outform", "DER"],
-                              check=True, capture_output=True).stdout
+                              check=True, capture_output=True, timeout=OPENSSL_S).stdout
     _x509, _h, serialization, _ec, _o = _crypto()
     return zasebni.public_key().public_bytes(serialization.Encoding.DER,
                                              serialization.PublicFormat.SubjectPublicKeyInfo)
@@ -89,7 +99,7 @@ def podpisi(pot_kljuca: str, podatki: bytes) -> bytes:
     zasebni = _nalozi_zasebni(pot_kljuca)
     if zasebni is None:
         return subprocess.run(["openssl", "dgst", "-sha256", "-sign", pot_kljuca],
-                              input=podatki, check=True, capture_output=True).stdout
+                              input=podatki, check=True, capture_output=True, timeout=OPENSSL_S).stdout
     _x509, hashes, _s, ec, _o = _crypto()
     return zasebni.sign(podatki, ec.ECDSA(hashes.SHA256()))
 
@@ -115,7 +125,7 @@ def preveri(spki_der: bytes, podatki: bytes, podpis_der: bytes) -> bool:
         with open(pot_p, "wb") as d:
             d.write(podpis_der)
         r = subprocess.run(["openssl", "dgst", "-sha256", "-verify", pot_k, "-keyform", "DER",
-                            "-signature", pot_p], input=podatki, capture_output=True)
+                            "-signature", pot_p], input=podatki, capture_output=True, timeout=OPENSSL_S)
         return r.returncode == 0
     except Exception:
         return False
@@ -137,7 +147,7 @@ def ecdh(pot_kljuca: str, tuj_spki_der: bytes) -> bytes:
         with open(pot_t, "wb") as d:
             d.write(tuj_spki_der)
         r = subprocess.run(["openssl", "pkeyutl", "-derive", "-inkey", pot_kljuca, "-peerkey", pot_t,
-                            "-peerform", "DER"], capture_output=True)
+                            "-peerform", "DER"], capture_output=True, timeout=OPENSSL_S)
         if r.returncode != 0 or not r.stdout:
             raise RuntimeError("ECDH ni uspel")
         return r.stdout

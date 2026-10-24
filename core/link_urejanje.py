@@ -56,8 +56,8 @@ def v_smeti(pot: str) -> None:
 
 
 def _v_smeti_rocno(pot: str) -> None:
-    dom = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
-    smeti = os.path.join(dom, "Trash")
+    from core import gostitelj
+    smeti = os.path.join(gostitelj.podatki_gostitelja(), "Trash")
     datoteke, info = os.path.join(smeti, "files"), os.path.join(smeti, "info")
     os.makedirs(datoteke, exist_ok=True)
     os.makedirs(info, exist_ok=True)

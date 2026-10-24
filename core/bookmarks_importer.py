@@ -186,6 +186,72 @@ def parse_bookmarks_html(file_path: str) -> List[Dict[str, Any]]:
     return results
 
 
+
+# ----------------------------------------------------------------------
+# Kje se zaznamki skrivajo pri nekom, ki pride z Windowsov
+# ----------------------------------------------------------------------
+
+# Kam Linux priklaplja diske. Kot spremenljivka, da je mogoce preizkusiti
+# tudi brez pravega diska.
+KORENINE_PRIKLOPOV = ("/media/*/*", "/media/*", "/run/media/*/*", "/mnt/*")
+
+
+def _korenine_priklopov() -> List[str]:
+    """Mape, kamor Linux priklopi diske in particije (tudi Windows particijo)."""
+    korenine = []
+    for vzorec in KORENINE_PRIKLOPOV:
+        for pot in glob.glob(vzorec):
+            try:
+                if os.path.isdir(pot) and os.path.isdir(os.path.join(pot, "Users")):
+                    korenine.append(pot)
+            except OSError:
+                continue
+    return korenine
+
+
+def windows_chromium_poti() -> List[str]:
+    """Bookmarks iz Chroma, Edgea ali Brave na priklopljeni Windows particiji."""
+    najdeno = []
+    for koren in _korenine_priklopov():
+        for rel in (
+            "Users/*/AppData/Local/Google/Chrome/User Data/*/Bookmarks",
+            "Users/*/AppData/Local/Microsoft/Edge/User Data/*/Bookmarks",
+            "Users/*/AppData/Local/BraveSoftware/Brave-Browser/User Data/*/Bookmarks",
+            "Users/*/AppData/Local/Chromium/User Data/*/Bookmarks",
+        ):
+            try:
+                najdeno.extend(glob.glob(os.path.join(koren, rel)))
+            except OSError:
+                continue
+    return najdeno
+
+
+def windows_firefox_poti() -> List[str]:
+    """places.sqlite iz Firefoxa na priklopljeni Windows particiji."""
+    najdeno = []
+    for koren in _korenine_priklopov():
+        try:
+            najdeno.extend(glob.glob(os.path.join(
+                koren, "Users/*/AppData/Roaming/Mozilla/Firefox/Profiles/*/places.sqlite")))
+        except OSError:
+            continue
+    return najdeno
+
+
+def flatpak_snap_firefox_poti() -> List[str]:
+    home = os.path.expanduser("~")
+    return (glob.glob(os.path.join(home, ".var/app/org.mozilla.firefox/.mozilla/firefox/*/places.sqlite")) +
+            glob.glob(os.path.join(home, "snap/firefox/common/.mozilla/firefox/*/places.sqlite")))
+
+
+def flatpak_chromium_poti() -> List[str]:
+    home = os.path.expanduser("~")
+    return (glob.glob(os.path.join(home, ".var/app/com.google.Chrome/config/google-chrome/*/Bookmarks")) +
+            glob.glob(os.path.join(home, ".var/app/com.brave.Browser/config/BraveSoftware/Brave-Browser/*/Bookmarks")) +
+            glob.glob(os.path.join(home, ".var/app/org.chromium.Chromium/config/chromium/*/Bookmarks")) +
+            glob.glob(os.path.join(home, ".var/app/com.microsoft.Edge/config/microsoft-edge/*/Bookmarks")))
+
+
 def detect_browser_profiles() -> Dict[str, List[Dict[str, str]]]:
     """
     Detect all installed web browser profiles on the current Linux system.
@@ -240,7 +306,34 @@ def detect_browser_profiles() -> Dict[str, List[Dict[str, str]]]:
     if opera_paths:
         detected["opera"] = [{"name": "Default", "path": opera_paths[0], "type": "json"}]
 
+    # 7. Flatpak in snap razlicice istih brskalnikov (v Mintu pogoste)
+    for pot in flatpak_snap_firefox_poti():
+        detected.setdefault("firefox", []).append(
+            {"name": os.path.basename(os.path.dirname(pot)), "path": pot, "type": "sqlite"})
+    for pot in flatpak_chromium_poti():
+        detected.setdefault("chrome", []).append(
+            {"name": os.path.basename(os.path.dirname(pot)), "path": pot, "type": "json"})
+
+    # 8. Prikljucena Windows particija -- primer nekoga, ki sele prehaja na Linux.
+    #    Brez tega carovnik ravno njemu ne ponudi nicesar.
+    windows = []
+    for pot in windows_chromium_poti():
+        windows.append({"name": _windows_ime(pot), "path": pot, "type": "json"})
+    for pot in windows_firefox_poti():
+        windows.append({"name": _windows_ime(pot), "path": pot, "type": "sqlite"})
+    if windows:
+        detected["windows"] = windows
+
     return detected
+
+
+def _windows_ime(pot: str) -> str:
+    """Iz poti izlusci uporabnisko ime na Windows particiji, da ga lahko pokazemo."""
+    deli = pot.replace("\\", "/").split("/")
+    try:
+        return deli[deli.index("Users") + 1]
+    except (ValueError, IndexError):
+        return "Windows"
 
 
 def import_from_firefox_profiles(profile_path: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -252,7 +345,9 @@ def import_from_firefox_profiles(profile_path: Optional[str] = None) -> List[Dic
     if profile_path:
         target_files = [profile_path]
     else:
-        target_files = glob.glob(os.path.join(home, ".mozilla/firefox/*/places.sqlite"))
+        target_files = (glob.glob(os.path.join(home, ".mozilla/firefox/*/places.sqlite"))
+                        + flatpak_snap_firefox_poti()
+                        + windows_firefox_poti())
 
     if not target_files:
         return []
@@ -307,7 +402,9 @@ def import_from_chromium_profiles(bookmarks_path: Optional[str] = None) -> List[
             glob.glob(os.path.join(home, ".config/BraveSoftware/Brave-Browser/*/Bookmarks")) +
             glob.glob(os.path.join(home, ".config/chromium/*/Bookmarks")) +
             glob.glob(os.path.join(home, ".config/microsoft-edge/*/Bookmarks")) +
-            glob.glob(os.path.join(home, ".config/opera/Bookmarks"))
+            glob.glob(os.path.join(home, ".config/opera/Bookmarks")) +
+            flatpak_chromium_poti() +
+            windows_chromium_poti()
         )
 
     if not target_files:
@@ -380,3 +477,37 @@ def auto_import_all_profiles() -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
 
     return merged, stats
 
+
+# Uvoz iz mape, ki jo uporabnik izbere v izbirniku (Flatpak brskalnika, pregled 18. 10. 2026): brez stalnega dostopa do
+# profilov drugih brskalnikov (tam so tudi piskotki in gesla). Portal dokumentov da dostop samo do izbrane mape (pot
+# /run/user/<uid>/doc/...); v njej poiscemo samo datoteke zaznamkov. Globina 3: npr. BraveSoftware/Brave-Browser/Default.
+GLOBINA_MAPE = 3
+
+
+def _v_globini(mapa: str, ime: str) -> List[str]:
+    najdene = []
+    for globina in range(GLOBINA_MAPE + 1):
+        najdene += glob.glob(os.path.join(glob.escape(mapa), *(["*"] * globina), ime))
+    return sorted(set(najdene))
+
+
+def uvozi_iz_mape(mapa: str) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
+    """Zaznamki iz mape brskalnika, ki jo je izbral uporabnik (Firefox: places.sqlite, Chromium: Bookmarks)."""
+    ff, cr = [], []
+    for pot in _v_globini(mapa, "places.sqlite"):
+        ff += import_from_firefox_profiles(pot)
+    for pot in _v_globini(mapa, "Bookmarks"):
+        if os.path.isfile(pot):
+            cr += import_from_chromium_profiles(pot)
+    stats = {}
+    if ff:
+        stats["Firefox"] = len(ff)
+    if cr:
+        stats["Chrome/Brave"] = len(cr)
+    merged, seen = [], set()
+    for item in ff + cr:
+        norm = re.sub(r"/+$", "", item.get("url", "")).lower()
+        if norm not in seen:
+            seen.add(norm)
+            merged.append(item)
+    return merged, stats

@@ -6,11 +6,14 @@ from datetime import datetime, timezone
 import json
 from typing import Callable, Iterable, Optional, Sequence
 from urllib.parse import urlencode
-from urllib.request import Request, urlopen
+from urllib.request import Request
 
-from .adapter import Adapter
+from .adapter import Adapter, odpri_brez_preusmeritev
 from .model import Pogovor, Sporocilo
 from . import skrivnosti
+
+#: Glava api_access_token bi ob preusmeritvi sla na nov naslov (pregled 14. 10. 2026): preusmeritev zavrnemo.
+urlopen = odpri_brez_preusmeritev
 
 
 class ChatwootAdapter(Adapter):
@@ -103,6 +106,11 @@ class ChatwootAdapter(Adapter):
 
     def oznaci_prebrano(self, pogovor_id: str) -> None:
         self._api("/conversations/" + str(pogovor_id) + "/update_last_seen", "POST", {})
+
+    def prenesi_priponko(self, sporocilo_id: str, priponka: dict, pisi, napredek=None) -> int:
+        """data_url je podpisan naslov datoteke (Active Storage) - brez zetona racuna, samo https."""
+        from .adapter import prenesi_url
+        return prenesi_url(str(priponka.get("url") or ""), pisi, napredek, timeout=60)
 
     def sprejmi_webhook(self, telo) -> bool:
         """Sprejme ze preverjeno JSON telo HTTP ovojnice; omrezni streznik ostane zamenljiv."""

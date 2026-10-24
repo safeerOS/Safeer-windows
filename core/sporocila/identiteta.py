@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Iterable, Optional, Tuple
 
 from .model import Oseba
+from core import sqlite_baza
 
 PRIVZETA_POT = Path.home() / ".local/share/safeer/sporocila/sporocila.sqlite3"
 
@@ -47,7 +48,7 @@ class IdentitetniGraf:
     def __init__(self, pot: Optional[Path] = None):
         self.pot = Path(pot or PRIVZETA_POT)
         zasebna_baza(self.pot)
-        self._db = sqlite3.connect(str(self.pot), check_same_thread=False)
+        self._db = sqlite_baza.odpri(self.pot, check_same_thread=False)
         self._db.row_factory = sqlite3.Row
         self._zaklep = threading.RLock()
         with self._db:

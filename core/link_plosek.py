@@ -13,8 +13,9 @@ moral vsak uporabnik namestiti. Vse, kar pride z omrezja, gre skozi seznam dovol
 poslje **oznako** gumba ali osi (`a`, `start`, `leva_x` ...), nikoli stevilke jedra.
 
 Dostop: `/dev/uinput` je pri vecini distribucij dostopen samo rootu. Safeer Control ga zato
-uporabi le, kadar je dostopen (glej `Plosek.mozno()`); pravilo udev, ki napravo odpre skupini
-`input`, je v packaging/99-safeer-uinput.rules in ga namesti uporabnik sam.
+uporabi le, kadar je dostopen (glej `Plosek.mozno()`); pravilo udev, ki napravo da uporabniku aktivne
+krajevne seje (uaccess, ne skupini `input`, ki bi brala vse tipkovnice), je v packaging/60-safeer-uinput.rules in ga
+namesti uporabnik sam.
 """
 
 from __future__ import annotations

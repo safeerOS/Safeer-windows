@@ -9,20 +9,23 @@ Vse gre skozi nmcli s fiksnimi argumenti; ime omrezja in geslo sta vedno en argu
 
 from __future__ import annotations
 
-import shutil
 import subprocess
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
+from core import root_ukaz
 from core.os_sistem import _razdeli
 
 CAS = 20.0
 
 
 def _nmcli(argumenti: List[str], cas: float = 6.0) -> Tuple[int, str, str]:
-    if shutil.which("nmcli") is None:
+    # Samo iz sistemskih map, ne po PATH: povezave sistema (up, delete) polkit lahko zavaruje z geslom
+    # (core/root_ukaz.sistemski_program).
+    nmcli = root_ukaz.sistemski_program("nmcli")
+    if nmcli is None:
         return 127, "", "nmcli ni namescen"
     try:
-        r = subprocess.run(["nmcli"] + argumenti, capture_output=True, text=True, timeout=cas)
+        r = subprocess.run([nmcli] + argumenti, capture_output=True, text=True, timeout=cas)
         return r.returncode, r.stdout, r.stderr
     except subprocess.TimeoutExpired:
         return 124, "", "cas je potekel"
@@ -95,7 +98,7 @@ def shranjene_povezave() -> List[dict]:
 def stanje(osvezi: bool = False) -> dict:
     return {"naprave": naprave(), "wifi_vklopljen": wifi_vklopljen(),
             "omrezja": omrezja(osvezi) if any(n["vrsta"] == "wifi" for n in naprave()) else [],
-            "shranjene": shranjene_povezave(), "napredno": shutil.which("nm-connection-editor") is not None}
+            "shranjene": shranjene_povezave(), "napredno": root_ukaz.sistemski_program("nm-connection-editor") is not None}
 
 
 def _napaka(stderr: str) -> str:
