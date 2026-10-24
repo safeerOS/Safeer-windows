@@ -19,13 +19,14 @@ vnosom, ki je starejsi od njega; vnos, novejsi od umika, napravo vrne.
 from __future__ import annotations
 
 import base64
+import functools
 import hashlib
 import json
 import os
 import subprocess
 import threading
 import time
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 
 def _mapa_nastavitev() -> str:
@@ -107,22 +108,37 @@ def podatki_za_podpis(odtis_huba: str, nonce: str, device_id: str) -> bytes:
     return f"safeer-link-auth\n{(odtis_huba or '').lower()}\n{nonce}\n{device_id}".encode("utf-8")
 
 
+@functools.lru_cache(maxsize=65536)
 def id_iz_kljuca(kljuc_b64: str) -> str:
-    """Id nove naprave iz javnega kljuca (KrogZaupanja.idIzKljuca): n- + 16 hex SHA-256."""
+    """Id nove naprave iz javnega kljuca (KrogZaupanja.idIzKljuca): n- + 16 hex SHA-256.
+
+    Zapomnjeno (cista funkcija kljuca): clan_za_id in kljuc_za_jedro jo klicejo za VSAKEGA clana kroga. Meritev
+    18. 10. 2026, 1000 clanov: brez spomina 1,9 ms na iskanje (vsak trk neposredne poti, vsaka naprava v seznamu
+    soseda - pri tisoc napravah ~2 s procesorja na seznam), s spominom 0,2 ms."""
     return "n-" + hashlib.sha256(base64.b64decode(kljuc_b64)).hexdigest()[:16]
 
 
 DOLZINA_ID_IZ_KLJUCA = 18
 
 
+#: Pripona programa za jedrom (`-control`, `-os` ...): samo te znake.
+_PRIPONA_ID = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
+NAJVEC_ID = 128
+
+
 def je_id_iz_kljuca(device_id: str) -> bool:
-    """Ali je id izpeljan iz kljuca (`n-<16 hex>`, po zelji s pripono `-control` ...)."""
-    if len(device_id) < DOLZINA_ID_IZ_KLJUCA or not device_id.startswith("n-"):
+    """Ali je id izpeljan iz kljuca: `n-<16 hex>`, po zelji s pripono programa (`-control`, `-os` ...).
+
+    Pripona sme imeti samo crke, stevke, piko, podcrtaj in vezaj. Id z drugimi znaki (presledek, prelom vrstice ...)
+    NI id iz kljuca in kljuca po jedru ne dobi: z njim je sredisce sejo zascite ene naprave prevezalo na drugo (drugi
+    neodvisni pregled, 7. 10. 2026)."""
+    if not isinstance(device_id, str) or not (DOLZINA_ID_IZ_KLJUCA <= len(device_id) <= NAJVEC_ID):
         return False
-    jedro = device_id[2:DOLZINA_ID_IZ_KLJUCA]
-    if any(z not in "0123456789abcdef" for z in jedro):
+    if not device_id.startswith("n-") or any(z not in "0123456789abcdef" for z in device_id[2:DOLZINA_ID_IZ_KLJUCA]):
         return False
-    return len(device_id) == DOLZINA_ID_IZ_KLJUCA or device_id[DOLZINA_ID_IZ_KLJUCA] == "-"
+    if len(device_id) == DOLZINA_ID_IZ_KLJUCA:
+        return True
+    return device_id[DOLZINA_ID_IZ_KLJUCA] == "-" and all(z in _PRIPONA_ID for z in device_id[DOLZINA_ID_IZ_KLJUCA + 1:])
 
 
 # ------------------------------------------------------------------ krog
@@ -139,6 +155,40 @@ def _veljaven_kljuc(b64: str) -> bool:
 #: Clan, ki ga ni bilo toliko dni, se umakne iz kroga (pospravi); stiki se na disk zapisejo najvec vsakih 10 min.
 DNI_BREZ_STIKA = 90
 STIKI_ZAPIS_S = 600.0
+
+#: Stevec sprememb clanov in umikov v tem procesu. Krog spreminja tudi odjemalec Linka mimo sredisca (trust.update
+#: drugega sredisca, odjava); sredisce na stevec caka (pocakaj_spremembo) in umik uveljavi v delcku sekunde - prej
+#: sele ob pospravljanju na 10 minut (pregled 19. 10. 2026). Pogoj ima svoj zaklep: krog ga vzame znotraj svojega,
+#: cakajoci nikoli obratno (vrstni red zaklepov krog -> stevec).
+_sprememba = threading.Condition(threading.Lock())
+_stevec = 0
+
+
+def _ob_spremembi() -> None:
+    global _stevec
+    with _sprememba:
+        _stevec += 1
+        _sprememba.notify_all()
+
+
+def razlicica() -> int:
+    """Stevec sprememb kroga v tem procesu (vsaka sprememba clanov ali umikov ga poveca)."""
+    with _sprememba:
+        return _stevec
+
+
+def pocakaj_spremembo(videna: int, rok_s: float) -> int:
+    """Caka, da stevec ni vec `videna` (ali do roka ali do zbudi()); vrne trenutni stevec."""
+    with _sprememba:
+        if _stevec == videna and rok_s > 0:
+            _sprememba.wait(rok_s)
+        return _stevec
+
+
+def zbudi() -> None:
+    """Zbudi cakajoce brez spremembe (sredisce se ustavlja)."""
+    with _sprememba:
+        _sprememba.notify_all()
 
 
 class Krog:
@@ -158,6 +208,10 @@ class Krog:
                     self.zdruzi(json.load(d), shrani=False)
             except Exception:
                 pass
+            # Umiki z diska: kdaj jih je ta proces prvic videl, ne vemo - umik iz prihodnosti velja od zdaj.
+            zdaj = time.time()
+            for u in self.umiki.values():
+                u["videno"] = min(float(u["umaknjeno"]), zdaj)
             try:
                 with open(self._pot_stikov(), "r", encoding="utf-8") as d:
                     self.stiki = {str(k): float(v) for k, v in (json.load(d) or {}).items()}
@@ -245,6 +299,37 @@ class Krog:
                     return dict(c)
         return None
 
+    def kljuc_za_jedro(self, jedro: str) -> Optional[str]:
+        """Javni kljuc veljavnega clana, ki da to jedro (`n-<16 hex>`), ali None. Isce po VSEH vnosih: oznaka iz kljuca
+        je vezana na kljuc, zato ni pomembno, pod katero oznako je vpisan (naprava sama, sorodnik, stara oznaka) - in
+        vnos z oznako tega jedra, a z drugim kljucem, pravega ne more zasenciti."""
+        if not je_id_iz_kljuca(jedro) or len(jedro) != DOLZINA_ID_IZ_KLJUCA:
+            return None
+        with self._zaklep:
+            for c in self.clani.values():
+                try:
+                    if self._veljaven(c) and c.get("kljuc") and id_iz_kljuca(c["kljuc"]) == jedro:
+                        return str(c["kljuc"])
+                except Exception:  # noqa: BLE001 - pokvarjen vnos preskocimo
+                    continue
+        return None
+
+    def znani(self) -> Tuple[set, set]:
+        """(jedra kljucev, id-ji) veljavnih clanov - za preverjanje DOLGEGA seznama naprav naenkrat: en prehod kroga
+        namesto enega za vsako napravo (tisoc naprav, tisoc clanov: ~0,2 s z iskanjem po napravah)."""
+        jedra, idji = set(), set()
+        with self._zaklep:
+            for i, c in self.clani.items():
+                if not self._veljaven(c):
+                    continue
+                idji.add(i)
+                try:
+                    if c.get("kljuc"):
+                        jedra.add(id_iz_kljuca(c["kljuc"]))
+                except Exception:  # noqa: BLE001 - pokvarjen vnos preskocimo
+                    continue
+        return jedra, idji
+
     def je_umaknjen(self, device_id: str) -> bool:
         """Ali je naprava izrecno umaknjena iz kroga (nadgrobnik je novejsi od vpisa).
 
@@ -262,6 +347,41 @@ class Krog:
             jedro = device_id[:DOLZINA_ID_IZ_KLJUCA]
             ujemanja = [c for c in self.clani.values() if id_iz_kljuca(c["kljuc"]) == jedro]
             return bool(ujemanja) and not any(self._veljaven(c) for c in ujemanja)
+
+    def umaknjen_ob(self, device_id: str) -> Optional[float]:
+        """Cas umika, ki za napravo velja zdaj (isto ujemanje kot je_umaknjen), ali None. Sredisce po njem loci zeton,
+        izdan pred umikom (ne velja vec), od zetona nove seznanitve po umiku (velja, naprava se lahko vrne)."""
+        if not device_id:
+            return None
+        with self._zaklep:
+            u = self.umiki.get(device_id)
+            c = self.clani.get(device_id)
+            if u and (not c or u["umaknjeno"] > c["dodano"]):
+                return float(u["umaknjeno"])
+            if c or not je_id_iz_kljuca(device_id):
+                return None
+            jedro = device_id[:DOLZINA_ID_IZ_KLJUCA]
+            ujemanja = [c for c in self.clani.values() if id_iz_kljuca(c["kljuc"]) == jedro]
+            if not ujemanja or any(self._veljaven(c) for c in ujemanja):
+                return None
+            casi = [float(self.umiki[c["id"]]["umaknjeno"]) for c in ujemanja if c["id"] in self.umiki]
+            return max(casi) if casi else None
+
+    def umaknjen_videno(self, device_id: str) -> Optional[float]:
+        """Kdaj je ta proces (po SVOJI uri) prvic videl umik, ki za napravo velja zdaj, ali None.
+
+        Cas umika (umaknjen_ob) postavi ura naprave, ki je umikala; sredisce pa z njim primerja cas izdaje zetona po
+        svoji uri. Ura, ki prehiteva, je preklicala tudi novo seznanitev takoj po umiku, ura, ki zaostaja, pa je pustila
+        veljati zetone iz razmika (pregled 19. 10. 2026). Umik z diska (ponovni zagon) velja od min(cas umika, zdaj)."""
+        ob = self.umaknjen_ob(device_id)
+        if ob is None:
+            return None
+        with self._zaklep:
+            u = self.umiki.get(device_id)
+            kandidati = [u] if u and u.get("umaknjeno") == ob else \
+                [v for v in self.umiki.values() if v.get("umaknjeno") == ob]
+            videno = [float(v["videno"]) for v in kandidati if v.get("videno") is not None]
+        return max(videno) if videno else min(ob, time.time())
 
     def stevilo(self) -> int:
         with self._zaklep:
@@ -317,9 +437,13 @@ class Krog:
     def umakni(self, device_id: str, kdo: str, ob: Optional[float] = None) -> bool:
         """Umakne clana (nadgrobnik ostane, da umik preide na vse naprave). Naprava, ki je ni v
         krogu, ne spremeni nicesar - sicer bi vsak tuj id pustil nadgrobnik."""
-        if not self.je_clan(device_id):
+        c = self.clan(device_id)
+        if c is None:
             return False
         ob = ob if ob is not None else time.time()
+        # Umik, ki ga naredimo zdaj, velja za vnos, ki ga vidimo zdaj - tudi ce ga je dodala ura, ki prehiteva
+        # (sicer bi bil umik starejsi od vnosa in ne bi veljal).
+        ob = max(float(ob), float(c.get("dodano") or 0.0) + 0.001)
         umik = {"umaknjeno": ob, "umaknil": kdo}
         if self._smo_mi(kdo):
             try:
@@ -412,7 +536,9 @@ class Krog:
                     continue
                 obstojeci = self.umiki.get(i)
                 if obstojeci is None or obstojeci["umaknjeno"] < ob:
-                    self.umiki[i] = dict({"umaknjeno": ob, "umaknil": umaknil}, **({"podpis": podpis} if podpis else {}))
+                    # `videno`: nasa ura ob prvem prejemu (ne gre v zapis kroga, glej umaknjen_videno).
+                    self.umiki[i] = dict({"umaknjeno": ob, "umaknil": umaknil, "videno": time.time()},
+                                         **({"podpis": podpis} if podpis else {}))
                     spremenjeno = True
             for i, c in (tuj.get("clani") or {}).items():
                 if not isinstance(c, dict) or not _veljaven_kljuc(str(c.get("kljuc") or "")):
@@ -461,6 +587,8 @@ class Krog:
                     spremenjeno = True
             if spremenjeno and shrani:
                 self._shrani()
+            if spremenjeno:
+                _ob_spremembi()
         return spremenjeno
 
     def _shrani(self) -> None:
@@ -486,6 +614,21 @@ def krog() -> Krog:
         if _krog is None:
             _krog = Krog(_pot_kroga())
         return _krog
+
+
+def pozabi_krog() -> None:
+    """Odjava te naprave (»Odjavi to napravo«): krajevna kopija kroga zaupanja, stiki in sosedje Link Mesh gredo
+    stran. Odjavljena naprava ne sme vec poznati naprav, s katerimi je bila povezana (lastnik, 12. 10. 2026)."""
+    global _krog
+    with _zaklep:
+        pot = _pot_kroga()
+        for dat in (pot, pot + "-stiki.json", os.path.join(_mapa_nastavitev(), "mesh-sosedje.json")):
+            try:
+                os.remove(dat)
+            except FileNotFoundError:
+                pass
+        _krog = None
+    _ob_spremembi()
 
 
 def sprejmi(tuj) -> bool:

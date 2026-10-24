@@ -17,7 +17,7 @@ import http.client
 import json
 import socket
 import ssl
-from typing import Optional, Tuple
+from typing import Callable, Optional, Tuple
 from urllib.parse import urlparse
 
 
@@ -46,14 +46,18 @@ def ovij(vticnik: socket.socket, gostitelj: str, pripeti: Optional[str]) -> Tupl
     NeujemanjeOdtisa.
     """
     s = _kontekst().wrap_socket(vticnik, server_hostname=gostitelj)
-    der = s.getpeercert(binary_form=True) or b""
-    videni = odtis_potrdila(der) if der else ""
-    if not videni or (pripeti is not None and not _isti(videni, pripeti)):
+    try:
+        der = s.getpeercert(binary_form=True) or b""
+        videni = odtis_potrdila(der) if der else ""
+        if not videni or (pripeti is not None and not _isti(videni, pripeti)):
+            raise NeujemanjeOdtisa("Safeer Link: Hub ima drugo potrdilo, kot je bilo ob seznanitvi.")
+    except BaseException:
+        # Vsaka napaka po rokovanju zapre TLS (surova vticnica je ze odklopljena v s) - naloga 45.
         try:
             s.close()
-        except Exception:
-            pass
-        raise NeujemanjeOdtisa("Safeer Link: Hub ima drugo potrdilo, kot je bilo ob seznanitvi.")
+        except OSError as e:
+            print("[Link TLS] zapiranje:", type(e).__name__, flush=True)
+        raise
     return s, videni
 
 
@@ -97,8 +101,8 @@ def javni_kljuc_potrdila(der: bytes) -> str:
         pass
     try:
         import subprocess
-        pem = subprocess.run(["openssl", "x509", "-inform", "DER", "-pubkey", "-noout"], input=der, check=True, capture_output=True).stdout
-        spki = subprocess.run(["openssl", "pkey", "-pubin", "-outform", "DER"], input=pem, check=True, capture_output=True).stdout
+        pem = subprocess.run(["openssl", "x509", "-inform", "DER", "-pubkey", "-noout"], input=der, check=True, capture_output=True, timeout=30).stdout
+        spki = subprocess.run(["openssl", "pkey", "-pubin", "-outform", "DER"], input=pem, check=True, capture_output=True, timeout=30).stdout
         return base64.b64encode(spki).decode("ascii")
     except Exception:
         return ""
@@ -136,6 +140,11 @@ def _isti(a: str, b: str) -> bool:
     return hmac.compare_digest(a.lower().encode(), b.lower().encode())
 
 
+def isti(a, b) -> bool:
+    """Odtis ali javni kljuc: oba neprazna in enaka, primerjava v stalnem casu (AGENTS.md)."""
+    return bool(a) and bool(b) and _isti(str(a), str(b))
+
+
 class RokovanjeVNiti:
     """Za http.server.ThreadingHTTPServer z ovitim TLS vticnikom (do_handshake_on_connect=False).
 
@@ -169,13 +178,16 @@ class RokovanjeVNiti:
 class _PripetaHttps(http.client.HTTPSConnection):
     """HTTPS povezava, ki po rokovanju preveri odtis Hubovega potrdila."""
 
-    def __init__(self, gostitelj: str, vrata: int, pripeti: Optional[str], timeout: float) -> None:
+    def __init__(self, gostitelj: str, vrata: int, pripeti: Optional[str], timeout: float,
+                 odpri: Optional[Callable[..., socket.socket]] = None) -> None:
+        """`odpri`: namesto socket.create_connection (isti podpis) - npr. core/gneca.odpri_oddajo za velike oddaje."""
         super().__init__(gostitelj, vrata, timeout=timeout, context=_kontekst())
         self.pripeti = pripeti
         self.videni = ""
+        self._odpri = odpri or socket.create_connection
 
     def connect(self) -> None:  # noqa: D401 - http.client API
-        surov = socket.create_connection((self.host, self.port), self.timeout)
+        surov = self._odpri((self.host, self.port), self.timeout)
         try:
             self.sock, self.videni = ovij(surov, self.host, self.pripeti)
         except Exception:

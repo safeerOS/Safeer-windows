@@ -140,24 +140,63 @@ def opis(ime_videa: str, pot_podnapisa: str, id_: str) -> dict:
 _CAS_SRT = re.compile(r"(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})")
 
 
-def _besedilo(podatki: bytes) -> str:
-    for kodiranje in ("utf-8-sig", "cp1250", "latin-1"):
-        try:
-            return podatki.decode(kodiranje)
-        except UnicodeDecodeError:
-            continue
-    return podatki.decode("utf-8", "replace")
+#: Jeziki, ki jih stari podnapisi pisejo v Windows-1250 (srednja Evropa) oziroma Windows-1251 (cirilica).
+_JEZIKI_1250 = {"sl", "hr", "sr", "bs", "cs", "sk", "pl", "hu", "ro"}
+_JEZIKI_1251 = {"ru", "bg", "uk", "mk", "be"}
+#: Bajti, ki so v Windows-1250 pogoste crke (š ž Š Ž ł ą ľ đ Đ ś ź ...), v Windows-1252 pa redki znaki zahodnih jezikov.
+_ZNAKI_1250 = frozenset(b"\x8a\x8e\x9a\x9e\xb3\xa3\xb9\xa5\xbe\xbc\xf0\xd0\x8c\x9c\x8f\x9f\x8d\x9d")
+#: Bajti, ki so v Windows-1252 pogoste crke zahodnih jezikov (à À ã å Å), v Windows-1250 pa redke (ŕ Ŕ ă ĺ Ĺ).
+_ZNAKI_1252 = frozenset(b"\xe0\xc0\xe3\xe5\xc5")
+
+
+def zaznaj_kodiranje(podatki: bytes, jezik: str = "") -> str:
+    """Kodiranje besedila podnapisov: BOM, UTF-8, sicer Windows-1250/1251/1252 po znacilnih bajtih in jeziku.
+
+    Slovenski podnapisi so pogosto v Windows-1250; kot Windows-1252 bi se č izpisal kot è (preverjeno s testom
+    tests/test_predvajalnik_moznosti.py)."""
+    if podatki.startswith(b"\xef\xbb\xbf"):
+        return "utf-8-sig"
+    if podatki.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return "utf-16"
+    try:
+        podatki.decode("utf-8")
+        return "utf-8"
+    except UnicodeDecodeError:
+        pass
+    jezik = str(jezik or "")[:2].lower()
+    visoki = [b for b in podatki if b >= 0x80]
+    crke = sum(1 for b in podatki if 0x41 <= b <= 0x5a or 0x61 <= b <= 0x7a) + len(visoki)
+    # Cirilica: skoraj vse crke so visoki bajti in stojijo skupaj (cele besede); v latinici so naglaseni znaki
+    # posamezni med crkami ASCII (»Grüße« ima le dva skupaj).
+    skupaj = sum(1 for i, b in enumerate(podatki) if b >= 0x80 and (
+        (i > 0 and podatki[i - 1] >= 0x80) or (i + 1 < len(podatki) and podatki[i + 1] >= 0x80)))
+    if jezik in _JEZIKI_1251 or (not jezik and crke and len(visoki) / crke > 0.3 and skupaj / len(visoki) > 0.6):
+        return "cp1251"
+    tocke = sum(1 for b in visoki if b in _ZNAKI_1250) - sum(1 for b in visoki if b in _ZNAKI_1252)
+    if jezik in _JEZIKI_1250:
+        tocke += 1
+    elif jezik:
+        tocke -= 1
+    return "cp1252" if tocke < 0 else "cp1250"
+
+
+def _besedilo(podatki: bytes, jezik: str = "") -> str:
+    kodiranje = zaznaj_kodiranje(podatki, jezik)
+    try:
+        return podatki.decode(kodiranje)
+    except UnicodeDecodeError:
+        return podatki.decode(kodiranje, "replace")
 
 
 def _srt_cas(u: int, m: int, s: int, ms: int) -> str:
     return "%02d:%02d:%02d,%03d" % (u, m, s, ms)
 
 
-def srt_pocisti(podatki: bytes) -> str:
+def srt_pocisti(podatki: bytes, jezik: str = "") -> str:
     """Popravljen SRT v UTF-8, kot ga zna prebrati vsak predvajalnik (VLC je strpen, GStreamer in ExoPlayer ne):
     zaporedne številke znova, brez presledkov za številko, časi z vejico, kodiranje (npr. Windows-1250) v UTF-8."""
     izid, n = [], 0
-    for blok in re.split(r"\n\s*\n", _besedilo(podatki).replace("\r\n", "\n").replace("\r", "\n").strip()):
+    for blok in re.split(r"\n\s*\n", _besedilo(podatki, jezik).replace("\r\n", "\n").replace("\r", "\n").strip()):
         deli = blok.split("\n")
         i = next((k for k, v in enumerate(deli) if "-->" in v), -1)
         if i < 0:
@@ -177,11 +216,13 @@ def srt_pocisti(podatki: bytes) -> str:
 
 
 def pocisti(ime: str, podatki: bytes) -> Tuple[str, str]:
-    """(končnica, besedilo UTF-8) za predvajalnik: SRT popravimo, druge zapise le prekodiramo."""
+    """(končnica, besedilo UTF-8) za predvajalnik: SRT popravimo, druge zapise le prekodiramo.
+    Jezik iz imena (``Film.sl.srt``) pomaga pri izbiri kodiranja starih datotek brez UTF-8."""
     k = os.path.splitext(ime)[1].lower()
+    namig = jezik("", os.path.basename(ime))[0]
     if k in (".ass", ".ssa", ".vtt"):
-        return k, _besedilo(podatki)
-    return ".srt", srt_pocisti(podatki)
+        return k, _besedilo(podatki, namig)
+    return ".srt", srt_pocisti(podatki, namig)
 
 
 def pripravi(uri: str, ime: str = "", mapa: str = "") -> str:
@@ -208,7 +249,7 @@ def pripravi(uri: str, ime: str = "", mapa: str = "") -> str:
         else:
             return uri
         koncnica, besedilo = pocisti(ime or u.path, podatki)
-        mapa = mapa or os.path.join(os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache")), "safeer-os", "podnapisi")
+        mapa = mapa or os.path.join((os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache")), "safeer-os", "podnapisi")
         os.makedirs(mapa, exist_ok=True)
         cilj = os.path.join(mapa, hashlib.sha256(uri.encode()).hexdigest()[:24] + koncnica)
         if koncnica == ".srt":
@@ -303,7 +344,7 @@ def v_vtt(ime: str, podatki: bytes) -> str:
 # ------------------------------------------------------------------ izbira uporabnika
 
 def _pot_nastavitev() -> str:
-    return os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")), "safeer-os", "podnapisi.json")
+    return os.path.join((os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")), "safeer-os", "podnapisi.json")
 
 
 def nalozi_nastavitve() -> dict:
@@ -345,23 +386,50 @@ def jezik_sistema() -> str:
 _IMENA = {
     "sl": {"sl": "slovenščina", "en": "angleščina", "de": "nemščina", "hr": "hrvaščina", "sr": "srbščina", "bs": "bosanščina",
            "it": "italijanščina", "fr": "francoščina", "es": "španščina", "pt": "portugalščina", "hu": "madžarščina",
-           "cs": "češčina", "pl": "poljščina", "ru": "ruščina", "nl": "nizozemščina", "mk": "makedonščina"},
+           "cs": "češčina", "pl": "poljščina", "ru": "ruščina", "nl": "nizozemščina", "mk": "makedonščina",
+           "ro": "romunščina", "he": "hebrejščina", "tr": "turščina", "el": "grščina", "ar": "arabščina", "et": "estonščina", "bg": "bolgarščina", "fa": "perzijščina", "ko": "korejščina", "sv": "švedščina", "fi": "finščina", "da": "danščina", "no": "norveščina", "zh": "kitajščina", "ja": "japonščina", "uk": "ukrajinščina", "sk": "slovaščina"},
     "en": {"sl": "Slovenian", "en": "English", "de": "German", "hr": "Croatian", "sr": "Serbian", "bs": "Bosnian",
            "it": "Italian", "fr": "French", "es": "Spanish", "pt": "Portuguese", "hu": "Hungarian", "cs": "Czech",
-           "pl": "Polish", "ru": "Russian", "nl": "Dutch", "mk": "Macedonian"},
+           "pl": "Polish", "ru": "Russian", "nl": "Dutch", "mk": "Macedonian",
+           "ro": "Romanian", "he": "Hebrew", "tr": "Turkish", "el": "Greek", "ar": "Arabic", "et": "Estonian", "bg": "Bulgarian", "fa": "Persian", "ko": "Korean", "sv": "Swedish", "fi": "Finnish", "da": "Danish", "no": "Norwegian", "zh": "Chinese", "ja": "Japanese", "uk": "Ukrainian", "sk": "Slovak"},
     "de": {"sl": "Slowenisch", "en": "Englisch", "de": "Deutsch", "hr": "Kroatisch", "sr": "Serbisch", "bs": "Bosnisch",
            "it": "Italienisch", "fr": "Französisch", "es": "Spanisch", "pt": "Portugiesisch", "hu": "Ungarisch",
-           "cs": "Tschechisch", "pl": "Polnisch", "ru": "Russisch", "nl": "Niederländisch", "mk": "Mazedonisch"},
+           "cs": "Tschechisch", "pl": "Polnisch", "ru": "Russisch", "nl": "Niederländisch", "mk": "Mazedonisch",
+           "ro": "Rumänisch", "he": "Hebräisch", "tr": "Türkisch", "el": "Griechisch", "ar": "Arabisch", "et": "Estnisch", "bg": "Bulgarisch", "fa": "Persisch", "ko": "Koreanisch", "sv": "Schwedisch", "fi": "Finnisch", "da": "Dänisch", "no": "Norwegisch", "zh": "Chinesisch", "ja": "Japanisch", "uk": "Ukrainisch", "sk": "Slowakisch"},
     "es": {"sl": "esloveno", "en": "inglés", "de": "alemán", "hr": "croata", "sr": "serbio", "bs": "bosnio", "it": "italiano",
            "fr": "francés", "es": "español", "pt": "portugués", "hu": "húngaro", "cs": "checo", "pl": "polaco", "ru": "ruso",
-           "nl": "neerlandés", "mk": "macedonio"},
+           "nl": "neerlandés", "mk": "macedonio",
+           "ro": "rumano", "he": "hebreo", "tr": "turco", "el": "griego", "ar": "árabe", "et": "estonio", "bg": "búlgaro", "fa": "persa", "ko": "coreano", "sv": "sueco", "fi": "finés", "da": "danés", "no": "noruego", "zh": "chino", "ja": "japonés", "uk": "ucraniano", "sk": "eslovaco"},
     "fr": {"sl": "slovène", "en": "anglais", "de": "allemand", "hr": "croate", "sr": "serbe", "bs": "bosnien", "it": "italien",
            "fr": "français", "es": "espagnol", "pt": "portugais", "hu": "hongrois", "cs": "tchèque", "pl": "polonais",
-           "ru": "russe", "nl": "néerlandais", "mk": "macédonien"},
+           "ru": "russe", "nl": "néerlandais", "mk": "macédonien",
+           "ro": "roumain", "he": "hébreu", "tr": "turc", "el": "grec", "ar": "arabe", "et": "estonien", "bg": "bulgare", "fa": "persan", "ko": "coréen", "sv": "suédois", "fi": "finnois", "da": "danois", "no": "norvégien", "zh": "chinois", "ja": "japonais", "uk": "ukrainien", "sk": "slovaque"},
     "it": {"sl": "sloveno", "en": "inglese", "de": "tedesco", "hr": "croato", "sr": "serbo", "bs": "bosniaco", "it": "italiano",
            "fr": "francese", "es": "spagnolo", "pt": "portoghese", "hu": "ungherese", "cs": "ceco", "pl": "polacco",
-           "ru": "russo", "nl": "olandese", "mk": "macedone"},
+           "ru": "russo", "nl": "olandese", "mk": "macedone",
+           "ro": "rumeno", "he": "ebraico", "tr": "turco", "el": "greco", "ar": "arabo", "et": "estone", "bg": "bulgaro", "fa": "persiano", "ko": "coreano", "sv": "svedese", "fi": "finlandese", "da": "danese", "no": "norvegese", "zh": "cinese", "ja": "giapponese", "uk": "ucraino", "sk": "slovacco"},
 }
+
+
+#: ISO 639-2 (oznake jezika v MKV, MP4 in na OpenSubtitles) -> ISO 639-1. Pozor: "slo" je tu slovascina (ISO),
+#: v imenih datotek (_JEZIKI) pa pogosto slovenscina - zato sta seznama locena.
+_ISO2 = {
+    "slv": "sl", "eng": "en", "ger": "de", "deu": "de", "hrv": "hr", "scc": "sr", "srp": "sr", "bos": "bs",
+    "ita": "it", "fre": "fr", "fra": "fr", "spa": "es", "spn": "es", "spl": "es", "ea": "es", "por": "pt", "pob": "pt",
+    "pom": "pt", "hun": "hu", "cze": "cs", "ces": "cs", "pol": "pl", "rus": "ru", "dut": "nl", "nld": "nl",
+    "mac": "mk", "mkd": "mk", "slo": "sk", "slk": "sk", "rum": "ro", "ron": "ro", "heb": "he", "tur": "tr",
+    "ell": "el", "gre": "el", "ara": "ar", "est": "et", "bul": "bg", "per": "fa", "fas": "fa", "kor": "ko",
+    "swe": "sv", "fin": "fi", "dan": "da", "nor": "no", "nob": "no", "nno": "no", "chi": "zh", "zho": "zh",
+    "zhs": "zh", "zht": "zh", "ze": "zh", "jpn": "ja", "ukr": "uk",
+}
+
+
+def iso1(koda: str) -> str:
+    """Oznaka jezika iz oznake toka ali spletnega vira (``slv``, ``en-US``, ``pt_BR``) -> ISO 639-1; neznano -> ""."""
+    k = str(koda or "").strip().lower().replace("_", "-").split("-")[0]
+    if len(k) == 2 and k.isalpha():
+        return k
+    return _ISO2.get(k, "")
 
 
 def ime_jezika(koda: str, jezik_vmesnika: str = "sl") -> str:

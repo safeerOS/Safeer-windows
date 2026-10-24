@@ -23,10 +23,11 @@ import hashlib
 import os
 import socket
 import struct
+import time
 import threading
 from typing import Callable, Deque, Optional
 
-from core import link_vticnik
+from core import link_pot, link_vticnik
 
 CAROBNI_NIZ = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
@@ -51,7 +52,7 @@ ZAPIRALNI_ROK_S = 0.3
 
 def sprejemni_kljuc(kljuc: str) -> str:
     """Vrednost glave Sec-WebSocket-Accept za dani Sec-WebSocket-Key."""
-    izvlecek = hashlib.sha1((kljuc.strip() + CAROBNI_NIZ).encode("ascii")).digest()
+    izvlecek = hashlib.sha1((kljuc.strip() + CAROBNI_NIZ).encode("ascii"), usedforsecurity=False).digest()
     return base64.b64encode(izvlecek).decode("ascii")
 
 
@@ -105,25 +106,78 @@ class Povezava:
         self.podatki: dict = {}          # kar si o napravi zapomni Hub (id, ime, vloga ...)
         self._vrsta: Deque[bytes] = collections.deque()
         self._bajtov = 0
+        #: vrsta sporocila -> okvir, ki se caka v vrsti in ga novejsi iste vrste nadomesti (poslji(nadomesti=)).
+        self._nadomestljivi: dict = {}
         self._zaklep = threading.Lock()
         self._ima_kaj = threading.Event()
         self._zaprta = False
         self._pisec: Optional[threading.Thread] = None
         self._medpomnilnik = b""
+        #: Meritev poti (core/link_pot.MeritevPoti); nastane ob prvem izmeri() - samo na sosednjih povezavah.
+        self.meritev = None
+        #: Sonda meritve, ki se caka v izhodni vrsti (natanko ta objekt), ali None. Ne steje v meje vrste.
+        self._sonda: Optional[bytes] = None
+        #: Kdaj je z druge strani nazadnje prisel kateri koli okvir (tudi ping/pong): po tem Hub loci zivo sosednjo
+        #: povezavo od polodprte (Hub.dodaj_soseda, Hub.zapri_tihe_sosede).
+        self.zadnji_prejem = time.monotonic()
 
-    # ------------------------------------------------------------------ pisanje
+    # ------------------------------------------------------------------ meritev poti
 
-    def poslji(self, besedilo: str) -> bool:
-        return self._v_vrsto(okvir(OPKODA_BESEDILO, besedilo.encode("utf-8")))
+    def izmeri(self) -> bool:
+        """Poslje sondo za meritev poti: ping s 12-bajtnim tovorom, ki ga druga stran vrne v pongu.
 
-    def _v_vrsto(self, surovo: bytes) -> bool:
+        Gre skozi isto izhodno vrsto kot sporocila; sonda, ki caka za njimi, ne steje v najmanjsi zamik.
+        Meritev povezave nikoli ne zapre: sonda ne steje v meje vrste (gluha naprava izpade natanko tako kot pred
+        meritvijo), v vrsti pa je najvec ena - dokler prejsnja caka, nove ne dodamo.
+        Pri prvem klicu nastane meritev (pot iz naslova druge strani: zanka = rele). Vrne False, ce je zaprta."""
+        if self._zaprta:
+            return False
+        meritev = self.meritev
+        if meritev is None:
+            meritev = self.meritev = link_pot.MeritevPoti(link_pot.pot_vticnika(self.naslov, self.vticnik))
+        meritev.preveri()
+        meritev.tcp(link_vticnik.tcp_info(self.vticnik))
         with self._zaklep:
             if self._zaprta:
                 return False
-            if len(self._vrsta) >= NAJVEC_V_VRSTI or self._bajtov + len(surovo) > NAJVEC_BAJTOV_V_VRSTI:
+            if self._sonda is not None:
+                return True                 # prejsnja sonda se caka za sporocili: ostane edina
+            surovo = okvir(OPKODA_PING, meritev.sonda(zaseden=bool(self._vrsta)))
+            self._sonda = surovo
+            self._vrsta.append(surovo)
+        self._ima_kaj.set()
+        return True
+
+    # ------------------------------------------------------------------ pisanje
+
+    #: poslji(..., nadomesti=) zna (core/link_spremembe.razposlji).
+    NADOMESTI = True
+
+    def poslji(self, besedilo: str, nadomesti: Optional[str] = None) -> bool:
+        """V izhodno vrsto. `nadomesti`: sporocilo te vrste, ki se caka v vrsti, se zamenja z novim (na istem mestu) -
+        za cel seznam naprav starejsemu odjemalcu, kjer novejsi seznam stari povsem nadomesti. Prej se je ob valu prijav
+        v vrsti nabralo vec celih seznamov (pri 400 napravah ~120 KB vsak) in odjemalec je izpadel (meja vrste)."""
+        return self._v_vrsto(okvir(OPKODA_BESEDILO, besedilo.encode("utf-8")), nadomesti)
+
+    def _v_vrsto(self, surovo: bytes, nadomesti: Optional[str] = None) -> bool:
+        with self._zaklep:
+            if self._zaprta:
+                return False
+            if nadomesti is not None:
+                star = self._nadomestljivi.get(nadomesti)
+                if star is not None:
+                    for i, okv in enumerate(self._vrsta):
+                        if okv is star:
+                            self._vrsta[i] = surovo
+                            self._bajtov += len(surovo) - len(star)
+                            self._nadomestljivi[nadomesti] = surovo
+                            return True
+            # Sonda meritve (izmeri) ne steje: zaradi meritve povezava ne izpade niti en okvir prej.
+            v_vrsti = len(self._vrsta) - (self._sonda is not None)
+            if v_vrsti >= NAJVEC_V_VRSTI or self._bajtov + len(surovo) > NAJVEC_BAJTOV_V_VRSTI:
                 # Naprava ne bere. Ce bi cakali nanjo, bi zadrzala vse ostale.
                 print("[SafeerHub] naprava ne bere (%s): v vrsti %d okvirjev, %d B - povezavo zapiram"
-                      % (self.podatki.get("id") or self.naslov, len(self._vrsta), self._bajtov), flush=True)
+                      % (self.podatki.get("id") or self.naslov, v_vrsti, self._bajtov), flush=True)
                 self._zaprta = True
                 self._ima_kaj.set()
                 try:
@@ -133,6 +187,8 @@ class Povezava:
                 return False
             self._vrsta.append(surovo)
             self._bajtov += len(surovo)
+            if nadomesti is not None:
+                self._nadomestljivi[nadomesti] = surovo
         self._ima_kaj.set()
         return True
 
@@ -146,7 +202,12 @@ class Povezava:
                         return
                     continue
                 surovo = self._vrsta.popleft()
-                self._bajtov -= len(surovo)
+                for k in [k for k, v in self._nadomestljivi.items() if v is surovo]:
+                    del self._nadomestljivi[k]          # ze na poti: naslednji iste vrste gre na konec vrste
+                if surovo is self._sonda:
+                    self._sonda = None      # sonda ni stela v _bajtov; naslednji izmeri() sme poslati novo
+                else:
+                    self._bajtov -= len(surovo)
             try:
                 self.vticnik.sendall(surovo)
             except Exception as e:  # noqa: BLE001
@@ -175,6 +236,10 @@ class Povezava:
             kos = self.vticnik.recv(65536)
             if not kos:
                 raise ConnectionError("povezava je zaprta")
+            # Vsak prejeti bajt pove, da druga stran zivi - tudi sredi dolgega okvirja. Prej je cas veljal samo ob
+            # glavi okvirja: sporocilo 1 MiB prek pocasnega releja (0,25 Mbit/s = 34 s) je Hub zaprl kot tiho
+            # sosednjo povezavo (TIHI_SOSED_S), ceprav so bajti ves cas prihajali (meritev 18. 10. 2026).
+            self.zadnji_prejem = time.monotonic()
             self._medpomnilnik += kos
         izhod, self._medpomnilnik = self._medpomnilnik[:koliko], self._medpomnilnik[koliko:]
         return izhod
@@ -183,7 +248,8 @@ class Povezava:
         """Bere, dokler povezava zivi. Konca s klicem ob_koncu."""
         self._pisec = threading.Thread(target=self._zanka_pisanja, daemon=True)
         self._pisec.start()
-        zbrano = b""
+        # bytearray: dodajanje kosa ne prepise vsega zbranega (bytes += bi bil pri mnogo majhnih okvirjih kvadraten).
+        zbrano = bytearray()
         zbrana_opkoda = -1
         tihih = 0
         try:
@@ -197,6 +263,7 @@ class Povezava:
                     self._v_vrsto(okvir(OPKODA_PING, b""))
                     continue
                 tihih = 0
+                self.zadnji_prejem = time.monotonic()
                 zakljucen = bool(prvi & 0x80)
                 opkoda = prvi & 0x0F
                 maskiran = bool(drugi & 0x80)
@@ -209,6 +276,10 @@ class Povezava:
                     dolzina = struct.unpack(">Q", self._preberi(8))[0]
                 if dolzina > NAJVECJE_SPOROCILO:
                     break
+                if opkoda == OPKODA_NADALJEVANJE and len(zbrano) + dolzina > NAJVECJE_SPOROCILO:
+                    # Meja velja za celo sporocilo, ne za okvir: 151 nezakljucenih okvirjev po 1 MiB je prej povecalo
+                    # pomnilnik procesa za 310 MiB (pregled 19. 10. 2026). Kot pri prevelikem okvirju: povezavo zapremo.
+                    break
                 maska = self._preberi(4)
                 telo = odmaskiraj(self._preberi(dolzina), maska)
                 if opkoda == OPKODA_ZAPRI:
@@ -217,10 +288,16 @@ class Povezava:
                     self._v_vrsto(okvir(OPKODA_PONG, telo))
                     continue
                 if opkoda == OPKODA_PONG:
+                    meritev = self.meritev
+                    if meritev is not None:
+                        try:
+                            meritev.pong(telo)
+                        except Exception:  # noqa: BLE001 - meritev ne sme ustaviti branja
+                            pass
                     continue
                 if opkoda != OPKODA_NADALJEVANJE:
                     zbrana_opkoda = opkoda
-                    zbrano = b""
+                    zbrano = bytearray()
                 zbrano += telo
                 if not zakljucen:
                     continue
@@ -228,13 +305,13 @@ class Povezava:
                     try:
                         sporocilo = zbrano.decode("utf-8")
                     except UnicodeDecodeError:
-                        zbrano = b""
+                        zbrano = bytearray()
                         continue
                     try:
                         self.ob_sporocilu(self, sporocilo)
                     except Exception:
                         pass
-                zbrano = b""
+                zbrano = bytearray()
         except Exception as e:  # noqa: BLE001
             if not self._zaprta:
                 self._zabelezi_konec("branje", e)
