@@ -1,6 +1,6 @@
 {
   "vir": "safeerOS/Safeer-linux",
-  "ref": "497904fc9d16f5c65e3bd059a355e377235b2322",
+  "ref": "b7bb1bc7d8c2a7a3dc33c05e9c8bd3f410b568d2",
   "skupne": [
     "core/bank_guard.py",
     "core/bookmarks_importer.py",
