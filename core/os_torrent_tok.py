@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import os
 import re
-import threading
 import time
 import urllib.parse
 from pathlib import Path
@@ -154,10 +153,14 @@ def _izberi(datoteke: List[dict], indeks: Optional[int], ime: str) -> Optional[d
 
 
 def pripravi(hash_: str, indeks: Optional[int] = None, ime: str = "", sledilniki: Iterable[str] = (),
-             torrenti=None, zmogljivost=None, mape_stanja=None, pot: Optional[str] = None) -> dict:
+             torrenti=None, zmogljivost=None, mape_stanja=None, pot: Optional[str] = None,
+             motor_napredek=None, motor_preklic=None) -> dict:
     """Tok za predvajalnik: {url, ime, indeks, velikost, podnapisi[, pot]} ali os_torrent.NapakaTorrenta(koda).
 
-    Kode: ni_magnet, ni_predvajljivo, ni_prostora, malo_pomnilnika in kode motorja (npr. metapodatkov ni)."""
+    Kode: ni_magnet, ni_predvajljivo, ni_prostora, malo_pomnilnika, motor (predvajalnega programa ni bilo mogoce
+    prenesti), preklicano (uporabnik je njegov prenos preklical) in kode motorja (npr. metapodatkov ni).
+
+    `motor_napredek(preneseno, vse)` in `motor_preklic` (threading.Event) veljata za enkratni prenos programa rqbit."""
     uri = magnet(hash_, ime, sledilniki)
     if not uri or os_torrent.razcleni_magnet(uri) is None:
         raise os_torrent.NapakaTorrenta("ni_magnet")
@@ -180,7 +183,12 @@ def pripravi(hash_: str, indeks: Optional[int] = None, ime: str = "", sledilniki
                 "velikost": os.path.getsize(obstojeca), "podnapisi": []}
     if torrenti is None:
         if not os_torrent.program_na_voljo():
-            os_torrent.prenesi_program()
+            try:
+                os_torrent.prenesi_program(motor_napredek, preklic=motor_preklic)
+            except os_torrent.NapakaTorrenta:
+                raise
+            except Exception as napaka:  # noqa: BLE001 - ni interneta, streznik ne odgovarja, SHA-256 se ne ujema
+                raise os_torrent.NapakaTorrenta("motor") from napaka
         torrenti = os_torrent.torrenti()
     torrenti.zazeni()
     opis = torrenti.preberi(uri)
@@ -231,27 +239,24 @@ _ZADNJA_PRIPRAVA = 0.0
 
 def zazeni_ciscenje(razmik_s: float = 3 * 3600, zamik_s: float = 240) -> None:
     """Safeer OS: prenose zaradi gledanja pregleda kmalu po zagonu in nato vsake tri ure. Ce je motor ugasnjen in
-    je kaj za odstraniti, ga za pregled prizge in potem spet ugasne (ne ostane v ozadju samo zaradi ciscenja)."""
+    je kaj za odstraniti, ga za pregled prizge in potem spet ugasne (ne ostane v ozadju samo zaradi ciscenja).
+    Hisno opravilo ure storitev (core/storitve_na_zahtevo): tece v kratki niti, ko je na vrsti - prej je nit za to
+    ves dan spala (izmerjeno 18. 10. 2026: ena nit manj v procesu Safeer OS)."""
     global _CISCENJE_TECE
     if _CISCENJE_TECE or not podprto():
         return
     _CISCENJE_TECE = True
 
-    def zanka() -> None:
-        time.sleep(zamik_s)
-        while True:
-            try:
-                raba = link_datoteke._beri_rabo(pot_rabe())
-                if any(time.time() - cas > RABA_VELJA_S for cas in raba.values()):
-                    t = os_torrent.torrenti()
-                    tekel = t.tece()
-                    zacetek = time.time()
-                    if not tekel:
-                        t.seznam()          # zazene motor le, ce ima shranjeno stanje
-                    pocisti(t)
-                    if not tekel and t.tece() and _ZADNJA_PRIPRAVA < zacetek:
-                        t.ustavi()
-            except Exception:  # noqa: BLE001
-                pass
-            time.sleep(razmik_s)
-    threading.Thread(target=zanka, name="safeer-ciscenje-gledanja", daemon=True).start()
+    def delo() -> None:
+        raba = link_datoteke._beri_rabo(pot_rabe())
+        if any(time.time() - cas > RABA_VELJA_S for cas in raba.values()):
+            t = os_torrent.torrenti()
+            tekel = t.tece()
+            zacetek = time.time()
+            if not tekel:
+                t.seznam()          # zazene motor le, ce ima shranjeno stanje
+            pocisti(t)
+            if not tekel and t.tece() and _ZADNJA_PRIPRAVA < zacetek:
+                t.ustavi_motor()    # naslovi tokov, ki jih ima predvajalnik, ostanejo veljavni
+    from core import storitve_na_zahtevo
+    storitve_na_zahtevo.opravilo("ciscenje_gledanja", delo, razmik_s, zamik_s)

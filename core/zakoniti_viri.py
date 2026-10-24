@@ -6,9 +6,10 @@ import re
 import threading
 import time
 import unicodedata
+import urllib.error
 import urllib.parse
 import urllib.request
-from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeout
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, as_completed, wait as _pocakaj_na, TimeoutError as FuturesTimeout
 from typing import Any
 
 # Vgrajeni PeerTube strezniki z urejeno vsebino. peertube.tv in peertube.uno sta 27. 9. 2026 med najbolj
@@ -23,6 +24,9 @@ _PEERTUBE_SUMLJIVO = re.compile(
 # Filmi v javni lasti z Internet Archive: samo vnosi z izrecno licenco javne lasti (CC PD / CC0).
 # Zbirka feature_films vsebuje tudi uporabniske nalozbe, zato brez licence ne prikazemo nicesar.
 ARCHIVE_PD_QUERY = "collection:feature_films AND mediatype:movies AND licenseurl:*publicdomain*"
+#: Filmske zvrsti Medijskega centra (id TMDB, kot v assets/os/os.js KAT_FILMSKI_ZANRI) -> predmet (subject) v Internet Archive.
+ARCHIVE_ZVRSTI = {"28": "action", "878": "science fiction", "35": "comedy", "27": "horror", "18": "drama",
+                  "53": "thriller", "16": "animation", "10749": "romance"}
 _ARCHIVE_SUMLJIVO = re.compile(r"torrent|\b(?:dvd|br|web|hd|bd)?rip\b|\bhdcam\b|\bx26[45]\b|\bxvid\b|\bcam\b", re.I)
 # Jezik vsebine kot koda ISO 639-1 (za filter jezikov); sprejme kode, angleska in slovenska imena.
 _JEZIKI = {
@@ -78,7 +82,14 @@ GLASBENE_ZVRSTI = {
 #: TV v zivo: samo uradni, javno objavljeni prenosi izdajateljev (preverjeno, da tecejo), brez posrednikov.
 #: (id, ime, jezik, url HLS ali "", uradna stran, samo za drzavo ("" = za vse), drzava izdajatelja)
 TV_V_ZIVO = (
-    ("rtvslo", "RTV SLO v živo", "slovenščina", "", "https://365.rtvslo.si/v-zivo", "SI", "SI"),
+    # RTV 365: vsak program na svoji strani (/programi/<kanal>); prejsnji /v-zivo je od jeseni 2026 stran 404
+    # (lastnik, 14. 10. 2026). Poti preverjene na 365.rtvslo.si/programi istega dne.
+    ("tvs1", "TV SLO 1", "slovenščina", "", "https://365.rtvslo.si/programi/tvs1", "SI", "SI"),
+    ("tvs2", "TV SLO 2", "slovenščina", "", "https://365.rtvslo.si/programi/tvs2", "SI", "SI"),
+    ("tvs3", "TV SLO 3", "slovenščina", "", "https://365.rtvslo.si/programi/tvs3", "SI", "SI"),
+    ("mmctv", "MMC TV", "slovenščina", "", "https://365.rtvslo.si/programi/mmctv", "SI", "SI"),
+    ("tvkp", "TV Koper", "slovenščina", "", "https://365.rtvslo.si/programi/tvkp", "SI", "SI"),
+    ("tvmb", "TV Maribor", "slovenščina", "", "https://365.rtvslo.si/programi/tvmb", "SI", "SI"),
     ("dw-en", "DW News", "angleščina", "https://dwamdstream102.akamaized.net/hls/live/2015525/dwstream102/index.m3u8", "", "", "DE"),
     ("dw-de", "DW Deutsch", "nemščina", "https://dwamdstream103.akamaized.net/hls/live/2015526/dwstream103/index.m3u8", "", "", "DE"),
     ("dw-es", "DW Español", "španščina", "https://dwamdstream104.akamaized.net/hls/live/2015530/dwstream104/index.m3u8", "", "", "DE"),
@@ -92,6 +103,71 @@ TV_V_ZIVO = (
     ("tagesschau24", "tagesschau24 (ARD)", "nemščina", "https://tagesschau.akamaized.net/hls/live/2020115/tagesschau/tagesschau_1/master.m3u8", "", "", "DE"),
     ("redbull", "Red Bull TV", "angleščina", "https://rbmn-live.akamaized.net/hls/live/590964/BoRB-AT/master.m3u8", "", "", "AT"),
 )
+
+
+#: Domaca stran izdajatelja za logotip kanala (ikone_strani: neposredno s strani, shranjeno v predpomnilnik).
+#: Lastnik 14. 10. 2026: pri TV v zivo so manjkale ikone.
+DOMACE_STRANI = {"SI": "https://www.rtvslo.si/", "dw": "https://www.dw.com/", "f24": "https://www.france24.com/",
+                 "aje": "https://www.aljazeera.com/", "trt-world": "https://www.trtworld.com/",
+                 "cbs-news": "https://www.cbsnews.com/", "arirang": "https://www.arirang.com/",
+                 "tagesschau24": "https://www.tagesschau.de/", "redbull": "https://www.redbull.com/"}
+
+
+def domaca_stran(kljuc: str, izvor: str) -> str:
+    if izvor == "SI":
+        return DOMACE_STRANI["SI"]
+    return DOMACE_STRANI.get(kljuc) or DOMACE_STRANI.get(kljuc.split("-")[0], "")
+
+
+def logotip(kljuc: str, izvor: str, prenesi: bool = True) -> str:
+    """Logotip kanala (data URL) iz predpomnilnika; manjkajocega prenese v ozadju (naslednji izris ga pokaze)."""
+    from core import ikone_strani
+    stran = domaca_stran(kljuc, izvor)
+    if not stran:
+        return ""
+    ikona = ikone_strani.iz_predpomnilnika(stran)
+    if ikona or not prenesi:
+        return ikona
+    if _logotip_zacni(stran):
+        threading.Thread(target=_logotip_prenesi, args=(stran,), daemon=True).start()
+    return ""
+
+
+#: Logotipi, ki se prav zdaj prenasajo (stran -> True), in kdaj je prenos nazadnje spodletel (stran -> time.monotonic()).
+_LOGOTIPI_V_TEKU: set = set()
+_LOGOTIPI_NEUSPELI: dict = {}
+_LOGOTIPI_ZAKLEP = threading.Lock()
+#: Spodleteli logotip poskusimo znova sele cez 10 min: prej ga tv_v_zivo() ne caka (pregled 14. 10. 2026: logotip,
+#: ki ni uspel, se do ponovnega zagona ni vec poskusil, katalog pa je ob vsakem izrisu cakal nanj do 4 s).
+LOGOTIP_ZNOVA_S = 600.0
+
+
+def _logotip_zacni(stran: str) -> bool:
+    """Ali naj ta klic prenese logotip: ni ze v teku in ni nedavno spodletel (oznaci ga kot v teku)."""
+    with _LOGOTIPI_ZAKLEP:
+        neuspel = _LOGOTIPI_NEUSPELI.get(stran)
+        if stran in _LOGOTIPI_V_TEKU or (neuspel is not None and time.monotonic() - neuspel < LOGOTIP_ZNOVA_S):
+            return False
+        _LOGOTIPI_V_TEKU.add(stran)
+        return True
+
+
+def _logotip_prenesi(stran: str) -> None:
+    from core import ikone_strani
+    i = None
+    try:
+        i = ikone_strani.ikona_strani(stran)
+        if i:
+            ikone_strani.shrani(stran, i)
+    except Exception:  # noqa: BLE001 - logotip je okras; brez njega kartica pokaze ime
+        i = None
+    finally:
+        with _LOGOTIPI_ZAKLEP:
+            _LOGOTIPI_V_TEKU.discard(stran)
+            if i:
+                _LOGOTIPI_NEUSPELI.pop(stran, None)
+            else:
+                _LOGOTIPI_NEUSPELI[stran] = time.monotonic()
 
 
 DRZAVE = {"SI": "Slovenija", "DE": "Nemčija", "FR": "Francija", "QA": "Katar", "TR": "Turčija", "US": "ZDA",
@@ -114,14 +190,31 @@ def tv_drzave(drzava_uporabnika: str = "", moji: bool = False) -> list[dict]:
     return izid
 
 
+def pripravi_logotipe(cas: float = 4.0) -> None:
+    """Manjkajoce logotipe kanalov prenese hkrati (enkrat; nato so v predpomnilniku na disku). Katalog TV v zivo
+    se namrec shrani - logotip, prenesen sele po izrisu, bi se pokazal sele ob naslednji osvezitvi (10 min)."""
+    from concurrent.futures import ThreadPoolExecutor, wait
+    from core import ikone_strani
+    manjkajo = sorted({domaca_stran(k, izvor) for k, _i, _j, _u, _s, _samo, izvor in TV_V_ZIVO} - {""})
+    # V teku ali nedavno spodleteli ne cakamo (_logotip_zacni): tv_v_zivo() caka samo na prvi poskus.
+    manjkajo = [s for s in manjkajo if not ikone_strani.iz_predpomnilnika(s) and _logotip_zacni(s)]
+    if not manjkajo:
+        return
+    pool = ThreadPoolExecutor(max_workers=8)
+    wait([pool.submit(_logotip_prenesi, s) for s in manjkajo], timeout=cas)
+    pool.shutdown(wait=False)
+
+
 def tv_v_zivo(drzava: str = "") -> list[dict]:
     """Uradni prenosi v zivo; domaci (npr. RTV SLO) samo za uporabnike iz te drzave."""
+    pripravi_logotipe()
     izid = []
     for kljuc, ime, jezik, url, stran, samo, izvor in TV_V_ZIVO:
         if samo and samo != (drzava or "").upper():
             continue
         vnos = {"id": "tv:" + kljuc, "naslov": ime, "vrsta": "tv-v-zivo", "vir": ime, "drzava": izvor,
-                "opis": "Uradni prenos v živo · " + DRZAVE.get(izvor, izvor) + " · " + jezik, "slika": "", "jezik": jezik_koda(jezik) or jezik}
+                "opis": "Uradni prenos v živo · " + DRZAVE.get(izvor, izvor) + " · " + jezik,
+                "slika": logotip(kljuc, izvor), "jezik": jezik_koda(jezik) or jezik}
         if url:
             vnos.update(url=url, mime="application/vnd.apple.mpegurl")
         else:
@@ -136,6 +229,12 @@ def zvrsti_za(vrsta: str) -> list[dict]:
     return [{"id": kljuc, "ime": v[0]} for kljuc, v in GLASBENE_ZVRSTI.items() if v[indeks]]
 _TTL = 30 * 60
 _TIMEOUT = 10
+#: Seznam videov enega streznika PeerTube: zdrav odgovori v manj kot sekundi, na pocasnega katalog ne caka dlje.
+_TIMEOUT_SEZNAM = 5
+#: Streznik, ki pocasi odpove, toliko casa preskakujemo (uporabnik nanj ne caka); nato ga vprasamo v ozadju.
+_PREMOR_STREZNIKA = 5 * 60
+#: Ko prvi streznik odgovori z videi, imajo ostali se toliko sekund; pozni odgovori ostanejo za naslednji pogled.
+_PO_PRVEM_S = 1.5
 
 
 def _norm(value: Any) -> str:
@@ -151,16 +250,63 @@ class ZakonitiViri:
         self._clock = clock
         self._cache: dict[str, tuple[float, Any]] = {}
         self._lock = threading.RLock()
+        #: Streznik -> do kdaj ga preskakujemo, ker ni odgovoril (uporabnik nanj ne caka znova in znova).
+        self._nedosegljivi: dict[str, float] = {}
+        self._preverjam: set[str] = set()
+        #: Napaka, na katero smo cakali vsaj toliko sekund, steje kot »streznik ne odgovarja«.
+        self._pocasi_s = 3.0
 
-    def _json(self, url: str) -> Any:
+    def _json(self, url: str, timeout: float = _TIMEOUT) -> Any:
+        host = (urllib.parse.urlsplit(url).hostname or "").lower()
+        with self._lock:
+            do = self._nedosegljivi.get(host)
+        if do is not None:
+            if self._clock() >= do:
+                self._preveri_v_ozadju(host, url, timeout)
+            raise OSError("streznik %s trenutno ne odgovarja" % host)
+        return self._zahtevaj(url, timeout, host)
+
+    def _zahtevaj(self, url: str, timeout: float, host: str) -> Any:
         request = urllib.request.Request(url, headers={
             "User-Agent": "SafeerOS/1.0 (+https://safeer.si)",
             "Accept": "application/json",
         })
-        with self._opener(request, timeout=_TIMEOUT) as response:
-            if getattr(response, "status", 200) != 200:
-                raise OSError("HTTP %s" % response.status)
-            return json.loads(response.read(5 * 1024 * 1024 + 1).decode("utf-8"))
+        zacetek = time.monotonic()
+        try:
+            with self._opener(request, timeout=timeout) as response:
+                status = getattr(response, "status", 200)
+                telo = response.read(5 * 1024 * 1024 + 1) if status == 200 else b""
+        except urllib.error.HTTPError:
+            with self._lock:
+                self._nedosegljivi.pop(host, None)      # streznik je odgovoril (z napako): ni nedosegljiv
+            raise
+        except OSError:
+            if time.monotonic() - zacetek >= self._pocasi_s:
+                with self._lock:
+                    self._nedosegljivi[host] = self._clock() + _PREMOR_STREZNIKA
+            raise
+        with self._lock:
+            self._nedosegljivi.pop(host, None)
+        if status != 200:
+            raise OSError("HTTP %s" % status)
+        return json.loads(telo.decode("utf-8"))
+
+    def _preveri_v_ozadju(self, host: str, url: str, timeout: float) -> None:
+        """Premor streznika je potekel: vprasamo ga znova, a ne v klicu, na katerega caka uporabnik."""
+        with self._lock:
+            if host in self._preverjam:
+                return
+            self._preverjam.add(host)
+
+        def delo() -> None:
+            try:
+                self._zahtevaj(url, timeout, host)      # uspeh streznik vrne v rabo, pocasen neuspeh premor podaljsa
+            except Exception:  # noqa: BLE001
+                pass
+            finally:
+                with self._lock:
+                    self._preverjam.discard(host)
+        threading.Thread(target=delo, name="safeer-vir-preverjanje", daemon=True).start()
 
     def _cached(self, key: str, fn):
         now = self._clock()
@@ -177,7 +323,8 @@ class ZakonitiViri:
         return value
 
     def _video_hosts(self, configured: list[str]) -> list[str]:
-        hosts = list(PEERTUBE_INSTANCES)
+        # Lastnik, 11. 10. 2026: PeerTube ni vgrajen vir - samo strezniki PeerTube, ki jih je dodal uporabnik.
+        hosts: list[str] = []
         candidates = []
         for value in configured:
             try:
@@ -239,63 +386,75 @@ class ZakonitiViri:
     def _peer_rows(self, host: str, endpoint: str, category: str) -> list[dict]:
         key = "pt:%s:%s" % (host, endpoint)
         def fetch():
-            data = self._json("https://%s%s" % (host, endpoint))
+            data = self._json("https://%s%s" % (host, endpoint), _TIMEOUT_SEZNAM)
             rows = data.get("data", []) if isinstance(data, dict) else []
             return [item for row in rows if (item := self._peertube_video(row, host, category))]
         return self._cached(key, fetch)
 
-    def _search_video(self, query: str, hosts: list[str]) -> list[dict]:
+    def _search_video(self, query: str, hosts: list[str], jezik: str = "") -> list[dict]:
         if not query:
             return []
-        encoded = urllib.parse.urlencode({"search": query, "sort": "-match", "nsfw": "false", "count": 30})
+        iskanje = {"search": query, "sort": "-match", "nsfw": "false", "count": 30}
+        if jezik:
+            # PeerTube vrne videe v tem jeziku IN videe s podnapisi v njem; tocno izbere katalog (os_media).
+            iskanje["languageOneOf"] = jezik
+        encoded = urllib.parse.urlencode(iskanje)
+        if not hosts:
+            # Lastnik, 11. 10. 2026: PeerTube ni vgrajen - brez streznikov, ki jih je dodal uporabnik, ga ne iscemo
+            # (tudi ne prek globalnega indeksa sepiasearch.org).
+            return []
         def fetch():
             result = []
-            try:
-                data = self._json("https://sepiasearch.org/api/v1/search/videos?" + encoded)
-                rows = data.get("data", []) if isinstance(data, dict) else []
-                for row in rows:
-                    host = str(row.get("host") or urllib.parse.urlsplit(str(row.get("url") or "")).hostname or "")
-                    if not host and row.get("channel"):
-                        host = str(row["channel"].get("host") or "")
-                    item = self._peertube_video(row, host, "Iskanje")
-                    if item:
-                        result.append(item)
-            except Exception:
-                pass
-            if not result:
-                def server_search(host):
-                    path = "/api/v1/search/videos?" + urllib.parse.urlencode({"search": query, "sort": "-match", "nsfw": "false", "count": 20})
-                    return self._peer_rows(host, path, "Iskanje")
-                with ThreadPoolExecutor(max_workers=min(8, len(hosts))) as pool:
-                    futures = [pool.submit(server_search, host) for host in hosts]
-                    try:
-                        for future in as_completed(futures, timeout=_TIMEOUT):
-                            rows = future.result()
-                            if rows:
-                                result.extend(rows)
-                                break
-                    except FuturesTimeout:
-                        pass
+            def server_search(host):
+                path = "/api/v1/search/videos?" + urllib.parse.urlencode(dict(iskanje, count=20))
+                return self._peer_rows(host, path, "Iskanje")
+            with ThreadPoolExecutor(max_workers=min(8, len(hosts))) as pool:
+                futures = [pool.submit(server_search, host) for host in hosts]
+                try:
+                    for future in as_completed(futures, timeout=_TIMEOUT):
+                        try:
+                            result.extend(future.result() or [])
+                        except Exception:
+                            pass
+                except FuturesTimeout:
+                    pass
             terms = [word for word in _norm(query).split() if len(word) > 1]
             if terms:
                 result = [item for item in result if all(term in _norm(" ".join((item["naslov"], item["izvajalec"], item["opis"]))) for term in terms)]
             return result[:40]
-        return self._cached("pt-search:" + query.casefold(), fetch)
+        return self._cached("pt-search:" + query.casefold() + ("|" + jezik if jezik else ""), fetch)
 
-    def videos(self, query: str = "", configured_hosts: list[str] | None = None) -> list[dict]:
+    def videos(self, query: str = "", configured_hosts: list[str] | None = None, jezik: str = "") -> list[dict]:
+        """`jezik` (koda ISO 639-1): izbran jezik vsebine - strezniki ze sami izberejo videe v njem."""
+        jezik = jezik if re.fullmatch(r"[a-z]{2}", jezik or "") else ""
         hosts = self._video_hosts(configured_hosts or [])
         if query:
-            return self._search_video(query, hosts)
+            return self._search_video(query, hosts, jezik)
         result = []
-        routes = (("trending", "/api/v1/videos?sort=-trending&count=18&nsfw=false&isLocal=true"),
-                  ("Najbolj gledani", "/api/v1/videos?sort=-views&count=18&nsfw=false&isLocal=true"),
-                  ("Nedavno", "/api/v1/videos?sort=-publishedAt&count=18&nsfw=false&isLocal=true"))
+        # Izbran jezik: izbor je ozji, zato vprasamo za vec zadetkov.
+        stevilo = "40&languageOneOf=" + jezik if jezik else "18"
+        routes = (("trending", "/api/v1/videos?sort=-trending&count=%s&nsfw=false&isLocal=true" % stevilo),
+                  ("Najbolj gledani", "/api/v1/videos?sort=-views&count=%s&nsfw=false&isLocal=true" % stevilo),
+                  ("Nedavno", "/api/v1/videos?sort=-publishedAt&count=%s&nsfw=false&isLocal=true" % stevilo))
         jobs = [(host, label, path) for label, path in routes for host in hosts]
-        with ThreadPoolExecutor(max_workers=min(15, len(jobs))) as pool:
-            futures = [pool.submit(self._peer_rows, host, path, label) for host, label, path in jobs]
-            for future in futures:
-                try: result.extend(future.result())
-                except Exception: pass
+        pool = ThreadPoolExecutor(max_workers=min(15, len(jobs)))
+        futures = [pool.submit(self._peer_rows, host, path, label) for host, label, path in jobs]
+        # Na zadnji, pocasni streznik katalog ne caka: po prvem odgovoru z videi imajo ostali se _PO_PRVEM_S. Kar pride
+        # pozneje, ostane v predpomnilniku za naslednji pogled. Dokler ni odgovoril nihce, cakamo vse (do roka zahteve).
+        cakajo, rok, konec = set(futures), None, time.monotonic() + _TIMEOUT_SEZNAM + 1
+        while cakajo:
+            do = konec if rok is None else min(konec, rok)
+            koncani, cakajo = _pocakaj_na(cakajo, timeout=max(0.0, do - time.monotonic()), return_when=FIRST_COMPLETED)
+            if not koncani:
+                break
+            if rok is None and any(f.exception() is None and f.result() for f in koncani):
+                rok = time.monotonic() + _PO_PRVEM_S
+        pool.shutdown(wait=False)
+        for future in futures:
+            if not future.done():
+                continue
+            try: result.extend(future.result())
+            except Exception: pass
         unique = {}
         for item in result:
             unique.setdefault(item["id"], item)
@@ -351,60 +510,122 @@ class ZakonitiViri:
 
     @staticmethod
     def _track(row: dict) -> dict:
-        return {"id": "jamendo:" + str(row.get("id")), "naslov": row.get("name", ""), "vrsta": "glasba",
+        vnos = {"id": "jamendo:" + str(row.get("id")), "naslov": row.get("name", ""), "vrsta": "glasba",
                 "izvajalec": row.get("artist_name", ""), "url": row.get("audio", ""),
                 "slika": row.get("image") or row.get("album_image", ""),
                 "zunanja_povezava": row.get("shorturl") or row.get("shareurl", ""),
                 "vir": "Jamendo", "opis": "Jamendo · " + str(row.get("artist_name", ""))}
+        # Jezik besedila skladbe (musicinfo); instrumentalne ga nimajo.
+        info = row.get("musicinfo") if isinstance(row.get("musicinfo"), dict) else {}
+        jezik = str(info.get("lang") or "")
+        if re.fullmatch(r"[a-z]{2}", jezik):
+            vnos["jezik"] = jezik
+        return vnos
 
-    def music(self, query: str = "", zvrst: str = "") -> list[dict]:
+    def music(self, query: str = "", zvrst: str = "", jezik: str = "") -> list[dict]:
+        """`jezik` (koda ISO 639-1): izbran jezik vsebine - Jamendo izbere skladbe z besedilom v njem."""
         oznaka = GLASBENE_ZVRSTI.get(zvrst, ("", "", ""))[1]
         if zvrst and not oznaka:
             return []
+        dodatno = {"include": "musicinfo"}
+        if re.fullmatch(r"[a-z]{2}", jezik or ""):
+            dodatno["lang"] = jezik
         if oznaka and not query:
             # Jamendo pri nekaterih oznakah obcasno vrne prazno z `tags`; takrat poskusimo `fuzzytags`.
-            zadetki = self._jamendo("tracks/", {"order": "popularity_total", "limit": 48, "audioformat": "mp32", "tags": oznaka})
-            return zadetki or self._jamendo("tracks/", {"order": "popularity_total", "limit": 48, "audioformat": "mp32",
-                                                         "fuzzytags": oznaka})
+            zadetki = self._jamendo("tracks/", dict({"order": "popularity_total", "limit": 48, "audioformat": "mp32",
+                                                     "tags": oznaka}, **dodatno))
+            return zadetki or self._jamendo("tracks/", dict({"order": "popularity_total", "limit": 48, "audioformat": "mp32",
+                                                              "fuzzytags": oznaka}, **dodatno))
         if not query:
-            return self._jamendo("tracks/", {"order": "popularity_total", "limit": 36, "audioformat": "mp32"})
+            return self._jamendo("tracks/", dict({"order": "popularity_total", "limit": 36, "audioformat": "mp32"}, **dodatno))
         def fetch():
             artists = self._json("https://api.jamendo.com/v3.0/artists/?" + urllib.parse.urlencode({
                 "namesearch": query, "order": "popularity_total", "limit": 8,
                 "client_id": JAMENDO_CLIENT_ID, "format": "json"}))
             selected = artists.get("results", [])[:6]
             with ThreadPoolExecutor(max_workers=max(1, len(selected))) as pool:
-                return [track for rows in pool.map(lambda artist: self._jamendo("tracks/", {
+                return [track for rows in pool.map(lambda artist: self._jamendo("tracks/", dict({
                     "artist_id": artist.get("id"), "order": "popularity_total", "limit": 8,
-                    "audioformat": "mp32"}), selected) for track in rows]
-        return self._cached("jam-search:" + query.casefold(), fetch)
+                    "audioformat": "mp32"}, **dodatno)), selected) for track in rows]
+        return self._cached("jam-search:" + query.casefold() + ("|" + dodatno["lang"] if "lang" in dodatno else ""), fetch)
 
-    def radio(self, query: str = "", zvrst: str = "") -> list[dict]:
+    def _radio_browser(self, pot: str, params: dict) -> Any:
+        # Radio Browser ima vec zrcal; ce eno ne odgovori (11. 10. 2026: de1 vracal 503), poskusimo naslednje.
+        napaka = None
+        for streznik in ("de1", "de2", "fi1", "nl1", "at1"):
+            try:
+                return self._json("https://%s.api.radio-browser.info/json/%s?%s"
+                                  % (streznik, pot, urllib.parse.urlencode(params)), 4)
+            except Exception as e:  # noqa: BLE001
+                napaka = e
+        raise napaka or OSError("Radio Browser")
+
+    def radio_drzave(self) -> list[dict]:
+        """Drzave z delujocimi postajami v Radio Browserju ({"id": "SI", "postaj": 120}), najvec postaj najprej.
+        Drzave z manj kot 3 postajami izpustimo: izbira, ki da prazen ali skoraj prazen seznam, uporabniku ne koristi."""
+        def fetch():
+            rows = self._radio_browser("countries", {"order": "stationcount", "reverse": "true", "hidebroken": "true"})
+            izid, videne = [], set()
+            for row in rows if isinstance(rows, list) else []:
+                koda = str((row or {}).get("iso_3166_1") or "").upper() if isinstance(row, dict) else ""
+                try:
+                    stevilo = int(row.get("stationcount") or 0)
+                except (TypeError, ValueError):
+                    stevilo = 0
+                if re.fullmatch(r"[A-Z]{2}", koda) and stevilo >= 3 and koda not in videne:
+                    videne.add(koda); izid.append({"id": koda, "postaj": stevilo})
+            return izid
+        return self._cached("radio-drzave", fetch)
+
+    def radio(self, query: str = "", zvrst: str = "", drzava: str = "") -> list[dict]:
+        """`drzava` (ISO 3166-1 alpha-2, npr. "SI"): samo postaje iz te drzave (lastnik, 15. 10. 2026)."""
         ime, _, oznaka = GLASBENE_ZVRSTI.get(zvrst, ("", "", ""))
         if zvrst and not oznaka:
             return []
+        drzava = (drzava or "").upper()
+        if not re.fullmatch(r"[A-Z]{2}", drzava):
+            drzava = ""
         if oznaka:
             tags = [(oznaka, ime)]
+        elif drzava:
+            # Izbrana drzava: vse iskanje in vse skupine samo v njej; najprej najbolj poslusane, nato po zvrsteh.
+            tags = ([("ime:" + query, "Iskanje"), (query, "Iskanje")] if query else
+                    [("", "Najbolj poslušane")] + [(tag, tag.title()) for tag in RADIO_TAGS])
         else:
-            tags = [(query, "Iskanje")] if query else [("SI", "Slovenija")] + [(tag, tag.title()) for tag in RADIO_TAGS] + [("", "Najbolj poslušane")]
+            # Iskanje: najprej postaje s tem imenom v Sloveniji (»rock radio« = Rock Radio iz Slovenije), nato po svetu,
+            # nato postaje s to oznako (zvrstjo). Prej je iskalo samo po oznaki - »rock radio« ni nasel nicesar.
+            tags = ([("ime:SI:" + query, "Iskanje"), ("ime:" + query, "Iskanje"), (query, "Iskanje")] if query else
+                    [("SI", "Slovenija")] + [(tag, tag.title()) for tag in RADIO_TAGS] + [("", "Najbolj poslušane")])
         def load_tag(entry):
             value, label = entry
             params = {"order": "clickcount", "reverse": "true", "hidebroken": "true",
-                      "limit": "60" if oznaka else "30", "is_https": "true"}
+                      "limit": "60" if (oznaka or (drzava and not value)) else "30", "is_https": "true"}
             if value == "SI": params["countrycode"] = "SI"
+            elif value.startswith("ime:SI:"): params["name"] = value[len("ime:SI:"):]; params["countrycode"] = "SI"
+            elif value.startswith("ime:"): params["name"] = value[len("ime:"):]
             elif value: params["tag"] = value
-            key = "radio:" + label + ":" + value
+            if drzava:
+                params["countrycode"] = drzava
+            key = "radio:" + label + ":" + value + (":" + drzava if drzava else "")
             def fetch(params=params, label=label):
-                url = "https://de1.api.radio-browser.info/json/stations/search?" + urllib.parse.urlencode(params)
-                rows = self._json(url)
+                rows = self._radio_browser("stations/search", params)
                 return [self._station(row, label) for row in rows if isinstance(row, dict)]
             return self._cached(key, fetch)
         with ThreadPoolExecutor(max_workers=len(tags)) as pool:
             result = [station for rows in pool.map(load_tag, tags) for station in rows]
-        if not zvrst:
+        # TuneIn ne pove drzave postaje: pri izbrani drzavi bi pomesal postaje od drugod.
+        if not zvrst and not drzava:
             # TuneIn (neuradni OPML vmesnik; uporabo je izrecno dovolil lastnik izdelka): pri iskanju zadetki,
             # sicer postaje v blizini. Ce vmesnik ne odgovori, se tiho izpusti.
             try:
+                if query:
+                    # Kot pri spletnem iskalniku: najprej domace postaje (TuneIn »v blizini« po IP naslovu), ki se z
+                    # iskanim ujemajo - »rock radio« pri lastniku najprej Rock Radio Si in Radio 1 Rock, ne nemske.
+                    besede = [b for b in _norm(query).split() if len(b) > 1]
+                    blizu = [p for p in self.tunein("") if besede and all(b in _norm(p.get("naslov", "")) for b in besede)]
+                    fraza = _norm(query).strip()
+                    blizu.sort(key=lambda p: 0 if fraza in _norm(p.get("naslov", "")) else 1)
+                    result = blizu + result
                 result += self.tunein(query)
             except Exception:
                 pass
@@ -458,8 +679,85 @@ class ZakonitiViri:
                         else:
                             vrste.append(el)
             zberi((self._json(url) or {}).get("body"))
-            return [v for v in (self._tunein_vnos(r, skupina) for r in vrste) if v][:40]
+            # V blizini cel seznam (po abecedi; Rock Radio Si je bil pri lastniku 80. in ga omejitev 40 ni pustila).
+            return [v for v in (self._tunein_vnos(r, skupina) for r in vrste) if v][:40 if query else 150]
         return self._cached(kljuc, fetch)
+
+    # ------------------------------------------------------------------ tokovi postaje
+    # Lastnik, 11. 10. 2026: postaja z vec programi (Rock Radio: Best Ballads, Hard & Heavy, Classics) - uporabnik
+    # izbere program kot na strani postaje. Tokove najdemo na domaci strani postaje (povezave na tokove), ime toka pove
+    # streznik sam (glava icy-name). Nic ni vpisano na roko za posamezno postajo.
+    _TOK_VZOREC = re.compile(r"""https://[^\s"'<>\\]{6,400}""")
+    _TOK_NAMIG = re.compile(r"stream|live|icecast|shoutcast|proxy|\.mp3|\.aac|\.m3u8|\.ogg|/radio|:8\d{3}/", re.I)
+    _TOK_NE = re.compile(r"\.(?:jpe?g|png|gif|webp|svg|css|js|ico|woff2?|ttf|html?)(?:[?#]|$)|facebook|instagram|twitter|x\.com|youtube|google|datocms", re.I)
+
+    def domaca_stran_postaje(self, item: dict) -> str:
+        stran = str(item.get("domaca_stran") or "")
+        gid = str(item.get("tunein_id") or "")
+        if not stran and re.fullmatch(r"s\d{1,12}", gid):
+            try:
+                opis = self._json(self.TUNEIN + "/Describe.ashx?" + urllib.parse.urlencode({"id": gid, "render": "json"}), 6)
+                stran = str(((opis or {}).get("body") or [{}])[0].get("url") or "")
+            except Exception:
+                stran = ""
+        if stran.startswith("http://"):
+            stran = "https://" + stran[len("http://"):]
+        return stran if stran.startswith("https://") else ""
+
+    def _glava_toka(self, url: str) -> dict | None:
+        """Ali je naslov zvocni tok: preberemo samo glavo (icy-name, vrsta, bitna hitrost), telesa ne."""
+        host = (urllib.parse.urlsplit(url).hostname or "").lower()
+        if not host or re.fullmatch(r"[\d.]+|\[?[0-9a-f]*:[0-9a-f:]+\]?", host) or host in ("localhost",) or host.endswith(".local"):
+            return None
+        request = urllib.request.Request(url, headers={"User-Agent": "SafeerOS/1.0 (+https://safeer.si)", "Icy-MetaData": "1"})
+        try:
+            with self._opener(request, timeout=5) as response:
+                glava = response.headers
+                vrsta = str(glava.get("Content-Type") or "").lower()
+                if not (vrsta.startswith("audio/") or "mpegurl" in vrsta or "ogg" in vrsta):
+                    return None
+                return {"url": url, "ime": str(glava.get("icy-name") or "").strip()[:120],
+                        "bitrate": int(re.sub(r"\D", "", str(glava.get("icy-br") or "")) or 0),
+                        "mime": "application/vnd.apple.mpegurl" if "mpegurl" in vrsta else vrsta.split(";")[0]}
+        except Exception:
+            return None
+
+    def tokovi_postaje(self, item: dict) -> list[dict]:
+        """Vsi tokovi (programi) postaje z njene domace strani: [{naslov, url, bitrate, mime}]. Prazno, ce jih ni vec."""
+        stran = self.domaca_stran_postaje(item)
+        if not stran:
+            return []
+
+        def fetch():
+            request = urllib.request.Request(stran, headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) SafeerOS/1.0",
+                                                             "Accept": "text/html"})
+            with self._opener(request, timeout=8) as response:
+                html = response.read(1024 * 1024).decode("utf-8", "replace")
+            kandidati = []
+            for url in self._TOK_VZOREC.findall(html.replace("\\/", "/").replace("&amp;", "&")):
+                url = url.rstrip(").,;")
+                if self._TOK_NAMIG.search(url) and not self._TOK_NE.search(url) and url not in kandidati:
+                    kandidati.append(url)
+            kandidati = kandidati[:12]
+            if not kandidati:
+                return []
+            with ThreadPoolExecutor(max_workers=min(6, len(kandidati))) as pool:
+                glave = [g for g in pool.map(self._glava_toka, kandidati) if g]
+            # Tok brez imena (npr. HLS istega glavnega programa) izpustimo, ce imajo drugi tokovi imena.
+            if sum(1 for g in glave if g["ime"]) >= 2:
+                glave = [g for g in glave if g["ime"]]
+            tokovi, imena = [], set()
+            for g in glave:
+                ime = g["ime"] or str(item.get("naslov") or "")
+                if ime.isupper():
+                    ime = re.sub(r"\bHq\b", "HQ", ime.title())
+                kljuc = _norm(ime)
+                if kljuc in imena:
+                    continue                 # isti program v drugi kakovosti (HLS, nizja hitrost): obdrzimo prvega
+                imena.add(kljuc)
+                tokovi.append({"naslov": ime, "url": g["url"], "bitrate": g["bitrate"], "mime": g["mime"]})
+            return tokovi if len(tokovi) > 1 else []
+        return self._cached("tokovi:" + stran, fetch)
 
     def resolve_tunein(self, item: dict) -> dict | None:
         gid = str(item.get("tunein_id") or "")
@@ -519,10 +817,23 @@ class ZakonitiViri:
         return dict(item, url=url, mime="video/mp4", locljivost=visina, kakovost="%dp" % visina,
                     stran="https://archive.org/details/" + urllib.parse.quote(str(item.get("archive_id")), safe=""))
 
-    def javna_last(self, query: str = "") -> list[dict]:
-        """Filmi v javni lasti (Internet Archive); tocno datoteko MP4 poiscemo ob kliku (resolve_archive)."""
+    @staticmethod
+    def _archive_jezik(jezik: str) -> str:
+        """Pogoj za polje `language` v Internet Archive (npr. en -> "English" OR "eng"); "" = brez pogoja."""
+        # Kode in angleska imena (Internet Archive), ne slovenska (»anglescina«).
+        imena = sorted(k for k, v in _JEZIKI.items() if v == jezik and k.isascii() and len(k) > 2 and not k.endswith("scina"))
+        return " AND language:(%s)" % " OR ".join('"%s"' % ime for ime in imena) if imena else ""
+
+    def javna_last(self, query: str = "", jezik: str = "", zvrst: str = "") -> list[dict]:
+        """Filmi v javni lasti (Internet Archive); tocno datoteko MP4 poiscemo ob kliku (resolve_archive).
+        `jezik` (ISO 639-1) in `zvrst` (id filmske zvrsti) izbere ze Internet Archive: vecina filmov v javni lasti nima
+        jezika v podatkih, zato izbira jezika po prejetih zadetkih ni pustila skoraj nicesar (»V tem jeziku tukaj ni
+        vsebine«, lastnik 10. 10. 2026), zvrst pa se ni upostevala."""
         iskanje = re.sub(r"[^\w\s-]", " ", query or "", flags=re.UNICODE).strip()
-        q = ARCHIVE_PD_QUERY + (" AND title:(%s)" % iskanje if iskanje else "")
+        jezik = jezik if re.fullmatch(r"[a-z]{2}", jezik or "") else ""
+        predmet = ARCHIVE_ZVRSTI.get(str(zvrst or ""), "")
+        q = (ARCHIVE_PD_QUERY + (" AND title:(%s)" % iskanje if iskanje else "") + (self._archive_jezik(jezik) if jezik else "")
+             + (' AND subject:("%s")' % predmet if predmet else ""))
         url = "https://archive.org/advancedsearch.php?" + urllib.parse.urlencode(
             [("q", q), ("fl[]", "identifier"), ("fl[]", "title"), ("fl[]", "year"), ("fl[]", "description"), ("fl[]", "format"), ("fl[]", "language"),
              ("sort[]", "downloads desc"), ("rows", "40"), ("output", "json")])
@@ -553,19 +864,31 @@ class ZakonitiViri:
                     "slika": "https://archive.org/services/img/" + urllib.parse.quote(ident, safe=""),
                     "opis": re.sub(r"<[^>]+>", " ", opis)[:600],
                     "vir": "Internet Archive · javna last", "vir_id": "archive-javna-last", "skupina": "Javna last",
-                    "jezik": jezik_koda(v.get("language")),
+                    # Internet Archive je izbral po jeziku: zadetek brez jezika v podatkih je v izbranem jeziku.
+                    "jezik": jezik_koda(v.get("language")) or jezik,
                 })
             return out
 
-        return self._cached("archive-pd:" + iskanje.casefold(), fetch)
+        return self._cached("archive-pd:" + iskanje.casefold() + (("|" + jezik) if jezik else "") + (("|z" + predmet) if predmet else ""), fetch)
 
-    def get(self, query: str = "", configured_hosts: list[str] | None = None, zvrst: str = "") -> list[dict]:
+    def get(self, query: str = "", configured_hosts: list[str] | None = None, zvrst: str = "", jezik: str = "",
+            filmska_zvrst: str = "", vrsta: str = "", drzava_radia: str = "") -> list[dict]:
+        """`jezik`: izbran jezik vsebine. PeerTube in Jamendo izbereta ze sama; pri radiu in javni lasti jezik pove
+        vnos. Tocno izbiro (in vnose brez znanega jezika) opravi katalog."""
         if zvrst:
             # Glasbena zvrst velja samo za glasbo in radio (video nima teh zvrsti).
-            tasks = ((self.music, (query, zvrst)), (self.radio, (query, zvrst)))
+            tasks = ((self.music, (query, zvrst, jezik)), (self.radio, (query, zvrst, drzava_radia)))
         else:
-            tasks = ((self.videos, (query, configured_hosts)), (self.music, (query,)), (self.radio, (query,)),
-                     (self.javna_last, (query,)))
+            # Lastnik, 11. 10. 2026: Internet Archive (filmi v javni lasti) ni vgrajen vir.
+            tasks = ((self.videos, (query, configured_hosts, jezik)), (self.music, (query, "", jezik)), (self.radio, (query, "", drzava_radia)))
+        # Samo viri, ki dajo to vrsto (lastnik 14. 10. 2026: cakanje na filme - prej je katalog filmov cakal tudi na
+        # radijske postaje, 1,7 s na prenosniku, ceprav jih katalog nato izloci).
+        potrebni = {"film": ("videos",), "serija": ("videos",), "video": ("videos",), "glasba": ("music",),
+                    "radio": ("radio",), "tv-v-zivo": ()}.get(vrsta)
+        if potrebni is not None:
+            tasks = tuple(t for t in tasks if t[0].__name__ in potrebni)
+            if not tasks:
+                return []
         with ThreadPoolExecutor(max_workers=4) as pool:
             futures = [pool.submit(fn, *args) for fn, args in tasks]
             results = []

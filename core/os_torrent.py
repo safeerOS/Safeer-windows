@@ -1,7 +1,8 @@
 """Safeer Media: magnet povezave (BitTorrent) - prejem, pošiljanje in predvajanje že med prenosom.
 
-Motor je odprtokodni rqbit (Apache-2.0, https://github.com/ikatson/rqbit). Safeer ga ob prvi rabi prenese
-z uradne izdaje na GitHubu, preveri SHA-256 in ga zažene kot lasten proces, samo na 127.0.0.1:
+Motor je odprtokodni rqbit (Apache-2.0, https://github.com/ikatson/rqbit). Paketi Safeer OS za Linux (.deb, Flatpak,
+AppImage) ga prinesejo sami (packaging/rqbit: uradni vir z nasim popravkom za racunalnike brez IPv6); drugje (Windows)
+ga Safeer ob prvi rabi prenese z uradne izdaje na GitHubu in preveri SHA-256. Zažene ga kot lasten proces, samo na 127.0.0.1:
 
 - API rqbita zahteva geslo (HTTP Basic, naključno ob vsakem zagonu). Spletna stran v brskalniku ga zato
   ne more upravljati (CSRF), drug program na računalniku pa ne pozna gesla.
@@ -35,6 +36,8 @@ import urllib.parse
 import urllib.request
 from typing import Iterable, Callable, Dict, List, Optional, Tuple
 
+from core import https_prenos, os_deskriptorji, storitve_na_zahtevo
+
 RQBIT_RAZLICICA = "9.0.1"
 #: Uradne izdaje (github.com/ikatson/rqbit/releases/tag/v9.0.1) in njihov SHA-256 iz GitHubovega "digest".
 RQBIT_PAKETI: Dict[str, Tuple[str, str, int]] = {
@@ -43,6 +46,13 @@ RQBIT_PAKETI: Dict[str, Tuple[str, str, int]] = {
     "windows-amd64": ("rqbit.exe", "2ed683203beca628e0c45f62f99feeef4242cecc3444c8422dfe5b1b6aa38cea", 12706816),
 }
 RQBIT_URL = "https://github.com/ikatson/rqbit/releases/download/v{razlicica}/{ime}"
+#: Nas rqbit v paketu .deb Safeer OS (packaging/rqbit, lastnik 18. 10. 2026): ista razlicica iz pripetega uradnega vira
+#: z nasim popravkom, zgrajena v CI (SHA-256 vira, popravka in programa preverjen ob gradnji paketa). Uradni program se
+#: na jedru brez IPv6 (ipv6.disable=1, nekateri vsebniki) ne zazene - odjemalec sledilnikov UDP veze [::]:0 tudi z
+#: --ipv4-only (EAFNOSUPPORT, izmerjeno 18. 10. 2026). Na Linuxu ima vgrajeni prednost; prenos z GitHuba (RQBIT_PAKETI)
+#: ostane za platforme in gradnje brez njega (Windows; izvorna koda). SAFEER_RQBIT: pot do programa (AppImage: AppRun-os,
+#: preizkusi).
+SPREMENLJIVKA_VGRAJENEGA = "SAFEER_RQBIT"
 
 #: Hitrost brez pretirane obremenitve (glej docstring).
 NAJVEC_POVEZAV = 80
@@ -60,6 +70,13 @@ KOS = 256 * 1024
 #: bi metapodatke iskalo se enkrat.
 PREBRANO_VELJA_S = 180.0
 _VIR_IPV4 = re.compile(r"\d{1,3}(?:\.\d{1,3}){3}:\d{1,5}")
+#: Motor na zahtevo (lastnik, 18. 10. 2026): rqbit se zazene ob prvi rabi (vsak klic API-ja ga zazene sam) in se
+#: ustavi, ko ga toliko casa nihce ne uporablja in nic ne dela - ni prenosa, ki se ni koncal, ni torrenta, ki ga
+#: uporabnik izrecno deli naprej, ni odprtega toka predvajalnika. Izmerjeno na testnem PC (rqbit 9.0.1, 18. 10. 2026):
+#: mirujoc motor stane 13-15 MiB PSS, 4 niti, 16-18 deskriptorjev, 110-200 ms CPU na minuto in 15 prebujanj/s (DHT);
+#: ponovni zagon s shranjenim stanjem traja 0,05 s, torrent obdrzi id in premor, tok po njem dela takoj (9 ms). 10 min:
+#: konec filma in izbira naslednjega dela iz istega torrenta motorja ne ustavita; dlje ga ne drzimo za nic.
+MIROVANJE_S = 600.0
 #: Toliko casa posrednik toka caka, da rqbit torrent pripravi (500 "initializing"), preden napako poslje naprej.
 PRIPRAVA_TOKA_S = 45.0
 PRIPRAVA_TOKA_RAZMIK_S = 0.3
@@ -176,15 +193,20 @@ def _ustavi_sirote(mapa_stanja: str, program: str) -> None:
     """Ustavi rqbit iz prejšnjega zagona (datoteka rqbit.pid), a samo, če PID res pripada našemu programu."""
     pot = os.path.join(mapa_stanja, "rqbit.pid")
     try:
-        with open(pot) as d:
+        with open(pot, encoding="utf-8") as d:
             pid = int(d.read().strip())
     except (OSError, ValueError):
         return
     try:
         if sys.platform.startswith("win"):
             return          # na Windows rqbit ustavi posel (Job Object) skupaj s Safeer OS
-        exe = os.path.realpath("/proc/%d/exe" % pid)
-        if exe == os.path.realpath(program):
+        exe = os.readlink("/proc/%d/exe" % pid)
+        # Posodobitev paketa program, ki tece, zamenja: jedro poti doda " (deleted)". Sirota je lahko tudi uradni
+        # preneseni program izpred prehoda na vgrajenega (ali obratno) - oba sta nasa.
+        if exe.endswith(" (deleted)"):
+            exe = exe[:-len(" (deleted)")]
+        nasi = {os.path.realpath(p) for p in (program, vgrajen_program(), prenesen_program()) if p}
+        if os.path.realpath(exe) in nasi:
             import signal
             os.kill(pid, signal.SIGTERM)
             for _ in range(30):
@@ -304,11 +326,41 @@ def mapa_prenosov() -> str:
     return os.path.join(prejemi or os.path.join(doma, "Downloads"), "Safeer")
 
 
-def pot_programa() -> str:
+def _tovor() -> str:
+    """Mapa, v kateri je core/ (paket .deb: /usr/lib/safeer-os ali /usr/lib/safeer-control)."""
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def vgrajen_program() -> str:
+    """rqbit iz paketa (samo Linux): <tovor>/rqbit/rqbit (.deb /usr/lib/safeer-os, Flatpak /app/lib/safeer-os) ali
+    SAFEER_RQBIT (AppImage: $APPDIR/opt/rqbit/rqbit). Safeer Control (<lib>/safeer-control) je v istem paketu kot
+    Safeer OS in uporabi njegovega (<lib>/safeer-os/rqbit/rqbit). "" = paket ga nima."""
+    if not sys.platform.startswith("linux"):
+        return ""
+    izrecno = os.environ.get(SPREMENLJIVKA_VGRAJENEGA, "")
+    if izrecno:
+        kandidati = [izrecno]
+    else:
+        tovor = _tovor()
+        kandidati = [os.path.join(tovor, "rqbit", "rqbit")]
+        if os.path.basename(tovor) == "safeer-control":
+            kandidati.append(os.path.join(os.path.dirname(tovor), "safeer-os", "rqbit", "rqbit"))
+    for pot in kandidati:
+        if os.path.isfile(pot) and os.access(pot, os.X_OK):
+            return pot
+    return ""
+
+
+def prenesen_program() -> str:
+    """Pot uradnega programa, ki ga Safeer prenese z GitHuba (platforme brez vgrajenega)."""
     paket = RQBIT_PAKETI.get(platforma())
     if not paket:
         return ""
     return os.path.join(mapa_programa(), "rqbit.exe" if paket[0].endswith(".exe") else "rqbit")
+
+
+def pot_programa() -> str:
+    return vgrajen_program() or prenesen_program()
 
 
 def _sha256(pot: str) -> str:
@@ -320,27 +372,39 @@ def _sha256(pot: str) -> str:
 
 
 def program_na_voljo() -> bool:
-    pot = pot_programa()
+    if vgrajen_program():
+        return True
+    pot = prenesen_program()
     paket = RQBIT_PAKETI.get(platforma())
     return bool(pot and paket and os.path.isfile(pot) and os.path.getsize(pot) == paket[2])
 
 
 def prenesi_program(napredek: Optional[Callable[[int, int], None]] = None,
-                    odpri: Callable = urllib.request.urlopen) -> str:
-    """Prenese rqbit za to platformo z uradne izdaje in preveri SHA-256. Vrne pot ali dvigne napako."""
+                    odpri: Callable = https_prenos.odpri, preklic=None) -> str:
+    """Prenese rqbit za to platformo z uradne izdaje in preveri SHA-256. Vrne pot ali dvigne napako.
+    Paket z vgrajenim programom ne prenasa nicesar (vrne vgrajenega).
+
+    `preklic` (threading.Event): uporabnik je prenos preklical - delna datoteka se odstrani, NapakaTorrenta("preklicano")."""
+    vgrajen = vgrajen_program()
+    if vgrajen:
+        return vgrajen
     paket = RQBIT_PAKETI.get(platforma())
     if not paket:
         raise RuntimeError("Ta platforma ni podprta")
     ime, pricakovan, velikost = paket
-    cilj = pot_programa()
+    cilj = prenesen_program()
     os.makedirs(os.path.dirname(cilj), exist_ok=True)
     zacasna = cilj + ".part"
     h = hashlib.sha256()
     prebrano = 0
     zahteva = urllib.request.Request(RQBIT_URL.format(razlicica=RQBIT_RAZLICICA, ime=ime),
                                      headers={"User-Agent": "Safeer/1.0"})
+    preklicano = False
     with odpri(zahteva, timeout=60) as odgovor, open(zacasna, "wb") as d:
         while True:
+            if preklic is not None and preklic.is_set():
+                preklicano = True
+                break
             kos = odgovor.read(KOS)
             if not kos:
                 break
@@ -351,6 +415,9 @@ def prenesi_program(napredek: Optional[Callable[[int, int], None]] = None,
             d.write(kos)
             if napredek:
                 napredek(prebrano, velikost)
+    if preklicano:
+        os.remove(zacasna)
+        raise NapakaTorrenta("preklicano")
     if prebrano != velikost or h.hexdigest() != pricakovan:
         os.remove(zacasna)
         raise RuntimeError("Preneseni program se ne ujema z uradno izdajo (SHA-256)")
@@ -446,6 +513,13 @@ class Torrenti:
         self.vrata_toka = 0
         self._deli_naprej: set = set(self._nalozi_nastavitve().get("deli_naprej", []))
         self._nadzor: Optional[threading.Thread] = None
+        #: Na zahtevo: ali motor dela (prenos, deljenje naprej - nadzor vsakih 10 s) in koliko tokov je odprtih.
+        self._dela = False
+        self._aktivni_tokovi = 0
+        self.ime_storitve = "torrent_naprave" if self.svoj_dht else "torrent"
+        storitve_na_zahtevo.registriraj(
+            self.ime_storitve, storitve_na_zahtevo.NA_ZAHTEVO, MIROVANJE_S, tece=self.tece, ustavi=self.ustavi_motor,
+            zaposlena=self.zaposlen, pidi=lambda: [self._proces.pid] if self.tece() else [])
 
     # -- nastavitve (katere torrente uporabnik izrecno deli naprej)
 
@@ -508,7 +582,7 @@ class Torrenti:
             if sys.platform.startswith("win"):
                 _vezi_na_safeer(self._proces)
             try:
-                with open(os.path.join(self.mapa_stanja, "rqbit.pid"), "w") as d:
+                with open(os.path.join(self.mapa_stanja, "rqbit.pid"), "w", encoding="utf-8") as d:
                     d.write(str(self._proces.pid))
             except OSError:
                 pass
@@ -535,9 +609,33 @@ class Torrenti:
             if koda != 401:
                 self.ustavi()
                 raise NapakaTorrenta("program_brez_gesla")
-            if self._nadzor is None:
+            self._rabi()
+            if self._nadzor is None or not self._nadzor.is_alive():
                 self._nadzor = threading.Thread(target=self._nadzoruj, name="safeer-torrent-nadzor", daemon=True)
                 self._nadzor.start()
+
+    def _rabi(self) -> None:
+        """Uporabnik (ali naprava) je motor pravkar uporabil: rok mirovanja (MIROVANJE_S) se zacne znova."""
+        storitve_na_zahtevo.rabi(self.ime_storitve)
+
+    def zaposlen(self) -> bool:
+        """Motor dela: prenos, ki se ni koncal, izrecno deljenje naprej ali odprt tok predvajalnika (glej _nadzoruj)."""
+        return self._dela or self._aktivni_tokovi > 0
+
+    def ustavi_motor(self) -> None:
+        """Ustavitev ob mirovanju (core/storitve_na_zahtevo): konca samo rqbit. Posrednik toka in naslovi, ki jih ima
+        predvajalnik, ostanejo - ob naslednji zahtevi toka posrednik motor zazene znova (torrenti obdrzijo id)."""
+        with self._zaklep:
+            if self.zaposlen():
+                return
+            p, self._proces = self._proces, None
+        if p is not None and p.poll() is None:
+            p.terminate()
+            try:
+                p.wait(5)
+            except subprocess.TimeoutExpired:
+                p.kill()
+                p.wait(5)
 
     def ustavi(self) -> None:
         with self._zaklep:
@@ -559,6 +657,8 @@ class Torrenti:
 
     def _api(self, metoda: str, pot: str, telo: Optional[bytes] = None, cas: float = 30,
              glave: Optional[dict] = None) -> Tuple[int, bytes]:
+        if threading.current_thread() is not self._nadzor:
+            self._rabi()          # vsak klic uporabnika ali naprave; nadzorovo branje stanja ni raba
         povezava = http.client.HTTPConnection("127.0.0.1", self.vrata, timeout=cas)
         try:
             g = {"Authorization": "Basic " + base64.b64encode(("safeer:" + self._geslo).encode()).decode()}
@@ -814,29 +914,53 @@ class Torrenti:
 
     # -- nadzor: po koncu prenosa ne oddajamo, razen če uporabnik tako izbere
 
+    def _beri_brez_zagona(self, pot: str) -> dict:
+        """GET za nadzor: za razliko od _json motorja ne zazene (ustavljen med mirovanjem ostane ustavljen)."""
+        koda, podatki = self._api("GET", pot, cas=10)
+        if koda != 200:
+            raise NapakaTorrenta("api_%d" % koda)
+        return json.loads(podatki.decode("utf-8") or "{}")
+
     def _nadzoruj(self) -> None:
+        """Dokler motor tece, vsakih 10 s _preveri(). Ko se motor ustavi, nit konca (prej je spala do konca procesa)."""
         while True:
             time.sleep(10)
-            if not self.tece():
-                continue
+            with self._zaklep:
+                if not self.tece():
+                    self._dela = False
+                    if self._nadzor is threading.current_thread():
+                        self._nadzor = None
+                    return
             try:
-                for t in self._json("GET", "/torrents").get("torrents") or []:
-                    hash_ = str(t.get("info_hash") or "").lower()
-                    if hash_ in self._deli_naprej:
-                        continue
-                    s = self._json("GET", "/torrents/%d/stats/v1" % int(t.get("id")))
-                    if s.get("finished") and s.get("state") == "live":
-                        self._api("POST", "/torrents/%d/pause" % int(t.get("id")))
+                self._preveri()
             except Exception:  # noqa: BLE001 - nadzor ne sme pasti
                 continue
 
+    def _preveri(self) -> bool:
+        """Koncanih torrentov, ki jih uporabnik ne deli naprej, ne oddajamo (premor). Vrne in zapomni si, ali motor
+        dela: prenos, ki se ni koncal, ali torrent, ki ga uporabnik izrecno deli naprej (storitve na zahtevo)."""
+        dela = False
+        for t in self._beri_brez_zagona("/torrents").get("torrents") or []:
+            hash_ = str(t.get("info_hash") or "").lower()
+            s = self._beri_brez_zagona("/torrents/%d/stats/v1" % int(t.get("id")))
+            stanje = str(s.get("state") or "")
+            if hash_ in self._deli_naprej:
+                dela = dela or stanje == "live"
+                continue
+            if s.get("finished") and stanje == "live":
+                self._api("POST", "/torrents/%d/pause" % int(t.get("id")))
+            elif stanje in ("live", "initializing") and not s.get("finished"):
+                dela = True          # prenos tece: motor se ne ustavi
+        self._dela = dela
+        return dela
 
-class _Streznik(http.server.ThreadingHTTPServer):
+
+class _Streznik(os_deskriptorji.BrezBujenja, http.server.ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
 
-class _Obravnava(http.server.BaseHTTPRequestHandler):
+class _Obravnava(os_deskriptorji.RokCakanjaZahteve, http.server.BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server_version = "SafeerTorrent"
     sys_version = ""
@@ -869,6 +993,28 @@ class _Obravnava(http.server.BaseHTTPRequestHandler):
             return
         tid, i = cilj
         glave = {"Range": self.headers["Range"]} if self.headers.get("Range") else {}
+        with torrenti._zaklep:
+            torrenti._aktivni_tokovi += 1
+        try:
+            if not torrenti.tece():
+                # Motor se je ustavil med mirovanjem (MIROVANJE_S), predvajalnik pa nadaljuje: zazenemo ga znova, torrent
+                # ima isti id (shranjeno stanje) - posnetek se nadaljuje brez nove povezave magnet.
+                torrenti.zazeni()
+                torrenti._api("POST", "/torrents/%d/start" % tid, cas=10)
+            torrenti._rabi()
+        except (NapakaTorrenta, OSError):
+            with torrenti._zaklep:
+                torrenti._aktivni_tokovi -= 1
+            self._prazen(503)
+            return
+        try:
+            self._prenesi_tok(torrenti, tid, i, glave, deli, samo_glava)
+        finally:
+            with torrenti._zaklep:
+                torrenti._aktivni_tokovi -= 1
+            torrenti._rabi()
+
+    def _prenesi_tok(self, torrenti, tid: int, i: int, glave: dict, deli: list, samo_glava: bool) -> None:
         povezava = http.client.HTTPConnection("127.0.0.1", torrenti.vrata, timeout=120)
         try:
             glave["Authorization"] = "Basic " + base64.b64encode(("safeer:" + torrenti._geslo).encode()).decode()
