@@ -1,23 +1,17 @@
-"""Odprta okna programov za Safeer OS na racunalniku (libwnck, samo X11).
+"""Odprta okna programov za Safeer OS na racunalniku (EWMH prek Xlib, samo X11).
 
-Zakaj svoj modul: 20. 9. 2026 se je Safeer OS sesul (SIGSEGV v g_object_unref -> g_hash_table_remove)
-med obdelavo sporocila iz strani. Vzrok je bila raba libwnck:
+Do GTK4 je seznam dajal libwnck. libwnck je knjiznica GTK3 in se v procesu GTK4 ne da naloziti, zato isto preberemo
+neposredno iz lastnosti, ki jih vodi upravitelj oken (EWMH: _NET_CLIENT_LIST_STACKING, _NET_ACTIVE_WINDOW,
+_NET_WM_STATE, _NET_WM_NAME, WM_CLASS, _NET_WM_ICON) in mu dejanja posljemo kot sporocila (_NET_ACTIVE_WINDOW,
+_NET_CLOSE_WINDOW, _NET_SHOWING_DESKTOP, WM_CHANGE_STATE). Brez libwnck tudi ni vec njegovega sesutja
+(20. 9. 2026: SIGSEGV v g_object_unref po force_update()).
 
-  * `Wnck.Screen.force_update()` se je klical ob vsakem branju seznama oken. Ta klic sinhrono
-    prebere stanje iz X in pri tem unici objekte oken, ki so medtem izginila. PyGObject na vsak
-    vrnjen objekt doda svojo referenco; ko jo pozneje spusti, libwnck ze unicen objekt odstrani
-    iz svoje razpredelnice - in prav to je pot, po kateri se je proces sesul.
-  * Objekti oken so bili uporabljeni po tem, ko jih je libwnck ze zavrgel.
+Pravila, ki jih ta modul uveljavlja (enaka kot prej):
 
-Pravila, ki jih ta modul uveljavlja:
-
-  1. `force_update()` samo enkrat, ob prvi uporabi. Potem se Wnck osvezuje sam iz dogodkov X
-     (glavna zanka tece), kar je tudi edina podprta raba.
-  2. Navzven ne gre noben objekt libwnck - samo stevilke in nizi. Okno se vedno poisce znova
-     po xid, tik pred dejanjem.
-  3. Vse samo iz glavne niti. Klic iz druge niti vrne prazen seznam in se zabelezi, namesto da
-     bi tvegal sesutje.
-  4. Vsaka napaka je ujeta: seznam oken ni nikoli razlog, da Safeer OS pade.
+  1. Navzven gre samo stevilka (xid) in nizi. Okno se vedno poisce znova po xid, tik pred dejanjem.
+  2. Vse samo iz glavne niti (povezava z X je ena). Klic iz druge niti vrne prazen seznam in se zabelezi.
+  3. Vsaka napaka je ujeta: seznam oken ni nikoli razlog, da Safeer OS pade (napake X, ko okno izgine med branjem,
+     pogoltne core/x11.py).
 """
 
 from __future__ import annotations
@@ -26,13 +20,16 @@ import os
 import threading
 from typing import Callable, List, Optional
 
+from core import x11
+
 #: Kadar je nastavljeno (varni nacin po ponovljenem sesutju), seznama oken ni - vse ostalo dela.
 IZKLOP = "SAFEER_OS_BREZ_OKEN"
 
-_zaslon = None            # Wnck.Screen ali False, ce ga ni
-_wnck = None              # modul gi.repository.Wnck
-_osvezen = False          # force_update() smo naredili natanko enkrat
 _opozorilo_nit = False
+_narocniki: list = []
+_spremljam = False
+#: Lastnosti korena, ob katerih spremembi so se okna spremenila (odprtje, zaprtje, menjava aktivnega).
+_LASTNOSTI_SPREMEMBE = ("_NET_CLIENT_LIST", "_NET_CLIENT_LIST_STACKING", "_NET_ACTIVE_WINDOW")
 
 
 def _dnevnik(*a) -> None:
@@ -40,8 +37,9 @@ def _dnevnik(*a) -> None:
 
 
 def na_voljo() -> bool:
-    """Ali imamo seznam oken (X11 z libwnck, brez varnega nacina)."""
-    return _pridobi() is not None
+    """Ali imamo seznam oken (X11 z upraviteljem oken EWMH, brez varnega nacina)."""
+    p = _pridobi()
+    return p is not None and bool(p.stevila(p.koren, "_NET_SUPPORTED"))
 
 
 def _glavna_nit() -> bool:
@@ -50,91 +48,139 @@ def _glavna_nit() -> bool:
         return True
     if not _opozorilo_nit:
         _opozorilo_nit = True
-        _dnevnik("klic iz niti", threading.current_thread().name, "- libwnck je samo za glavno nit; preskocim")
+        _dnevnik("klic iz niti", threading.current_thread().name, "- seznam oken je samo za glavno nit; preskocim")
     return False
 
 
+_izklopljeno = False
+
+
+def izklopi() -> None:
+    """Varni nacin Safeer OS: brez seznama oken v tem procesu (prej okoljska spremenljivka IZKLOP, nastavljena v main(),
+    ko so niti ze tekle)."""
+    global _izklopljeno
+    _izklopljeno = True
+
+
+def izklopljen() -> bool:
+    return _izklopljeno or bool(os.environ.get(IZKLOP))
+
+
 def _pridobi():
-    """Wnck.Screen ali None. Prvi klic naredi force_update(), pozneje nikoli vec."""
-    global _zaslon, _wnck, _osvezen
-    if os.environ.get(IZKLOP):
+    """Povezava z X (core/x11.py) ali None (varni nacin, druga nit, ni X11, seja Wayland).
+
+    Wayland: tudi z GDK prek XWaylanda bi seznam pokazal samo programe XWayland - vrstica bi bila lazno nepopolna.
+    Wayland seznama oken odjemalcu ne da (GNOME ga nima niti v razsiritvi), zato ga ni."""
+    if izklopljen():
+        return None
+    from core import seja_prikaza
+    if seja_prikaza.je_wayland():
         return None
     if not _glavna_nit():
         return None
-    if _zaslon is None:
-        try:
-            import gi
-            gi.require_version("Wnck", "3.0")
-            from gi.repository import Wnck
-            Wnck.set_client_type(Wnck.ClientType.PAGER)
-            _wnck = Wnck
-            _zaslon = Wnck.Screen.get_default()
-        except Exception as e:  # noqa: BLE001
-            _dnevnik("libwnck ni na voljo:", e)
-            _zaslon = False
-    if _zaslon in (False, None):
-        return None
-    if not _osvezen:
-        # Edini force_update v zivljenju procesa: da imamo seznam ze pred prvim dogodkom X.
-        try:
-            _zaslon.force_update()
-        except Exception as e:  # noqa: BLE001
-            _dnevnik("force_update:", e)
-        _osvezen = True
-    return _zaslon
+    return x11.povezava()
+
+
+def _ob_dogodku(*_a) -> bool:
+    p = _pridobi()
+    if p is None:
+        return True
+    try:
+        spremembe = p.dogodki()
+    except Exception as e:  # noqa: BLE001
+        _dnevnik("dogodki:", e)
+        return True
+    if any(s in _LASTNOSTI_SPREMEMBE for s in spremembe):
+        for f in list(_narocniki):
+            try:
+                f()
+            except Exception as e:  # noqa: BLE001
+                _dnevnik("narocnik:", e)
+    return True
 
 
 def spremljaj(ob_spremembi: Callable[[], None]) -> bool:
     """Naroci se na odprtje, zaprtje in menjavo aktivnega okna. Vrne, ali je narocilo uspelo."""
-    zaslon = _pridobi()
-    if zaslon is None:
+    global _spremljam
+    p = _pridobi()
+    if p is None:
         return False
     try:
-        for signal in ("window-opened", "window-closed", "active-window-changed"):
-            zaslon.connect(signal, lambda *_a: ob_spremembi())
+        _narocniki.append(ob_spremembi)
+        if not _spremljam:
+            from gi.repository import GLib
+            for ime in _LASTNOSTI_SPREMEMBE:      # ime_atoma pozna samo ze internirane atome
+                p.atom(ime)
+            opisnik = p.spremljaj_koren()
+            GLib.io_add_watch(opisnik, GLib.PRIORITY_DEFAULT, GLib.IOCondition.IN, _ob_dogodku)
+            # Xlib dogodke bere tudi med drugimi klici (odgovori na branje lastnosti) in jih hrani v vrsti -
+            # takrat opisnik ni vec bralen. Zato vrsto pregledamo se vsako sekundo.
+            GLib.timeout_add_seconds(1, _ob_dogodku)
+            _spremljam = True
         return True
     except Exception as e:  # noqa: BLE001
         _dnevnik("narocilo na dogodke:", e)
         return False
 
 
-def _je_program(okno, nasi_xid: set) -> bool:
+def _stanja(p, xid: int) -> set:
+    return set(p.stevila(xid, "_NET_WM_STATE"))
+
+
+def _je_program(p, xid: int, nasi_xid: set) -> bool:
+    """Navadno okno programa, ki sodi v opravilno vrstico (kot Wnck: vrsta NORMAL, brez skip_tasklist)."""
+    if xid in nasi_xid:
+        return False
     try:
-        return (okno.get_window_type() == _wnck.WindowType.NORMAL
-                and not okno.is_skip_tasklist()
-                and okno.get_xid() not in nasi_xid)
+        vrste = p.stevila(xid, "_NET_WM_WINDOW_TYPE")
+        if vrste and vrste[0] != p.atom("_NET_WM_WINDOW_TYPE_NORMAL"):
+            return False
+        return p.atom("_NET_WM_STATE_SKIP_TASKBAR") not in _stanja(p, xid)
     except Exception:  # noqa: BLE001
         return False
 
 
+def _okna(p) -> List[int]:
+    """Okna po vrstnem redu zlaganja (spodaj -> zgoraj)."""
+    return p.stevila(p.koren, "_NET_CLIENT_LIST_STACKING") or p.stevila(p.koren, "_NET_CLIENT_LIST")
+
+
+def _aktivno(p) -> int:
+    a = p.stevila(p.koren, "_NET_ACTIVE_WINDOW")
+    return a[0] if a else 0
+
+
+def _pomanjsano(p, xid: int) -> bool:
+    return p.atom("_NET_WM_STATE_HIDDEN") in _stanja(p, xid)
+
+
 def seznam(nasi_xid: Optional[set] = None, mapa_ikon: str = "", najvec_ikon: int = 200) -> List[dict]:
-    """Odprta okna programov, najnovejse najprej. Samo podatki - noben objekt libwnck ne gre ven."""
-    zaslon = _pridobi()
-    if zaslon is None:
+    """Odprta okna programov, najnovejse najprej. Samo podatki - noben objekt ne gre ven."""
+    p = _pridobi()
+    if p is None:
         return []
     nasi = set(nasi_xid or ())
     izhod: List[dict] = []
     try:
-        aktivno = zaslon.get_active_window()
-        aktivni_xid = aktivno.get_xid() if aktivno is not None else 0
+        aktivni_xid = _aktivno(p)
     except Exception:  # noqa: BLE001
         aktivni_xid = 0
     try:
-        okna = list(zaslon.get_windows_stacked() or [])
+        okna = _okna(p)
     except Exception as e:  # noqa: BLE001
         _dnevnik("seznam oken:", e)
         return []
-    for okno in okna:
-        if not _je_program(okno, nasi):
+    for xid in okna:
+        if not _je_program(p, xid, nasi):
             continue
         try:
-            xid = okno.get_xid()
+            ime = p.besedilo(xid, "_NET_WM_NAME") or p.besedilo(xid, "WM_NAME")
             izhod.append({
                 "id": xid,
-                "ime": okno.get_name() or "",
-                "program": okno.get_class_group_name() or "",
-                "ikona": _ikona(okno, xid, mapa_ikon) if mapa_ikon else "",
-                "pomanjsano": bool(okno.is_minimized()),
+                "ime": ime or "",
+                "program": p.razred(xid)[1] or "",
+                "ikona": _ikona(p, xid, mapa_ikon) if mapa_ikon else "",
+                "pomanjsano": _pomanjsano(p, xid),
                 "aktivno": xid == aktivni_xid,
             })
         except Exception:  # noqa: BLE001
@@ -145,15 +191,41 @@ def seznam(nasi_xid: Optional[set] = None, mapa_ikon: str = "", najvec_ikon: int
     return izhod
 
 
-def _ikona(okno, xid: int, mapa: str) -> str:
+def _izberi_ikono(podatki: list, zelena: int = 48):
+    """Iz _NET_WM_ICON (sirina, visina, ARGB ...)* izbere velikost, najblizjo zeleni; (s, v, zacetek) ali None."""
+    i, najboljsa = 0, None
+    while i + 2 <= len(podatki):
+        s, v = int(podatki[i]), int(podatki[i + 1])
+        if s <= 0 or v <= 0 or i + 2 + s * v > len(podatki):
+            break
+        if najboljsa is None or abs(s - zelena) < abs(najboljsa[0] - zelena):
+            najboljsa = (s, v, i + 2)
+        i += 2 + s * v
+    return najboljsa
+
+
+def _ikona(p, xid: int, mapa: str) -> str:
     """Ikona okna, shranjena v datoteko (stran je ne more dobiti iz pomnilnika)."""
     pot = os.path.join(mapa, "okno-%d.png" % xid)
     if os.path.isfile(pot):
         return "file://" + pot
     try:
-        pb = okno.get_icon()
-        if pb is None:
+        podatki = p.stevila(xid, "_NET_WM_ICON")
+        izbor = _izberi_ikono(podatki) if podatki else None
+        if izbor is None:
             return ""
+        s, v, zacetek = izbor
+        rgba = bytearray(s * v * 4)
+        for j, argb in enumerate(podatki[zacetek:zacetek + s * v]):
+            k = j * 4
+            rgba[k] = (argb >> 16) & 0xFF
+            rgba[k + 1] = (argb >> 8) & 0xFF
+            rgba[k + 2] = argb & 0xFF
+            rgba[k + 3] = (argb >> 24) & 0xFF
+        import gi
+        gi.require_version("GdkPixbuf", "2.0")
+        from gi.repository import GdkPixbuf, GLib
+        pb = GdkPixbuf.Pixbuf.new_from_bytes(GLib.Bytes.new(bytes(rgba)), GdkPixbuf.Colorspace.RGB, True, 8, s, v, s * 4)
         os.makedirs(mapa, exist_ok=True)
         zacasna = pot + ".tmp"
         pb.savev(zacasna, "png", [], [])
@@ -183,58 +255,79 @@ def _pocisti_ikone(mapa: str, zivi: set, najvec: int) -> None:
         pass
 
 
+def _pomanjsaj(p, xid: int) -> None:
+    p.L.XIconifyWindow(p.dpy, xid, p.zaslon)
+
+
+def _aktiviraj(p, xid: int, cas: int) -> None:
+    # Vir 2 = pult/preklopnik (uporabnikovo dejanje): upravitelj oken okno res pokaze, ne le oznaci.
+    p.sporocilo(xid, "_NET_ACTIVE_WINDOW", 2, cas & 0xFFFFFFFF, 0)
+
+
 def dejanje(xid, kaj: str, cas: int = 0) -> bool:
-    """Aktiviraj, pomanjsaj ali zapri okno. Okno poiscemo sveze - shranjenih objektov ne uporabljamo."""
-    zaslon = _pridobi()
-    if zaslon is None:
+    """Aktiviraj, pomanjsaj ali zapri okno. Okno poiscemo sveze - shranjenih podatkov ne uporabljamo."""
+    p = _pridobi()
+    if p is None:
         return False
     try:
         iskani = int(xid)
     except (TypeError, ValueError):
         return False
     try:
-        okna = list(zaslon.get_windows() or [])
-    except Exception as e:  # noqa: BLE001
-        _dnevnik("dejanje:", e)
-        return False
-    for okno in okna:
-        try:
-            if okno.get_xid() != iskani:
-                continue
-            if kaj == "zapri":
-                okno.close(cas)
-            elif kaj == "preklopi" and okno.is_active() and not okno.is_minimized():
-                okno.minimize()
-            elif kaj == "pomanjsaj":
-                if not okno.is_minimized():
-                    okno.minimize()
-            else:
-                okno.activate(cas)
-            return True
-        except Exception as e:  # noqa: BLE001
-            _dnevnik(kaj, e)
+        if iskani not in _okna(p):
             return False
-    return False
+        if kaj == "zapri":
+            p.sporocilo(iskani, "_NET_CLOSE_WINDOW", cas & 0xFFFFFFFF, 2)
+        elif kaj == "preklopi" and _aktivno(p) == iskani and not _pomanjsano(p, iskani):
+            _pomanjsaj(p, iskani)
+        elif kaj == "pomanjsaj":
+            if not _pomanjsano(p, iskani):
+                _pomanjsaj(p, iskani)
+        else:
+            _aktiviraj(p, iskani, cas)
+        p.poslji()
+        return True
+    except Exception as e:  # noqa: BLE001
+        _dnevnik(kaj, e)
+        return False
 
 
 def pomanjsaj_vse(nasi_xid: Optional[set] = None, cas: int = 0) -> int:
     """Pomanjsa vsa okna programov (gumb Domov). Vrne, koliko jih je bilo pomanjsanih."""
-    zaslon = _pridobi()
-    if zaslon is None:
+    p = _pridobi()
+    if p is None:
         return 0
     nasi = set(nasi_xid or ())
     koliko = 0
     try:
-        okna = list(zaslon.get_windows_stacked() or [])
+        okna = _okna(p)
     except Exception:  # noqa: BLE001
         return 0
-    for okno in okna:
-        if not _je_program(okno, nasi):
+    for xid in okna:
+        if not _je_program(p, xid, nasi):
             continue
         try:
-            if not okno.is_minimized():
-                okno.minimize()
+            if not _pomanjsano(p, xid):
+                _pomanjsaj(p, xid)
                 koliko += 1
         except Exception:  # noqa: BLE001
             continue
+    try:
+        p.poslji()
+    except Exception:  # noqa: BLE001
+        pass
     return koliko
+
+
+def pokazi_namizje() -> bool:
+    """Pokaze namizje (okna se umaknejo kot pri Super+D), da je iskalna lupa vidna; klicati na glavni niti.
+    False, ce seznama oken ni (ni X11, varni nacin)."""
+    p = _pridobi()
+    if not p:
+        return False
+    try:
+        p.sporocilo(p.koren, "_NET_SHOWING_DESKTOP", 1)
+        p.poslji()
+        return True
+    except Exception:  # noqa: BLE001
+        return False
