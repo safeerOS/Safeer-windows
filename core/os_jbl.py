@@ -12,11 +12,19 @@ commitu in preverimo odtis SHA-256. Hrani se samo v uporabnikovi mapi (0700). Pr
 
 Vrstico najdemo po mDNS (_jbl-product._tcp); naslov Bluetooth vrne sama (getStatusEx, BT_MAC), tako
 da vemo, kateri izhod racunalnika je ta vrstica.
+
+Potrdilo in kljuc JBL One nista skrivnost tega racunalnika: sta javna (v repozitoriju JBL_Soundbar), zato ne dokazujeta,
+da ukaz posilja Safeer. Ob vklopu si zapomnimo odtis SHA-256 potrdila vrstice (prvi stik) in ukaz poslje samo napravi z
+istim odtisom - preverjeno PRED posiljanjem ukaza (drugi neodvisni pregled, 19. 10. 2026). To ustavi lazno vrstico v
+domacem omrezju (npr. ob novem naslovu DHCP); nikogar v omrezju, ki ima isti javni kljuc, pa ne ustavi pri posiljanju
+ukazov vrstici sami.
 """
 
 from __future__ import annotations
 
 import hashlib
+import hmac
+import http.client
 import json
 import os
 import re
@@ -25,6 +33,8 @@ import ssl
 import subprocess
 import urllib.parse
 import urllib.request
+
+from core import https_prenos
 from typing import List, Optional
 
 VIR = ("https://raw.githubusercontent.com/MrBearPresident/JBL_Soundbar/"
@@ -34,10 +44,16 @@ ODTISI = {
     "Key.pem": "b072d78a8b259360b679478b8bf75ee4765ce7762f5f06574bff4d1e9e450099",
 }
 TIPKE = {"tv": "source-tv", "bluetooth": "bluetooth"}
+#: Vrata HTTPS vrstice (preizkusi jih zamenjajo).
+VRATA = 443
+
+
+class NapakaOdtisa(ValueError):
+    """Naprava na naslovu vrstice ima drugo potrdilo, kot si ga je Safeer zapomnil ob vklopu - ukaz ni bil poslan."""
 
 
 def mapa() -> str:
-    return os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")), "safeer-os", "jbl")
+    return os.path.join((os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")), "safeer-os", "jbl")
 
 
 def _nastavitve_pot() -> str:
@@ -72,7 +88,7 @@ def ima_potrdilo() -> bool:
     return True
 
 
-def prenesi_potrdilo(odpri=urllib.request.urlopen) -> bool:
+def prenesi_potrdilo(odpri=https_prenos.odpri) -> bool:
     """Potrdilo JBL One z dolocenega commita; brez ujemanja odtisa ne shranimo nicesar."""
     vsebina = {}
     for ime, odtis in ODTISI.items():
@@ -91,24 +107,41 @@ def prenesi_potrdilo(odpri=urllib.request.urlopen) -> bool:
 
 def _kontekst() -> ssl.SSLContext:
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    # Vrstica ima samopodpisano potrdilo brez imena; zaupamo ji v domacem omrezju, ukazi so nenevarni.
+    # Vrstica ima samopodpisano potrdilo brez imena: CA ga ne more potrditi. Zaupanje je odtis potrdila, ki ga _zahteva
+    # preveri pred posiljanjem ukaza (zapomnjen ob vklopu).
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
     ctx.load_cert_chain(os.path.join(mapa(), "Cert.pem"), os.path.join(mapa(), "Key.pem"))
     return ctx
 
 
-def _zahteva(naslov: str, ukaz: str, payload: Optional[dict] = None, cas: float = 5.0) -> str:
+def _zahteva(naslov: str, ukaz: str, payload: Optional[dict] = None, cas: float = 5.0,
+             odtis: Optional[str] = None) -> tuple:
+    """(odgovor, odtis potrdila naprave). Ce je `odtis` podan, gre ukaz samo napravi s tem odtisom (sicer NapakaOdtisa,
+    brez posiljanja); brez njega (prvi stik ob vklopu) vrne odtis, ki si ga klicatelj zapomni."""
     if not re.fullmatch(r"[0-9a-fA-F:.]{3,45}", naslov or ""):
         raise ValueError("neveljaven naslov")
-    url = "https://%s/httpapi.asp" % (("[%s]" % naslov) if ":" in naslov else naslov)
-    if payload is None:
-        z = urllib.request.Request(url + "?command=" + urllib.parse.quote(ukaz))
-    else:
-        telo = "command=%s&payload=%s" % (ukaz, json.dumps(payload, separators=(",", ":")))
-        z = urllib.request.Request(url, data=telo.encode("utf-8"), method="POST")
-    with urllib.request.urlopen(z, context=_kontekst(), timeout=cas) as o:
-        return o.read(4096).decode("utf-8", "replace")
+    povezava = http.client.HTTPSConnection(naslov, VRATA, timeout=cas, context=_kontekst())
+    try:
+        povezava.connect()
+        der = povezava.sock.getpeercert(binary_form=True) or b""
+        if not der:
+            raise NapakaOdtisa("naprava ni poslala potrdila")
+        dejanski = hashlib.sha256(der).hexdigest()
+        if odtis is not None and not hmac.compare_digest(dejanski, str(odtis)):
+            raise NapakaOdtisa("potrdilo naprave se ne ujema z zapomnjenim")
+        if payload is None:
+            povezava.request("GET", "/httpapi.asp?command=" + urllib.parse.quote(ukaz))
+        else:
+            telo = "command=%s&payload=%s" % (ukaz, json.dumps(payload, separators=(",", ":")))
+            povezava.request("POST", "/httpapi.asp", body=telo.encode("utf-8"),
+                             headers={"Content-Type": "application/x-www-form-urlencoded"})
+        odgovor = povezava.getresponse()
+        if odgovor.status >= 400:
+            raise OSError("vrstica je odgovorila %d" % odgovor.status)
+        return odgovor.read(4096).decode("utf-8", "replace"), dejanski
+    finally:
+        povezava.close()
 
 
 def najdi(cas: float = 4.0) -> List[dict]:
@@ -131,13 +164,15 @@ def najdi(cas: float = 4.0) -> List[dict]:
     return sorted(najdene.values(), key=lambda n: n["ime"])
 
 
-def bt_naslov(naslov: str) -> str:
-    """Naslov Bluetooth vrstice (getStatusEx) - po njem prepoznamo izhod racunalnika."""
+def bt_naslov(naslov: str) -> tuple:
+    """(naslov Bluetooth vrstice, odtis njenega potrdila) iz getStatusEx - po prvem prepoznamo izhod racunalnika,
+    drugega si zapomnimo za vse nadaljnje ukaze. Brez odgovora ("", "")."""
     try:
-        m = re.search(r'"BT_MAC"\s*:\s*"([0-9A-Fa-f:]{17})"', _zahteva(naslov, "getStatusEx"))
-        return m.group(1).upper() if m else ""
+        besedilo, odtis = _zahteva(naslov, "getStatusEx")
+        m = re.search(r'"BT_MAC"\s*:\s*"([0-9A-Fa-f:]{17})"', besedilo)
+        return (m.group(1).upper(), odtis) if m else ("", "")
     except Exception:
-        return ""
+        return "", ""
 
 
 def vklopi(vklop: bool) -> dict:
@@ -157,10 +192,11 @@ def vklopi(vklop: bool) -> dict:
     if not vrstice:
         return dict(stanje(), napaka="ni_vrstice")
     v = vrstice[0]
-    bt = bt_naslov(v["naslov"])
+    bt, odtis = bt_naslov(v["naslov"])
     if not bt:
         return dict(stanje(), napaka="ne_odgovori")
-    n.update({"vklop": True, "ime": v["ime"], "naslov": v["naslov"], "bt": bt})
+    n.update({"vklop": True, "ime": v["ime"], "naslov": v["naslov"], "bt": bt, "odtis": odtis})
+    n.pop("napaka", None)
     _shrani(n)
     return stanje()
 
@@ -168,6 +204,8 @@ def vklopi(vklop: bool) -> dict:
 def stanje(isci: bool = False) -> dict:
     n = nastavitve()
     izid = {"vklop": bool(n.get("vklop")) and ima_potrdilo(), "ime": n.get("ime", ""), "bt": n.get("bt", "")}
+    if izid["vklop"] and n.get("napaka") == "odtis":
+        izid["napaka"] = "odtis"        # vrstica ima novo potrdilo: uporabnik jo poveze znova (izklop in vklop)
     if isci and not izid["vklop"]:
         vrstice = najdi(3.0)
         if vrstice:
@@ -195,18 +233,55 @@ def preklopi(vhod: str) -> bool:
     if vhod not in TIPKE or not n.get("vklop") or not ima_potrdilo():
         return False
     naslov = n.get("naslov", "")
-    try:
-        _zahteva(naslov, "sendAppController", {"key_pressed": TIPKE[vhod]})
-        return True
-    except Exception:
-        # DHCP je lahko dal vrstici nov naslov: poiscemo jo znova (po imenu) in poskusimo enkrat.
-        for v in najdi():
-            if v["ime"] == n.get("ime") and v["naslov"] != naslov:
-                n["naslov"] = v["naslov"]
+    odtis = str(n.get("odtis") or "") or None
+    if odtis is None:
+        # Vklop pred 1.0.128 si odtisa ni zapomnil. Ukaz ne gre nobeni napravi pred preverjenim odtisom (AGENTS.md: TLS
+        # brez CA samo s pripetim odtisom PRED posiljanjem): najprej prvi stik brez ukaza kot ob vklopu (getStatusEx),
+        # naprava mora imeti zapomnjeni naslov Bluetooth; njen odtis si zapomnimo, ukaz gre nato s pripetim odtisom.
+        # Prej je ukaz sel nepreverjen - ob spremembi naslova (DHCP) celo prvi napravi z istim imenom v mDNS.
+        kandidati = [naslov] + [v["naslov"] for v in najdi() if v["ime"] == n.get("ime") and v["naslov"] != naslov]
+        for na in kandidati:
+            bt, prvi = bt_naslov(na) if na else ("", "")
+            if bt and prvi and bt == str(n.get("bt") or ""):
+                odtis, naslov = prvi, na
+                n.update({"odtis": prvi, "naslov": na})
+                n.pop("napaka", None)
                 _shrani(n)
-                try:
-                    _zahteva(v["naslov"], "sendAppController", {"key_pressed": TIPKE[vhod]})
-                    return True
-                except Exception:
-                    return False
-        return False
+                break
+        else:
+            return False
+
+    tuje_potrdilo = []
+
+    def poslji(na: str) -> bool:
+        try:
+            _besedilo, dejanski = _zahteva(na, "sendAppController", {"key_pressed": TIPKE[vhod]}, odtis=odtis)
+        except NapakaOdtisa:
+            tuje_potrdilo.append(na)
+            raise
+        if n.get("napaka"):
+            n.pop("napaka", None)
+            _shrani(n)
+        return True
+
+    try:
+        return poslji(naslov)
+    except Exception:        # tudi NapakaOdtisa: na naslovu je druga naprava (DHCP) - pravo vrstico poiscemo spodaj
+        pass
+    # DHCP je lahko dal vrstici nov naslov: poiscemo jo znova (po imenu) in poskusimo enkrat - ukaz gre samo, ce ima
+    # naprava na novem naslovu zapomnjeni odtis.
+    for v in najdi():
+        if v["ime"] == n.get("ime") and v["naslov"] != naslov:
+            try:
+                poslji(v["naslov"])
+            except Exception:
+                break
+            n["naslov"] = v["naslov"]
+            _shrani(n)
+            return True
+    if tuje_potrdilo and n.get("napaka") != "odtis":
+        # Vrstica (ali naprava na njenem naslovu) ima drugo potrdilo: ukaza nismo poslali. Nastavitve to pokazejo,
+        # sicer bi preklop tiho nehal delovati (neodvisni pregled, 19. 10. 2026).
+        n["napaka"] = "odtis"
+        _shrani(n)
+    return False
