@@ -1441,7 +1441,8 @@ class MediaCenter:
         self._dynamic_items[item_id] = resolved
         return resolved
 
-    def _razresi_usenet(self, item_id: str, item: dict, tip: str, ident: str, rezerve: list) -> Optional[dict]:
+    def _razresi_usenet(self, item_id: str, item: dict, tip: str, ident: str, rezerve: list,
+                        samo_takoj: bool = False) -> Optional[dict]:
         """Usenet prek TorBoxa (kot Safeer OS za Android, naloga 141): uporabnikov indeksator najde izdaje, TorBox jih
         prenese in pretaka. Samodejno najboljsa do 15 GB, najvec dva poskusa; povezave ostanejo rezerva. None = ni Useneta
         ali ni uspelo - takrat gre izbira naprej (debrid torrent, povezave) brez okna »Izberi vir«."""
@@ -1450,7 +1451,13 @@ class MediaCenter:
         # Serija brez epizode (tt…) bi iskala film z istim id-jem; film z epizodno obliko pa ni film.
         if (tip == "series") != (":" in ident):
             return None
-        zadetki = self.debrid.usenet_isci(ident)
+        # Isti zadetki za oba kroga (najprej samo pripravljeno, nato s cakanjem) - indeksator vprasamo enkrat.
+        kljuc_iskanja = (item_id, ident)
+        if getattr(self, "_usenet_zadnje", (None, None))[0] == kljuc_iskanja:
+            zadetki = self._usenet_zadnje[1]
+        else:
+            zadetki = self.debrid.usenet_isci(ident)
+            self._usenet_zadnje = (kljuc_iskanja, zadetki)
         if not zadetki:
             return None
         zadetki = tok_izbira.uredi(zadetki, lambda t: str(t.get("opis") or ""),
@@ -1458,7 +1465,7 @@ class MediaCenter:
                                    naslov=lambda t: "", **(self._jezik_zvoka(item) if hasattr(self, "_jezik_zvoka") else {}))
         for i in usenet_pravila.za_samodejno([float(t.get("gb") or 0.0) for t in zadetki]):
             t = zadetki[i]
-            izid = self.debrid.usenet_tok(str(t["url"]), str(t.get("naslov") or ""), samo_takoj=False,
+            izid = self.debrid.usenet_tok(str(t["url"]), str(t.get("naslov") or ""), samo_takoj=samo_takoj,
                                           rok_cakanja=debrid_pravila.CAKAJ_NOVEGA_S)
             if izid.url:
                 tok = {"url": izid.url, "vir": "Usenet · " + debrid_pravila.ime(izid.ponudnik), "opis": str(t.get("opis") or "")}
@@ -3547,10 +3554,11 @@ class MediaCenter:
                           and str(v.get("url") or "").startswith(("http://", "https://"))]
             # Naloga 131: z vpisanim kljucem debrid gre najboljsi PRIPRAVLJEN torrent pred neposrednimi povezavami
             # (zasebno, hitro, obicajno boljsa kakovost) - kot Safeer OS za Android (naloga 130), brez »Izberi vir«.
-            # Usenet prek TorBoxa je prvi (lastnik, 24. 10. 2026: samodejno najboljsi vir, pri nas Usenet), nato debrid
-            # torrent in povezave. Brez indeksatorja ali kljuca TorBox se nic ne spremeni.
+            # Usenet prek TorBoxa (lastnik, 24. 10. 2026: samodejno najboljsi vir). Lastnik 25. 10. 2026: uporabnik ne caka
+            # na prenos, ce je kaj takoj predvajljivo - najprej Usenet, ki ga ima TorBox ze pripravljenega, nato pripravljen
+            # torrent ⚡ in povezave, sele nato Usenet s cakanjem na prenos.
             if pripravi_torrent:
-                resolved = self._razresi_usenet(item_id, item, tip, ident, neposredni)
+                resolved = self._razresi_usenet(item_id, item, tip, ident, neposredni, samo_takoj=True)
                 if resolved:
                     return resolved
             torrenti = [t for t in tokovi if t.get("torrent") and t.get("hash")]
@@ -3582,6 +3590,10 @@ class MediaCenter:
                 return resolved
             if drugi_http:
                 return dict(item, razlicice=drugi_http, stevilo_razlicic=len(drugi_http))
+            if pripravi_torrent:
+                resolved = self._razresi_usenet(item_id, item, tip, ident, [], samo_takoj=False)
+                if resolved:
+                    return resolved
             # Neposrednega toka ni: torrent, ce ga ta racunalnik zna prenasati (kot Android: neposredni imajo prednost).
             if torrenti and aktivna:
                 # Naloga 131: ni povezave in ni pripravljenega torrenta - prek debrida (s cakanjem samo, ce ga uporabnik
