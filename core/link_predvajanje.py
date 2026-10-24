@@ -92,6 +92,11 @@ def vnos_datoteke(datoteke, pot: str, naslov: str, posiljatelj: str, hub_url: st
     if not oznaka or datoteke.mape.razresi(oznaka) is None:
         return None
     s = streznik_za(datoteke, posiljatelj, hub_url)
+    # Prav ta datoteka je napravi dosegljiva tudi brez odprtih datotek: do sem pride samo naprava z odprtim
+    # predvajalnikom (play.state) ali naprava, ki ji uporabnik tega racunalnika vsebino sam poslje.
+    dovoli = getattr(datoteke.streznik, "dovoli_izrecno", None)
+    if dovoli is not None:
+        dovoli(posiljatelj, oznaka)
     url = s["base_url"] + "/d/" + urllib.parse.quote(oznaka, safe="")
     mime = mimetypes.guess_type(pot)[0] or ""
     ime = naslov or os.path.splitext(os.path.basename(pot))[0]
@@ -293,6 +298,9 @@ def _vodilo():
 
 
 def safeer_os_tece(vodilo=None) -> bool:
+    from core import en_proces
+    if en_proces.os_app() is not None:
+        return True
     try:
         from gi.repository import Gio, GLib
         vodilo = vodilo or _vodilo()
@@ -306,6 +314,14 @@ def safeer_os_tece(vodilo=None) -> bool:
 def _klic_safeer_os(metoda: str, *argumenti: str, cas_ms: int = 3000) -> Optional[dict]:
     """Metoda vmesnika Predvajanje v tekocem Safeer OS; None, ce ne tece ali ne odgovori."""
     import json
+    from core import en_proces
+    if en_proces.os_app() is not None:
+        # Control tece v procesu Safeer OS: neposredno, brez D-Bus samemu sebi (core/en_proces.py).
+        try:
+            izid = en_proces.klic_os(metoda, [str(a) for a in argumenti])
+        except Exception:  # noqa: BLE001
+            return None
+        return izid if isinstance(izid, dict) and izid.get("ok") else None
     try:
         from gi.repository import Gio, GLib
         vodilo = _vodilo()

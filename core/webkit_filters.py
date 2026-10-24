@@ -33,6 +33,12 @@ _DOMAIN_OPTION = re.compile(r"^[a-z0-9.-]+$")
 # or the end" as an optional group with the $ anchor.
 SEPARATOR_CLASS = "[/:?=&#;,+@!~]"
 SEPARATOR_AT_END = "(" + SEPARATOR_CLASS + ".*)?$"
+# Za cisto domeno (||primer.si^) za imenom gostitelja v naslovu WebKita vedno sledi "/" ali ":" (vrata); dovolj je
+# en znak, brez neobveznega repa ".*)?$", ki je v DFA WebKita drag (12. 10. 2026: 97 % pravil EasyList).
+HOST_END = "[/:]"
+#: Razlicica pretvornika - ob spremembi se preveden filter prevede znova (oznaka v list.sha256).
+VERZIJA_PRETVORNIKA = "2"
+_CISTA_DOMENA = re.compile(r"^[a-z0-9.-]+\^$")
 HOST_PREFIX = "^[a-z][a-z0-9+.-]*://([a-z0-9-]+\\.)*"
 
 
@@ -60,6 +66,8 @@ def abp_to_regex(pattern: str) -> str | None:
         return out + ".*" + ("$" if end else "")
     if any(ord(ch) > 126 or ord(ch) < 32 for ch in p):
         return None  # WebKit url-filters are ASCII only
+    if out == HOST_PREFIX and not end and _CISTA_DOMENA.match(p.lower()):
+        return out + _escape(p[:-1]) + HOST_END
     last = len(p) - 1
     for i, ch in enumerate(p):
         if ch == "*":

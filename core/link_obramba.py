@@ -156,6 +156,16 @@ class Obramba:
 
     # ------------------------------------------------------------------ stanje
 
+    def zaupa(self, vir: str) -> bool:
+        """Ali je vir zdaj zaupan: v zadnjih ZAUPANJE_S se je izkazal kot clan kroga ali ima odprto povezavo."""
+        if not vir:
+            return False
+        if self._povezan(vir):
+            return True
+        with self._zaklep:
+            v = self._viri.get(vir)
+            return v is not None and v.zaupan_do > self.ura()
+
     def zaprt(self, vir: str) -> bool:
         with self._zaklep:
             v = self._viri.get(vir)

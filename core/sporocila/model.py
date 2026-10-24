@@ -79,3 +79,10 @@ class Sporocilo(JSONModel):
     cas: str
     priponke: List[Dict[str, Any]] = field(default_factory=list)
     stanje: str = "prejeto"
+    #: Stevilka dela s HTML telesom pisma (e-posta, za pogled »kot v Gmailu« s slikami v vrstici); "" = ni HTML.
+    html: str = ""
+
+    @classmethod
+    def iz_slovarja(cls, podatki: Dict[str, Any]) -> "Sporocilo":
+        znani = {f for f in cls.__dataclass_fields__}       # stanje starejse ali novejse razlicice: neznano izpustimo
+        return cls(**{k: v for k, v in podatki.items() if k in znani})

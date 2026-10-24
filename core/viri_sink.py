@@ -23,6 +23,7 @@ Pravila:
 from __future__ import annotations
 
 import re
+import urllib.parse
 from typing import Optional
 
 #: Vrsta vira, ki ga je uporabnik dodal na racunalniku (vrsto doloci naprava, ki ga prevzame).
@@ -127,3 +128,62 @@ def cisti_izbrisi(d: object) -> dict:
 def obrezi_izbrisane(izbrisani: dict) -> dict:
     """Najvec [NAJVEC_IZBRISANIH] zadnjih izbrisov."""
     return dict(sorted(izbrisani.items(), key=lambda kv: kv[1], reverse=True)[:NAJVEC_IZBRISANIH])
+
+
+# ------------------------------------------------------------------ prijava osebnih streznikov v naslovih
+# Skladbe osebnih streznikov imajo prijavo v naslovu toka in ovitka: Jellyfin `ApiKey=<zeton>` (prej `api_key`), Emby
+# `api_key`, Navidrome/Subsonic `u=…&t=md5(geslo+sol)&s=…`, Plex `X-Plex-Token`, Funkwhale `token`, Kodi in TVHeadend
+# `uporabnik:geslo@`. Taki naslovi ne smejo v sezname, police ali na druge naprave (pregled 14. 10. 2026: »Shrani kot
+# seznam« jih je pisal v seznami.json, lists.get pa jih je dal napravam v Linku). Shranimo naslov brez prijave;
+# Medijski center jo doda ob predvajanju iz zbirke skrivnosti (MediaCenter.s_prijavo).
+
+#: Parametri, ki so prijava ne glede na pot (male crke).
+PARAMETRI_PRIJAVE = frozenset({"api_key", "apikey", "x-emby-token", "x-mediabrowser-token", "token", "access_token",
+                               "x-plex-token"})
+#: Parametri Subsonic API (Navidrome, Airsonic …): kratka imena, zato samo na poti /rest/ ali *.view - drugje (npr.
+#: `t=` cas v posnetku) jih ne odstranimo.
+PARAMETRI_SUBSONIC = frozenset({"u", "t", "s", "p"})
+
+
+def je_subsonic(pot: str) -> bool:
+    pot = str(pot or "").lower()
+    return "/rest/" in pot or pot.startswith("rest/") or pot.endswith(".view")
+
+
+def brez_prijave(url: object) -> str:
+    """Naslov brez prijave: brez uporabnika in gesla pred gostiteljem in brez parametrov prijave. Drugo ostane enako."""
+    besedilo = str(url or "")
+    if not besedilo.lower().startswith(("http://", "https://")):
+        return besedilo
+    try:
+        d = urllib.parse.urlsplit(besedilo)
+    except ValueError:
+        return ""
+    gostitelj = d.netloc.rpartition("@")[2]
+    subsonic = je_subsonic(d.path)
+    deli = [x for x in d.query.split("&") if x]
+    ostali = [x for x in deli if not (urllib.parse.unquote_plus(x.partition("=")[0]).lower() in PARAMETRI_PRIJAVE
+                                     or (subsonic and urllib.parse.unquote_plus(x.partition("=")[0]).lower() in PARAMETRI_SUBSONIC))]
+    if gostitelj == d.netloc and len(ostali) == len(deli):
+        return besedilo
+    return urllib.parse.urlunsplit((d.scheme, gostitelj, d.path, "&".join(ostali), d.fragment))
+
+
+def ima_prijavo(url: object) -> bool:
+    """Ali ima naslov prijavo (zeton, geslo ali uporabnika pred gostiteljem)."""
+    return brez_prijave(url) != str(url or "")
+
+
+def cista_skladba(s: object) -> object:
+    """Skladba seznama (ali opis police) brez prijave v `url`, `slika` in `ozadje`. Ce je bila prijava odstranjena,
+    dobi oznako `prijava`: Medijski center jo ob predvajanju doda s streznika (MediaCenter.s_prijavo)."""
+    if not isinstance(s, dict):
+        return s
+    izid = dict(s)
+    for polje in ("url", "slika", "ozadje"):
+        if isinstance(izid.get(polje), str) and izid[polje]:
+            cist = brez_prijave(izid[polje])
+            if cist != izid[polje]:
+                izid[polje] = cist
+                izid["prijava"] = True
+    return izid
