@@ -2443,6 +2443,18 @@ class SafeerOsWindow(QMainWindow):
         if metoda == "stanje":
             return os_backend_win.stanje_sistema()
 
+        # Diski s prostim prostorom in podatki o racunalniku (core/sistem_podatki.py, isti modul kot na Linuxu).
+        if metoda == "diski":
+            from core import sistem_podatki
+            return sistem_podatki.diski()
+
+        if metoda == "sistemPodatki":
+            from core import sistem_podatki
+            return sistem_podatki.podatki()
+
+        if metoda == "priklopiDisk":
+            return {"ok": False, "napaka": "ni_podprto"}
+
         if metoda == "nastavitve":
             razdelek = str(a[0]) if a else ""
             return os_backend_win.odpri_nastavitve(razdelek)

@@ -1042,6 +1042,78 @@
       b.addEventListener("click", function () { odpriMapo(m.pot); });
       seznam.appendChild(b);
     });
+    // Diski (lastnik, 24. 10. 2026): prosti prostor na vsakem pogonu (core/sistem_podatki.py, kot na Linuxu).
+    if ((S.diski || []).length) {
+      seznam.appendChild(el("h3", "mape-naslov", ubezi(t("diski"))));
+      S.diski.forEach(function (d) { seznam.appendChild(vrsticaDiska(d)); });
+    }
+    if (!S.diskiNalagam && (!S.diskiCas || Date.now() - S.diskiCas > 30000)) {
+      S.diskiNalagam = true;
+      klic("diski").then(function (d) {
+        var prej = JSON.stringify(S.diski || []);
+        S.diski = Array.isArray(d) ? d.filter(function (x) { return x && x.naprava; }) : [];
+        S.diskiNalagam = false; S.diskiCas = Date.now();
+        opozoriMaloProstora(S.diski);
+        if (JSON.stringify(S.diski) !== prej) narisiMape();
+      }, function () { S.diskiNalagam = false; S.diskiCas = Date.now(); });
+    }
+  }
+  function imeDiska(d) {
+    if (d.sistem) return t("diskSistem");
+    return d.oznaka || (d.model ? d.model + " · " + velikost(d.velikost) : (d.naprava || "").replace(/^\/dev\//, ""));
+  }
+  function vrsticaDiska(d) {
+    var deluje = d.priklopljen && d.velikost > 0, delez = deluje ? Math.max(0, Math.min(1, 1 - (d.prosto || 0) / d.velikost)) : 0;
+    var pod = deluje ? t("diskProsto", { prosto: velikost(d.prosto || 0), skupaj: velikost(d.velikost) })
+      : t("diskNiPriklopljen", { skupaj: velikost(d.velikost) });
+    var b = el("button", "disk" + (S.pot && d.pot && S.pot === d.pot ? " izbran" : "") + (d.malo_prostora ? " malo" : ""),
+      svg(d.odstranljiv ? "arhiv" : "namizje") + "<span class=\"disk-opis\"><span>" + ubezi(imeDiska(d)) + "</span><small>" + ubezi(pod) +
+      "</small>" + (deluje ? "<i class=\"disk-vrstica\"><b style=\"width:" + Math.round(delez * 100) + "%\"></b></i>" : "") + "</span>");
+    b.type = "button";
+    b.title = imeDiska(d) + (d.datotecni_sistem ? " · " + d.datotecni_sistem : "") + " · " + pod;
+    b.setAttribute("aria-label", b.title);
+    b.addEventListener("click", function () {
+      if (d.priklopljen && d.pot) { odpriMapo(d.pot); return; }
+      obvesti(t("diskPriklapljam", { ime: imeDiska(d) }));
+      klic("priklopiDisk", [d.naprava]).then(function (o) {
+        S.diskiCas = 0;
+        if (o && o.ok && o.pot) { odpriMapo(o.pot); narisiMape(); }
+        else obvesti(t(o && o.napaka === "zavrnjeno" ? "diskPriklopZavrnjen" : "diskPriklopNi", { ime: imeDiska(d) }));
+      }, function () { obvesti(t("diskPriklopNi", { ime: imeDiska(d) })); });
+    });
+    return b;
+  }
+  // Enkrat na sejo za vsak disk: malo prostora (manj kot 5 GB, ali manj kot 10 % in hkrati manj kot 15 GB).
+  function opozoriMaloProstora(diski) {
+    S.diskiOpozorjeni = S.diskiOpozorjeni || {};
+    (diski || []).forEach(function (d) {
+      if (!d.malo_prostora || S.diskiOpozorjeni[d.naprava]) return;
+      S.diskiOpozorjeni[d.naprava] = 1;
+      obvesti(t("diskMalo", { ime: imeDiska(d), prosto: velikost(d.prosto || 0) }));
+    });
+  }
+  // O tem racunalniku (Nastavitve): strojna in programska oprema, diski. Samo prikaz - nic ne gre z racunalnika.
+  function narisiORacunalniku() {
+    var dl = $("oRacunalniku"); if (!dl) return;
+    klic("sistemPodatki").then(function (p) {
+      if (!p) return;
+      dl.innerHTML = "";
+      function vrsta(k, v) { if (!v) return; var d = el("div", "bliznjica", ""); d.appendChild(el("dt", "", ubezi(t(k)))); d.appendChild(el("dd", "", ubezi(v))); dl.appendChild(d); }
+      var ram = p.pomnilnik || {}, ure = Math.floor((p.cas_delovanja_s || 0) / 3600);
+      vrsta("racRacunalnik", p.racunalnik);
+      vrsta("racSistem", p.sistem + (p.arhitektura ? " (" + p.arhitektura + ")" : ""));
+      vrsta("racJedro", p.jedro);
+      vrsta("racNamizje", p.namizje);
+      vrsta("racProcesor", p.procesor ? p.procesor + (p.jeder ? " · " + t("racJeder", { n: p.jeder }) : "") : "");
+      vrsta("racPomnilnik", ram.skupaj ? t("racPomnilnikVr", { skupaj: velikost(ram.skupaj), prosto: velikost(ram.na_voljo || 0) }) : "");
+      vrsta("racGraficna", (p.graficne || []).join(", "));
+      (p.diski || []).forEach(function (d) {
+        vrsta("racDisk", imeDiska(d) + " · " + (d.priklopljen ? t("diskProsto", { prosto: velikost(d.prosto || 0), skupaj: velikost(d.velikost) })
+          : t("diskNiPriklopljen", { skupaj: velikost(d.velikost) })) + (d.datotecni_sistem ? " · " + d.datotecni_sistem : ""));
+      });
+      vrsta("racCas", ure >= 24 ? t("racDni", { d: Math.floor(ure / 24), h: ure % 24 }) : t("racUr", { h: ure }));
+      vrsta("racSafeer", (S.zacetek && S.zacetek.razlicica) || "");
+    }, function () {});
   }
   function odpriNedavne() {
     S.pot = "";
@@ -2518,6 +2590,7 @@
       });
       cilj.appendChild(m);
     });
+    narisiORacunalniku();
     $("oSistemu").textContent = t("razlicica", { v: (S.zacetek && S.zacetek.razlicica) || "" }) +
       (S.zacetek ? " · " + S.zacetek.racunalnik : "");
     if (!S.stanje) klic("stanje").then(function (s) { narisiStanje(s); kontrole($("hitreNastavitve"), false); }, function () {});

@@ -1075,3 +1075,20 @@ body.vrstica-skrita.nacin-splet .rocaj-vrstice { display: block; }
 .debrid-opis { display: flex; flex-direction: column; flex: 1 1 200px; min-width: 0; }
 .debrid-vrstica input { flex: 1 1 220px; min-width: 0; }
 .debrid-takoj { display: flex; align-items: center; gap: 8px; }
+
+/* O tem racunalniku: dve stolpca (oznaka, vrednost). */
+.bliznjice { display: grid; grid-template-columns: max-content 1fr; gap: 8px 18px; max-width: 900px; margin: 0 0 24px; align-items: baseline; }
+.bliznjica { display: contents; }
+.bliznjica dt { white-space: nowrap; }
+.bliznjica dd { margin: 0; color: var(--medlo); }
+
+/* Diski v Datotekah (lastnik, 24. 10. 2026): prosti prostor in zasedenost; nepriklopljen disk se priklopi s klikom. */
+.mape-seznam .mape-naslov { margin: 14px 14px 2px; font-size: 13px; font-weight: 600; color: var(--medlo); text-transform: none; }
+.mape-seznam button.disk { align-items: flex-start; }
+.disk-opis { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+.disk-opis > span, .disk-opis small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.disk-opis small { color: var(--medlo); font-size: 12px; }
+.disk-vrstica { display: block; height: 4px; border-radius: 2px; background: var(--rob); overflow: hidden; }
+.disk-vrstica b { display: block; height: 100%; background: var(--zelena); border-radius: 2px; }
+.mape-seznam button.disk.malo .disk-vrstica b { background: var(--opozorilo, #e5a50a); }
+.mape-seznam button.disk.malo small { color: var(--opozorilo, #e5a50a); }
