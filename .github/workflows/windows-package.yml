@@ -18,6 +18,8 @@ on:
       # (tests/test_link_stran_dogodki.py); potisk, ki je spremenil samo stran, preverjanja ni sprozil.
       - 'assets/link/**'
       - 'assets/os/**'
+      - 'skupna-koda.json'
+      - 'scripts/skupna_koda.py'
       - '.github/workflows/windows-package.yml'
   pull_request:
     paths:
@@ -39,6 +41,24 @@ concurrency:
   group: windows-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  # Skupna koda (core/) mora biti enaka kot v Safeer-linux na commitu iz skupna-koda.json (lastnik, 25. 10. 2026:
+  # Linux je vir; do takrat se je 70 od 86 skupnih datotek tiho razslo). Seznam zacasno razlicnih se sme samo krajsati.
+  skupna-koda:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - name: Commit Safeer-linux iz skupna-koda.json
+        id: vir
+        run: echo "ref=$(python3 -c 'import json;print(json.load(open("skupna-koda.json"))["ref"])')" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v5
+        with:
+          repository: safeerOS/Safeer-linux
+          ref: ${{ steps.vir.outputs.ref }}
+          path: linux-vir
+          persist-credentials: false
+      - name: Skupne datoteke enake kot v Safeer-linux
+        run: python3 scripts/skupna_koda.py preveri linux-vir
   windows:
     runs-on: windows-2022
     outputs:
