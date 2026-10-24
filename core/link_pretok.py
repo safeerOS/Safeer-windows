@@ -29,7 +29,7 @@ import urllib.parse
 from dataclasses import dataclass
 from typing import Callable, Dict, Optional, Tuple
 
-from core import link_tls
+from core import link_tls, os_deskriptorji
 
 KOS = 256 * 1024
 NAJVEC_VIROV = 512
@@ -37,6 +37,10 @@ NAJVEC_VIROV = 512
 POT_VELJA_S = 60.0
 #: Kratek poskus neposredne povezave: doma odgovori v nekaj ms, zunaj doma pa sploh ne.
 NEPOSREDNO_CAKAJ_S = 2.5
+#: Naslov iz dokumentacijskega obsega (RFC 5737), na katerem ni nikogar. Naprava brez naslova v domacem omrezju
+#: (telefon na mobilnih podatkih) ga da v opis svojega streznika datotek: do nje se pride samo prek njenega Huba
+#: (Global Link), zato neposrednega poskusa sploh ne delamo - uporabnik ne caka na nekaj, kar ne more uspeti.
+OBSEG_BREZ_OMREZJA = ipaddress.ip_network("192.0.2.0/24")
 #: Glave odgovora, ki jih predvajalnik potrebuje (vse druge ostanejo pri napravi).
 GLAVE_NAPREJ = ("Content-Type", "Content-Length", "Content-Range", "Accept-Ranges", "Last-Modified", "ETag")
 
@@ -54,6 +58,14 @@ class Vir:
     pot: str = ""
 
 
+def brez_omrezja(gostitelj: str) -> bool:
+    """Ali je to naslov naprave brez domacega omrezja (OBSEG_BREZ_OMREZJA): pot do nje je samo prek Huba."""
+    try:
+        return ipaddress.ip_address(str(gostitelj or "")) in OBSEG_BREZ_OMREZJA
+    except ValueError:
+        return False
+
+
 def vir_iz_streznika(streznik: dict, id_datoteke: str, kljuc: str = "", mime: str = "") -> Optional[Vir]:
     """Vir iz polja `server` odgovora na `files.list`; None, ce streznik ni HTTPS s pripetim odtisom
     na naslovu v domacem omrezju (naprava ne more poslati racunalnika nekam na internet)."""
@@ -68,7 +80,7 @@ def vir_iz_streznika(streznik: dict, id_datoteke: str, kljuc: str = "", mime: st
         ip = ipaddress.ip_address(urllib.parse.urlparse(osnova).hostname or "")
     except ValueError:
         return None
-    if not (ip.is_private or ip.is_link_local or ip.is_loopback):
+    if not (ip.is_private or ip.is_link_local or ip.is_loopback or ip in OBSEG_BREZ_OMREZJA):
         return None
     # Vrsta gre v glavo odgovora: samo "vrsta/podvrsta", brez presledkov in novih vrstic.
     mime = str(mime or "")
@@ -176,7 +188,8 @@ class LokalniPretok:
         gostitelj, vrata = u.hostname or "", u.port or 443
         # Neposredno samo, ce na tem naslovu res odgovori ta naprava (pripet odtis): zunaj doma je na
         # istem zasebnem naslovu lahko cisto druga naprava.
-        if gostitelj and self._potrdilo("wss://%s:%d/" % (gostitelj, vrata), NEPOSREDNO_CAKAJ_S)[0] == vir.odtis:
+        if (gostitelj and not brez_omrezja(gostitelj)
+                and link_tls.isti(self._potrdilo("wss://%s:%d/" % (gostitelj, vrata), NEPOSREDNO_CAKAJ_S)[0], vir.odtis)):
             p = _Pot(gostitelj, vrata, "/d/", vir.odtis, False, zdaj + POT_VELJA_S)
         else:
             p = self._pot_prek_releja(vir, zdaj)
@@ -198,7 +211,10 @@ class LokalniPretok:
         with self._zaklep:
             rele = self._releji.get(cilj)
             if rele is None:
-                rele = (self._rele_za or link_rele.LokalniRele)(cilj)
+                # Zunaj doma: najprej neposredno (javni naslov doma, ce ga je naprava objavila in preverila), sicer
+                # prek releja - isto krajevno vrata (core/link_neposredno.LokalniOdZunaj).
+                from core import link_neposredno
+                rele = (self._rele_za or link_neposredno.od_zunaj)(cilj)
                 self._releji[cilj] = rele
         vrata = int(getattr(rele, "vrata", 0) or 0)
         with self._zaklep:
@@ -207,27 +223,44 @@ class LokalniPretok:
             # Zaupanje: kljuc v potrdilu Huba = kljuc naprave iz kroga (odtis prek releja je lahko drug
             # kot odtis streznika datotek v LAN, kljuc pa je isti). Nato velja pripet odtis.
             odtis, kljuc = self._potrdilo("wss://127.0.0.1:%d/" % vrata, 15.0)
-            if not odtis or not kljuc or kljuc != vir.kljuc:
+            if not odtis or not link_tls.isti(kljuc, vir.kljuc):
                 return None
             with self._zaklep:
                 self._odtisi_releja[cilj] = odtis
         return _Pot("127.0.0.1", vrata, "/cast/d/", odtis, True, zdaj + POT_VELJA_S)
 
-    def odpri(self, vir: Vir, metoda: str, obseg: str = "") -> Tuple[http.client.HTTPSConnection, http.client.HTTPResponse]:
-        """Zahteva do naprave (neposredno ali prek releja); ob izpadu neposredne poti enkrat znova."""
+    def odpri(self, vir: Vir, metoda: str, obseg: str = "", vrsta: str = "d",
+              rok: float = 20.0, telo=None, dolzina: int = 0) -> Tuple[http.client.HTTPSConnection, http.client.HTTPResponse]:
+        """Zahteva do naprave (neposredno ali prek releja); ob izpadu neposredne poti enkrat znova.
+
+        `vrsta`: pot streznika datotek za isto datoteko - "d" (datoteka), "kosi" (opis kosov, core/link_delta) ali
+        "popravek" (Teamwork: POST shranitve, core/link_teamwork; `telo` je odprta datoteka z `dolzina` bajti).
+        `rok`: cakanje na odgovor (opis velike datoteke naprava racuna dlje kot prvi bajt toka)."""
+        if vrsta not in ("d", "kosi", "popravek"):
+            raise ValueError("neznana vrsta poti")
+        if (vrsta == "popravek") != (telo is not None):
+            raise ValueError("popravek potrebuje telo")
+        if vir.pot and vrsta != "d":
+            raise ValueError("tok torrenta nima opisa kosov")
         zadnja: Optional[BaseException] = None
         for poskus in range(2):
             p = self.pot(vir, osvezi=poskus > 0)
             if p is None:
                 break
-            povezava = link_tls._PripetaHttps(p.gostitelj, p.vrata, p.odtis, 20.0)
+            povezava = link_tls._PripetaHttps(p.gostitelj, p.vrata, p.odtis, rok)
             glave = {"X-Safeer-Token": vir.zeton}
             if obseg:
                 glave["Range"] = obseg
+            if telo is not None:
+                glave["Content-Length"] = str(int(dolzina))
+                glave["Content-Type"] = "application/octet-stream"
+                telo.seek(0)
             try:
                 if vir.pot and p.rele:
                     raise ConnectionError("tok torrenta samo v domacem omrezju")
-                povezava.request(metoda, vir.pot or (p.predpona + urllib.parse.quote(vir.id_datoteke, safe="")), headers=glave)
+                predpona = p.predpona if vrsta == "d" else p.predpona[:-2] + vrsta + "/"   # /d/ -> /kosi/, /cast/d/ -> /cast/kosi/
+                povezava.request(metoda, vir.pot or (predpona + urllib.parse.quote(vir.id_datoteke, safe="")), body=telo,
+                                 headers=glave)
                 odgovor = povezava.getresponse()
                 # Pot dela: dokler tok tece, je ne preverjamo znova (brez premora in brez dodatnih kanalov releja).
                 p.velja_do = time.time() + POT_VELJA_S
@@ -250,12 +283,12 @@ def _kljuc_poti(vir: Vir) -> tuple:
     return (vir.base_url, vir.odtis, vir.kljuc)
 
 
-class _Streznik(http.server.ThreadingHTTPServer):
+class _Streznik(os_deskriptorji.BrezBujenja, http.server.ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
 
-class _Obravnava(http.server.BaseHTTPRequestHandler):
+class _Obravnava(os_deskriptorji.RokCakanjaZahteve, http.server.BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server_version = "SafeerPretok"
     sys_version = ""
