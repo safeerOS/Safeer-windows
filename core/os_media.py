@@ -3554,13 +3554,6 @@ class MediaCenter:
                           and str(v.get("url") or "").startswith(("http://", "https://"))]
             # Naloga 131: z vpisanim kljucem debrid gre najboljsi PRIPRAVLJEN torrent pred neposrednimi povezavami
             # (zasebno, hitro, obicajno boljsa kakovost) - kot Safeer OS za Android (naloga 130), brez »Izberi vir«.
-            # Usenet prek TorBoxa (lastnik, 24. 10. 2026: samodejno najboljsi vir). Lastnik 25. 10. 2026: uporabnik ne caka
-            # na prenos, ce je kaj takoj predvajljivo - najprej Usenet, ki ga ima TorBox ze pripravljenega, nato pripravljen
-            # torrent ⚡ in povezave, sele nato Usenet s cakanjem na prenos.
-            if pripravi_torrent:
-                resolved = self._razresi_usenet(item_id, item, tip, ident, neposredni, samo_takoj=True)
-                if resolved:
-                    return resolved
             torrenti = [t for t in tokovi if t.get("torrent") and t.get("hash")]
             aktivna = self.debrid.aktivna() if torrenti else None
             if aktivna:
@@ -3590,10 +3583,14 @@ class MediaCenter:
                 return resolved
             if drugi_http:
                 return dict(item, razlicice=drugi_http, stevilo_razlicic=len(drugi_http))
+            # Usenet prek TorBoxa (lastnik 24.-25. 10. 2026): uporabnik ne caka na prenos, ce je kaj takoj predvajljivo.
+            # Izmerjeno na TV: pripravljen torrent ⚡ zacne v ~2 s, preverba »Usenet pripravljen« traja 2-6 s na izdajo -
+            # zato najprej ⚡ torrent in povezave (zgoraj), nato Usenet, ki ga ima TorBox pripravljenega, sele nato s prenosom.
             if pripravi_torrent:
-                resolved = self._razresi_usenet(item_id, item, tip, ident, [], samo_takoj=False)
-                if resolved:
-                    return resolved
+                for takoj in (True, False):
+                    resolved = self._razresi_usenet(item_id, item, tip, ident, [], samo_takoj=takoj)
+                    if resolved:
+                        return resolved
             # Neposrednega toka ni: torrent, ce ga ta racunalnik zna prenasati (kot Android: neposredni imajo prednost).
             if torrenti and aktivna:
                 # Naloga 131: ni povezave in ni pripravljenega torrenta - prek debrida (s cakanjem samo, ce ga uporabnik
