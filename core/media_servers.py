@@ -632,12 +632,108 @@ def stremio_poskusne_epizode(koren: str, ident: str) -> list[str]:
     return izbor
 
 
+_IMDB = re.compile(r"tt\d+")
+_EPIZODA = re.compile(r".+:\d+:\d+")
+
+
+def stremio_je_epizoda(ident: str) -> bool:
+    """Naloga 131: id epizode Stremio je »<id serije>:<sezona>:<epizoda>«. Prej je stelo, da id brez dvopicja ni
+    epizoda - id serije iz kataloga z lastnimi id-ji (»tmdb:84773«) pa dvopicje ze ima, zato se epizode niso iskale."""
+    return bool(_EPIZODA.fullmatch(str(ident or "")))
+
+
+def stremio_imdb_iz_meta(meta: dict, ident: str) -> str:
+    """Naloga 131: id IMDb serije - polje `imdb_id` metapodatkov ali id sam (tt...); prazno, ce ga ni. Dodatki s
+    torrenti (Torrentio ...) poznajo samo tega, katalog z lastnimi id-ji (tmdb:...) pa jih zato ni nikoli vprasal."""
+    polje = str((meta or {}).get("imdb_id") or "").strip() if isinstance(meta, dict) else ""
+    if _IMDB.fullmatch(polje):
+        return polje
+    return ident if _IMDB.fullmatch(str(ident or "")) else ""
+
+
+def stremio_id_epizode_imdb(imdb: str, id_epizode: str, sezona: int, epizoda: int) -> str:
+    """Id epizode po IMDb (`tt...:S:E`), ki ga vprasamo poleg id-ja dodatka. Prazno, ce ni potreben (id ze je ta) ali
+    ni mogoc (brez IMDb, posebne epizode sezone 0, brez stevilke epizode)."""
+    if not _IMDB.fullmatch(str(imdb or "")) or int(sezona or 0) < 1 or int(epizoda or 0) < 1:
+        return ""
+    v = "%s:%d:%d" % (imdb, int(sezona), int(epizoda))
+    return "" if v == id_epizode else v
+
+
+def stremio_daje_meta_serij(manifest: dict, ident: str) -> bool:
+    """Ali dodatek daje metapodatke serij za ta id (resource `meta`, tip `series`, predpona id-ja)."""
+    if not isinstance(manifest, dict):
+        return False
+    tipi = {str(t) for t in (manifest.get("types") or [])}
+    predpone = manifest.get("idPrefixes")
+    for r in manifest.get("resources") or []:
+        if r == "meta" or (isinstance(r, dict) and r.get("name") == "meta"):
+            rt = {str(t) for t in ((r.get("types") if isinstance(r, dict) else None) or tipi)}
+            rp = (r.get("idPrefixes") if isinstance(r, dict) else None) or predpone
+            if (not rt or "series" in rt) and (not rp or any(str(ident).startswith(str(x)) for x in rp)):
+                return True
+    return False
+
+
+def _stremio_videi_serije(meta: dict) -> list[dict]:
+    return [v for v in (meta.get("videos") or []) if isinstance(v, dict) and v.get("id")] if isinstance(meta, dict) else []
+
+
+def _stremio_par_epizode(v: dict, imdb: str) -> tuple[str, str]:
+    return str(v["id"]), stremio_id_epizode_imdb(imdb, str(v["id"]), int(v.get("season") or 0), int(v.get("episode") or 0))
+
+
+def stremio_prva_epizoda_z_imdb(koren: str, ident: str) -> tuple[str, str]:
+    """Naloga 131: (id prve epizode pri dodatku, isti id po IMDb ali prazno). Prazen id, ce dodatek epizod ne navaja."""
+    meta = json.loads(_request(koren + "/meta/series/%s.json" % urllib.parse.quote(ident, safe=""))).get("meta") or {}
+    videi = _stremio_videi_serije(meta)
+    if not videi:
+        return "", ""
+    prvi = sorted(videi, key=lambda v: (int(v.get("season") or 0) or 999, int(v.get("episode") or 0)))[0]
+    return _stremio_par_epizode(prvi, stremio_imdb_iz_meta(meta, ident))
+
+
+def stremio_poskusne_epizode_z_imdb(koren: str, ident: str) -> list[tuple[str, str]]:
+    """Kot stremio_poskusne_epizode, z id-jem po IMDb za vsako (naloga 131): serija iz kataloga z lastnimi id-ji se
+    ne skrije le zato, ker ima tokove samo dodatek, ki pozna IMDb."""
+    meta = json.loads(_request(koren + "/meta/series/%s.json" % urllib.parse.quote(ident, safe=""))).get("meta") or {}
+    imdb = stremio_imdb_iz_meta(meta, ident)
+    videi = [v for v in _stremio_videi_serije(meta) if int(v.get("season") or 0) >= 1]
+    if not videi:
+        return []
+    videi.sort(key=lambda v: (int(v.get("season") or 0), int(v.get("episode") or 0)))
+    zadnja = int(videi[-1].get("season") or 0)
+    izbor: list[tuple[str, str]] = []
+    for v in (videi[0], next(v for v in videi if int(v.get("season") or 0) == zadnja), videi[-1]):
+        par = _stremio_par_epizode(v, imdb)
+        if par not in izbor:
+            izbor.append(par)
+    return izbor
+
+
+def stremio_prva_epizoda_drugje(koreni: list[str], imdb: str) -> str:
+    """Naloga 131: dodatek kartice serije ni dal epizod - prva epizoda po IMDb pri drugem uporabnikovem dodatku, ki
+    daje metapodatke serij (Cinemete koda ne doda sama). Prazno, ce je ne pozna nihce."""
+    if not _IMDB.fullmatch(str(imdb or "")):
+        return ""
+    for k in koreni:
+        try:
+            if not stremio_daje_meta_serij(stremio_manifest(k), imdb):
+                continue
+            prvi, _ = stremio_prva_epizoda_z_imdb(k, imdb)
+        except Exception:  # noqa: BLE001 - nedosegljiv dodatek preskocimo
+            continue
+        if prvi:
+            return prvi
+    return ""
+
+
 def stremio_tokovi(koren: str, tip: str, ident: str) -> list[dict]:
     """Predvajalne povezave dodatka: samo neposredni tokovi HTTP(S). Zunanjih povezav (`externalUrl`) in obvestil
     dodatka (donacije, Discord, "No streams found") ni med njimi. Tok `infoHash` (torrent) vrnemo z vsem, kar
     potrebuje motor (hash, indeks datoteke, ime, sledilniki): predvaja ga racunalnik, ki zna prenasati torrente
     (core/os_torrent_tok.py) - kot Safeer OS za Android."""
-    if tip == "series" and ":" not in ident:
+    if tip == "series" and not stremio_je_epizoda(ident):
         meta = json.loads(_request(koren + "/meta/series/%s.json" % urllib.parse.quote(ident, safe=""))).get("meta") or {}
         videi = [v for v in (meta.get("videos") or []) if v.get("id")]
         if not videi:

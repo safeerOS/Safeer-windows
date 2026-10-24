@@ -1068,3 +1068,10 @@ body.vrstica-skrita.nacin-splet .rocaj-vrstice { display: block; }
 .meni-polja button { display: block; width: 100%; padding: 9px 12px; border-radius: 8px; font-size: 14px; text-align: left; cursor: default; }
 .meni-polja button:hover:not(:disabled) { background: var(--kartica-poudarek); }
 .meni-polja button:disabled { color: var(--medlo); opacity: .45; }
+
+/* Naloga 131: okno »Debrid storitve« - samo postavitev; barve, robovi in pisava so od obstojecih razredov (plosca, gumb). */
+.debrid-seznam { display: flex; flex-direction: column; gap: 12px; margin: 12px 0; }
+.debrid-vrstica { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.debrid-opis { display: flex; flex-direction: column; flex: 1 1 200px; min-width: 0; }
+.debrid-vrstica input { flex: 1 1 220px; min-width: 0; }
+.debrid-takoj { display: flex; align-items: center; gap: 8px; }

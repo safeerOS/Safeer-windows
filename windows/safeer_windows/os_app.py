@@ -2773,6 +2773,11 @@ class SafeerOsWindow(QMainWindow):
                 return mz.predvajaj(item, str(a[1]) if len(a) > 1 else "", bool(a[2]) if len(a) > 2 else False)
             return mz.dejanje(str(a[0]) if a else "")
 
+        if metoda == "mediaDebrid":
+            # Naloga 131: debrid storitve - stanje, izbira ob zvrsteh, kljuci (core/debrid.most).
+            from core import debrid
+            return debrid.most(self.media_center.debrid, list(a or []))
+
         if metoda == "mediaOdkrijDlna":
             from core import media_servers
             return media_servers.odkrij_dlna()

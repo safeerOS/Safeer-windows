@@ -31,6 +31,8 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
 
 from . import zakoniti_viri
+from . import debrid
+from . import debrid_pravila
 from . import media_servers
 from . import tok_izbira
 from . import os_torrent, os_torrent_tok
@@ -1177,6 +1179,9 @@ class MediaCenter:
         self._zakoniti_viri = zakoniti_viri.ZakonitiViri()
         self._secret_encryptor = secret_encryptor or _dpapi_protect
         self._secret_decryptor = secret_decryptor or _dpapi_unprotect
+        # Naloga 131: debrid storitve (TorBox, Real-Debrid, AllDebrid). Kljuci samo sifrirani (isti sifrirnik kot gesla
+        # streznikov), v svoji datoteki - meritev po predvajanju ne sme ozastariti predpomnilnika kataloga.
+        self.debrid = debrid.Debrid(self._beri_debrid, self._pisi_debrid, self._secret_encryptor, self._secret_decryptor)
         self._server_cache: dict[str, tuple[float, list[dict]]] = {}
         # Trajni predpomnilnik kataloga in podatkov TMDB: ob odprtju se prikaze takoj,
         # sveze podatke dobimo v ozadju (uporabnik ne caka na prazen zaslon).
@@ -1405,6 +1410,36 @@ class MediaCenter:
             data["viri"] = []
         return data
 
+    def _beri_debrid(self) -> dict:
+        try:
+            d = json.loads((self.config_dir / "debrid.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            d = {}
+        return d if isinstance(d, dict) else {}
+
+    def _pisi_debrid(self, d: dict) -> None:
+        self.config_dir.mkdir(parents=True, exist_ok=True)
+        zacasna = self.config_dir / ("debrid.json.%d.tmp" % threading.get_ident())
+        zacasna.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+        try:
+            os.chmod(zacasna, 0o600)
+        except OSError:
+            pass
+        os.replace(zacasna, self.config_dir / "debrid.json")
+
+    def _razresi_debrid(self, item_id: str, item: dict, t: dict, rezerve: list) -> dict:
+        """Naloga 131: torrent prek debrid storitve. Uspeh: povezava CDN (brez kljuca) z oznako ⚡ in imenom storitve, za
+        njo neposredne povezave kot rezerva. Neuspeh: napaka_koda »debrid_<razlog>« - nikoli tiho na neposreden torrent."""
+        izid = self.debrid.tok(str(t["hash"]), t.get("indeks"), str(t.get("ime") or ""), t.get("sledilniki") or ())
+        if not izid.url:
+            return dict(item, napaka_koda="debrid_" + (izid.napaka or debrid_pravila.NAPAKA_STREZNIK))
+        tok = {"url": izid.url, "vir": "%s %s" % (debrid_pravila.OZNAKA_PREDPOMNJEN, debrid_pravila.ime(izid.ponudnik)),
+               "kakovost": str(t.get("kakovost") or ""), "opis": str(t.get("opis") or "")}
+        razlicice = [tok] + list(rezerve[:9])
+        resolved = dict(item, url=izid.url, razlicice=razlicice, stevilo_razlicic=len(razlicice), debrid=izid.ponudnik)
+        self._dynamic_items[item_id] = resolved
+        return resolved
+
     def _save(self, data: dict) -> None:
         self.config_dir.mkdir(parents=True, exist_ok=True)
         temporary = self.store_path.with_suffix(".tmp")
@@ -1587,16 +1622,16 @@ class MediaCenter:
 
     def _na_voljo(self, koren: str, tip: str, ident: str) -> Optional[bool]:
         """True = kateri od dodatkov ima tok, False = vsi so odgovorili in nobeden nima, None = ne vemo (izpad)."""
-        if tip == "series" and ":" not in ident:
+        if tip == "series" and not media_servers.stremio_je_epizoda(ident):
             try:
-                poskusi = media_servers.stremio_poskusne_epizode(koren, ident)
+                poskusi = media_servers.stremio_poskusne_epizode_z_imdb(koren, ident)
             except Exception:
                 return None
             if not poskusi:
                 return None
             neznano = False
-            for epizoda in poskusi:
-                if self._predvajljivi(self._stremio_tokovi_vseh(koren, tip, epizoda)):
+            for epizoda, dodatni in poskusi:
+                if self._predvajljivi(self._stremio_tokovi_vseh(koren, tip, epizoda, dodatni)):
                     return True
                 if not getattr(self._tokovi_odgovor, "vsi", False):
                     neznano = True
@@ -2086,17 +2121,25 @@ class MediaCenter:
         with self._lock:
             return [x for x in self._load().get("osebni_strezniki", []) if isinstance(x, dict) and x.get("ponudnik") == "stremio" and x.get("url")]
 
-    def _stremio_tokovi_vseh(self, koren: str, tip: str, ident: str) -> list[dict]:
+    def _stremio_tokovi_vseh(self, koren: str, tip: str, ident: str, dodatni: str = "") -> list[dict]:
         """
         Tokovi za vsebino iz VSEH uporabnikovih dodatkov, ne le iz tistega, ki jo je pokazal: katalog (npr. Cinemeta)
         pozna naslove, tokove ima pogosto drug dodatek - kot v Stremiu in kot v Safeer OS za Android.
         """
-        if tip == "series" and ":" not in ident:
+        if tip == "series" and not media_servers.stremio_je_epizoda(ident):
             # Serija brez izbrane epizode: prvo epizodo doloci dodatek, ki serijo pozna; z njenim id-jem vprasamo vse.
+            # Naloga 131: poleg id-ja dodatka vprasamo se id po IMDb (tt...:S:E) - dodatki s torrenti poznajo samo tega.
+            # Dodatek kartice epizod ne da: prvo epizodo po IMDb poiscemo pri drugem uporabnikovem dodatku z metapodatki.
+            serija = ident
             try:
-                ident = media_servers.stremio_prva_epizoda(koren, ident) or ident
+                prvi, dodatni = media_servers.stremio_prva_epizoda_z_imdb(koren, ident)
             except Exception:
-                pass
+                prvi = ""
+            if not prvi:
+                drugi = [media_servers._stremio_koren(str(x.get("url") or "")) for x in self._stremio_strezniki()]
+                prvi = media_servers.stremio_prva_epizoda_drugje([k for k in drugi if k and k != koren],
+                                                                 media_servers.stremio_imdb_iz_meta({}, serija))
+            ident = prvi or ident
         koreni = [koren]
         for streznik in self._stremio_strezniki():
             k = media_servers._stremio_koren(str(streznik.get("url") or ""))
@@ -2107,7 +2150,7 @@ class MediaCenter:
         # bi hip nedosegljiv dodatek film skril za ure (glej resolve).
         izpadi: list[str] = []
 
-        def vprasaj(k: str) -> list[dict]:
+        def vprasaj_en(k: str, ident: str = ident) -> list[dict]:
             try:
                 return media_servers.stremio_tokovi(k, tip, ident)
             except urllib.error.HTTPError as napaka:
@@ -2117,6 +2160,10 @@ class MediaCenter:
             except Exception:
                 izpadi.append(k)
                 return []
+
+        def vprasaj(k: str) -> list[dict]:
+            # Naloga 131: isti dodatek se z id-jem po IMDb (npr. Torrentio za serijo iz kataloga z lastnimi id-ji).
+            return vprasaj_en(k) + (vprasaj_en(k, dodatni) if dodatni else [])
 
         # Kateri dodatek je ponudil torrent (za zasebnost na polici »Na tvojih napravah«). Naslov dodatka ostane tu:
         # v njem je lahko uporabnikov zeton, zato ga tokovom, ki gredo na stran, ne pripisemo.
@@ -3469,6 +3516,22 @@ class MediaCenter:
             neposredni = self._zivi_naprej(neposredni)
             drugi_http = [v for v in (item.get("razlicice") or []) if isinstance(v, dict)
                           and str(v.get("url") or "").startswith(("http://", "https://"))]
+            # Naloga 131: z vpisanim kljucem debrid gre najboljsi PRIPRAVLJEN torrent pred neposrednimi povezavami
+            # (zasebno, hitro, obicajno boljsa kakovost) - kot Safeer OS za Android (naloga 130), brez »Izberi vir«.
+            torrenti = [t for t in tokovi if t.get("torrent") and t.get("hash")]
+            aktivna = self.debrid.aktivna() if torrenti else None
+            if aktivna:
+                jezik = self._jezik_zvoka(item) if hasattr(self, "_jezik_zvoka") else {}
+                torrenti = tok_izbira.uredi(torrenti, lambda t: str(t.get("opis") or "%s %s" % (t.get("vir", ""), t.get("kakovost", ""))),
+                                            tok_izbira.Zmoznosti(visina=int(getattr(self, "visina_zaslona", 0) or 1080)),
+                                            naslov=lambda t: "", **jezik)
+                if pripravi_torrent:
+                    hashi = [str(t["hash"]) for t in torrenti]
+                    k = debrid_pravila.samodejni_torrent(aktivna, hashi, self.debrid.predpomnjeni(hashi))
+                    if k >= 0:
+                        resolved = self._razresi_debrid(item_id, item, torrenti[k], neposredni)
+                        if resolved.get("url") and not resolved.get("napaka_koda"):
+                            return resolved
             if neposredni:
                 if drugi_http and str(item.get("url") or "").startswith(("http://", "https://")):
                     # Kartica ima tudi druge (vdelane) vire: tokove dodatka dodamo kot dodatne razlicice.
@@ -3485,13 +3548,16 @@ class MediaCenter:
             if drugi_http:
                 return dict(item, razlicice=drugi_http, stevilo_razlicic=len(drugi_http))
             # Neposrednega toka ni: torrent, ce ga ta racunalnik zna prenasati (kot Android: neposredni imajo prednost).
-            torrenti = [t for t in tokovi if t.get("torrent") and t.get("hash")]
+            if torrenti and aktivna:
+                # Naloga 131: ni povezave in ni pripravljenega torrenta - prek debrida (s cakanjem samo, ce ga uporabnik
+                # dovoli). Ob napaki NIKOLI tiho na neposreden torrent (razkril bi IP racunalnika) - povemo zakaj.
+                return self._razresi_debrid(item_id, item, torrenti[0], []) if pripravi_torrent else dict(item, torrent=True)
             if torrenti and os_torrent_tok.podprto():
                 return self._razresi_torrent(item, torrenti) if pripravi_torrent else dict(item, torrent=True)
             # Brez predvajljivega toka ni strani in ni seznama povezav: kratko obvestilo, vsebina izgine s seznama.
             # Za ure si to zapomnimo le, ce so odgovorili vsi dodatki (izpad dodatka ni "ni na voljo").
             if getattr(self._tokovi_odgovor, "vsi", False):
-                if tip == "series" and ":" not in ident:
+                if tip == "series" and not media_servers.stremio_je_epizoda(ident):
                     # Serija: ena epizoda brez toka se ni "serije ni" - presodimo po vec epizodah (v ozadju).
                     self.preveri_razpolozljivost([item])
                 else:

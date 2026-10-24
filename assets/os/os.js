@@ -2786,6 +2786,73 @@
     vsi[i].scrollIntoView({ block: "nearest" });
   }
 
+  // ------------------------------------------------------------------ naloga 131: debrid storitve
+  // Izbira »Debrid« ob zvrsteh: prek katere storitve (TorBox, Real-Debrid, AllDebrid) gredo torrenti; privzeto tista,
+  // za katero je vpisan kljuc. Kljuci se vpisejo v oknu »Debrid storitve«; jedro jih hrani sifrirane, v vmesnik ne pridejo.
+  var debridStanje = null, debridNalagam = false;
+  function narisiDebrid(vidno) {
+    var polje = $("mediaDebridPolje"), izbira = $("mediaDebrid"); if (!polje || !izbira) return;
+    polje.hidden = !vidno;
+    if (!vidno) return;
+    if (!debridStanje) {
+      if (debridNalagam) return;
+      debridNalagam = true;
+      klic("mediaDebrid", []).then(function (s) { debridStanje = s; debridNalagam = false; narisiDebrid(true); })
+        .catch(function () { debridNalagam = false; });
+      return;
+    }
+    var s = debridStanje, z = (s.storitve || []).filter(function (x) { return x.kljuc; });
+    izbira.innerHTML = "";
+    if (!z.length) izbira.add(new Option(t("debridDodaj"), ""));
+    z.forEach(function (x) { izbira.add(new Option((s.oznaka || "⚡") + " " + x.ime, x.id)); });
+    if (z.length) izbira.add(new Option(t("debridBrez"), "brez"));
+    izbira.add(new Option(t("debridNastavitve"), "nastavitve"));
+    izbira.value = z.length ? (s.aktivna || "brez") : "";
+    izbira.setAttribute("aria-label", t("debridIzbira")); izbira.title = t("debridIzbira");
+    polje.classList.toggle("izbran", !!s.aktivna);
+  }
+  function izbranDebrid(v) {
+    if (v === "nastavitve" || v === "") { narisiDebrid(true); odpriDebrid(); return; }
+    klic("mediaDebrid", ["aktivna", v === "brez" ? "" : v]).then(function (s) { debridStanje = s; narisiDebrid(true); })
+      .catch(function () {});
+  }
+  function odpriDebrid() {
+    $("slojDebrid").classList.add("viden");
+    klic("mediaDebrid", []).then(narisiDebridOkno).catch(function () {});
+  }
+  function narisiDebridOkno(s) {
+    if (!s) return;
+    debridStanje = s; narisiDebrid(!$("mediaDebridPolje").hidden);
+    var sez = $("debridSeznam"); sez.innerHTML = "";
+    (s.storitve || []).forEach(function (x) {
+      var vrsta = el("div", "debrid-vrstica");
+      var opis = el("div", "debrid-opis");
+      opis.appendChild(el("strong", "", ubezi(x.ime)));
+      opis.appendChild(el("small", "", ubezi(x.kljuc ? t("debridVpisan") + (x.meritev ? " · " + x.meritev : "") : t("debridKje", { kje: x.kje }))));
+      vrsta.appendChild(opis);
+      var polje = el("input", ""); polje.type = "password"; polje.autocomplete = "off"; polje.spellcheck = false;
+      polje.placeholder = t("debridKljuc"); polje.setAttribute("aria-label", t("debridKljuc") + " – " + x.ime);
+      var shrani = el("button", "gumb", ubezi(t("debridShrani"))); shrani.type = "button";
+      function shraniKljuc() {
+        klic("mediaDebrid", ["kljuc", x.id, polje.value]).then(function (o) {
+          polje.value = "";
+          obvesti(t(o && o.ok ? "debridShranjen" : "debridNiKljuc", { ime: x.ime }));
+          narisiDebridOkno(o);
+        }).catch(function () {});
+      }
+      shrani.addEventListener("click", shraniKljuc);
+      polje.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); shraniKljuc(); } });
+      vrsta.appendChild(polje); vrsta.appendChild(shrani);
+      if (x.kljuc) {
+        var odstrani = el("button", "gumb", ubezi(t("debridOdstrani"))); odstrani.type = "button";
+        odstrani.addEventListener("click", function () { klic("mediaDebrid", ["pozabi", x.id]).then(narisiDebridOkno).catch(function () {}); });
+        vrsta.appendChild(odstrani);
+      }
+      sez.appendChild(vrsta);
+    });
+    $("debridSamoTakoj").checked = !!s.samo_takoj;
+  }
+
   function zapriSloje() {
     document.querySelectorAll(".sloj").forEach(function (s) { s.classList.remove("viden"); });
     if ($("iskanje").value && document.activeElement !== $("iskanje")) $("iskanje").value = "";
@@ -5063,6 +5130,13 @@
     }).catch(function () { obvesti(t("mediaNapaka_dvd")); });
   });
   on("magnetZapri", "click", zapriSloje);
+  // Naloga 131: izbira Debrid v orodni vrstici Medijskega centra in okno Debrid storitve.
+  on("mediaDebrid", "change", function () { izbranDebrid(this.value); });
+  on("debridZapri", "click", zapriSloje);
+  on("debridSamoTakoj", "change", function () {
+    klic("mediaDebrid", ["samo_takoj", this.checked]).then(narisiDebridOkno).catch(function () {});
+  });
+  narisiDebrid(true);
   on("magnetObrazec", "submit", function (e) {
     e.preventDefault();
     var uri = $("magnetPolje").value.trim();

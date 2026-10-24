@@ -206,11 +206,33 @@ if (-not $pyInfo) {
 
     if (-not $installedViaWinget) {
         Write-Info "Prenašam uradni namestitveni program Python 3.12 iz python.org..."
-        $pythonUrl = "https://www.python.org/ftp/python/3.12.8/python-3.12.8-amd64.exe"
-        $tempInstaller = Join-Path $env:TEMP "python-3.12.8-amd64.exe"
+        # Naloga 131: 3.12.10, ne vec 3.12.8 - python.org je 28. 8. 2025 preklical podpisni certifikat namestitvenih programov
+        # 3.12.8 (preverba podpisa bi vedno padla). 3.12.10 je zadnja izdaja 3.12 z namestitvenim programom za Windows.
+        # SHA-256 iz uradnega paketa Sigstore na python.org (python-3.12.10-amd64.exe.sigstore, podpisnik release managerja
+        # 3.12), prebrano 24. 10. 2026 - python.org na strani izdaje navaja samo MD5.
+        $pythonUrl = "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe"
+        $pythonSha256 = "67b5635e80ea51072b87941312d00ec8927c4db9ba18938f7ad2d27b328b95fb"
+        $tempInstaller = Join-Path $env:TEMP "python-3.12.10-amd64.exe"
         
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
         Invoke-WebRequest -Uri $pythonUrl -OutFile $tempInstaller -UseBasicParsing
+
+        # Pred zagonom (kot skrbnik): pripeta SHA-256 IN veljaven podpis Authenticode Python Software Foundation.
+        # Ce kar koli ne velja, datoteko izbrisemo in namestitev ustavimo - poskodovan ali podtaknjen prenos se ne zazene.
+        $dejanskiSha256 = (Get-FileHash -Path $tempInstaller -Algorithm SHA256).Hash.ToLowerInvariant()
+        $podpis = Get-AuthenticodeSignature -FilePath $tempInstaller
+        $podpisnik = if ($podpis.SignerCertificate) { $podpis.SignerCertificate.Subject } else { "" }
+        if ($dejanskiSha256 -ne $pythonSha256) {
+            Remove-Item $tempInstaller -Force -ErrorAction SilentlyContinue
+            Write-Err "Prenešeni namestitveni program Python se NE ujema s pričakovano vsoto SHA-256 (poškodovan ali spremenjen prenos). Namestitev je ustavljena."
+            exit 1
+        }
+        if ($podpis.Status -ne "Valid" -or $podpisnik -notmatch 'CN="?Python Software Foundation') {
+            Remove-Item $tempInstaller -Force -ErrorAction SilentlyContinue
+            Write-Err "Namestitveni program Python nima veljavnega podpisa Python Software Foundation (stanje: $($podpis.Status)). Namestitev je ustavljena."
+            exit 1
+        }
+        Write-Success "Namestitveni program Python preverjen (SHA-256 in podpis Python Software Foundation)."
 
         Write-Info "Izvajam tiho namestitev Pythona 3.12 (uporabniški profil, vključen PATH)..."
         $argsList = "/quiet InstallAllUsers=0 PrependPath=1 Include_test=0 Include_pip=1 SimpleInstall=1"

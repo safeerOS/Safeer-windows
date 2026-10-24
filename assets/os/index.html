@@ -250,6 +250,10 @@
               <option value="za">Po abecedi Ž–A</option>
             </select>
           </label>
+          <label class="media-razvrsti" id="mediaDebridPolje" hidden>
+            <span data-t="debridNaslov">Debrid</span>
+            <select id="mediaDebrid"></select>
+          </label>
           <div class="media-filter-viri">
             <button class="gumb" id="mediaViriFilterGumb" type="button" aria-expanded="false" aria-controls="mediaViriFilter">Viri in jeziki: vsi</button>
             <div class="media-viri-filter" id="mediaViriFilter" hidden>
@@ -584,6 +588,17 @@
   </div>
 </div>
 
+<!-- Naloga 131: debrid storitve - kljuci (shranjeni sifrirani) in »samo takoj predvajljivo«. -->
+<div class="sloj" id="slojDebrid"><div class="tancica"></div>
+  <div class="plosca media-mape-plosca debrid-plosca" role="dialog" aria-modal="true" aria-labelledby="debridNaslov" aria-describedby="debridPojasnilo">
+    <span class="media-kicker">SAFEER MEDIA · DEBRID</span>
+    <h3 id="debridNaslov" data-t="debridNaslov"></h3>
+    <p class="drobno" id="debridPojasnilo" data-t="debridPojasnilo"></p>
+    <div class="debrid-seznam" id="debridSeznam"></div>
+    <label class="debrid-takoj"><input type="checkbox" id="debridSamoTakoj"> <span data-t="debridSamoTakoj"></span></label>
+    <div class="gumbi"><button type="button" class="gumb" id="debridZapri" data-t="zapri"></button></div>
+  </div>
+</div>
 <div class="sloj" id="slojMagnet"><div class="tancica"></div>
   <div class="plosca magnet-plosca" role="dialog" aria-modal="true" aria-labelledby="magnetNaslov">
     <span class="magnet-kicker">SAFEER MEDIA · MAGNET</span>
