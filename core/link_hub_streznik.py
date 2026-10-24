@@ -1181,6 +1181,9 @@ class Hub:
             return self._potrditev(id_sporocila, "chat", "rejected", "Ista naprava.", "isti_naprava")
         sporocilo["sender"] = moj_id
         sporocilo["sender_name"] = self._ime_naprave(moj_id)
+        # Posiljatelja doloci sredisce, ne odjemalec: naprava brez kljuca v krogu se ne sme predstaviti kot druga naprava
+        # (pregled 25. 10. 2026 - Android sender_device verjame najprej).
+        sporocilo.pop("sender_device", None)
         if moj_kljuc:
             sporocilo["sender_device"] = moj_kljuc
         besedilo = json.dumps(sporocilo, ensure_ascii=False)
