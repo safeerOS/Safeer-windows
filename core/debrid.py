@@ -15,11 +15,13 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Callable, Optional, Sequence
 
 from . import debrid_pravila as P
+from . import usenet_pravila as U
 
 _log = logging.getLogger("safeer.debrid")
 
@@ -51,8 +53,9 @@ class Odgovor:
 
 
 def klic(naslov: str, kljuc: Optional[str], metoda: str = "GET", obrazec: Optional[list] = None,
-         rok: float = 20.0) -> Odgovor:
-    """Klic s kljucem v glavi (nikoli v naslovu); [obrazec] gre kot application/x-www-form-urlencoded."""
+         rok: float = 20.0, telo: Optional[tuple] = None) -> Odgovor:
+    """Klic s kljucem v glavi (nikoli v naslovu); [obrazec] gre kot application/x-www-form-urlencoded, [telo] je
+    (bajti, Content-Type) - npr. multipart z NZB za Usenet."""
     glave = {"Accept": "application/json", "User-Agent": "SafeerOS/1.0"}
     if kljuc:
         glave["Authorization"] = P.glava_avtorizacije(kljuc)
@@ -60,6 +63,8 @@ def klic(naslov: str, kljuc: Optional[str], metoda: str = "GET", obrazec: Option
     if obrazec is not None:
         podatki = urllib.parse.urlencode(obrazec).encode("utf-8")
         glave["Content-Type"] = "application/x-www-form-urlencoded"
+    elif telo is not None:
+        podatki, glave["Content-Type"] = telo[0], telo[1]
     zahteva = urllib.request.Request(naslov, data=podatki, headers=glave, method=metoda)
     try:
         with urllib.request.urlopen(zahteva, timeout=rok) as o:
@@ -355,6 +360,129 @@ def izmeri(ponudnik: str, url: str) -> Optional[P.Meritev]:
         return None
 
 
+# ---------------------------------------------------------------------- Usenet (indeksator Newznab + TorBox)
+
+def _beri_do(o, najvec: int) -> bytes:
+    deli, skupaj = [], 0
+    while skupaj < najvec:
+        kos = o.read(min(64 * 1024, najvec - skupaj))
+        if not kos:
+            break
+        deli.append(kos)
+        skupaj += len(kos)
+    return b"".join(deli)
+
+
+def usenet_isci(osn: str, kljuc_ix: str, ident: str, rok: float = 8.0) -> list:
+    """Zadetki indeksatorja za id Stremio (film tt… ali epizoda tt…:S:E); ob napaki prazno. Naslov (s kljucem) ne gre v dnevnik."""
+    naslov = U.naslov_iskanja(osn, kljuc_ix, ident)
+    if not naslov:
+        return []
+    try:
+        zahteva = urllib.request.Request(naslov, headers={"Accept": "application/rss+xml, application/xml, text/xml",
+                                                          "User-Agent": "SafeerOS/1.0"})
+        try:
+            with urllib.request.urlopen(zahteva, timeout=rok) as o:
+                koda, telo = o.status, _beri_do(o, U.NAJVEC_ODGOVORA_BAJTOV)
+        except urllib.error.HTTPError as e:
+            koda, telo = e.code, _beri_do(e, 64 * 1024) if e.fp else b""
+        besedilo = telo.decode("utf-8", "replace")
+        if not 200 <= koda < 300:
+            _log.info("usenet iskanje: HTTP %d", koda)
+            return []
+        n = U.napaka(besedilo)
+        if n:
+            _log.info("usenet iskanje: napaka indeksatorja (%s)", n)
+            return []
+        z = U.zadetki(besedilo, osn)
+        _log.info("usenet iskanje: %d zadetkov", len(z))
+        return z
+    except Exception as e:  # noqa: BLE001 - brez Useneta, ostali viri delajo naprej
+        _log.warning("usenet iskanje: %s", type(e).__name__)
+        return []
+
+
+def usenet_nzb(povezava: str, rok: float = 30.0) -> tuple:
+    """NZB z indeksatorja: (bajti, "") ali (None, napaka). Povezava vsebuje kljuc - ne gre v dnevnik."""
+    try:
+        zahteva = urllib.request.Request(povezava, headers={"User-Agent": "SafeerOS/1.0"})
+        try:
+            with urllib.request.urlopen(zahteva, timeout=rok) as o:
+                koda, telo = o.status, _beri_do(o, U.NAJVEC_NZB_BAJTOV + 1)
+        except urllib.error.HTTPError as e:
+            koda, telo = e.code, _beri_do(e, 64 * 1024) if e.fp else b""
+        if len(telo) > U.NAJVEC_NZB_BAJTOV:
+            return None, U.NAPAKA_INDEKSATOR
+        zacetek = telo[:4096].decode("utf-8", "replace")
+        if 200 <= koda < 300 and U.je_nzb(zacetek):
+            return telo, ""
+        n = U.napaka(zacetek) or (P.NAPAKA_KLJUC if koda in (401, 403) else P.NAPAKA_MEJA if koda == 429 else U.NAPAKA_INDEKSATOR)
+        _log.info("usenet nzb: HTTP %d, napaka %s", koda, n)
+        return None, n
+    except Exception as e:  # noqa: BLE001
+        _log.warning("usenet nzb: %s", type(e).__name__)
+        return None, U.NAPAKA_INDEKSATOR
+
+
+def torbox_usenet(kljuc: str, nzb: bytes, ime_izdaje: str, indeks: Optional[int], samo_takoj: bool,
+                  cakaj: Callable[[float], None] = time.sleep, rok_cakanja: float = U.CAKAJ_PRENOSA_S) -> Izid:
+    """NZB -> TorBox createusenetdownload -> (cakanje na prenos) -> requestdl. Izid nosi ponudnika TorBox."""
+    try:
+        meja = "safeer" + uuid.uuid4().hex
+        ime = " ".join(str(ime_izdaje or "safeer").split())[:120] or "safeer"
+        obrazec = U.vecdelni_obrazec([("name", ime), ("add_only_if_cached", "true" if samo_takoj else "false"),
+                                      ("post_processing", "-1")], ("file", "safeer.nzb", nzb), meja)
+        ust = klic(U.OSNOVA_TORBOX + "/createusenetdownload", kljuc, "POST", rok=60.0,
+                   telo=(obrazec, "multipart/form-data; boundary=" + meja))
+        j = ust.json if isinstance(ust.json, dict) else {}
+        data = j.get("data") if isinstance(j.get("data"), dict) else {}
+        uid = int(data.get("usenetdownload_id") or -1)
+        if not _tb_uspeh(ust):
+            if j.get("error") == "DUPLICATE_ITEM":
+                if uid < 0:
+                    vsi = klic(U.OSNOVA_TORBOX + "/mylist?bypass_cache=true", kljuc)
+                    uid = next((int(t.get("id")) for t in ((vsi.json or {}).get("data") or [])
+                                if isinstance(t, dict) and str(t.get("name") or "") == ime), -1)
+            else:
+                n = _tb_napaka(ust)
+                if U.ni_predpomnjeno(samo_takoj, n.napaka):
+                    return Izid(napaka=P.NAPAKA_NI_PREDPOMNJENO, ponudnik=P.TORBOX)
+                return n
+        if uid < 0:
+            return _tb_napaka(ust)
+        _log.info("usenet: prenos %d samo_takoj=%s", uid, samo_takoj)
+        cakano, datoteke = 0.0, []
+        while True:
+            o = klic(U.naslov_seznam(uid), kljuc)
+            if not _tb_uspeh(o):
+                return _tb_napaka(o)
+            t = (o.json or {}).get("data") or {}
+            if not isinstance(t, dict):
+                return Izid(napaka=P.NAPAKA_STREZNIK, ponudnik=P.TORBOX)
+            datoteke = _tb_datoteke(t.get("files"))
+            if P.torbox_pripravljen(str(t.get("download_state") or ""), bool(t.get("download_finished")),
+                                    bool(t.get("download_present"))) and datoteke:
+                break
+            if str(t.get("download_state") or "").lower().startswith("failed"):
+                return Izid(napaka=P.NAPAKA_NI_DATOTEKE, ponudnik=P.TORBOX)
+            if cakano >= rok_cakanja:
+                return Izid(napaka=P.NAPAKA_PRENASA, ponudnik=P.TORBOX)
+            cakaj(P.CAKAJ_KORAK_S)
+            cakano += P.CAKAJ_KORAK_S
+        d = P.izberi_datoteko(datoteke, indeks)
+        if d is None:
+            return Izid(napaka=P.NAPAKA_NI_DATOTEKE, ponudnik=P.TORBOX)
+        dl = klic(U.naslov_prenosa(kljuc, uid, d.id), None)      # kljuc v naslovu (token) - ne zapisemo
+        url = str((dl.json or {}).get("data") or "")
+        if not _tb_uspeh(dl) or not url.startswith("https://"):
+            return _tb_napaka(dl)
+        _log.info("usenet: tok pripravljen")
+        return Izid(url=url, ponudnik=P.TORBOX)
+    except Exception as e:  # noqa: BLE001
+        _log.warning("usenet TorBox: %s", type(e).__name__)
+        return Izid(napaka=P.NAPAKA_STREZNIK, ponudnik=P.TORBOX)
+
+
 # ---------------------------------------------------------------------- storitev za Medijski center
 
 class Debrid:
@@ -367,6 +495,7 @@ class Debrid:
         self._sifriraj, self._desifriraj = sifriraj, desifriraj
         self._zaklep = threading.Lock()
         self._kljuci: dict = {}          # predpomnilnik desifriranih kljucev (samo v pomnilniku)
+        self._povezave_nzb: dict = {}    # id toka »usenet:…« -> povezava NZB s kljucem (samo v pomnilniku)
 
     def _nastavitve(self) -> dict:
         d = self._beri()
@@ -406,6 +535,71 @@ class Debrid:
     def pozabi_kljuc(self, p: str) -> None:
         self._spremeni(lambda d: (d.setdefault("kljuci", {}).pop(p, None), d.setdefault("meritve", {}).pop(p, None)))
 
+    # ---- Usenet: uporabnikov indeksator Newznab (naslov in kljuc samo sifrirana, kot kljuci storitev)
+    def indeksator(self) -> Optional[tuple]:
+        """(osnova, kljuc) ali None. Naslov je lahko zaseben (streznik v domacem omrezju), zato je tudi sifriran."""
+        u = self._nastavitve().get("usenet") or {}
+        if not isinstance(u, dict) or not u.get("url") or not u.get("kljuc"):
+            return None
+        try:
+            osn = U.osnova(self._desifriraj(str(u["url"])))
+            k = U.ocisti_kljuc(self._desifriraj(str(u["kljuc"])))
+        except Exception:  # noqa: BLE001 - zapisa ni mogoce prebrati: kot da ga ni
+            return None
+        return (osn, k) if osn and k else None
+
+    def nastavi_indeksator(self, naslov: str, kljuc: str) -> bool:
+        osn, k = U.osnova(naslov), U.ocisti_kljuc(kljuc)
+        if not osn or not k:
+            return False
+        enc_u, enc_k = self._sifriraj(osn), self._sifriraj(k)
+        if not enc_u or not enc_k:
+            return False
+        self._spremeni(lambda d: d.__setitem__("usenet", {"url": enc_u, "kljuc": enc_k}))
+        return True
+
+    def pozabi_indeksator(self) -> None:
+        self._spremeni(lambda d: d.pop("usenet", None))
+
+    def gostitelj_indeksatorja(self) -> str:
+        ix = self.indeksator()
+        return (urllib.parse.urlsplit(ix[0]).hostname or "") if ix else ""
+
+    def usenet_na_voljo(self) -> bool:
+        """Indeksator, kljuc TorBox (prenese in pretaka TorBox) in uporabnik ni izbral »Brez debrida«."""
+        return self.indeksator() is not None and bool(self.kljuc(P.TORBOX)) and self.aktivna() is not None
+
+    def usenet_isci(self, ident: str) -> list:
+        """Tokovi Usenet za id Stremio: [{"url": "usenet:…", "opis": …, "gb": …}]. Povezave NZB ostanejo v pomnilniku."""
+        ix = self.indeksator()
+        if not ix or not self.usenet_na_voljo() or not U.iscemo(ident):
+            return []
+        tokovi = []
+        for z in usenet_isci(ix[0], ix[1], ident):
+            idt = U.id_toka(z.povezava)
+            with self._zaklep:
+                self._povezave_nzb[idt] = z.povezava
+                while len(self._povezave_nzb) > 500:
+                    self._povezave_nzb.pop(next(iter(self._povezave_nzb)))
+            tokovi.append({"url": idt, "opis": U.opis(z), "naslov": z.naslov, "gb": z.velikost / 1073741824.0,
+                           "vir": "Usenet", "usenet": True})
+        return tokovi
+
+    def usenet_tok(self, id_toka: str, ime_izdaje: str, indeks: Optional[int] = None,
+                   samo_takoj: bool = False, rok_cakanja: float = U.CAKAJ_PRENOSA_S) -> Izid:
+        """NZB od indeksatorja (ta racunalnik), nato TorBox. Napaka indeksatorja je U.NAPAKA_INDEKSATOR."""
+        k = self.kljuc(P.TORBOX)
+        if not k:
+            return Izid(napaka=P.NAPAKA_KLJUC, ponudnik=P.TORBOX)
+        with self._zaklep:
+            povezava = self._povezave_nzb.get(id_toka)
+        if not povezava:
+            return Izid(napaka=U.NAPAKA_INDEKSATOR, ponudnik=P.TORBOX)
+        nzb, _napaka = usenet_nzb(povezava)
+        if nzb is None:
+            return Izid(napaka=U.NAPAKA_INDEKSATOR, ponudnik=P.TORBOX)
+        return torbox_usenet(k, nzb, ime_izdaje, indeks, samo_takoj, rok_cakanja=rok_cakanja)
+
     # ---- nastavitve
     def samo_takoj(self) -> bool:
         return bool(self._nastavitve().get("samo_takoj", True))
@@ -442,7 +636,8 @@ class Debrid:
             storitve.append({"id": p, "ime": P.ime(p), "kljuc": bool(self.kljuc(p)), "kje": P.kje_kljuc(p),
                              "meritev": P.opis_meritve(m) if m else ""})
         return {"storitve": storitve, "aktivna": self.aktivna() or "", "samo_takoj": self.samo_takoj(),
-                "oznaka": P.OZNAKA_PREDPOMNJEN}
+                "oznaka": P.OZNAKA_PREDPOMNJEN,
+                "usenet": {"gostitelj": self.gostitelj_indeksatorja(), "torbox": bool(self.kljuc(P.TORBOX))}}
 
     # ---- predvajanje
     def predpomnjeni(self, hashi: Sequence[str]) -> set:
@@ -517,7 +712,8 @@ class Debrid:
 
 def most(dbr: Debrid, a: list) -> dict:
     """Metoda mostu »mediaDebrid« (Linux os_katalog, Windows os_app): [] -> stanje; ["aktivna", p | ""];
-    ["kljuc", p, vnos] -> {"ok": bool, ...stanje}; ["pozabi", p]; ["samo_takoj", da]. Vrne stanje brez kljucev."""
+    ["kljuc", p, vnos] -> {"ok": bool, ...stanje}; ["pozabi", p]; ["samo_takoj", da]; ["usenet", naslov, kljuc];
+    ["pozabi_usenet"]. Vrne stanje brez kljucev (pri Usenetu samo gostitelja indeksatorja)."""
     ukaz = str(a[0]) if a else ""
     ok = True
     if ukaz == "aktivna":
@@ -529,4 +725,8 @@ def most(dbr: Debrid, a: list) -> dict:
         dbr.pozabi_kljuc(str(a[1]))
     elif ukaz == "samo_takoj":
         dbr.nastavi_samo_takoj(bool(a[1]) if len(a) > 1 else True)
+    elif ukaz == "usenet":
+        ok = len(a) > 2 and dbr.nastavi_indeksator(str(a[1]), str(a[2]))
+    elif ukaz == "pozabi_usenet":
+        dbr.pozabi_indeksator()
     return dict(dbr.stanje(), ok=bool(ok))

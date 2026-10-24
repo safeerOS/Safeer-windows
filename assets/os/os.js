@@ -2850,6 +2850,36 @@
       }
       sez.appendChild(vrsta);
     });
+    // Usenet prek TorBoxa: uporabnikov indeksator (Newznab). Naslov in kljuc ostaneta sifrirana na tem racunalniku;
+    // nazaj dobimo samo gostitelja.
+    var u = s.usenet || {}, uv = el("div", "debrid-vrstica");
+    var uo = el("div", "debrid-opis");
+    uo.appendChild(el("strong", "", ubezi(t("usenetIme"))));
+    uo.appendChild(el("small", "", ubezi(u.gostitelj ? t("usenetVpisan", { gostitelj: u.gostitelj }) + (u.torbox ? "" : " · " + t("usenetBrezTorbox"))
+      : t("usenetPojasnilo"))));
+    uv.appendChild(uo);
+    var un = el("input", ""); un.type = "url"; un.autocomplete = "off"; un.spellcheck = false;
+    un.placeholder = t("usenetNaslov"); un.setAttribute("aria-label", t("usenetNaslov"));
+    var uk = el("input", ""); uk.type = "password"; uk.autocomplete = "off"; uk.spellcheck = false;
+    uk.placeholder = t("usenetKljuc"); uk.setAttribute("aria-label", t("usenetKljuc"));
+    var us = el("button", "gumb", ubezi(t("debridShrani"))); us.type = "button";
+    function shraniUsenet() {
+      klic("mediaDebrid", ["usenet", un.value, uk.value]).then(function (o) {
+        uk.value = "";
+        obvesti(t(o && o.ok ? "usenetShranjen" : "usenetNiVeljaven"));
+        if (o && o.ok) un.value = "";
+        narisiDebridOkno(o);
+      }).catch(function () {});
+    }
+    us.addEventListener("click", shraniUsenet);
+    [un, uk].forEach(function (p) { p.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); shraniUsenet(); } }); });
+    uv.appendChild(un); uv.appendChild(uk); uv.appendChild(us);
+    if (u.gostitelj) {
+      var uod = el("button", "gumb", ubezi(t("debridOdstrani"))); uod.type = "button";
+      uod.addEventListener("click", function () { klic("mediaDebrid", ["pozabi_usenet"]).then(narisiDebridOkno).catch(function () {}); });
+      uv.appendChild(uod);
+    }
+    sez.appendChild(uv);
     $("debridSamoTakoj").checked = !!s.samo_takoj;
   }
 
