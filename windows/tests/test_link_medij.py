@@ -60,7 +60,10 @@ def test_medijske_tipke_gredo_v_predvajalnik():
     assert r["data"]["media"]["title"] == "Film" and "media" in r["data"]["actions"] and "next" in r["data"]["keys"]
 
 
-def test_brez_predvajanja_pade_na_navidezni_zaslon():
+def test_brez_predvajanja_pade_na_navidezni_zaslon(monkeypatch):
+    # Brez prave medijske tipke sistema (ni Windows ali je ni bilo mogoce poslati) gre tipka navideznemu zaslonu.
+    # Na Windows CI bi sicer sla prava tipka (_sistemska_medijska_tipka vrne True) - to preverja naslednji preizkus.
+    monkeypatch.setattr(CB, "_sistemska_medijska_tipka", lambda k: False)
     b = _backend(lambda u, p: {"ok": False, "code": "ni_predvajanja"} if u != "status" else None)
     r = _ukaz(b, "key", {"key": "play_pause"})
     assert r["ok"] and b.navidezni_zaslon.tipke == ["play_pause"]
@@ -74,3 +77,13 @@ def test_brez_medijskega_centra():
     assert not r["ok"] and r["code"] == "ni_medija"
     r = _ukaz(b, "status")
     assert "media" not in r["data"]
+
+
+def test_brez_predvajanja_prava_medijska_tipka_windows(monkeypatch):
+    """Windows: ce Medijski center ne predvaja, gre prava medijska tipka sistemu (Splet, Spotify ...), ne navideznemu zaslonu."""
+    poslano = []
+    monkeypatch.setattr(CB, "_sistemska_medijska_tipka", lambda k: poslano.append(k) or True)
+    b = _backend(lambda u, p: {"ok": False, "code": "ni_predvajanja"} if u != "status" else None)
+    b._gleda_navidezni = lambda *_a: False
+    r = _ukaz(b, "key", {"key": "play_pause"})
+    assert r["ok"] and poslano == ["play_pause"] and b.navidezni_zaslon.tipke == []
