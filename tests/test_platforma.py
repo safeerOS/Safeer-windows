@@ -10,6 +10,7 @@ import sys
 import tempfile
 import types
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from core import platforma
@@ -53,10 +54,13 @@ class Poti(unittest.TestCase):
                          os.path.join(os.path.expanduser("~/.local/share"), "safeer-os"))
         self.assertEqual(platforma.mapa_predpomnilnika(False, {}), os.path.join(os.path.expanduser("~/.cache"), "safeer-os"))
 
-    def test_linux_enako_kot_obstojeci_moduli(self):
-        # Iste mape kot moduli, ki jih bodo klicali (podatki uporabnika se ne premaknejo).
-        from core import os_programi
-        self.assertEqual(platforma.mapa_nastavitev(False), os_programi.MAPA_NASTAVITEV)
+    def test_linux_ista_formula_kot_os_programi(self):
+        # Ista mapa kot os_programi.MAPA_NASTAVITEV (podatki uporabnika se ne premaknejo). Ta se izracuna ob uvozu, drugi
+        # preizkusi pa okolje spreminjajo - zato primerjamo formulo (poln tek 25. 10. 2026 je padel na vrednosti).
+        vir = (Path(platforma.__file__).with_name("os_programi.py")).read_text(encoding="utf-8")
+        self.assertIn('MAPA_NASTAVITEV = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), '
+                      '"safeer-os")', vir)
+        self.assertEqual(platforma.mapa_nastavitev(False, {"XDG_CONFIG_HOME": "/q"}), os.path.join("/q", "safeer-os"))
 
     def test_windows_appdata(self):
         o = {"APPDATA": r"C:\U\R", "LOCALAPPDATA": r"C:\U\L"}
