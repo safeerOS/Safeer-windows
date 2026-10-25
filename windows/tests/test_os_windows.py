@@ -1365,7 +1365,7 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
         self.assertIn('id="dovoljenjaNaprav"', html)
         self.assertIn('pravicaPolno: "Poln dostop"', js)
         # Ena privolitev (lastnik, 25. 10. 2026 10:49): poln dostop = ozji krog z upravljanjem in vnosom.
-        self.assertIn("Upravljanje z miško in tipkovnico, vsi diski, datoteke in aplikacije (ožji krog)", js)
+        self.assertIn("Upravljanje z miško in tipkovnico, tvoje mape (brez skritih map in ključev) in aplikacije", js)
         self.assertIn('pravicaIzbrano: "Izbrane datoteke"', js)
         self.assertIn('pravicaZaslon: "Samo zaslon"', js)
         self.assertIn('pravicaBrez: "Brez dostopa"', js)                 # umik iz ozjega kroga

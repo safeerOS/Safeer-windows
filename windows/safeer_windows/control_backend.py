@@ -913,7 +913,11 @@ class SafeerControlBackend:
         return link_predvajanje.izid_ponudbe(self.ukaz_pocakaj(id_naprave, "play.offer", parametri, cas=8.0))
 
     def _datoteke_za(self, posiljatelj: str):
-        """Deljene mape za napravo: en streznik za omejen dostop in en za cel disk (dovoljenje "polno").
+        """Deljene mape za napravo: en streznik za omejen dostop in en za ozji krog (dovoljenje "polno").
+
+        Ozji krog dobi uporabnikove mape (domaca mapa brez AppData, skritih map in skrivnosti - DeljeneMape.dom), ne
+        celega diska: ena privolitev kot na Linuxu (lastnik 25. 10. 2026 10:49, koordinator 25. 10.). Prej je »polno«
+        odprlo vse diske.
 
         Prej je vsak `files.list` naredil nov streznik na novih vratih (ostajali so odprti), zeton
         prejsnjega pa je s tem nehal veljati sredi predvajanja. Zdaj oba ostaneta in ju streze tudi Hub
@@ -928,7 +932,7 @@ class SafeerControlBackend:
             shramba[True].streznik.preklici(posiljatelj)
         d = shramba.get(polno)
         if d is None:
-            d = link_datoteke.Datoteke(poti=self.deljene_mape(), tls_mapa=self.navidezni_zaslon.tls_mapa, ves_disk=polno)
+            d = link_datoteke.Datoteke(poti=self.deljene_mape(), tls_mapa=self.navidezni_zaslon.tls_mapa, dom=polno)
             # Zeton velja le, dokler ima naprava se pravico do tega streznika in je v krogu - preveri se ob
             # vsaki zahtevi (tudi med predvajanjem), ne sele ob naslednjem seznamu ali po 12 urah.
             privzeto = d.streznik.umaknjena

@@ -158,6 +158,40 @@ def _obcutljiva(pot: str) -> bool:
     return False
 
 
+#: Datoteke s skrivnostmi, ki jih domaca mapa in ves disk ne dajata napravam (zasebni kljuci SSH, potrdila s kljucem,
+#: zbirke gesel) - tudi, ce niso v skriti mapi. Isti seznam kot Safeer-linux core/link_datoteke._skrivnost (a26daa2).
+_SKRIVNOSTI_IMENA = frozenset(("id_rsa", "id_dsa", "id_ecdsa", "id_ed25519", "id_ecdsa_sk", "id_ed25519_sk",
+                               "wallet.dat", "credentials", "credentials.json", "client_secret.json"))
+_SKRIVNOSTI_KONCNICE = frozenset((".pem", ".key", ".p12", ".pfx", ".kdbx", ".kdb", ".jks", ".keystore", ".ppk",
+                                  ".gpg", ".pgp", ".asc", ".ovpn"))
+#: FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM: Raziskovalec jih ne kaze (AppData, NTUSER.DAT, stare povezave).
+_SKRITA_ATRIBUT = 0x2 | 0x4
+
+
+def _skrivnost(pot: str) -> bool:
+    """Datoteka s skrivnostjo po imenu (kljuc, potrdilo s kljucem, zbirka gesel, nastavitve VPN s kljucem)."""
+    ime = os.path.basename(str(pot or "")).lower()
+    return ime in _SKRIVNOSTI_IMENA or os.path.splitext(ime)[1] in _SKRIVNOSTI_KONCNICE
+
+
+def _skrita_atribut(pot: str, koren: str = "") -> bool:
+    """Windows: pot (ali katera koli mapa med `koren` in njo) ima atribut Skrito ali Sistem. Drugje False."""
+    if os.name != "nt":
+        return False
+    pot = os.path.abspath(pot)
+    koren = os.path.abspath(koren) if koren else ""
+    while True:
+        try:
+            if getattr(os.stat(pot, follow_symlinks=False), "st_file_attributes", 0) & _SKRITA_ATRIBUT:
+                return True
+        except OSError:
+            return True                      # ne vemo - ne damo
+        starsa = os.path.dirname(pot)
+        if not koren or pot == koren or starsa == pot or not pot.startswith(koren + os.sep):
+            return False
+        pot = starsa
+
+
 class DeljeneMape:
     """Izbrane mape (absolutne poti) in navidezne oznake.
 
@@ -169,10 +203,31 @@ class DeljeneMape:
     #: Mape, ki na korenu niso za uporabnika (jedro, naprave, sistem, podatki programov) in jih ne damo.
     SISTEMSKE = _SISTEMSKE_WIN | _SISTEMSKE_NIX | _APPDATA
 
-    def __init__(self, poti: Optional[List[str]] = None, ves_disk: bool = False) -> None:
+    def __init__(self, poti: Optional[List[str]] = None, ves_disk: bool = False, dom: bool = False) -> None:
         self.poti: List[str] = []
         self.ves_disk = bool(ves_disk)
+        #: Uporabnikove mape za ozji krog (oznake `dom:<rel>`, kot Safeer-linux a26daa2): ena privolitev v Linku
+        #: (lastnik 25. 10. 2026 10:49) da napravi v ozjem krogu uporabniski profil (Namizje, Dokumenti, Slike,
+        #: Prenosi, Glasba, Videoposnetki ...) - BREZ AppData, map z zacetno piko, datotek in map z atributom Skrito
+        #: ali Sistem, datotek s skrivnostmi in povezav (simbolnih, junction) ven iz profila ali v AppData.
+        self.dom = bool(dom)
         self.nastavi(poti or [])
+
+    @staticmethod
+    def _domaca() -> str:
+        return os.path.realpath(os.path.expanduser("~"))
+
+    def _v_domu(self, pot: str) -> Optional[str]:
+        """Razresena pot v domaci mapi, ce jo ozji krog sme videti, sicer None."""
+        koren = self._domaca()
+        if pot != koren and not pot.startswith(koren + os.sep):
+            return None              # .. ali povezava ven iz domace mape
+        if pot != koren and (_skrita(os.path.relpath(pot, koren)) or _skrita_atribut(pot, koren)
+                             or _skrivnost(pot)):
+            return None
+        if _obcutljiva(pot):
+            return None              # AppData, sistemska mapa, registrski panj, UNC
+        return pot
 
     def nastavi(self, poti: List[str]) -> None:
         cista: List[str] = []
@@ -196,6 +251,9 @@ class DeljeneMape:
                         vnosi.append({"id": "disk:" + disk, "name": disk, "type": "folder"})
             else:
                 vnosi.append({"id": "disk:/", "name": "/", "type": "folder"})
+        elif self.dom:
+            dom = self._domaca()
+            vnosi.append({"id": "dom:", "name": os.path.basename(dom) or dom, "type": "folder"})
         return vnosi
 
     def razresi(self, oznaka: str) -> Optional[Tuple[int, str]]:
@@ -218,6 +276,18 @@ class DeljeneMape:
             if _skrita(pot) or _obcutljiva(pot):
                 return None
             return (-1, pot) if os.path.exists(pot) else None
+        if oznaka.startswith("dom:"):
+            if not self.dom:
+                return None
+            rel = oznaka[len("dom:"):].replace("\\", "/").lstrip("/")
+            if _je_unc(rel) or (len(rel) > 1 and rel[1] == ":"):
+                return None          # absolutna pot (C:...) ali UNC ni del domace mape
+            try:
+                pot = os.path.realpath(os.path.join(self._domaca(), rel)) if rel else self._domaca()
+            except (OSError, ValueError):
+                return None
+            pot = self._v_domu(pot)
+            return (-2, pot) if pot is not None and os.path.exists(pot) else None
         deli = str(oznaka or "").split(":", 2)
         if len(deli) != 3 or deli[0] != "share":
             return None
@@ -247,7 +317,12 @@ class DeljeneMape:
                 return f"share:{i}:"
             if pot.startswith(koren + os.sep):
                 return f"share:{i}:" + os.path.relpath(pot, koren).replace(os.sep, "/")
-        return "disk:" + pot if self.ves_disk else ""
+        if self.ves_disk:
+            return "disk:" + pot
+        dom = self._domaca()
+        if self.dom and (pot == dom or pot.startswith(dom + os.sep)) and self._v_domu(pot) is not None:
+            return "dom:" + ("" if pot == dom else os.path.relpath(pot, dom).replace(os.sep, "/"))
+        return ""
 
     def podnapisi(self, oznaka_videa: str) -> List[dict]:
         """Podnapisi ob videu (ista mapa ali podmapa Subs), vsak s svojo oznako znotraj deljene mape."""
@@ -283,6 +358,8 @@ class DeljeneMape:
         i, pot = r
         if not os.path.isdir(pot):
             return None
+        if i == -2:
+            return self._seznam_doma(pot)
         if i < 0:
             return self._seznam_diska(pot)
         koren = self.poti[i]
@@ -374,6 +451,40 @@ class DeljeneMape:
                 break
         zadetki.sort(key=lambda z: (z[0], z[1]))
         return [z[2] for z in zadetki[:najvec]]
+
+    def _seznam_doma(self, pot: str) -> Optional[List[dict]]:
+        """Vsebina mape v domaci mapi (oznake `dom:`): brez skritih, brez skrivnosti, brez povezav ven in v AppData."""
+        koren = self._domaca()
+        try:
+            imena = sorted(os.listdir(pot), key=lambda s: s.lower())
+        except OSError:
+            return None
+        vnosi: List[dict] = []
+        for ime in imena:
+            if ime.startswith(".") or _skrivnost(ime):
+                continue
+            cela = os.path.join(pot, ime)
+            try:
+                if _skrita_atribut(cela):
+                    continue
+                mapa = os.path.isdir(cela)
+                if not mapa and not os.path.isfile(cela):
+                    continue
+                realna = self._v_domu(os.path.realpath(cela))
+                if realna is None:
+                    continue
+                rel = os.path.relpath(realna, koren).replace(os.sep, "/")
+                v = {"id": "dom:" + rel, "name": ime, "type": "folder" if mapa else vrsta_datoteke(ime)}
+                if not mapa:
+                    st = os.stat(cela)
+                    v["size"] = st.st_size
+                    v["modified"] = int(st.st_mtime * 1000)
+                    v["mime"] = mimetypes.guess_type(ime)[0] or "application/octet-stream"
+                vnosi.append(v)
+            except (OSError, ValueError):
+                continue
+        vnosi.sort(key=lambda v: (v["type"] != "folder", v["name"].lower()))
+        return vnosi[:NAJVEC_VNOSOV]
 
     def _seznam_diska(self, pot: str) -> Optional[List[dict]]:
         """Vsebina mape kjerkoli na racunalniku (oznake `disk:`). Skrite datoteke ostanejo skrite,
@@ -1028,8 +1139,8 @@ class Datoteke:
     ZMOZNOST = "files"
 
     def __init__(self, poti: Optional[List[str]] = None, tls_mapa: str = TLS_MAPA,
-                 ves_disk: bool = False) -> None:
-        self.mape = DeljeneMape(poti, ves_disk=ves_disk)
+                 ves_disk: bool = False, dom: bool = False) -> None:
+        self.mape = DeljeneMape(poti, ves_disk=ves_disk, dom=dom)
         self.streznik = StreznikDatotek(self.mape, tls_mapa)
         # Klicatelj (Control) ga nastavi, da spremembo map shrani in stran osvezi.
         self.ob_spremembi: Optional[callable] = None
