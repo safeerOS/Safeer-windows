@@ -45,6 +45,8 @@ PRIVZETA_VRATA = 8990
 POT_WS = "/cast/ws"
 #: Deljene datoteke prek Huba (tok in prenos tudi prek Global Linka).
 POT_DATOTEKE = "/cast/d/"
+#: Slicica deljene datoteke prek Huba (kot Linux in Android: /cast/thumb/<id>) - isti zeton in pravila kot datoteka.
+POT_SLICICE = "/cast/thumb/"
 #: Deljenje med napravami (core/link_hub_deljenje.py): besedilo, oddaja datoteke in njen prevzem.
 POT_BESEDILO = "/cast/share/text"
 #: Ime, ki ga napravi da uporabnik (zivi v krogu zaupanja, vidijo ga vse naprave).
@@ -1968,7 +1970,7 @@ class _Obravnava(http.server.BaseHTTPRequestHandler):
             # Samo stevila, nikoli imena naprav: to je preverba, da tu res tece Safeer Hub.
             self._odgovori(200, self._hub.zdravje())
             return
-        if pot.startswith(POT_DATOTEKE):
+        if pot.startswith(POT_DATOTEKE) or pot.startswith(POT_SLICICE):
             self._datoteka(pot, samo_glava=False)
             return
         if pot.startswith(POT_PREVZEM):
@@ -1997,7 +1999,7 @@ class _Obravnava(http.server.BaseHTTPRequestHandler):
 
     def do_HEAD(self) -> None:
         pot = urlparse(self.path).path
-        if self._je_krajevni() and pot.startswith(POT_DATOTEKE):
+        if self._je_krajevni() and (pot.startswith(POT_DATOTEKE) or pot.startswith(POT_SLICICE)):
             self._datoteka(pot, samo_glava=True)
             return
         # HEAD nima telesa (HTTP/1.1).
@@ -2027,6 +2029,9 @@ class _Obravnava(http.server.BaseHTTPRequestHandler):
             self._sovrazno("brez_zaupanja")
         from urllib.parse import unquote
         from core import link_datoteke
+        if pot.startswith(POT_SLICICE):
+            link_datoteke.postrezi_slicico(self, streznik, unquote(pot[len(POT_SLICICE):]), samo_glava)
+            return
         link_datoteke.postrezi_datoteko(self, streznik, unquote(pot[len(POT_DATOTEKE):]), samo_glava)
 
     # ------------------------------------------------------------------ deljenje: datoteka

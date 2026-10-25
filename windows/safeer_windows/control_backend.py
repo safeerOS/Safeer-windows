@@ -115,6 +115,16 @@ HUBI_VELJAJO_S = 10.0
 HUBI_PRAZNI_VELJAJO_S = 30.0
 
 
+def stevilo_ali_nic(v: Any) -> int:
+    """Nenegativno celo stevilo iz odgovora naprave (next_offset, total) ali 0, ce ga ni ali ni veljavno."""
+    if isinstance(v, bool):
+        return 0
+    try:
+        return max(0, int(v or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
 def _se_razresi(gostitelj: str) -> bool:
     """Ali ima gostitelj naslov: stevilcni naslov vedno, ime samo, ce ga omrezje pozna."""
     try:
@@ -2049,8 +2059,21 @@ class SafeerControlBackend:
                 "naslov": n.get("naslov") or n.get("address") or n.get("host", ""),
                 "ta": bool(n.get("ta") or n.get("id") == self.device_id),
                 "zmoznosti": n.get("zmoznosti") or n.get("capabilities") or [],
+                # »ozji«: naprava je v ozjem krogu zaupanja tega racunalnika (core/link_dostop, »Schengen«) - kot na
+                # Linuxu (safeer_control Seznam). Samo take Safeer OS pokaze za datoteke, programe in zaslon.
+                "ozji": bool(n.get("ta") or n.get("id") == self.device_id or self.v_ozjem_krogu(n.get("id", ""))),
             })
         return rez
+
+    @staticmethod
+    def v_ozjem_krogu(id_naprave: str) -> bool:
+        """Ali je naprava v ozjem krogu zaupanja tega racunalnika (ima kaksno dovoljenje v core/link_dostop). Ob napaki
+        branja zapisa ne - »ne vem« ni »da« (isto kot Linux safeer_control._v_ozjem_krogu)."""
+        try:
+            from core import link_dostop
+            return bool(link_dostop.zmoznosti(str(id_naprave or "")))
+        except Exception:  # noqa: BLE001
+            return False
 
     @staticmethod
     def _zmoznosti_naprave(naprava: dict) -> set[str]:
@@ -2165,14 +2188,26 @@ class SafeerControlBackend:
                     "ime": ime,
                     "platforma": n.get("platforma") or n.get("platform", ""),
                     "vrsta": n.get("vrsta") or n.get("kind", ""),
+                    "ozji": self.v_ozjem_krogu(n.get("id", "")),
                 })
         return rez
 
-    def datoteke_naprave(self, id_naprave: str, mapa: str = "") -> dict:
-        """Pridobi seznam datotek ali map z oddaljene naprave prek files.list."""
+    def datoteke_naprave(self, id_naprave: str, mapa: str = "", odmik: int = 0) -> dict:
+        """Pridobi seznam datotek ali map z oddaljene naprave prek files.list. Samo naprave v ozjem krogu zaupanja
+        (lastnik, 17. 10. 2026; kot Linux safeer_os.datoteke_naprave). `odmik`: naslednji del velike mape (galerija
+        telefona) - naprava, ki deli po delih, v odgovoru pove `next_offset`; starejsa parameter prezre."""
         if not id_naprave:
             return {"ok": False, "items": [], "shared": False, "koda": "manjka_naprava"}
-        r = self.ukaz_pocakaj(id_naprave, "files.list", {"folder": mapa}, cas=12.0)
+        if not self.v_ozjem_krogu(id_naprave):
+            return {"ok": False, "items": [], "shared": False, "koda": "ni_ozji_krog"}
+        parametri: Dict[str, Any] = {"folder": mapa}
+        try:
+            odmik = max(0, int(odmik or 0))
+        except (TypeError, ValueError):
+            odmik = 0
+        if odmik:
+            parametri["offset"] = odmik
+        r = self.ukaz_pocakaj(id_naprave, "files.list", parametri, cas=12.0)
         if not r.get("ok"):
             return {
                 "ok": False,
@@ -2191,6 +2226,8 @@ class SafeerControlBackend:
             "edit": bool(podatki.get("edit", False)),
             "server": podatki.get("server"),
             "reason": podatki.get("reason") or podatki.get("razlog") or "",
+            "next_offset": stevilo_ali_nic(podatki.get("next_offset")),
+            "total": stevilo_ali_nic(podatki.get("total")),
         }
 
     def odpri_datoteko_naprave(self, id_naprave: str, id_datoteke: str) -> dict:

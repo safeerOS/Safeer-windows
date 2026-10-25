@@ -13,9 +13,11 @@ izbrane mape (simbolne povezave navzven ne pridejo skozi), skrite datoteke se ne
 
 from __future__ import annotations
 
+import collections
 import hashlib
 import hmac
 import http.client
+import io
 import http.server
 import json
 import mimetypes
@@ -308,7 +310,9 @@ class DeljeneMape:
                     continue  # povezava ven iz deljene mape
                 v = {"id": f"share:{i}:{rel}", "name": ime, "type": "folder" if mapa else vrsta_datoteke(ime)}
                 if not mapa:
-                    v["size"] = os.path.getsize(cela)
+                    st = os.stat(cela)
+                    v["size"] = st.st_size
+                    v["modified"] = int(st.st_mtime * 1000)     # ms, kot Android (razvrscanje in datum na napravi)
                     v["mime"] = mimetypes.guess_type(ime)[0] or "application/octet-stream"
                 vnosi.append(v)
             except OSError:
@@ -396,7 +400,9 @@ class DeljeneMape:
                 v = {"id": "disk:" + realna, "name": ime,
                      "type": "folder" if mapa else vrsta_datoteke(ime)}
                 if not mapa:
-                    v["size"] = os.path.getsize(cela)
+                    st = os.stat(cela)
+                    v["size"] = st.st_size
+                    v["modified"] = int(st.st_mtime * 1000)
                     v["mime"] = mimetypes.guess_type(ime)[0] or "application/octet-stream"
                 vnosi.append(v)
             except OSError:
@@ -525,6 +531,11 @@ class _Obravnava(http.server.BaseHTTPRequestHandler):
             from core import link_sprotno
             (getattr(streznik, "sprotno", None) or link_sprotno.sprotno()).postrezi(self, u.path[6:].split("/")[0], samo_glava)
             return
+        if u.path.startswith("/thumb/"):
+            # Slicica slike ali videa (mreza na telefonu, televizorju ali drugem racunalniku): isti zeton in ista
+            # pravila kot datoteka - kar naprava sme prenesti, sme videti tudi pomanjsano (kot Linux in Android).
+            postrezi_slicico(self, streznik, urllib.parse.unquote(u.path[7:]), samo_glava)
+            return
         if not u.path.startswith("/d/"):
             self._napaka(404, "ni take poti")
             return
@@ -607,6 +618,136 @@ def _poslji_datoteko(obravnava, pot: str, samo_glava: bool) -> None:
     except (BrokenPipeError, ConnectionResetError, ssl.SSLError, socket.timeout):
         # Predvajalnik na napravi med predvajanjem zapira povezave sredi obsega (nov Range): ni napaka,
         # prej je vsaka taka pustila sled v dnevniku (SSLEOFError).
+        pass
+
+
+# ------------------------------------------------------------------ slicice (/thumb/<id>, kot Linux core/link_datoteke)
+#: Daljsa stranica slicice (dovolj za ploscico na televizorju), kakovost JPEG in koliko slicic drzimo v pomnilniku.
+SLICICA_ROB = 512
+SLICICA_KAKOVOST = 85
+NAJVEC_SLICIC = 300
+#: Najvec hkratnih slicic iz videa (ffmpeg) in iz slik (Pillow razsiri sliko v pomnilnik): mapa s sto zahtevami ne
+#: zasede vseh jeder in pomnilnika. Na mesto zahteva caka najvec CAKAJ_NA_SLICICO_S, nato 404 (naprava pokaze ikono).
+_SLICICE_VIDEA = threading.BoundedSemaphore(2)
+_SLICICE_SLIK = threading.BoundedSemaphore(2)
+CAKAJ_NA_SLICICO_S = 30.0
+NAJVEC_PIK_SLICICE = 50_000_000
+_slicice: "collections.OrderedDict[tuple, bytes]" = collections.OrderedDict()
+_slicice_kljuc = threading.Lock()
+
+
+def _slicica_slike(pot: str, rob: int) -> Optional[bytes]:
+    try:
+        from PIL import Image, ImageOps
+    except Exception:  # noqa: BLE001 - brez Pillow slicic slik ni; naprava si pomaga sama
+        return None
+    if not _SLICICE_SLIK.acquire(timeout=CAKAJ_NA_SLICICO_S):
+        return None
+    try:
+        with Image.open(pot) as im:
+            try:
+                im.draft("RGB", (rob * 2, rob * 2))      # JPEG se dekodira ze pomanjsan
+            except Exception:  # noqa: BLE001
+                pass
+            if im.size[0] * im.size[1] > NAJVEC_PIK_SLICICE:
+                return None
+            im = ImageOps.exif_transpose(im)             # pokoncna fotografija ostane pokoncna
+            im.thumbnail((rob, rob))
+            if im.mode not in ("RGB", "L"):
+                im = im.convert("RGB")
+            izhod = io.BytesIO()
+            im.save(izhod, "JPEG", quality=SLICICA_KAKOVOST)
+            return izhod.getvalue()
+    except Exception:  # noqa: BLE001 - pokvarjena ali nepodprta slika: slicice ni
+        return None
+    finally:
+        _SLICICE_SLIK.release()
+
+
+def _pot_ffmpeg() -> str:
+    """ffmpeg na poti ali nas paket na Windows (%LOCALAPPDATA%\\SafeerOS\\ffmpeg, safeer_windows/ffmpeg_win.py)."""
+    p = shutil.which("ffmpeg")
+    if p:
+        return p
+    if os.name == "nt":
+        nas = os.path.join(os.environ.get("LOCALAPPDATA") or "", "SafeerOS", "ffmpeg", "bin", "ffmpeg.exe")
+        if os.path.isfile(nas):
+            return nas
+    return ""
+
+
+def _slicica_videa(pot: str, rob: int) -> Optional[bytes]:
+    ffmpeg = _pot_ffmpeg()
+    if not ffmpeg:
+        return None
+    if not _SLICICE_VIDEA.acquire(timeout=CAKAJ_NA_SLICICO_S):
+        return None
+    try:
+        for zamik in ("3", "0"):                         # zacetek je pogosto crn; kratek posnetek da prvo sliko
+            try:
+                r = subprocess.run(
+                    [ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-ss", zamik, "-i", pot,
+                     "-frames:v", "1", "-vf", "scale='min(%d,iw)':-2" % rob, "-f", "image2pipe",
+                     "-vcodec", "mjpeg", "-q:v", "4", "-"],
+                    stdin=subprocess.DEVNULL, capture_output=True, timeout=15,
+                    creationflags=0x08000000 if os.name == "nt" else 0)   # CREATE_NO_WINDOW
+            except Exception:  # noqa: BLE001
+                return None
+            if r.returncode == 0 and len(r.stdout) > 200:
+                return r.stdout
+        return None
+    finally:
+        _SLICICE_VIDEA.release()
+
+
+def naredi_slicico(pot: str, rob: int = SLICICA_ROB) -> Optional[bytes]:
+    """Pomanjsan JPEG slike (obrnjen po EXIF) ali slike iz videa; None, ce je ni mogoce narediti. Za isto datoteko
+    (pot, cas spremembe, velikost) se naredi enkrat in ostane v pomnilniku (najvec NAJVEC_SLICIC)."""
+    try:
+        s = os.stat(pot)
+    except OSError:
+        return None
+    kljuc = (pot, int(s.st_mtime), s.st_size, rob)
+    with _slicice_kljuc:
+        znana = _slicice.get(kljuc)
+        if znana is not None:
+            _slicice.move_to_end(kljuc)
+            return znana
+    vrsta = vrsta_datoteke(pot)
+    slicica = _slicica_slike(pot, rob) if vrsta == "image" else _slicica_videa(pot, rob) if vrsta == "video" else None
+    if slicica:
+        with _slicice_kljuc:
+            _slicice[kljuc] = slicica
+            while len(_slicice) > NAJVEC_SLICIC:
+                _slicice.popitem(last=False)
+    return slicica
+
+
+def postrezi_slicico(obravnava, streznik: "StreznikDatotek", oznaka: str, samo_glava: bool) -> None:
+    """Slicica datoteke deljene mape (`/thumb/<id>`) z istim zetonom in istimi pravili kot datoteka. 404, kadar
+    datoteke ni ali slicice ni mogoce narediti."""
+    z = obravnava.headers.get("X-Safeer-Token")
+    if not streznik.zeton_velja(z.strip() if z else None):
+        _napaka_http(obravnava, 401, "manjka ali napacen zeton")
+        return
+    r = streznik.mape.razresi(oznaka)
+    if r is None or not os.path.isfile(r[1]):
+        _napaka_http(obravnava, 404, "datoteke ni")
+        return
+    slicica = naredi_slicico(r[1])
+    if not slicica:
+        _napaka_http(obravnava, 404, "slicice ni")
+        return
+    obravnava.send_response(200)
+    obravnava.send_header("Content-Type", "image/jpeg")
+    obravnava.send_header("Content-Length", str(len(slicica)))
+    obravnava.send_header("Cache-Control", "private, max-age=0")
+    obravnava.end_headers()
+    if samo_glava:
+        return
+    try:
+        obravnava.wfile.write(slicica)
+    except (BrokenPipeError, ConnectionResetError, ssl.SSLError, socket.timeout):
         pass
 
 
