@@ -1067,7 +1067,10 @@
     }
   }
   function imeDiska(d) {
-    if (d.sistem) return t("diskSistem");
+    // Windows: crka pogona kot v Raziskovalcu (»Sistemski disk (C:)«, »Podatki (D:)«); Linux (/dev/...) nespremenjen.
+    var crka = /^[A-Za-z]:\\?$/.test(d.naprava || "") ? d.naprava.slice(0, 2).toUpperCase() : "";
+    if (d.sistem) return t("diskSistem") + (crka ? " (" + crka + ")" : "");
+    if (crka) return d.oznaka ? d.oznaka + " (" + crka + ")" : crka;
     return d.oznaka || (d.model ? d.model + " · " + velikost(d.velikost) : (d.naprava || "").replace(/^\/dev\//, ""));
   }
   function vrsticaDiska(d) {
@@ -1107,11 +1110,12 @@
       if (!p) return;
       dl.innerHTML = "";
       function vrsta(k, v) { if (!v) return; var d = el("div", "bliznjica", ""); d.appendChild(el("dt", "", ubezi(t(k)))); d.appendChild(el("dd", "", ubezi(v))); dl.appendChild(d); }
-      var ram = p.pomnilnik || {}, ure = Math.floor((p.cas_delovanja_s || 0) / 3600);
+      var ram = p.pomnilnik || {}, sek = p.cas_delovanja_s || 0, ure = Math.floor(sek / 3600);
       vrsta("racRacunalnik", p.racunalnik);
       vrsta("racSistem", p.sistem + (p.arhitektura ? " (" + p.arhitektura + ")" : ""));
       vrsta("racJedro", p.jedro);
-      vrsta("racNamizje", p.namizje);
+      // Namizje samo, ce pove kaj novega (na Windows je »Windows« ze v vrstici Sistem).
+      if (p.namizje && String(p.sistem || "").toLowerCase().indexOf(String(p.namizje).toLowerCase()) < 0) vrsta("racNamizje", p.namizje);
       vrsta("racProcesor", p.procesor ? p.procesor + (p.jeder ? " · " + t("racJeder", { n: p.jeder }) : "") : "");
       vrsta("racPomnilnik", ram.skupaj ? t("racPomnilnikVr", { skupaj: velikost(ram.skupaj), prosto: velikost(ram.na_voljo || 0) }) : "");
       vrsta("racGraficna", (p.graficne || []).join(", "));
@@ -1119,7 +1123,8 @@
         vrsta("racDisk", imeDiska(d) + " · " + (d.priklopljen ? t("diskProsto", { prosto: velikost(d.prosto || 0), skupaj: velikost(d.velikost) })
           : t("diskNiPriklopljen", { skupaj: velikost(d.velikost) })) + (d.datotecni_sistem ? " · " + d.datotecni_sistem : ""));
       });
-      vrsta("racCas", ure >= 24 ? t("racDni", { d: Math.floor(ure / 24), h: ure % 24 }) : t("racUr", { h: ure }));
+      vrsta("racCas", ure >= 24 ? t("racDni", { d: Math.floor(ure / 24), h: ure % 24 })
+        : ure >= 1 ? t("racUr", { h: ure }) : t("racMin", { m: Math.floor(sek / 60) }));
       vrsta("racSafeer", (S.zacetek && S.zacetek.razlicica) || "");
     }, function () {});
   }
