@@ -290,22 +290,38 @@ class SafeerMpvPogon:
 
         @self._mpv.event_callback("end-file")
         def _ef(dogodek):
-            if self._zapiranje or self._mpv is None:
-                return
+            self._konec_datoteke(dogodek)
+
+    #: Besedilo, ko se vir ne odpre (HTTP 403, ni dosegljiv, napacna oblika); okno doda »Napaka: «.
+    NAPAKA_VIRA = "vira ni bilo mogoče predvajati (strežnik ga je zavrnil ali ni dosegljiv)."
+
+    def _konec_datoteke(self, dogodek) -> None:
+        """Dogodek mpv »end-file« (mpv nit): konec posnetka ali napaka vira. Napako (npr. HTTP 403) prej uporabnik ni
+        videl - okno je ostalo prazno, SMTC pa je javljal »predvaja« (pomocnik na testnem PC, naloga 13)."""
+        if self._zapiranje or self._mpv is None:
+            return
+        try:
+            razlog = dogodek.get("event", {}).get("reason", "")
+        except Exception:
+            razlog = ""
+        if str(razlog) in ("eof", "EndFile.EOF", "0"):
+            # mpv nit: samo oznacimo; GUI nit poklice obdelaj_konec() (prek sprememba-sporocila).
+            vnos = self._seznam[self._indeks] if 0 <= self._indeks < len(self._seznam) else {}
+            self._koncan_uri = vnos.get("uri", "")
+            self._konec_cakajoc = True
+        elif str(razlog) in ("error", "EndFile.ERROR", "4"):
+            if self._cb_napaka:
+                try:
+                    self._cb_napaka(self.NAPAKA_VIRA)
+                except Exception:
+                    pass
+        else:
+            return
+        if self._cb_sprememba:
             try:
-                razlog = dogodek.get("event", {}).get("reason", "")
+                self._cb_sprememba(None)          # stanje (in SMTC) ni vec »predvaja«
             except Exception:
-                razlog = ""
-            if str(razlog) in ("eof", "EndFile.EOF", "0"):
-                # mpv nit: samo oznacimo; GUI nit poklice obdelaj_konec() (prek sprememba-sporocila).
-                vnos = self._seznam[self._indeks] if 0 <= self._indeks < len(self._seznam) else {}
-                self._koncan_uri = vnos.get("uri", "")
-                self._konec_cakajoc = True
-                if self._cb_sprememba:
-                    try:
-                        self._cb_sprememba(None)
-                    except Exception:
-                        pass
+                pass
 
     def povezi_video(self, wid: int) -> None:
         """Poda rocaj okna (winId). mpv se vzpostavi znova z gpu-next izrisom v to okno."""

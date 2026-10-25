@@ -63,5 +63,20 @@ class PredvajalnikVir(unittest.TestCase):
         self.assertLess(telo.index('SAFEER_RAZVOJ'), telo.index('"Desktop"'))   # Namizje samo pod zastavico
 
 
+    def test_napaka_vira_se_pokaze(self):
+        """Naloga 13 (NIZKO 5): vir s HTTP 403 - okno pove napako, stanje se osvezi (SMTC ne ostane »predvaja«)."""
+        from safeer_windows import safeer_mpv_pogon as mp
+        p = mp.SafeerMpvPogon.__new__(mp.SafeerMpvPogon)
+        napake, spremembe = [], []
+        p._zapiranje, p._mpv, p._seznam, p._indeks = False, object(), [{"uri": "https://x/f.mkv"}], 0
+        p._cb_napaka, p._cb_sprememba = napake.append, spremembe.append
+        p._konec_datoteke({"event": {"reason": "error", "error": -13}})
+        self.assertEqual((napake, spremembe), ([mp.SafeerMpvPogon.NAPAKA_VIRA], [None]))
+        p._konec_datoteke({"event": {"reason": "eof"}})
+        self.assertTrue(p._konec_cakajoc and p._koncan_uri == "https://x/f.mkv")
+        p._konec_datoteke({"event": {"reason": "stop"}})              # uporabnik ustavil: nic
+        self.assertEqual(len(spremembe), 2)
+
+
 if __name__ == "__main__":
     unittest.main()
