@@ -24,10 +24,13 @@ import signal
 import subprocess
 from typing import Dict, List, Optional
 
-from core.link_mediji import profil_programa
+from core import zasebni_webkit
+from core.link_mediji import je_predvajalnik, profil_programa
 
 NAJVEC = 200
 IKONA_VELIKOST = 128
+# Varna meja za en odgovor apps.list (sporocila v Safeer Linku so omejena na 256 kB).
+NAJVEC_BAJTOV_KOSA = 190_000
 PREDPONA = "app:"
 
 # Kategorije, ki na televizorju nimajo smisla (nastavitve sistema, konzolna orodja).
@@ -74,8 +77,10 @@ def skupina(kategorije) -> str:
 IZPUSTI_OZNAKE = {"safeer-control.desktop"}
 
 
-def _mape_vnosov() -> List[str]:
-    doma = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+def _kandidati_map() -> List[str]:
+    """Vse mape, v katerih so lahko zaganjalniki - tudi tiste, ki jih (se) ni."""
+    from core import gostitelj
+    doma = gostitelj.podatki_gostitelja()   # v Flatpaku zaganjalniki uporabnika na racunalniku, ne v peskovniku
     sistem = os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share"
     mape = [os.path.join(doma, "applications")]
     for d in sistem.split(":"):
@@ -85,12 +90,24 @@ def _mape_vnosov() -> List[str]:
     mape.append("/var/lib/flatpak/exports/share/applications")
     mape.append(os.path.join(doma, "flatpak/exports/share/applications"))
     mape.append("/var/lib/snapd/desktop/applications")
-    vidne: List[str] = []
+    # Safeer OS v Flatpaku: programi, namesceni na racunalniku, so pod /run/host/usr (core/gostitelj.py).
+    from core import gostitelj
+    mape += gostitelj.mape_gostitelja("applications")
+    vse: List[str] = []
     for m in mape:
         p = os.path.realpath(m)
-        if p not in vidne and os.path.isdir(p):
-            vidne.append(p)
-    return vidne
+        if p not in vse:
+            vse.append(p)
+    return vse
+
+
+def gostitelj_pixmaps() -> List[str]:
+    from core import gostitelj
+    return gostitelj.mape_gostitelja("pixmaps")
+
+
+def _mape_vnosov() -> List[str]:
+    return [m for m in _kandidati_map() if os.path.isdir(m)]
 
 
 def _jezik() -> List[str]:
@@ -110,6 +127,25 @@ def _vrednost(vnos: configparser.SectionProxy, kljuc: str) -> str:
         if v:
             return v
     return vnos.get(kljuc, "") or ""
+
+
+def razredi_okna(ime_vnosa: str, razred: str, ukaz: List[str]) -> List[str]:
+    """Imena, po katerih prepoznamo okno programa na namizju (razred okna X): StartupWMClass iz vnosa, ime vnosa
+    brez `.desktop` in ime izvrsljive datoteke. Z malimi crkami, brez ponovitev."""
+    kandidati = [str(razred or ""), str(ime_vnosa or "")[:-len(".desktop")] if str(ime_vnosa or "").endswith(".desktop")
+                 else str(ime_vnosa or "")]
+    for del_ in ukaz or []:
+        osnova = os.path.basename(str(del_))
+        if osnova.startswith("-") or "=" in osnova or osnova in Programi._LUPINE or osnova in ("flatpak", "snap", "run"):
+            continue
+        kandidati.append(osnova)
+        break
+    izid: List[str] = []
+    for k in kandidati:
+        k = k.strip().lower()
+        if k and k not in izid:
+            izid.append(k)
+    return izid
 
 
 class Programi:
@@ -193,7 +229,9 @@ class Programi:
             return None
         return {"pot": pot, "ime": ime, "opis": _vrednost(vnos, "Comment").strip(),
                 "ikona": (vnos.get("Icon", "") or "").strip(), "skupina": skupina(kategorije),
-                "profil": profil_programa(kategorije, pot, vnos.get("Exec", "") or "")}
+                "predvajalnik": je_predvajalnik(kategorije),
+                "profil": profil_programa(kategorije, pot, vnos.get("Exec", "") or ""),
+                "razred": (vnos.get("StartupWMClass", "") or "").strip()}
 
     # ------------------------------------------------------------------ za Safeer Link
     def seznam(self, z_ikonami: bool = True, od: int = 0, koliko: int = 0) -> dict:
@@ -212,6 +250,7 @@ class Programi:
         od = max(0, int(od or 0))
         kos = urejeni[od:od + koliko] if koliko else urejeni[od:]
         vnosi = []
+        velikost = 0
         for oznaka, v in kos:
             element = {"id": PREDPONA + oznaka, "name": v["ime"], "comment": v["opis"],
                        "group": v.get("skupina", PRIVZETA_SKUPINA)}
@@ -219,6 +258,13 @@ class Programi:
                 ikona = self._ikona(v["ikona"])
                 if ikona:
                     element["icon_png"] = ikona
+            teza = len(element.get("icon_png", "")) + len(element["name"]) + len(element["comment"]) + 120
+            # Sporocilo v Safeer Linku sme imeti najvec 256 kB: 50 programov s 128-px ikonami jih je imelo
+            # 418 kB in odgovor se je izgubil (na Windows so bile namesto ikon crke). Kos zakljucimo prej;
+            # odjemalec nadaljuje od offset + len(items).
+            if vnosi and velikost + teza > NAJVEC_BAJTOV_KOSA:
+                break
+            velikost += teza
             vnosi.append(element)
         return {"enabled": True, "items": vnosi, "total": skupaj, "offset": od}
 
@@ -261,20 +307,33 @@ class Programi:
             # Na drugi zaslon ukaz iz vnosa pozenemo neposredno: `gio launch` bi program z D-Bus
             # zagonom odprl na uporabnikovem zaslonu, mimo drugega.
             self.drugi.zadnja_skupina = vnos.get("skupina", "")
-            # Predvajalnik (OK pavza, levo/desno previjanje) ali program za televizor (tipke).
+            # Predvajalnik (OK pavza, levo/desno previjanje) ali program za televizor (Kodi, Plex HTPC: tipke, ki jih
+            # televizor ze pozna kot profil "tv").
             self.drugi.zadnji_profil = vnos.get("profil", "")
             # Ce program na drugem zaslonu ze tece, ga samo pokazemo - drugo okno bi bilo odvec.
-            if self.drugi.pokazi(self._procesi(self._iskani_vzorci(ime))):
+            vzorci = self._iskani_vzorci(ime)
+            if self.drugi.pokazi(self._procesi(vzorci)):
                 return True
             ukaz = self._ukaz_vnosa(ime)
-            if ukaz and self.drugi.zazeni_program(ukaz):
+            # Program ene same instance, ki je ze odprt na namizju (aplikacija Electron, brskalnik ...), se tu ne
+            # odpre: zagon samo preda besedo odprtemu oknu. Po tem opisu loceni zaslon prepozna njegove procese in okno.
+            opis = {"oznaka": PREDPONA + ime, "ime": vnos["ime"], "pidi": lambda: self._procesi(vzorci),
+                    "razredi": razredi_okna(ime, vnos.get("razred", ""), ukaz)}
+            if ukaz and self.drugi.zazeni_program(ukaz, opis=opis):
                 return True
+        from core import varuh_procesov
         for ukaz in (["gio", "launch", pot], ["gtk-launch", ime]):
             if shutil.which(ukaz[0]) is None:
                 continue
             try:
+                pid = varuh_procesov.zazeni_program(ukaz, zasebni_webkit.okolje_za_zunanje())
+                if pid:
+                    return True
+            except Exception:
+                pass
+            try:
                 subprocess.Popen(ukaz, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                 start_new_session=True)
+                                 start_new_session=True, env=zasebni_webkit.okolje_za_zunanje())
                 return True
             except Exception:
                 continue
@@ -425,30 +484,20 @@ class Programi:
 
     @staticmethod
     def _iz_teme(ime: str) -> str:
-        """Ikono najprej poiscemo tako, kot jo namizje: prek teme ikon (GTK). Brez GTK (testi) prazno."""
-        try:
-            import gi
-            gi.require_version("Gtk", "3.0")
-            from gi.repository import Gtk
-            tema = Gtk.IconTheme.get_default()
-            if tema is None:
-                return ""
-            najdena = tema.lookup_icon(ime, IKONA_VELIKOST, 0)
-            if najdena is not None:
-                pot = najdena.get_filename() or ""
-                if pot and os.path.isfile(pot):
-                    return pot
-        except Exception:
-            pass
-        return ""
+        """Ikono najprej poiscemo tako, kot jo namizje: prek teme ikon (GTK3 ali GTK4). Brez GTK (testi) prazno."""
+        from core import gostitelj
+        return gostitelj.ikona_iz_teme(ime, IKONA_VELIKOST)
 
     def _poisci_ikono(self, ime: str, samo_pixmaps: bool = False) -> str:
-        doma = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+        from core import gostitelj
+        doma = gostitelj.podatki_gostitelja()
         korenine = [os.path.join(doma, "icons"), os.path.expanduser("~/.icons"),
                     "/usr/share/icons", "/usr/local/share/icons",
                     # Flatpak: sistemski in tisti, ki jih je uporabnik namestil zase (--user).
                     "/var/lib/flatpak/exports/share/icons",
                     os.path.join(doma, "flatpak/exports/share/icons")]
+        from core import gostitelj
+        korenine += gostitelj.mape_gostitelja("icons")
         velikosti = ["128x128", "96x96", "64x64", "256x256", "48x48", "scalable"]
         teme = ["hicolor", "Papirus", "Adwaita", "breeze"]
         for koren in ([] if samo_pixmaps else korenine):
@@ -458,7 +507,7 @@ class Programi:
                         pot = os.path.join(koren, tema, velikost, "apps", ime + konec)
                         if os.path.isfile(pot):
                             return pot
-        for mapa in ("/usr/share/pixmaps", os.path.join(doma, "pixmaps")):
+        for mapa in ["/usr/share/pixmaps", os.path.join(doma, "pixmaps")] + gostitelj_pixmaps():
             for konec in ("", ".png", ".svg", ".xpm"):
                 pot = os.path.join(mapa, ime + konec)
                 if os.path.isfile(pot) and (konec or ime.lower().endswith((".png", ".svg", ".xpm"))):

@@ -207,7 +207,8 @@ class Fokus:
             if p is None or p.poll() is not None:
                 koren = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
                 try:
-                    p = subprocess.Popen([sys.executable, "-m", "core.link_fokus"], cwd=koren,
+                    from core import okolje_procesa
+                    p = subprocess.Popen(okolje_procesa.python_ukaz() + ["-m", "core.link_fokus"], cwd=koren,
                                          stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                          stderr=subprocess.DEVNULL, text=True, bufsize=1,
                                          env=self._okolje_pomocnika(koren))
