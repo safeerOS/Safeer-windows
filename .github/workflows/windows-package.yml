@@ -119,6 +119,10 @@ jobs:
         run: python windows/fetch_libmpv.py
       - name: Build SafeerBrowser.exe
         run: python windows/build_windows.py pyinstaller
+      - name: PE hardening of every .exe/.dll/.pyd we ship (ASLR, HEVA, DEP; ours also CFG, /GS, CET)
+        # Equivalent of readelf on Linux (owner, 21 Oct 2026). Missing protection without a written exception in
+        # windows/tools/pe_izjeme.json stops the build; third-party exceptions are measured and give a reason.
+        run: python windows/tools/pe_utrjenost.py build/windows/dist windows/SafeerOS.exe windows/SafeerControl.exe windows/SafeerMediaWebView.exe --preveri --porocilo build/windows/out/pe-utrjenost.json
       - name: Smoke test built executable
         run: python windows/build_windows.py smoke-frozen --online --report build/windows/out/smoke-frozen.json
       - name: Load the QML desktop in the frozen SafeerOS.exe

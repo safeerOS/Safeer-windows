@@ -1,0 +1,134 @@
+{
+ "opis": "Izjeme preverbe utrjenosti PE (windows/tools/pe_utrjenost.py). Izmerjeno 25. 10. 2026 na namescenem paketu 1.0.51 (testni PC, 111 datotek). Vsaka izjema ima razlog; nova datoteka brez zascite in brez izjeme ustavi gradnjo. ASLR, DEP in HEVA (64-bit) niso nikoli izjema.",
+ "izjeme": {
+  "*/av.libs/*.dll": {
+   "dovoli": [
+    "CFG",
+    "GS",
+    "CET"
+   ],
+   "razlog": "PyAV (dekoder gledalca): FFmpeg in knjiznice iz kolesa PyAV, zgrajene z MinGW-w64 (GCC) - brez /guard:cf, /GS (varovalo MSVC) in /CETCOMPAT. Izmerjeno 25. 10. 2026 (PyAV 18.1). Nadgradnja: lastna gradnja FFmpeg s clang-cl /guard:cf /CETCOMPAT"
+  },
+  "*.pyd": {
+   "dovoli": [
+    "CFG",
+    "CET"
+   ],
+   "razlog": "razsiritve Python (CPython, PySide6, cryptography, cffi, PyAV): uradne gradnje brez /guard:cf in /CETCOMPAT; /GS imajo. Izmerjeno 25. 10. 2026 (28 + 65 datotek)"
+  },
+  "safeerbrowser.exe": {
+   "dovoli": [
+    "CET"
+   ],
+   "razlog": "zagonski program PyInstaller (uradni bootloader) brez /CETCOMPAT; CFG in /GS ima. Nadgradnja: lasten bootloader z /CETCOMPAT"
+  },
+  "safeeros.exe": {
+   "dovoli": [
+    "CET"
+   ],
+   "razlog": "zagonski program PyInstaller (uradni bootloader) brez /CETCOMPAT; Go zaganjalnik z istim imenom ima izjemo Go"
+  },
+  "safeercontrol.exe": {
+   "dovoli": [
+    "CET"
+   ],
+   "razlog": "kot safeeros.exe"
+  },
+  "safeermediawebview.exe": {
+   "dovoli": [
+    "CET"
+   ],
+   "razlog": ".NET 8 apphost (PublishSingleFile) brez CETCOMPAT; oznako CetCompat da sele .NET 9 SDK. Exe je v repozitoriju (CI ga ne gradi) - CET ob naslednji gradnji z .NET 9"
+  },
+  "api-ms-win-*.dll": {
+   "dovoli": [
+    "GS"
+   ],
+   "razlog": "Microsoft UCRT, samo preusmeritve izvozov (brez kode za zascito sklada)"
+  },
+  "python3.dll": {
+   "dovoli": [
+    "CFG",
+    "GS",
+    "CET"
+   ],
+   "razlog": "uradna gradnja CPython, samo preusmeritve izvozov"
+  },
+  "python3*.dll": {
+   "dovoli": [
+    "CFG",
+    "CET"
+   ],
+   "razlog": "uradna gradnja CPython (python.org) brez /guard:cf in /CETCOMPAT; /GS ima"
+  },
+  "libcrypto-3*.dll": {
+   "dovoli": [
+    "CFG",
+    "CET"
+   ],
+   "razlog": "OpenSSL iz uradne gradnje CPython; /GS ima"
+  },
+  "libssl-3*.dll": {
+   "dovoli": [
+    "CFG",
+    "CET"
+   ],
+   "razlog": "OpenSSL iz uradne gradnje CPython; /GS ima"
+  },
+  "libffi-8.dll": {
+   "dovoli": [
+    "CFG",
+    "CET"
+   ],
+   "razlog": "libffi iz uradne gradnje CPython; /GS ima"
+  },
+  "sqlite3.dll": {
+   "dovoli": [
+    "CFG",
+    "CET"
+   ],
+   "razlog": "SQLite iz uradne gradnje CPython; /GS ima"
+  },
+  "pyside6*.dll": {
+   "dovoli": [
+    "CFG",
+    "CET"
+   ],
+   "razlog": "uradna gradnja PySide6 (Qt for Python); /GS ima"
+  },
+  "shiboken6*.dll": {
+   "dovoli": [
+    "CFG",
+    "CET"
+   ],
+   "razlog": "uradna gradnja PySide6 (Shiboken); /GS ima"
+  },
+  "opengl32sw.dll": {
+   "dovoli": [
+    "CFG",
+    "CET"
+   ],
+   "razlog": "programski OpenGL (Mesa llvmpipe) iz uradne gradnje Qt; /GS ima"
+  },
+  "qt6*.dll": {
+   "dovoli": [
+    "CET"
+   ],
+   "razlog": "uradna gradnja Qt 6: nekatere knjiznice (npr. Qt6WebEngineCore) brez /CETCOMPAT; CFG in /GS imajo"
+  },
+  "qtwebengineprocess.exe": {
+   "dovoli": [
+    "CET"
+   ],
+   "razlog": "uradna gradnja Qt 6 (izmerjeno: CET ima; izjema za starejse razlicice)"
+  },
+  "unins*.exe": {
+   "dovoli": [
+    "CFG",
+    "GS",
+    "CET"
+   ],
+   "razlog": "odstranjevalnik Inno Setup 6 (32-bit, uradna gradnja; ASLR in DEP ima). Izmerjeno 25. 10. 2026 v namestitvi 1.0.51"
+  }
+ }
+}
