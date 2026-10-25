@@ -257,7 +257,7 @@ def vrsta_vmesnika(tip: int, medij: int) -> str:
 
 
 def gostitelj(naslov: str) -> str:
-    """»https://192.168.0.5:8990/pot«, »192.168.0.5:8990« ali »192.168.0.5« -> »192.168.0.5« (IPv6 brez oklepajev)."""
+    """»https://<ip>:8990/pot«, »<ip>:8990« ali »<ip>« -> »<ip>« (IPv6 brez oklepajev)."""
     n = str(naslov or "").strip()
     if "://" in n:
         import urllib.parse

@@ -1443,7 +1443,7 @@ class SafeerControlBackend:
             self.naprave = seznam
             self._oddaj_dogodek("naprave", self.naprave)
             self._oddaj_dogodek("stanje", self.stanje_linka())
-            if self.ob_napravah is not None:
+            if getattr(self, "ob_napravah", None) is not None:
                 # Izbrisi, ki cakajo na napravo (bila je brez povezave): morda je zdaj tu (Sporocila, os_app).
                 try:
                     self.ob_napravah()
