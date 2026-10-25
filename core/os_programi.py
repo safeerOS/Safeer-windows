@@ -12,14 +12,14 @@ from __future__ import annotations
 
 import configparser
 import hashlib
-import json
 import os
+import re
 import shutil
 import subprocess
 import time
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
-from core import link_programi
+from core import gostitelj, link_programi, os_oblak_igre, shramba_json, zasebni_webkit
 
 NAJVEC = 400
 IKONA_VELIKOST = 96
@@ -28,10 +28,48 @@ MAPA_IKON = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser(
 
 #: Nastavitve sistema (Cinnamon, Mint) dobijo svojo skupino, da se ne mesajo med programe.
 SISTEM = {"Settings", "System", "DesktopSettings", "HardwareSettings", "PackageManager", "Monitor", "Security"}
+#: Orodja, ki upravljajo nastavitve sistema (iskalna lupa jih pokaze v svoji skupini »Nastavitve«).
+NASTAVITVE = {"Settings", "DesktopSettings", "HardwareSettings"}
+#: Besede, po katerih uporabnik isce nastavitev, pa jih vnos sam nima (ne v svojem jeziku ne v anglescini).
+#: Kljuc je ime vnosa .desktop; iskanje ne gleda na sumnike.
+SOPOMENKE = {
+    "cinnamon-settings-power.desktop": "napajanje baterija energija varcevanje poraba spanje pokrov",
+    "cinnamon-settings-display.desktop": "monitor zaslon locljivost resolucija",
+    "cinnamon-display-panel.desktop": "monitor zaslon locljivost resolucija",
+    "cinnamon-settings-sound.desktop": "zvocnik slusalke mikrofon glasnost",
+    "cinnamon-settings-mouse.desktop": "miska touchpad sledilna ploscica kazalec",
+    "cinnamon-settings-keyboard.desktop": "tipke bliznjice razporeditev",
+    "cinnamon-settings-backgrounds.desktop": "ozadje slika namizja",
+    "cinnamon-settings-themes.desktop": "videz tema barve ikone kazalec",
+    "cinnamon-network-panel.desktop": "wifi brezzicno internet ethernet vpn",
+    "cinnamon-settings-notifications.desktop": "obvestila motnje",
+    "cinnamon-settings-startup.desktop": "samozagon zagon ob prijavi",
+    "cinnamon-settings-users.desktop": "racun geslo",
+    "cinnamon-settings-user.desktop": "racun geslo profil slika",
+    "cinnamon-settings-nightlight.desktop": "nocni nacin modra svetloba",
+    "cinnamon-settings-privacy.desktop": "zgodovina nedavne datoteke",
+    "blueberry.desktop": "bluetooth slusalke brezzicno",
+    "mintupdate.desktop": "posodobitve nadgradnja",
+    "system-config-printer.desktop": "tiskalnik tiskanje",
+}
 #: Vrstni red skupin v pogledu »Programi«.
 SKUPINE = ("splet", "pisarna", "predstavnost", "igre", "ucenje", "programiranje", "orodja", "sistem", "drugo")
-#: Programi, ki so del Safeerja samega (Safeer OS ne ponuja sebe).
-IZPUSTI = {"safeer-os.desktop", "io.github.memelandfaner.SafeerOS.desktop"}
+#: Programi, ki so del Safeerja samega (Safeer OS ne ponuja sebe; Safeer Player je njegov Medijski center).
+IZPUSTI = {"safeer-os.desktop", "io.github.memelandfaner.SafeerOS.desktop",
+           "safeer-os.Player.desktop", "io.github.memelandfaner.SafeerOS.Player.desktop"}
+
+
+#: Programi za Medijski center: predvajalniki po XDG ali programi za radio/glasbo/podcaste po opisu.
+PREDVAJALNIK = {"Player", "TV"}
+_MEDIJSKI_OPIS = re.compile(r"radio|podcast|music player|predvajalnik", re.I)
+
+
+def je_predvajalnik(kategorije, besedilo: str = "") -> bool:
+    """Ali program sodi v Medijski center (ne pa urejevalniki slik, skenerji, zvočni učinki ...)."""
+    nabor = set(kategorije or ())
+    if nabor & PREDVAJALNIK:
+        return True
+    return bool(nabor & {"Audio", "AudioVideo", "Video"}) and bool(_MEDIJSKI_OPIS.search(besedilo or ""))
 
 
 def skupina(kategorije) -> str:
@@ -85,7 +123,18 @@ def preberi_vnos(pot: str, namizja: Optional[List[str]] = None) -> Optional[dict
     if not ime:
         return None
     kategorije = _seznam(vnos.get("Categories", ""))
-    kljucne = _seznam(link_programi._vrednost(vnos, "Keywords"))
+    # Kljucne besede v jeziku uporabnika in anglesko (ime, splosno ime, kljucne): »display« najde »Zaslon«.
+    kljucne = _seznam(link_programi._vrednost(vnos, "Keywords")) + _seznam(vnos.get("Keywords", "") or "")
+    for kljuc in ("Name", "GenericName"):
+        osnovno = (vnos.get(kljuc, "") or "").strip()
+        if osnovno and osnovno != ime:
+            kljucne.append(osnovno)
+    kljucne += SOPOMENKE.get(os.path.basename(pot), "").split()
+    if set(kategorije) & NASTAVITVE:
+        # »nastavitve zaslona«: splosna beseda za vsa orodja nastavitev (jeziki Safeer OS in iskanja z glasom).
+        kljucne += ["nastavitve", "settings", "Einstellungen", "configuración", "configurações", "paramètres", "impostazioni"]
+    videne = set()
+    kljucne = [k.strip() for k in kljucne if k.strip() and not (k.strip().lower() in videne or videne.add(k.strip().lower()))]
     return {
         "pot": pot,
         "ime": ime,
@@ -93,40 +142,35 @@ def preberi_vnos(pot: str, namizja: Optional[List[str]] = None) -> Optional[dict
         "splosno": link_programi._vrednost(vnos, "GenericName").strip(),
         "ikona": (vnos.get("Icon", "") or "").strip(),
         "skupina": skupina(kategorije),
-        "kljucne": [k.strip() for k in kljucne if k.strip()][:12],
+        "medij": je_predvajalnik(kategorije, ime + " " + link_programi._vrednost(vnos, "Comment") + " " +
+                                 link_programi._vrednost(vnos, "GenericName")),
+        "zvok": "Audio" in kategorije and "Video" not in kategorije and "TV" not in kategorije,
+        "kljucne": kljucne[:40],
+        "nastavitev": bool(set(kategorije) & NASTAVITVE),
     }
 
 
-class Shramba:
-    """os.json: uporaba programov, pripeti programi in nastavitve Safeer OS."""
+def oblika_namestitve(pot: str) -> str:
+    """Kako je program namescen, po poti vnosa .desktop: Flatpak, Snap ali AppImage; prazno za navaden paket."""
+    p = pot.replace("\\", "/")
+    if "/flatpak/" in p:
+        return "Flatpak"
+    if "/snapd/" in p or "/snap/" in p:
+        return "Snap"
+    if "appimage" in p.lower():
+        return "AppImage"
+    return ""
+
+
+class Shramba(shramba_json.Shramba):
+    """os.json: uporaba programov, pripeti programi in nastavitve Safeer OS.
+
+    Pisejo jo Safeer OS in Scit v svojem procesu (core/scit_proces.py): zapis samo spremenjenih kljucev pod zaklepom,
+    atomsko s fsync (core/shramba_json.py). Prej je vsak zapis zapisal celo kopijo procesa in pokvarjena datoteka je
+    tiho pomenila prazne nastavitve."""
 
     def __init__(self, pot: Optional[str] = None) -> None:
-        self.pot = pot or os.path.join(MAPA_NASTAVITEV, "os.json")
-        try:
-            with open(self.pot, encoding="utf-8") as f:
-                self.podatki = json.load(f) or {}
-        except Exception:
-            self.podatki = {}
-        if not isinstance(self.podatki, dict):
-            self.podatki = {}
-
-    def get(self, kljuc: str, privzeto=None):
-        v = self.podatki.get(kljuc)
-        return privzeto if v is None else v
-
-    def set(self, kljuc: str, vrednost) -> None:
-        self.podatki[kljuc] = vrednost
-        self.shrani()
-
-    def shrani(self) -> None:
-        try:
-            os.makedirs(os.path.dirname(self.pot), exist_ok=True)
-            zacasna = self.pot + ".tmp"
-            with open(zacasna, "w", encoding="utf-8") as f:
-                json.dump(self.podatki, f, ensure_ascii=False, indent=1)
-            os.replace(zacasna, self.pot)
-        except Exception:
-            pass
+        super().__init__(pot or os.path.join(MAPA_NASTAVITEV, "os.json"))
 
 
 class Programi:
@@ -140,10 +184,18 @@ class Programi:
         self._vnosi: Dict[str, dict] = {}
 
     # ------------------------------------------------------------------ seznam
+    def mape(self) -> List[str]:
+        """Mape z zaganjalniki (.desktop), iz katerih je seznam - iste spremlja [NadzorProgramov]."""
+        return list(self._mape if self._mape is not None else link_programi._mape_vnosov())
+
+    def kandidati(self) -> List[str]:
+        """Mape, v katerih so lahko zaganjalniki - tudi tiste, ki jih se ni (prvi program Flatpak jo sele ustvari)."""
+        return list(self._mape if self._mape is not None else link_programi._kandidati_map())
+
     def preberi(self) -> Dict[str, dict]:
         najdeni: Dict[str, dict] = {}
         videna = set()
-        for mapa in (self._mape if self._mape is not None else link_programi._mape_vnosov()):
+        for mapa in self.mape():
             try:
                 imena = sorted(os.listdir(mapa))
             except OSError:
@@ -172,11 +224,23 @@ class Programi:
         pripeti = list(self.shramba.get("pripeti", []) or [])
         skriti = set(self.shramba.get("skriti_domov", []) or [])
         izhod = []
+        # Isti program v dveh oblikah (npr. paket in Flatpak): obe kartici imata isto ime - oblika pove, katera je katera
+        # (lastnik, 11. 10. 2026: »zakaj imam 2 Safeer Browserja«).
+        imena: dict = {}
+        for v in vnosi.values():
+            imena[v["ime"].casefold()] = imena.get(v["ime"].casefold(), 0) + 1
         for oznaka, v in sorted(vnosi.items(), key=lambda p: p[1]["ime"].lower()):
+            if imena.get(v["ime"].casefold(), 0) > 1:
+                oblika = oblika_namestitve(str(v.get("pot") or ""))
+                if oblika:
+                    v = dict(v, ime="%s (%s)" % (v["ime"], oblika))
             u = uporaba.get(oznaka) or {}
+            # Igre v oblaku (core/os_oblak_igre.py): program tece na ponudnikovih streznikih - to mora biti vidno.
+            oblak = (os_oblak_igre.oblak_za(oznaka) or {}).get("ponudnik", "")
             izhod.append({
                 "id": oznaka, "ime": v["ime"], "opis": v["opis"], "splosno": v["splosno"],
-                "skupina": v["skupina"], "kljucne": v["kljucne"],
+                "skupina": "igre" if oblak else v["skupina"], "kljucne": v["kljucne"], "oblak": oblak,
+                "medij": bool(v.get("medij")), "zvok": bool(v.get("zvok")), "nastavitev": bool(v.get("nastavitev")),
                 "ikona": ikone(v["ikona"]) if ikone else "",
                 "uporaba": int(u.get("n", 0) or 0), "zadnjic": float(u.get("t", 0) or 0),
                 "pripet": oznaka in pripeti,
@@ -216,13 +280,24 @@ class Programi:
                 ok = bool(zaganjalnik(pot))
             except Exception:
                 ok = False
+        if not ok and gostitelj.v_flatpaku():
+            ok = gostitelj.zazeni_vnos(pot)
         if not ok:
+            from core import varuh_procesov
             for ukaz in (["gio", "launch", pot], ["gtk-launch", oznaka]):
                 if shutil.which(ukaz[0]) is None:
                     continue
                 try:
+                    pid = varuh_procesov.zazeni_program(ukaz, zasebni_webkit.okolje_za_zunanje())
+                    if pid:
+                        ok = True
+                        break
+                except Exception:
+                    pass
+                try:
+                    # Brez nasih zasebnih poti (WebKit, AppImage): program dobi sistemske knjiznice in typelibe.
                     subprocess.Popen(ukaz, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                     start_new_session=True)
+                                     start_new_session=True, env=zasebni_webkit.okolje_za_zunanje())
                     ok = True
                     break
                 except Exception:
@@ -250,11 +325,163 @@ class Programi:
 
 
 # ---------------------------------------------------------------------- ikone
+class NadzorProgramov:
+    """Pove, ko se na racunalniku namesti ali odstrani program: v mapi z zaganjalniki se pojavi ali izgine vnos
+    .desktop. Stran, ki kaze seznam programov, ga takrat prebere znova (4. 10. 2026: program, namescen ob odprti
+    delovni povrsini, se v plosci Programi ni pokazal do ponovnega zagona).
+
+    Namestitev paketa sprozi vec sprememb zapored (zacasne datoteke upravljalnika paketov), zato pride eno obvestilo,
+    [zamik_ms] po zadnji spremembi. Tece v glavni zanki GLib (ustvari se v njeni niti).
+
+    Mapa z zaganjalniki, ki je ob zagonu se ni (prvi program Flatpak na svezem racunalniku, prvi zaganjalnik v
+    ~/.local/share/applications), ne sme ostati spregledana: namesto nje spremljamo najblizjo obstojeco nadrejeno
+    mapo in, ko manjkajoca nastane, zacnemo spremljati njo. [mape] je zato seznam kandidatov ali funkcija, ki ga vrne."""
+
+    #: Po nastanku cakane mape pocakamo trenutek (namestitev ustvari vec map zapored), nato nadzor preuredimo.
+    ZAMIK_MAP_MS = 300
+
+    def __init__(self, mape, ob_spremembi, zamik_ms: int = 1500) -> None:
+        self._mape = mape if callable(mape) else (lambda seznam=list(mape): seznam)
+        self._ob_spremembi = ob_spremembi
+        self._zamik_ms = zamik_ms
+        self._nadzori: list = []
+        self._spremljane: List[str] = []          # mape z zaganjalniki, ki jih spremljamo
+        self._cakane: Dict[str, set] = {}         # obstojeca nadrejena mapa -> imena podmap, na katere cakamo
+        self._casovnik = 0
+        self._casovnik_map = 0
+
+    @staticmethod
+    def razporedi(mape: List[str], obstaja=os.path.isdir) -> Tuple[List[str], Dict[str, set]]:
+        """Kaj spremljati: (mape z zaganjalniki, ki obstajajo; obstojeca nadrejena mapa -> imena podmap, ki jih se
+        ni in vodijo do mape z zaganjalniki). Brez GLib - za preizkus."""
+        spremljane: List[str] = []
+        cakane: Dict[str, set] = {}
+        for mapa in mape:
+            mapa = os.path.abspath(mapa)
+            if obstaja(mapa):
+                if mapa not in spremljane:
+                    spremljane.append(mapa)
+                continue
+            otrok, nadrejena = mapa, os.path.dirname(mapa)
+            while nadrejena != otrok and not obstaja(nadrejena):
+                otrok, nadrejena = nadrejena, os.path.dirname(nadrejena)
+            if nadrejena != otrok:
+                cakane.setdefault(nadrejena, set()).add(os.path.basename(otrok))
+        return spremljane, cakane
+
+    def zacni(self) -> int:
+        """Zacne spremljati; vrne stevilo map z zaganjalniki, ki jih spremlja (0 = brez GLib ali se nobene mape)."""
+        if self._nadzori:
+            return len(self._spremljane)
+        try:
+            from gi.repository import Gio
+        except Exception:  # noqa: BLE001
+            return 0
+        # Mapa lahko nastane med razporejanjem in nastavitvijo nadzora: po nastavitvi pogledamo se enkrat.
+        for _ in range(4):
+            spremljane, cakane = self.razporedi(self._mape())
+            self._ustavi_nadzore()
+            for mapa, obdelava in ([(m, self._sprememba) for m in spremljane]
+                                   + [(m, self._sprememba_nadrejene) for m in cakane]):
+                try:
+                    nadzor = Gio.File.new_for_path(mapa).monitor_directory(Gio.FileMonitorFlags.NONE, None)
+                    nadzor.connect("changed", obdelava)
+                    self._nadzori.append(nadzor)
+                except Exception:  # noqa: BLE001
+                    continue
+            self._spremljane, self._cakane = spremljane, cakane
+            if self.razporedi(self._mape()) == (spremljane, cakane):
+                break
+        return len(self._spremljane)
+
+    @staticmethod
+    def zadeva(ime: str) -> bool:
+        """Ali sprememba datoteke s tem imenom lahko spremeni seznam programov (vnos .desktop, tudi zacasni)."""
+        return ".desktop" in (ime or "")
+
+    def _nacrtuj(self) -> None:
+        from gi.repository import GLib
+        if self._casovnik:
+            GLib.source_remove(self._casovnik)
+        self._casovnik = GLib.timeout_add(self._zamik_ms, self._poslji)
+
+    def _sprememba(self, _nadzor, datoteka, _druga, _vrsta) -> None:
+        try:
+            ime = datoteka.get_basename() or ""
+        except Exception:  # noqa: BLE001
+            ime = ""
+        if self.zadeva(ime):
+            self._nacrtuj()
+
+    def _sprememba_nadrejene(self, _nadzor, datoteka, _druga, _vrsta) -> None:
+        """V nadrejeni mapi se je nekaj spremenilo: zanima nas samo nastanek podmape, na katero cakamo (v
+        ~/.local/share se datoteke spreminjajo ves cas)."""
+        try:
+            ime = datoteka.get_basename() or ""
+            mapa = datoteka.get_parent().get_path() or ""
+        except Exception:  # noqa: BLE001
+            return
+        if ime not in self._cakane.get(mapa, ()):
+            return
+        from gi.repository import GLib
+        if self._casovnik_map:
+            GLib.source_remove(self._casovnik_map)
+        self._casovnik_map = GLib.timeout_add(self.ZAMIK_MAP_MS, self._preuredi)
+
+    def _preuredi(self) -> bool:
+        """Cakana mapa je nastala: nadzor postavimo znova (zdaj spremljamo njo ali naslednjo na poti)."""
+        self._casovnik_map = 0
+        prej = set(self._spremljane)
+        self._ustavi_nadzore()
+        try:
+            self.zacni()
+        except Exception:  # noqa: BLE001
+            return False
+        if set(self._spremljane) - prej:
+            # Nova mapa z zaganjalniki: program, zaradi katerega je nastala, je lahko ze v njej.
+            self._nacrtuj()
+        return False
+
+    def _poslji(self) -> bool:
+        self._casovnik = 0
+        # Nov program prinese tudi svojo ikono: tema ikon GTK jo vidi sele, ko mape prebere znova (core/gostitelj).
+        try:
+            from core import gostitelj
+            gostitelj.osvezi_temo_ikon()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            self._ob_spremembi()
+        except Exception:  # noqa: BLE001
+            pass
+        return False
+
+    def _ustavi_nadzore(self) -> None:
+        for nadzor in self._nadzori:
+            try:
+                nadzor.cancel()
+            except Exception:  # noqa: BLE001
+                pass
+        self._nadzori = []
+
+    def koncaj(self) -> None:
+        self._ustavi_nadzore()
+        self._spremljane, self._cakane = [], {}
+        for ime in ("_casovnik", "_casovnik_map"):
+            if getattr(self, ime):
+                try:
+                    from gi.repository import GLib
+                    GLib.source_remove(getattr(self, ime))
+                except Exception:  # noqa: BLE001
+                    pass
+                setattr(self, ime, 0)
+
+
 def pot_ikone(ime: str, velikost: int = IKONA_VELIKOST) -> str:
-    """Ikona programa kot PNG v predpomnilniku; vrne pot ali ''. Klicati na glavni niti (Gtk)."""
+    """Ikona programa kot PNG v predpomnilniku; vrne pot ali ''. Klicati na glavni niti (tema ikon GTK)."""
     if not ime:
         return ""
-    cilj = os.path.join(MAPA_IKON, hashlib.sha1(("%s|%d" % (ime, velikost)).encode()).hexdigest() + ".png")
+    cilj = os.path.join(MAPA_IKON, hashlib.sha1(("%s|%d" % (ime, velikost)).encode(), usedforsecurity=False).hexdigest() + ".png")
     if os.path.isfile(cilj) and os.path.getsize(cilj) > 0:
         return cilj
     izvor = ""
@@ -262,18 +489,16 @@ def pot_ikone(ime: str, velikost: int = IKONA_VELIKOST) -> str:
         izvor = ime
     try:
         import gi
-        gi.require_version("Gtk", "3.0")
         gi.require_version("GdkPixbuf", "2.0")
-        from gi.repository import GdkPixbuf, Gtk
-        if izvor:
-            slika = GdkPixbuf.Pixbuf.new_from_file_at_size(izvor, velikost, velikost)
-        else:
-            tema = Gtk.IconTheme.get_default()
+        from gi.repository import GdkPixbuf
+        if not izvor:
+            # Tema ikon prek core/gostitelj.py: GTK4 (Safeer OS) ali GTK3, kar proces ze uporablja.
+            from core import gostitelj
             ime_teme = ime[:-4] if ime.endswith((".png", ".svg", ".xpm")) else ime
-            info = tema.lookup_icon(ime_teme, velikost, Gtk.IconLookupFlags.FORCE_SIZE)
-            if info is None:
+            izvor = gostitelj.ikona_iz_teme(ime_teme, velikost)
+            if not izvor:
                 return ""
-            slika = info.load_icon()
+        slika = GdkPixbuf.Pixbuf.new_from_file_at_size(izvor, velikost, velikost)
         if slika is None:
             return ""
         os.makedirs(MAPA_IKON, exist_ok=True)

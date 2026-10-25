@@ -100,10 +100,16 @@ class Zaloga(unittest.TestCase):
         # Druga naprava je prosta tudi medtem.
         self.assertIsNotNone(self.z.zacni("fon", "tv")[0])
 
-    def test_omejeno_stevilo_zaslonov(self):
-        for i in range(D.NAJVEC_ZASLONOV):
+    def test_zaslonov_ne_omejuje_stevilka_ampak_viri(self):
+        """Lastnik, 18. 10. 2026: prej najvec 4 deljeni zasloni hkrati; zdaj odloca pomnilnik (link_viri)."""
+        from unittest import mock
+        from core import link_viri
+        for i in range(12):
             self.assertIsNotNone(self.z.zacni("p%d" % i, "c%d" % i)[0])
-        self.assertEqual(self.z.zacni("se-en", "cilj"), (None, "prevec_zaslonov", ""))
+        with mock.patch.object(link_viri, "preveri", lambda *a, **k: link_viri.POMNILNIK), \
+                mock.patch.object(link_viri, "POSLUSALCI", []):
+            self.assertEqual(self.z.zacni("se-en", "cilj"), (None, link_viri.KODA, ""))
+        link_viri.ponastavi()
 
     def test_okvirji_gredo_gledalcem_in_konec_toka_konca_deljenje(self):
         z = self.z.zacni("pc1", "pc2")[0]
@@ -148,11 +154,17 @@ class Zaloga(unittest.TestCase):
         g, _ = self.z.dodaj_gledalca(z)
         self.assertEqual(g.naslednji(0), b"ZADNJA")
 
-    def test_omejeno_stevilo_gledalcev_in_koncano_deljenje(self):
+    def test_gledalcev_ne_omejuje_stevilka_in_koncano_deljenje(self):
+        """Prej najvec 4 gledalci enega zaslona (predstavitev v podjetju jih ima vec); zdaj odloca pomnilnik."""
+        from unittest import mock
+        from core import link_viri
         z = self.z.zacni("pc1", "pc2")[0]
-        for _ in range(D.NAJVEC_GLEDALCEV):
+        for _ in range(12):
             self.assertIsNotNone(self.z.dodaj_gledalca(z)[0])
-        self.assertEqual(self.z.dodaj_gledalca(z), (None, "prevec_gledalcev"))
+        with mock.patch.object(link_viri, "preveri", lambda *a, **k: link_viri.POMNILNIK), \
+                mock.patch.object(link_viri, "POSLUSALCI", []):
+            self.assertEqual(self.z.dodaj_gledalca(z), (None, link_viri.KODA))
+        link_viri.ponastavi()
         self.z.koncaj(z.id)
         self.assertEqual(self.z.dodaj_gledalca(z), (None, "ni_zaslona"))
 

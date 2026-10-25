@@ -162,9 +162,12 @@ class TestZakonitiViri(unittest.TestCase):
         with mock.patch("core.media_servers._request", side_effect=fake_request):
             rows = media_servers.catalog("jellyfin", "https://media.example", {"id": "s1", "ime": "Domači", "user_id": "u1"}, "token")
         self.assertEqual([row["vrsta"] for row in rows], ["film", "glasba"])
-        self.assertIn("/Users/u1/Items", urls[0][0])
-        self.assertEqual(urls[0][1]["X-Emby-Token"], "token")
-        self.assertIn("api_key=token", rows[0]["url"])
+        # Jellyfin 10.9+ (12 nima vec /Users/{id}/Items in starih glav): /Items?userId=, glava Authorization z zetonom,
+        # parameter ApiKey v naslovu toka (core/media_servers.py - skupna koda z Linuxom, krog 2).
+        self.assertIn("/Items?", urls[0][0])
+        self.assertIn("userId=u1", urls[0][0])
+        self.assertIn('Token="token"', urls[0][1]["Authorization"])
+        self.assertIn("ApiKey=token", rows[0]["url"])
 
     def test_plex_reads_library_xml_and_creates_tokenized_stream(self):
         replies = [b'<MediaContainer><Directory key="1"/></MediaContainer>',

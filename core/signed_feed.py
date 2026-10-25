@@ -198,9 +198,9 @@ def _check_values(value, depth=0) -> None:
         for item in value:
             _check_values(item, depth + 1)
     elif isinstance(value, str):
-        # Strings are already guaranteed printable ASCII by the raw-byte check and the escape rule in
-        # _check_text (only \\ and \" may appear), so there is nothing left to verify per character;
-        # doing so in Python cost up to 7 s of CPU at start-up on a large feed.
+        # Nizi so ze zagotovo natisljiv ASCII: _check_text dovoli samo bajte 0x20-0x7E (in presledke JSON, ki jih
+        # json.loads v nizu ne sprejme) in samo ubezni zaporedji za poševnico in narekovaj. Preverba po znakih v Pythonu
+        # ni nasla nic vec, stala pa je do 7 s procesorja ob zagonu na velikem seznamu (izmerjeno na Windows).
         return
     elif isinstance(value, bool) or not isinstance(value, int):
         raise FeedVerificationError("only objects, arrays, strings and integers are allowed")
@@ -373,13 +373,18 @@ def _valid_rule_value(value: str, kind: str) -> bool:
     return False
 
 
-def verify_bundle(bundle_bytes: bytes, manifest: Manifest, trusted_keys: dict) -> Bundle:
+def verify_bundle_bytes(bundle_bytes: bytes, manifest: Manifest, trusted_keys: dict) -> None:
+    """Size, SHA-256 and signature of the bundle file (no JSON parsing)."""
     if len(bundle_bytes) != manifest.bundle_size:
         raise FeedVerificationError("bundle size does not match the manifest")
     if hashlib.sha256(bundle_bytes).hexdigest() != manifest.bundle_sha256:
         raise FeedVerificationError("bundle SHA-256 does not match the manifest")
     if not _signature_ok(manifest.bundle_signature, trusted_keys, BUNDLE_CONTEXT, bundle_bytes):
         raise FeedVerificationError("bundle signature is not valid")
+
+
+def verify_bundle(bundle_bytes: bytes, manifest: Manifest, trusted_keys: dict) -> Bundle:
+    verify_bundle_bytes(bundle_bytes, manifest, trusted_keys)
     payload = _strict_loads(bundle_bytes)
     if not isinstance(payload, dict) or canonical_json(payload) != bundle_bytes:
         raise FeedVerificationError("bundle is not in canonical form")
@@ -420,37 +425,120 @@ def verify_bundle(bundle_bytes: bytes, manifest: Manifest, trusted_keys: dict) -
 # --------------------------------------------------------------------------------------------------
 
 class ThreatIndex:
-    """Constant-time lookups for the four rule kinds. Immutable after construction."""
+    """Lookups for the four rule kinds in compact sorted arrays of 64-bit keyed hashes (about 9 bytes per rule instead
+    of ~600 in Python dicts and strings - 208 000 rules took 126 MiB on 11 Oct 2026). Immutable after construction.
+    A false match needs a 64-bit collision (~1e-14 per lookup at this size)."""
+
+    _KATEGORIJE = ("botnet_c2", "malware", "phishing", "scam", "tracker", "ads")
 
     def __init__(self, rules=()):
-        self._suffix = {}
-        self._hosts = {}
-        self._urls = {}
+        from array import array
+        zbirke = {"d": {}, "h": {}, "u": {}}
         for value, kind, category, _source in rules:
             if kind == "domain":
-                node = self._suffix
-                for label in reversed(value.split(".")):
-                    node = node.setdefault(label, {})
-                node["\0"] = _more_severe(node.get("\0"), category)
+                vrsta = "d"
             elif kind in ("hostname", "ipv4", "ipv6"):
-                self._hosts[value] = _more_severe(self._hosts.get(value), category)
+                vrsta = "h"
             elif kind == "url":
-                self._urls[value] = _more_severe(self._urls.get(value), category)
+                vrsta = "u"
+            else:
+                continue
+            k = _kljuc(vrsta, value)
+            zbirke[vrsta][k] = _more_severe(zbirke[vrsta].get(k), category)
+        self._kljuci, self._kategorije = {}, {}
+        for vrsta, d in zbirke.items():
+            urejeno = sorted(d)
+            self._kljuci[vrsta] = array("Q", urejeno)
+            self._kategorije[vrsta] = bytes(self._KATEGORIJE.index(d[k]) if d[k] in self._KATEGORIJE else 255
+                                            for k in urejeno)
+        self._ima_url = len(self._kljuci["u"]) > 0
         self.size = len(rules)
+
+    # -- Kazalo na disku (12. 10. 2026): ob zagonu se paket ne razcleni vec v Pythonu (200 000 pravil v JSON je za
+    # sabo pustilo ~45 MiB razdrobljenega kupa). Kazalo (~2 MB) se prebere z mmap: strani so deljene in cist
+    # predpomnilnik datotek, ki ga jedro lahko kadarkoli sprosti.
+    _MAGIJA = b"SFIDX1\x00\x00"
+    _VRSTE = ("d", "h", "u")
+
+    def shrani(self, pot, bundle_sha256: str) -> bool:
+        """Zapise kazalo (glava, kljuci, kategorije, kontrolna vsota blake2b). Nikoli ne vrze izjeme."""
+        import sys
+        try:
+            telo = bytearray(self._MAGIJA)
+            telo += bytes.fromhex(bundle_sha256)
+            telo += (1 if sys.byteorder == "little" else 2).to_bytes(8, "little")
+            telo += int(self.size).to_bytes(8, "little")
+            for v in self._VRSTE:
+                telo += len(self._kljuci[v]).to_bytes(8, "little")
+            for v in self._VRSTE:
+                telo += bytes(memoryview(self._kljuci[v]).cast("B"))
+            for v in self._VRSTE:
+                kat = bytes(self._kategorije[v])
+                telo += kat + b"\x00" * (-len(kat) % 8)
+            telo += hashlib.blake2b(bytes(telo), digest_size=32).digest()
+            _atomic_write(Path(pot), bytes(telo))
+            return True
+        except Exception:  # noqa: BLE001 - kazalo je le pospesek; brez njega deluje kot prej
+            return False
+
+    @classmethod
+    def nalozi(cls, pot, bundle_sha256: str):
+        """Kazalo z diska (mmap) ali None, ce ga ni, je za drug paket ali je poskodovano."""
+        import mmap
+        import sys
+        try:
+            with open(pot, "rb") as f:
+                m = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+        except (OSError, ValueError):
+            return None
+        try:
+            if len(m) < 96 or m[:8] != cls._MAGIJA or m[8:40] != bytes.fromhex(bundle_sha256):
+                return None
+            if int.from_bytes(m[40:48], "little") != (1 if sys.byteorder == "little" else 2):
+                return None
+            if hashlib.blake2b(m[:-32], digest_size=32).digest() != m[-32:]:
+                return None
+            velikost = int.from_bytes(m[48:56], "little")
+            stevila = [int.from_bytes(m[56 + 8 * i:64 + 8 * i], "little") for i in range(3)]
+            mv, odmik = memoryview(m), 80
+            idx = cls.__new__(cls)
+            idx._kljuci, idx._kategorije = {}, {}
+            for v, n in zip(cls._VRSTE, stevila):
+                idx._kljuci[v] = mv[odmik:odmik + 8 * n].cast("Q")
+                odmik += 8 * n
+            for v, n in zip(cls._VRSTE, stevila):
+                idx._kategorije[v] = mv[odmik:odmik + n]
+                odmik += n + (-n % 8)
+            if odmik != len(m) - 32:
+                return None
+            idx._ima_url = stevila[2] > 0
+            idx.size = velikost
+            idx._mmap = m
+            return idx
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _najdi(self, vrsta: str, value: str):
+        from bisect import bisect_left
+        kljuci = self._kljuci[vrsta]
+        if not kljuci:
+            return None
+        k = _kljuc(vrsta, value)
+        i = bisect_left(kljuci, k)
+        if i < len(kljuci) and kljuci[i] == k:
+            c = self._kategorije[vrsta][i]
+            return self._KATEGORIJE[c] if c < len(self._KATEGORIJE) else None
+        return None
 
     def match_host(self, host: str):
         """Considers every rule covering the host; the most severe category wins."""
         host = _normalize_host(host)
         if not host:
             return None
-        best = self._hosts.get(host)
-        node = self._suffix
-        for label in reversed(host.split(".")):
-            node = node.get(label)
-            if node is None:
-                break
-            if "\0" in node:
-                best = _more_severe(best, node["\0"])
+        best = self._najdi("h", host)
+        oznake = host.split(".")
+        for i in range(len(oznake)):
+            best = _more_severe(best, self._najdi("d", ".".join(oznake[i:])))
         return best
 
     def match_url(self, url: str):
@@ -467,7 +555,7 @@ class ThreatIndex:
         except ValueError:
             return None
         best = self.match_host(host)
-        if not self._urls or parts.scheme not in ("http", "https"):
+        if not self._ima_url or parts.scheme not in ("http", "https"):
             return best
         normalized = _normalize_host(host)
         if not normalized:
@@ -476,7 +564,17 @@ class ThreatIndex:
         if port is not None and not ((parts.scheme == "http" and port == 80) or (parts.scheme == "https" and port == 443)):
             netloc = f"{netloc}:{port}"
         key = f"{parts.scheme}://{netloc}{parts.path or '/'}" + (f"?{parts.query}" if parts.query else "")
-        return _more_severe(best, self._urls.get(key))
+        return _more_severe(best, self._najdi("u", key))
+
+
+def _brez_pravil(bundle):
+    """Bundle za pomnilnik: pravila so ze v kompaktnem indeksu, seznam (~100 MiB) ne ostane v RAM-u."""
+    from dataclasses import replace
+    return replace(bundle, rules=())
+
+
+def _kljuc(vrsta: str, value: str) -> int:
+    return int.from_bytes(hashlib.blake2b((vrsta + ":" + value).encode("utf-8"), digest_size=8).digest(), "big")
 
 
 def _more_severe(current, candidate):
@@ -506,6 +604,14 @@ def _normalize_host(host) -> str:
 # --------------------------------------------------------------------------------------------------
 # Storage and updates
 # --------------------------------------------------------------------------------------------------
+
+def isti_gostitelj(zahtevano: str, koncno: str) -> bool:
+    """Seznam sprejmemo samo z gostitelja, ki smo ga vprasali: preusmeritev drugam ga ne sme podtakniti."""
+    try:
+        return (urlsplit(zahtevano).hostname or "") == (urlsplit(koncno).hostname or "x")
+    except ValueError:
+        return False
+
 
 def _atomic_write(path: Path, data: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -582,14 +688,30 @@ class SignedFeedStore:
                                        check_expiry=False)
             if manifest.version != version:
                 raise FeedVerificationError("stored manifest does not match the recorded version")
-            bundle = verify_bundle(bundle_path.read_bytes(), manifest, self.trusted_keys)
+            index_path = self._index_path(version)
+            index = ThreatIndex.nalozi(index_path, manifest.bundle_sha256)
+            if index is not None:
+                # Kazalo je iz tega paketa: paket se vedno preverimo (velikost, SHA-256, podpis), JSON pa ne razclenimo.
+                verify_bundle_bytes(bundle_path.read_bytes(), manifest, self.trusted_keys)
+                bundle = Bundle(manifest, (), ())
+            else:
+                bundle = verify_bundle(bundle_path.read_bytes(), manifest, self.trusted_keys)
+                index = ThreatIndex(bundle.rules)
+                index.shrani(index_path, manifest.bundle_sha256)
+                bundle = _brez_pravil(bundle)
+                nalozen = ThreatIndex.nalozi(index_path, manifest.bundle_sha256)
+                if nalozen is not None:
+                    index = nalozen          # polja iz kupa sprostimo, ostane mmap
         except (OSError, FeedVerificationError) as exc:
             self.last_error = f"stored feed unavailable: {exc}"
             return False
         with self._lock:
+            self.index = index
             self.bundle = bundle
-            self.index = ThreatIndex(bundle.rules)
         return True
+
+    def _index_path(self, version: int):
+        return self.directory / f"{self.feed_type}-{version}-index.bin"
 
     def _install(self, manifest: Manifest, manifest_bytes: bytes, bundle_bytes: bytes) -> None:
         manifest_path, bundle_path = self._files(manifest.version)
@@ -597,7 +719,8 @@ class SignedFeedStore:
         _atomic_write(manifest_path, manifest_bytes)
         # The state file is the commit point: until it is replaced, load() keeps using the old files.
         _atomic_write(self._state_path, json.dumps({"version": manifest.version}).encode("ascii"))
-        for old in self.directory.glob(f"{self.feed_type}-*-*.json"):
+        for old in list(self.directory.glob(f"{self.feed_type}-*-*.json")) + \
+                list(self.directory.glob(f"{self.feed_type}-*-index.bin")):
             parts = old.name.split("-")
             if len(parts) >= 3 and parts[-2].isdigit() and int(parts[-2]) < manifest.version:
                 try:
@@ -620,8 +743,10 @@ class SignedFeedStore:
                 bundle = verify_bundle(bundle_bytes, manifest, self.trusted_keys)
                 index = ThreatIndex(bundle.rules)
                 self._install(manifest, manifest_bytes, bundle_bytes)
+                if index.shrani(self._index_path(manifest.version), manifest.bundle_sha256):
+                    index = ThreatIndex.nalozi(self._index_path(manifest.version), manifest.bundle_sha256) or index
                 with self._lock:
-                    self.bundle = bundle
+                    self.bundle = _brez_pravil(bundle)
                     self.index = index
                 self.last_error = ""
                 return True

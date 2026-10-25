@@ -5,6 +5,7 @@ import hashlib
 import http.server
 import json
 import os
+import shutil
 import socketserver
 import sys
 import tempfile
@@ -145,6 +146,84 @@ class Razlicice(unittest.TestCase):
         n = op.preveri("linux", {"safeer-os": "0.4.22"}, m, nacin="deb")["nove"][0]
         self.assertIsNone(n["datoteka"])
         self.assertNotIn("tema", n)
+
+    def test_aplikacija_dobi_svoj_paket(self):
+        """Od 20. 10. 2026 sta namizno okolje (safeer-os) in aplikacija (safeer-os-app) loceni paketi, ki se med sabo
+        zamenjata: posodobitev aplikacije mora prenesti "deb_app", nikoli namiznega okolja (to bi aplikacijo zamenjalo z
+        namizjem); brez "deb_app" nic (stran). Namizno okolje ostane pri "deb"."""
+        m = json.loads(json.dumps(MANIFEST))
+        app = {"url": "https://github.com/x/safeer-os-app_0.4.23_amd64.deb", "sha256": "3" * 64, "velikost": 9}
+        with mock.patch.object(op, "je_aplikacija_deb", return_value=True):
+            self.assertIsNone(op.preveri("linux", {"safeer-os": "0.4.22"}, m, nacin="deb")["nove"][0]["datoteka"])
+            m["linux"]["safeer-os"]["deb_app"] = app
+            n = op.preveri("linux", {"safeer-os": "0.4.22"}, m, nacin="deb")["nove"][0]
+            self.assertEqual(n["datoteka"], app)
+        with mock.patch.object(op, "je_aplikacija_deb", return_value=False):
+            n = op.preveri("linux", {"safeer-os": "0.4.22"}, m, nacin="deb")["nove"][0]
+            self.assertTrue(n["datoteka"]["url"].endswith("safeer-os_0.4.23_all.deb"))
+
+    def test_odstranjena_aplikacija_ne_steje(self):
+        """Pomocnik 20. 10. 2026: po menjavi aplikacija -> namizje ostane safeer-os-app.list (stanje rc/ic) - posodobitev
+        je zato namestila APLIKACIJO in odstranila namizno okolje. Steje samo stanje dpkg »ii«."""
+        def dpkg(stanja):
+            def tek(ukaz, **_k):
+                return mock.Mock(returncode=0, stdout=stanja.get(ukaz[-1], "un "))
+            return tek
+        with mock.patch.object(op.shutil, "which", return_value="/usr/bin/dpkg-query"), \
+                mock.patch.object(op.subprocess, "run", side_effect=dpkg({"safeer-os": "ii ", "safeer-os-app": "rc "})), \
+                mock.patch.object(op.os.path, "exists", return_value=True):
+            self.assertFalse(op.je_aplikacija_deb())
+            self.assertTrue(op.namescen_deb("safeer-os"))
+        with mock.patch.object(op.shutil, "which", return_value="/usr/bin/dpkg-query"), \
+                mock.patch.object(op.subprocess, "run", side_effect=dpkg({"safeer-os-app": "ii "})):
+            self.assertTrue(op.je_aplikacija_deb())
+            self.assertFalse(op.namescen_deb("safeer-os"))
+        with mock.patch.object(op.shutil, "which", return_value=None):
+            self.assertFalse(op.je_aplikacija_deb())
+
+    def test_skupni_webkit_v_istem_apt_get(self):
+        """safeer-os in safeer-browser (.deb) zahtevata safeer-webkit iz iste izdaje (od 19. 10. 2026): program ga prenese
+        in namesti v istem apt-get, sicer posodobitev pade (apt-get odvisnosti ne razresi). Seznam za razlicice do 1.0.126
+        ga nosi tudi kot "tema_deb" (te ga tako ze namestijo) - novejsi program ga ne prenese dvakrat."""
+        webkit = {"url": "https://github.com/x/safeer-webkit_1.0.127_amd64.deb", "sha256": "1" * 64, "velikost": 9}
+        m = json.loads(json.dumps(MANIFEST))
+        m["linux"]["safeer-os"]["webkit_deb"] = webkit
+        m["linux"]["safeer-os"]["tema_deb"] = webkit
+        m["linux"]["safeer-browser"] = {"razlicica": "1.0.127", "webkit_deb": webkit,
+                                        "deb": {"url": "https://github.com/x/safeer-browser_1.0.127_amd64.deb", "sha256": "2" * 64}}
+        n = op.preveri("linux", {"safeer-os": "0.4.22"}, m, nacin="deb")["nove"][0]
+        self.assertEqual(n["webkit"], webkit)
+        self.assertEqual([d["url"].rsplit("/", 1)[1] for d in op.datoteke_namestitve(n)],
+                         ["safeer-os_0.4.23_all.deb", "safeer-webkit_1.0.127_amd64.deb"])
+        b = op.preveri("linux", {"safeer-browser": "1.0.126"}, m, nacin="deb")["nove"][0]
+        self.assertEqual([d["url"].rsplit("/", 1)[1] for d in op.datoteke_namestitve(b)],
+                         ["safeer-browser_1.0.127_amd64.deb", "safeer-webkit_1.0.127_amd64.deb"])
+        # Brez veljavnega vnosa WebKita nic napol (samo stran).
+        m["linux"]["safeer-os"]["webkit_deb"] = dict(webkit, sha256="")
+        self.assertIsNone(op.preveri("linux", {"safeer-os": "0.4.22"}, m, nacin="deb")["nove"][0]["datoteka"])
+        # Flatpak in AppImage imata svoj WebKit; Flatpak z .deb (sistemski deli) dobi safeer-webkit ob .deb.
+        m["linux"]["safeer-os"]["webkit_deb"] = webkit
+        for nacin in ("flatpak", "appimage"):
+            self.assertNotIn("webkit", op.preveri("linux", {"safeer-os": "0.4.22"}, m, nacin=nacin)["nove"][0], nacin)
+        h = op.preveri("linux", {"safeer-os": "0.4.22"}, m, nacin="flatpak+deb")["nove"][0]
+        self.assertEqual([d["url"].rsplit("/", 1)[1] for d in op.datoteke_namestitve(h)],
+                         ["Safeer-OS-0.4.23-x86_64.flatpak", "safeer-os_0.4.23_all.deb", "safeer-webkit_1.0.127_amd64.deb"])
+        # Seznam brez polja (pred to izdajo): kot prej.
+        n = op.preveri("linux", {"safeer-os": "0.4.22"}, MANIFEST, nacin="deb")["nove"][0]
+        self.assertNotIn("webkit", n)
+        self.assertEqual(len(op.datoteke_namestitve(n)), 2)
+
+    def test_posodobitev_uporabi_vse_datoteke(self):
+        """Safeer OS in Safeer Control preneseta datoteke iz op.datoteke_namestitve (program, videz, .deb, WebKit)."""
+        koren = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        imena = [i for i in ("safeer_os.py", "safeer_control.py") if os.path.isfile(os.path.join(koren, i))]
+        if not imena:
+            self.skipTest("zaganjalnika Linux nista v tem repozitoriju (Safeer-windows; preizkus je skupen z Linuxom)")
+        for ime in imena:
+            with open(os.path.join(koren, ime), encoding="utf-8") as f:
+                vir = f.read()
+            self.assertIn("for d in os_posodobitve.datoteke_namestitve(n):", vir, ime)
+            self.assertNotIn('[n["datoteka"]] + (', vir, ime)
 
 
 @unittest.skipIf(Ed25519PrivateKey is None, "brez python3-cryptography")
@@ -480,13 +559,90 @@ class Prenos(unittest.TestCase):
 
 
 class Namestitev(unittest.TestCase):
+    A, B = "a" * 64, "b" * 64
+
     def test_deb_brez_znizanja_razlicice(self):
         """Posodobitev nikoli ne namesti starejse razlicice (brez --allow-downgrades)."""
         with mock.patch.object(op.subprocess, "run", return_value=op.subprocess.CompletedProcess([], 0, "", "")) as run:
-            op.namesti_linux("deb", ["/tmp/a.deb", "/tmp/b.deb"])
+            op.namesti_linux("deb", ["/tmp/a.deb", "/tmp/b.deb"], [self.A, self.B])
         argv = run.call_args[0][0]
-        self.assertEqual(argv, ["pkexec", "apt-get", "install", "-y", "/tmp/a.deb", "/tmp/b.deb"])
-        self.assertNotIn("--allow-downgrades", argv)
+        self.assertEqual(argv, ["/usr/bin/pkexec", "/bin/sh", "-c", op.NAMESTI_DEB_KOT_ROOT, "safeer-posodobitev",
+                                self.A, "/tmp/a.deb", self.B, "/tmp/b.deb"])
+        self.assertNotIn("--allow-downgrades", " ".join(argv))
+
+    def test_deb_samo_z_vsotami_iz_seznama(self):
+        """Brez SHA-256 iz podpisanega seznama (ali z neveljavno) se root sploh ne vprasa."""
+        with mock.patch.object(op.subprocess, "run") as run:
+            for vsote in (None, [self.A], ["ni-vsota"], [self.A, "x" * 64]):
+                with self.assertRaises(ValueError):
+                    op.namesti_linux("deb", ["/tmp/a.deb", "/tmp/b.deb"], vsote)
+        run.assert_not_called()
+
+    def _root_skripta(self, vsebina: bytes, vsota: str):
+        """NAMESTI_DEB_KOT_ROOT z laznim apt-get (zapise, katere poti in vsebine je dobil); vrne (izhod, klic apt)."""
+        d = tempfile.mkdtemp(prefix="safeer-root-namestitev-")
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)     # vsak preizkus za sabo pospravi (AGENTS.md)
+        paket = os.path.join(d, "safeer-os_9.9.9_amd64.deb")
+        with open(paket, "wb") as f:
+            f.write(vsebina)
+        bin_ = os.path.join(d, "bin")
+        os.mkdir(bin_)
+        zapis = os.path.join(d, "apt.txt")
+        with open(os.path.join(bin_, "apt-get"), "w") as f:
+            # Lazni apt najprej (kot napadalec, ki tece kot uporabnik) prepise uporabnikovo datoteko, nato prebere,
+            # kar je dobil: namesti se mora preverjena kopija, ne prepisana datoteka.
+            f.write('#!/bin/sh\nprintf podtaknjeno > "%s"\nfor a in "$@"; do case "$a" in /*) '
+                    'printf "%%s %%s\\n" "$a" "$(sha256sum < "$a" | cut -c1-64)" >> "%s";; esac; done\n' % (paket, zapis))
+        os.chmod(os.path.join(bin_, "apt-get"), 0o755)
+        okolje = dict(os.environ, PATH=bin_ + os.pathsep + os.environ.get("PATH", ""))
+        r = op.subprocess.run(["/bin/sh", "-c", op.NAMESTI_DEB_KOT_ROOT, "safeer-posodobitev", vsota, paket],
+                              env=okolje, capture_output=True, text=True, timeout=30)
+        klic = open(zapis).read().split() if os.path.exists(zapis) else []
+        return r, klic, paket
+
+    def test_root_namesti_preverjeno_kopijo(self):
+        """Neodvisni pregled 19. 10. 2026: apt-get ne sme brati datoteke v ~/.cache (uporabnik bi jo zamenjal po
+        preverbi in po vpisanem geslu). Root jo prekopira k sebi, preveri SHA-256 kopije in namesti kopijo."""
+        vsebina = b"pravi paket"
+        r, klic, paket = self._root_skripta(vsebina, hashlib.sha256(vsebina).hexdigest())
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(len(klic), 2, klic)
+        self.assertNotEqual(klic[0], paket, "apt-get ne bere uporabnikove datoteke")
+        self.assertEqual(klic[1], hashlib.sha256(vsebina).hexdigest(), "namescena vsebina je preverjena kopija")
+        self.assertFalse(os.path.exists(klic[0]), "kopija se po namestitvi pospravi")
+
+    def test_root_zavrne_napacno_vsoto(self):
+        r, klic, _ = self._root_skripta(b"podtaknjen paket", hashlib.sha256(b"pravi paket").hexdigest())
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("SHA-256 se ne ujema", r.stderr)
+        self.assertEqual(klic, [], "apt-get se ne zazene")
+
+    def test_root_ne_bere_povezave_ali_fifo(self):
+        """Pregled 19. 10. 2026: podtaknjena povezava (npr. na /dev/zero - poln disk) ali FIFO (root caka do roka)
+        mora takoj pasti, apt-get se ne zazene."""
+        import time
+        for vrsta in ("povezava", "fifo"):
+            d = tempfile.mkdtemp(prefix="safeer-root-podtaknjeno-")
+            try:
+                paket = os.path.join(d, "safeer-os_9.9.9_amd64.deb")
+                if vrsta == "povezava":
+                    os.symlink("/dev/zero", paket)
+                else:
+                    os.mkfifo(paket)
+                bin_ = os.path.join(d, "bin")
+                os.mkdir(bin_)
+                with open(os.path.join(bin_, "apt-get"), "w") as f:
+                    f.write('#!/bin/sh\ntouch "%s"\n' % os.path.join(d, "apt-klican"))
+                os.chmod(os.path.join(bin_, "apt-get"), 0o755)
+                okolje = dict(os.environ, PATH=bin_ + os.pathsep + os.environ.get("PATH", ""))
+                zacetek = time.monotonic()
+                r = op.subprocess.run(["/bin/sh", "-c", op.NAMESTI_DEB_KOT_ROOT, "safeer-posodobitev", "a" * 64, paket],
+                                      capture_output=True, text=True, timeout=60, env=okolje)
+                self.assertEqual(r.returncode, 2, (vrsta, r.stderr))
+                self.assertLess(time.monotonic() - zacetek, 10, vrsta)
+                self.assertFalse(os.path.exists(os.path.join(d, "apt-klican")), vrsta)
+            finally:
+                shutil.rmtree(d, ignore_errors=True)
 
     def test_v_izdaji_ni_lokalnega_http(self):
         self.assertFalse(op._LOKALNI_HTTP)

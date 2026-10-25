@@ -1,8 +1,10 @@
+import shutil
 import subprocess
 import unittest
 from core.adblock import YOUTUBE_ADBLOCK_SCRIPT
 
 
+@unittest.skipUnless(shutil.which("node"), "node is required to run the page script")
 class YouTubeTests(unittest.TestCase):
     def test_short_content_is_not_an_ad_and_user_media_settings_return(self):
         start = YOUTUBE_ADBLOCK_SCRIPT.index("    function isAdActive()")
@@ -33,7 +35,6 @@ const document = {
 };
 const window = {};
 const location = { pathname: '/watch' };
-function clickSkip() {}
 global.document = document;
 """
         checks = r"""
@@ -43,14 +44,19 @@ assert.strictEqual(video.currentTime, 10);
 assert.strictEqual(video.playbackRate, 1.5);
 assert.strictEqual(cinematic.removed, false);
 
+// Ad that slipped through (lastnik 18. 10. 2026): only muted - never skipped, sped up or seeked to its end ...
 active = true;
 superviseYouTube();
+assert.strictEqual(video.muted, true);
+assert.strictEqual(video.playbackRate, 1.5);
 assert.strictEqual(video.currentTime, 10);
+// ... and the user's own sound comes back after it.
+active = false;
+superviseYouTube();
 assert.strictEqual(video.muted, false);
 assert.strictEqual(video.playbackRate, 1.5);
 
 video.muted = true;
-active = false;
 superviseYouTube();
 assert.strictEqual(video.muted, true);
 
@@ -70,6 +76,7 @@ assert.strictEqual(typeof watchPlayerClass, 'function');
         subprocess.run(["node", "-e", fixture + code + checks], check=True)
 
 
+@unittest.skipUnless(shutil.which("node"), "node is required to run the page script")
 class PlayerDataTests(unittest.TestCase):
     def test_initial_objects_fetch_xhr_and_signed_media_are_preserved(self):
         start = YOUTUBE_ADBLOCK_SCRIPT.index("    // Remove ad instructions")

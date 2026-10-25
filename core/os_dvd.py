@@ -129,8 +129,11 @@ def je_zasciten(pot: str) -> Optional[bool]:
     True = zaščiten (Safeer ga ne predvaja), False = brez zaščite, None = ni bilo mogoče preveriti.
     Branje zaščitenega diska brez odklepanja pogon pogosto zavrne - tudi to štejemo kot zaščito."""
     if pot.startswith("dvd://"):
-        pot = urllib.parse.unquote(pot[len("dvd://"):])
-        if len(pot) > 2 and pot[0] == "/" and pot[2] == ":":
+        pot = pot[len("dvd://"):]
+        if _windows():
+            # Naslov za LibVLC je odstotno kodiran (_vlc_uri), naslov za GStreamer na Linuxu ni (uri()).
+            pot = urllib.parse.unquote(pot)
+        if _windows() and len(pot) > 2 and pot[0] == "/" and pot[2] == ":":
             pot = pot[1:]                       # dvd:///C:/Filmi/x.iso -> C:/Filmi/x.iso
     vobi = _vobi(pot)
     if not vobi:
@@ -255,7 +258,7 @@ def pogoni() -> List[dict]:
         pass
     for ime in imena:
         try:
-            with open("/sys/block/%s/size" % ime) as d:
+            with open("/sys/block/%s/size" % ime, encoding="utf-8") as d:
                 vstavljen = int(d.read().strip() or 0) > 0
         except (OSError, ValueError):
             vstavljen = False

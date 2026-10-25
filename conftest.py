@@ -68,3 +68,18 @@ def pytest_unconfigure(config):
     else:
         os.environ["TMPDIR"] = staro
     shutil.rmtree(mapa, ignore_errors=True)
+
+
+try:
+    import pytest as _pytest
+
+    @_pytest.fixture(autouse=True)
+    def _pozabi_manifeste_stremio():
+        """Manifesti dodatkov Stremio so v pomnilniku (core/media_servers.py); vsak preizkus zacne brez njih."""
+        import sys
+        ms = sys.modules.get("core.media_servers")
+        if ms is not None and hasattr(ms, "_MANIFESTI"):
+            ms._MANIFESTI.clear()
+        yield
+except ImportError:  # pragma: no cover
+    pass

@@ -44,6 +44,17 @@ def _load_feed_module():
     return module
 
 
+def _vrni_pomnilnik() -> None:
+    """Preverjanje paketa (JSON z 200 000 pravili) pusti za sabo prazne strani: vrnemo jih sistemu."""
+    try:
+        import ctypes
+        # Brez gc.collect() v tej niti (pregled 18. 10. 2026): smeti pobira glavna nit (core/runtime_safety.py) -
+        # finalize predmeta WebKit/GTK zunaj glavne niti sesuje proces (signal 5).
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:  # noqa: BLE001 - drug sistem (Windows): nic
+        pass
+
+
 def default_data_dir(app_dir_name: str) -> Path:
     if os.name == "nt":
         base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~\\AppData\\Local")
@@ -57,6 +68,7 @@ class ThreatIntelService:
                  interval=UPDATE_INTERVAL_SECONDS, retry=RETRY_SECONDS, first_delay=FIRST_UPDATE_DELAY_SECONDS,
                  load_delay=0.0):
         self.feed = _load_feed_module()
+        #: Zamik nalaganja shranjenega paketa (s): Windows z vgrajenim DNS ga zamakne, da je prvi izris okna gladek.
         self.load_delay = float(load_delay)
         self.trusted_keys = dict(TRUSTED_KEYS if trusted_keys is None else trusted_keys)
         self.store = self.feed.SignedFeedStore(data_dir, "threats", self.trusted_keys, base_urls, fetch=fetch)
@@ -99,16 +111,18 @@ class ThreatIntelService:
             return False
 
     def _run(self) -> None:
-        # The stored bundle is pure-Python verified (GIL-bound, ~1-2 s on a 2-core PC); giving the window
+        # The stored bundle is verified in pure Python (GIL-bound, ~1-2 s on a 2-core PC); giving the window
         # a head start keeps the first paint smooth. Until then match() simply has nothing to match.
         if self.load_delay > 0 and self._stop.wait(self.load_delay):
-            self.loaded.set(); return
+            self.loaded.set()
+            return
         try:
             self.store.load()
         except Exception:  # noqa: BLE001 - a broken cache must never break start-up
             pass
         finally:
             self.loaded.set()
+            _vrni_pomnilnik()
         if self._stop.wait(self.first_delay):
             return
         while not self._stop.is_set():
@@ -135,7 +149,24 @@ class ThreatIntelService:
         return {
             "enabled": self.enabled,
             "version": bundle.manifest.version if bundle else 0,
-            "rules": len(bundle.rules) if bundle else 0,
+            "rules": self.store.index.size if bundle else 0,
             "expires_at": bundle.manifest.expires_at.strftime("%Y-%m-%dT%H:%M:%SZ") if bundle else "",
             "last_error": self.store.last_error,
         }
+
+
+_SKUPNE: dict = {}
+_SKUPNE_ZAKLEP = threading.Lock()
+
+
+def skupna(data_dir) -> "ThreatIntelService":
+    """Ena storitev na mapo za ves proces (12. 10. 2026: Scit in Splet v Safeer OS sta imela vsak svojo - dvakrat
+    preverjen paket, dve kazali v pomnilniku in dva posodabljalnika). Prvi klic jo ustvari in zazene."""
+    kljuc = str(Path(data_dir))
+    with _SKUPNE_ZAKLEP:
+        storitev = _SKUPNE.get(kljuc)
+        if storitev is None:
+            storitev = ThreatIntelService(data_dir)
+            storitev.start()
+            _SKUPNE[kljuc] = storitev
+        return storitev

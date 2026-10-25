@@ -30,9 +30,11 @@ class UvozSeznamaTest(unittest.TestCase):
     def test_prepozna_povezave(self):
         self.assertEqual(u.youtube_id("https://www.youtube.com/playlist?list=PL4fGSI1pDJn6puJdseH2Rt9sMvt9E2M4i"), "PL4fGSI1pDJn6puJdseH2Rt9sMvt9E2M4i")
         self.assertEqual(u.youtube_id("https://music.youtube.com/watch?v=abc&list=PL4fGSI1pDJn6puJdseH2Rt9sMvt9E2M4i"), "PL4fGSI1pDJn6puJdseH2Rt9sMvt9E2M4i")
-        # Posamezen posnetek, zasebni "Vsecki" (LL) in tuja stran niso seznam.
+        # Posamezen posnetek in tuja stran nista seznam. Zasebni »Vsecki« (LL) je seznam (od 14. 10. 2026, skupna koda
+        # z Linuxom), uvoz pa uporabniku pove, da je zaseben (prej »to ni seznam«).
         self.assertEqual(u.youtube_id("https://www.youtube.com/watch?v=abc"), "")
-        self.assertEqual(u.youtube_id("https://www.youtube.com/playlist?list=LL"), "")
+        self.assertEqual(u.youtube_id("https://www.youtube.com/playlist?list=LL"), "LL")
+        self.assertEqual(u.uvozi_z_razlogom("https://www.youtube.com/playlist?list=LL"), (None, "zaseben"))
         self.assertEqual(u.youtube_id("https://primer.si/playlist?list=PL4fGSI1pDJn6puJdseH2Rt9sMvt9E2M4i"), "")
         self.assertEqual(u.spotify_id("https://open.spotify.com/intl-de/playlist/37i9dQZF1DXcBWIGoYBM5M?si=x"), ("playlist", "37i9dQZF1DXcBWIGoYBM5M"))
         self.assertEqual(u.spotify_id("spotify:album:4aawyAB9vmqN3uQ7FjRGTy"), ("album", "4aawyAB9vmqN3uQ7FjRGTy"))

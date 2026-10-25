@@ -21,7 +21,8 @@ import array
 import glob
 import json
 import os
-import shlex
+import re
+import secrets
 import shutil
 import signal
 import socket
@@ -31,6 +32,7 @@ import threading
 import time
 from typing import Dict, List, Optional, Tuple
 
+from core import otroci, root_ukaz, zasebni_webkit
 from core.link_vnos import NAJVEC_BESEDILA, NAJVEC_DRZANJA_S, NAJVEC_PREMIK, TIPKE
 
 #: Ime navideznega zvocnega izhoda, na katerega igrajo programi drugega zaslona.
@@ -102,6 +104,14 @@ def _konfiguracija(sirina: int, visina: int) -> str:
         "client.focused_inactive #101418 #101418 #101418 #101418 #101418",
         "client.unfocused #101418 #101418 #101418 #101418 #101418",
         "seat seat0 xcursor_theme Adwaita 32",
+        # Navidezna miska in tipkovnica morata ostati na sedezu tudi, ce sedez dobi se kak ukaz: sway naprave,
+        # ki niso izrecno pripete, sicer odklopi (izmerjeno: po ukazu `seat seat0 ...` med tekom vnosa ni bilo vec).
+        "seat seat0 fallback true",
+        # Program si kazalca ne sme zakleniti. Igra cez cel zaslon s skritim kazalcem (SFML/SDL prek XWaylanda)
+        # ga sicer ujame in sway po zaklepu absolutnega premika ne izvede vec: dotik na telefonu ali tablici
+        # pride do igre kot relativni premik od zaklenjene lege in zgresi gumb. Relativni premiki (daljinec,
+        # plosek) do programa pridejo tudi brez zaklepa.
+        "seat seat0 pointer_constraint disable",
         "font pango:Sans 1",
         # Edina bliznjica: preklop med programi (daljinec: meni seje -> Naslednji program).
         # Celozaslonski program (igra) bi sicer zakril ostale, zato ga ob preklopu pomanjsamo v zavihek.
@@ -228,8 +238,12 @@ KODE: Dict[str, int] = {
     "F1": 59, "F2": 60, "F3": 61, "F4": 62, "F5": 63, "F6": 64, "F7": 65, "F8": 66, "F9": 67,
     "F10": 68, "F11": 87, "F12": 88,
     "ctrl": 29, "shift": 42, "alt": 56,
+    "Control_L": 29, "Shift_L": 42, "Alt_L": 56, "Super_L": 125,
     "a": 30, "b": 48, "c": 46, "f": 33, "i": 23, "p": 25, "s": 31, "t": 20, "u": 22, "v": 47, "w": 17,
     "x": 45, "y": 21, "z": 44,
+    # Ostale crke in stevke (link_vnos.TIPKE): drug racunalnik poslje vsako tipko posebej (linux/input-event-codes.h).
+    "d": 32, "e": 18, "g": 34, "h": 35, "j": 36, "k": 37, "l": 38, "m": 50, "n": 49, "o": 24, "q": 16, "r": 19,
+    "1": 2, "2": 3, "3": 4, "4": 5, "5": 6, "6": 7, "7": 8, "8": 9, "9": 10, "0": 11,
 }
 #: Maske krmilk v razporedu (Shift, Control, Mod1 = Alt, Mod4 = Super).
 MASKE = {29: 4, 42: 1, 56: 8, 125: 64}
@@ -346,7 +360,8 @@ class SwayVnos:
         ok = False
         if vrsta == "tipka":
             oznaka = str(dogodek.get("tipka", "") or "")
-            if oznaka.strip().lower() == "nazaj" and self.drugi.fokus.brskalnik_na_strani():
+            fokus = getattr(self.drugi, "fokus", None)
+            if oznaka.strip().lower() == "nazaj" and fokus is not None and fokus.brskalnik_na_strani():
                 # Nazaj na daljincu v brskalniku: prejsnja stran, kot v brskalniku na televizorju.
                 oznaka = "brskalnik_nazaj"
             kode = self._kode(oznaka)
@@ -576,9 +591,17 @@ def _je_brskalnik(pid: int, imena=BRSKALNIKI) -> bool:
     return _ime_brskalnika(prvi, imena)
 
 
+def _namizje_x11() -> bool:
+    """Ali je namizje uporabnika X11 (core/seja_prikaza): samo tam wmctrl vidi in premika vsa okna."""
+    from core import seja_prikaza
+    return seja_prikaza.je_x11()
+
+
 def _pidi_na_namizju() -> Optional[set]:
-    """PID-i oken na namizju racunalnika (X); None, kadar tega ne moremo ugotoviti."""
-    if not os.environ.get("DISPLAY") or not shutil.which("wmctrl"):
+    """PID-i oken na namizju racunalnika (X); None, kadar tega ne moremo ugotoviti.
+
+    Wayland: wmctrl vidi samo okna XWayland - nepopoln seznam bi lazno rekel »program ni odprt na namizju«."""
+    if not _namizje_x11() or not shutil.which("wmctrl"):
         return None
     try:
         r = subprocess.run(["wmctrl", "-lp"], capture_output=True, text=True, timeout=5)
@@ -592,6 +615,97 @@ def _pidi_na_namizju() -> Optional[set]:
         if len(deli) > 2 and deli[2].isdigit():
             pidi.add(int(deli[2]))
     return pidi
+
+
+#: Toliko casa po zagonu ne sodimo, ali se je program odprl: proces se sele rojeva. Izjema: rod zagona smo ze
+#: videli ziv (`_opazuj_zagon`) - potem je njegov konec zanesljiv tudi prej.
+ZAGON_NAJMANJ_S = 2.0
+#: Kako pogosto ta cas gledamo, ali je rod zagona zazivel.
+ZAGON_OPAZUJ_S = 0.1
+#: Konec rodu potrdimo z drugim pogledom: proces, ki se ravno zamenjuje (exec), za hip nima ne ukazne vrstice ne okolja.
+ZAGON_POTRDI_S = 0.05
+#: Oznaka zagona: v ukazni vrstici lupine, ki program zazene, in v okolju vsega njegovega rodu.
+ZAGON_SPREMENLJIVKA = "SAFEER_ZAGON"
+
+
+def zivi_zagon(zeton: str, proc: str = "/proc") -> bool:
+    """Ali se tece kak proces tega uporabnika iz zagona z oznako `zeton` (tudi odcepljeni otroci in vsebniki).
+
+    Kadar tega ne moremo ugotoviti, vrnemo True: raje cakamo, kot da program, ki se sele odpira, razglasimo za
+    koncanega."""
+    if not zeton:
+        return False
+    iskano = ("%s=%s" % (ZAGON_SPREMENLJIVKA, zeton)).encode("ascii")
+    jaz = os.getuid()
+    try:
+        vnosi = os.listdir(proc)
+    except OSError:
+        return True
+    for vnos in vnosi:
+        if not vnos.isdigit():
+            continue
+        pot = os.path.join(proc, vnos)
+        try:
+            if os.stat(pot).st_uid != jaz:
+                continue
+        except OSError:
+            continue
+        for ime in ("cmdline", "environ"):
+            try:
+                with open(os.path.join(pot, ime), "rb") as f:
+                    if iskano in f.read():
+                        return True
+            except OSError:
+                continue
+    return False
+
+
+def razberi_okna(izpis: str) -> List[dict]:
+    """Izpis `wmctrl -lpx` v seznam oken: [{"id", "pid", "razred"}] (razred z malimi crkami, npr. `gimp.gimp`)."""
+    okna: List[dict] = []
+    for vrstica in izpis.splitlines():
+        deli = vrstica.split(None, 4)
+        if len(deli) < 4 or not deli[2].lstrip("-").isdigit():
+            continue
+        okna.append({"id": deli[0], "pid": int(deli[2]), "razred": deli[3].lower()})
+    return okna
+
+
+def _okna_namizja() -> Optional[List[dict]]:
+    """Okna na namizju racunalnika (X); None, kadar tega ne moremo ugotoviti (tudi Wayland, glej _pidi_na_namizju)."""
+    if not _namizje_x11() or not shutil.which("wmctrl"):
+        return None
+    try:
+        r = subprocess.run(["wmctrl", "-lpx"], capture_output=True, text=True, timeout=5)
+    except Exception:
+        return None
+    return razberi_okna(r.stdout) if r.returncode == 0 else None
+
+
+def _ujema_razred(razred: str, kandidati) -> bool:
+    """Razred okna (`primerek.razred`) proti imenom programa: cel, eden od delov ali z imenom na zacetku/koncu."""
+    razred = str(razred or "").lower()
+    for k in kandidati or ():
+        k = str(k or "").strip().lower()
+        if len(k) < 3:
+            continue
+        if razred == k or razred.startswith(k + ".") or razred.endswith("." + k):
+            return True
+    return False
+
+
+def okno_programa(okna: List[dict], pidi, razredi, nova=None) -> str:
+    """Id okna na namizju, ki pripada programu: po procesu ali po razredu okna. Okna, ki so nastala ob tem zagonu
+    (`nova`), imajo prednost; med enakovrednimi zadnje (najnovejse). Prazno, ce takega okna ni."""
+    pidi = set(pidi or ())
+    moja = [o for o in okna if o.get("pid") in pidi or _ujema_razred(o.get("razred", ""), razredi)]
+    if not moja:
+        return ""
+    if nova:
+        sveza = [o for o in moja if o.get("id") in nova]
+        if sveza:
+            return str(sveza[-1]["id"])
+    return str(moja[-1]["id"])
 
 
 PAKETI = {"sway": "sway", "swaymsg": "sway", "wf-recorder": "wf-recorder", "wtype": "wtype"}
@@ -641,7 +755,14 @@ def stanje_namestitve() -> dict:
         posodobitev = bool(kandidat) and kandidat != namescena
     return {"manjka": manjka, "prestar": prestar, "posodobitev": posodobitev,
             "graficna": bool(DrugiZaslon.graficna()),
-            "orodja": bool(shutil.which("pkexec") and shutil.which("apt-get"))}
+            "orodja": bool(root_ukaz.na_voljo() and shutil.which("apt-get"))}
+
+
+def _za_sway(argv: List[str]) -> str:
+    """Ukazna vrstica za `swaymsg exec`: vsak argument v enojnih narekovajih. shlex.join vejice ne da v narekovaje,
+    sway pa ob vejici (in podpicju) ukaz razdeli - ime datoteke »film.mkv,exit« bi izvedlo sway ukaz exit (neodvisni
+    pregled, 19. 10. 2026). Znotraj narekovajev sway ne deli."""
+    return " ".join("'" + str(a).replace("'", "'\"'\"'") + "'" for a in argv)
 
 
 def paketi_za_namestitev(stanje: dict) -> List[str]:
@@ -652,17 +773,59 @@ def paketi_za_namestitev(stanje: dict) -> List[str]:
     return [p for p in paketi if p in set(PAKETI.values())]
 
 
+def opis_napake(izid, najvec: int = 400) -> str:
+    """Konec izpisa neuspele namestitve (stderr, sicer stdout) za sporocilo uporabniku - prej se je zavrgel in ni bilo
+    vidno, zakaj namestitev ni uspela (neodvisni pregled 19. 10. 2026)."""
+    besedilo = (getattr(izid, "stderr", "") or getattr(izid, "stdout", "") or "")
+    if isinstance(besedilo, bytes):
+        besedilo = besedilo.decode("utf-8", "replace")
+    besedilo = besedilo.strip()
+    return besedilo[-najvec:] if besedilo else ""
+
+
 def ukaz_namestitve(stanje: dict) -> Optional[List[str]]:
     """Namestitev ali posodobitev s sistemskim vprasanjem za geslo (pkexec). Zazene se samo, kadar
     uporabnik v Controlu to izrecno potrdi; geslo vpise sam v sistemsko okno."""
     paketi = paketi_za_namestitev(stanje)
     if not paketi or not stanje.get("orodja"):
         return None
-    return ["pkexec", "sh", "-c", "apt-get update -q; DEBIAN_FRONTEND=noninteractive apt-get install -y "
+    return [root_ukaz.pkexec(), root_ukaz.SH, "-c", "apt-get update -q; DEBIAN_FRONTEND=noninteractive apt-get install -y "
             + " ".join(paketi)]
 
 
 # ---------------------------------------------------------------------------------- sway
+
+def fiksno_platno(okno: dict) -> Optional[Tuple[int, int]]:
+    """Naravna velikost okna, ki riše na nespremenljivo platno (stare igre GLUT/SDL1 prek XWaylanda).
+
+    Tak program dobi okno cez cel zaslon, a slike ne raztegne: igra je bila v kotu, ostalo crno.
+    Prepoznamo ga po tem, da je okno X11 brez razreda WM_CLASS - vsak sodoben gradnik (GTK, Qt,
+    SDL2, Electron, brskalniki) ga nastavi, freeglut ga ne. Majhna okna (meniji, pogovorna okna) ne stejejo."""
+    if not isinstance(okno, dict) or okno.get("shell") != "xwayland":
+        return None
+    lastnosti = okno.get("window_properties") or {}
+    if lastnosti.get("class") or lastnosti.get("instance"):
+        return None
+    g = okno.get("geometry") or {}
+    w, h = int(g.get("width") or 0), int(g.get("height") or 0)
+    if w < 200 or h < 150:
+        return None
+    return w, h
+
+
+def _ze_urejeno(okno: dict, platno: Tuple[int, int]) -> bool:
+    """Okno ze lebdi v naravni velikosti (sway rect je v logicnih tockah, po merilu)."""
+    r = okno.get("rect") or {}
+    return okno.get("type") == "floating_con" and (int(r.get("width") or 0), int(r.get("height") or 0)) == platno
+
+
+def merilo_platna(sirina: int, visina: int, w: int, h: int) -> float:
+    """Koliko povecati platno, da zapolni zaslon brez obrezovanja (sway zna ulomke po 1/120)."""
+    if w <= 0 or h <= 0:
+        return 1.0
+    m = min(sirina / w, visina / h, 6.0)
+    return max(1.0, round(m * 120) / 120)
+
 
 class DrugiZaslon:
     """Brezglavi sway kot drugi zaslon racunalnika, samo za televizor."""
@@ -687,6 +850,13 @@ class DrugiZaslon:
                             lambda: self._wayland if self.tece() else "")
         from core.link_fokus import Fokus
         self.fokus = Fokus(self)
+        self._merilo = 1.0
+        #: Merilo za navadne programe (po napravi, ki gleda); igra s fiksnim platnom ima svoje.
+        self._osnova = 1.0
+        self._urejena_platna: Dict[int, int] = {}
+        self._opazovalec: Optional[subprocess.Popen] = None
+        #: Zadnji zagon programa: oznaka, cas, okna namizja pred zagonom in opis programa (link_programi).
+        self._zagon: Optional[dict] = None
 
     # ----------------------------------------------------------------- zmoznosti
     @staticmethod
@@ -716,7 +886,9 @@ class DrugiZaslon:
         return os.path.join(_run_mapa(), self._wayland) if self.tece() and self._wayland else ""
 
     def okolje(self) -> dict:
-        o = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY", "SWAYSOCK")}
+        # Programi na drugem zaslonu so zunanji programi: brez nasih zasebnih poti (core/zasebni_webkit.py).
+        o = {k: v for k, v in zasebni_webkit.okolje_za_zunanje().items()
+             if k not in ("DISPLAY", "WAYLAND_DISPLAY", "SWAYSOCK")}
         o.update({"XDG_RUNTIME_DIR": _run_mapa(), "WAYLAND_DISPLAY": self._wayland, "SWAYSOCK": self._ipc})
         return o
 
@@ -732,7 +904,9 @@ class DrugiZaslon:
             os.makedirs(self.mapa, exist_ok=True)
             konf = os.path.join(self.mapa, "config")
             # Ostanek prejsnjega Controla (ubit brez pospravljanja) bi tekel v prazno.
-            subprocess.run(["pkill", "-TERM", "-u", str(os.getuid()), "-f", "^sway -c " + konf],
+            # pkill -f vzame regularni izraz: pot (XDG_CONFIG_HOME) je lahko z znaki, ki so v izrazu posebni - brez
+            # re.escape bi signal dobil drug proces istega uporabnika (drugi neodvisni pregled, 19. 10. 2026).
+            subprocess.run(["pkill", "-TERM", "-u", str(os.getuid()), "-f", "^sway -c " + re.escape(konf) + "$"],
                            capture_output=True, timeout=5)
             with open(konf, "w", encoding="utf-8") as f:
                 f.write(_konfiguracija(sirina, visina))
@@ -740,7 +914,9 @@ class DrugiZaslon:
             self._zvok_pripravi()
             run = _run_mapa()
             pred = set(glob.glob(os.path.join(run, "wayland-*")))
-            okolje = {k: v for k, v in os.environ.items() if k not in ("WAYLAND_DISPLAY", "DISPLAY", "SWAYSOCK")}
+            # Sway in vsi programi, ki jih zazene (exec), dobijo okolje brez nasih zasebnih poti (WebKit, AppImage).
+            okolje = {k: v for k, v in zasebni_webkit.okolje_za_zunanje().items()
+                      if k not in ("WAYLAND_DISPLAY", "DISPLAY", "SWAYSOCK")}
             okolje.update({"XDG_RUNTIME_DIR": run, "WLR_BACKENDS": "headless",
                            "WLR_RENDER_DRM_DEVICE": self.graficna() or "",
                            "WLR_LIBINPUT_NO_DEVICES": "1", "PULSE_SINK": ZVOCNI_IZHOD,
@@ -752,9 +928,11 @@ class DrugiZaslon:
                            # velja samo za programe na tem zaslonu, sistemske nastavitve ostanejo.
                            "ACCESSIBILITY_ENABLED": "1", "GNOME_ACCESSIBILITY": "1",
                            "QT_ACCESSIBILITY": "1", "QT_LINUX_ACCESSIBILITY_ALWAYS_ON": "1"})
-            dnevnik = open(os.path.join(self.mapa, "sway.log"), "w")
-            self._sway = subprocess.Popen(["sway", "-c", konf], env=okolje, stdout=dnevnik, stderr=dnevnik,
-                                          stdin=subprocess.DEVNULL, start_new_session=True)
+            dnevnik = open(os.path.join(self.mapa, "sway.log"), "wb")     # samo za stdout/stderr programa sway
+            # Skupina sway: swaybg in Xwayland (sway ju zazene brez setsid). Programi na zaslonu (exec) imajo svojo sejo
+            # (sway/commands/exec_always.c: setsid) in jih ustavitev skupine ne konca (naloga 41).
+            self._sway = otroci.zazeni(["sway", "-c", konf], env=okolje, stdout=dnevnik, stderr=dnevnik,
+                                       stdin=subprocess.DEVNULL, dolgoziv=True)
             dnevnik.close()
             konec = time.monotonic() + 8
             while time.monotonic() < konec and self._sway.poll() is None:
@@ -764,6 +942,10 @@ class DrugiZaslon:
                 if novi and ipc:
                     self._wayland, self._ipc = os.path.basename(novi[0]), ipc[0]
                     print("[drugi zaslon] tece (%s, %dx%d)" % (self._wayland, sirina, visina), flush=True)
+                    self._merilo = 1.0
+                    self._osnova = 1.0
+                    self._urejena_platna = {}
+                    self._opazuj_okna()
                     return True
                 time.sleep(0.1)
             print("[drugi zaslon] sway se ni zagnal", flush=True)
@@ -774,6 +956,90 @@ class DrugiZaslon:
         if (sirina, visina) != (self.sirina, self.visina) and self.tece():
             self._msg(["output", IZHOD, "resolution", "%dx%d@60Hz" % (sirina, visina)])
             self.sirina, self.visina = sirina, visina
+            self._urejena_platna = {}
+            self.uredi_platno()
+
+    def osnovno_merilo(self, merilo: float) -> None:
+        """Merilo izhoda za navadne programe: naprava z gostim majhnim zaslonom (telefon) dobi vecje gumbe.
+        Fizicna locljivost in s tem slika, ki jo posiljamo, ostaneta enaki - programi so le narisani vecje."""
+        try:
+            merilo = min(3.0, max(1.0, float(merilo)))
+        except (TypeError, ValueError):
+            merilo = 1.0
+        if abs(merilo - self._osnova) > 1e-6:
+            self._osnova = merilo
+            self._urejena_platna = {}
+            self.uredi_platno()
+
+    # ----------------------------------------------------------------- igre cez cel zaslon
+    def _opazuj_okna(self) -> None:
+        """Ob vsakem novem/fokusiranem/zaprtem oknu preveri, ali je spredaj igra s fiksnim platnom."""
+        try:
+            self._opazovalec = subprocess.Popen(["swaymsg", "-t", "subscribe", "-m", '["window"]'],
+                                                env=self.okolje(), stdout=subprocess.PIPE,
+                                                stderr=subprocess.DEVNULL, text=True)
+        except Exception:
+            self._opazovalec = None
+            return
+        opazovalec = self._opazovalec
+
+        def tece() -> None:
+            for vrstica in opazovalec.stdout:
+                if '"change"' in vrstica and any(k in vrstica for k in ('"new"', '"focus"', '"close"')):
+                    try:
+                        self.uredi_platno()
+                    except Exception as e:  # opazovalec ne sme nikoli pasti
+                        print("[drugi zaslon] platno: %s" % e, flush=True)
+        threading.Thread(target=tece, name="safeer-sway-okna", daemon=True).start()
+
+    def _spredaj(self) -> Optional[dict]:
+        try:
+            drevo = json.loads(self._msg([], "get_tree") or "{}")
+        except ValueError:
+            return None
+        najden: List[dict] = []
+
+        def hodi(n):
+            if n.get("focused") and (n.get("pid") or n.get("window")):
+                najden.append(n)
+            for o in n.get("nodes", []) + n.get("floating_nodes", []):
+                hodi(o)
+        hodi(drevo)
+        return najden[0] if najden else None
+
+    def uredi_platno(self) -> None:
+        """Igra s fiksnim platnom (npr. Crack Attack) se na daljincu pokaze cez cel zaslon: izhod dobi
+        merilo, okno pa lebdi v svoji naravni velikosti na sredini - sway ga raztegne brez obrezovanja.
+        Zajem ostane enak (fizicna locljivost se ne spremeni), zato seja tece naprej. Ko je spredaj
+        navaden program, se merilo vrne na osnovno (1 ali merilo naprave, ki gleda - osnovno_merilo)."""
+        if not self.tece():
+            return
+        with self._kljuc:
+            okno = self._spredaj()
+            platno = fiksno_platno(okno) if okno else None
+            merilo = merilo_platna(self.sirina, self.visina, *platno) if platno else self._osnova
+            if okno is None and self._merilo != self._osnova and self.okna() > 0:
+                return   # trenutek brez fokusa med preklopom - ne utripaj
+            if abs(merilo - self._merilo) > 1e-6:
+                self._msg(["output", IZHOD, "scale", "%.6f" % merilo])
+                self._merilo = merilo
+            if platno and not _ze_urejeno(okno, platno):
+                self._msg(["[con_id=%d]" % int(okno["id"]), "floating enable, resize set %d %d, move position center"
+                           % platno])
+                # Stara igra si okno pogosto takoj po prikazu sama poveca nazaj (na velikost, ki jo je
+                # dobila kot zavihek) - brez novega dogodka okna. Zato preverimo se nekajkrat.
+                if self._urejena_platna.get(okno.get("id"), 0) < 4:
+                    self._urejena_platna[okno.get("id")] = self._urejena_platna.get(okno.get("id"), 0) + 1
+                    for zamik in (0.4, 1.5, 4.0):
+                        t = threading.Timer(zamik, self._preveri_platno)
+                        t.daemon = True
+                        t.start()
+
+    def _preveri_platno(self) -> None:
+        try:
+            self.uredi_platno()
+        except Exception as e:
+            print("[drugi zaslon] platno: %s" % e, flush=True)
 
     def _msg(self, argumenti: List[str], vrsta: Optional[str] = None) -> str:
         ukaz = ["swaymsg"] + (["-t", vrsta] if vrsta else []) + argumenti
@@ -783,8 +1049,11 @@ class DrugiZaslon:
         except Exception:
             return ""
 
-    def zazeni_program(self, argv: List[str]) -> bool:
-        """Zazene program na drugem zaslonu. argv pride iz nasega seznama programov, ne s televizorja."""
+    def zazeni_program(self, argv: List[str], opis: Optional[dict] = None) -> bool:
+        """Zazene program na drugem zaslonu. argv pride iz nasega seznama programov, ne s televizorja.
+
+        `opis` (link_programi): ime programa ter kako prepoznamo njegove procese in okna - za primer, ko se program
+        ne odpre tu, ampak preda besedo oknu, ki je ze odprto na namizju racunalnika (program ene same instance)."""
         if not argv or not self.zazeni(self.sirina, self.visina):
             return False
         self._zadnji_zagon = time.monotonic()
@@ -793,8 +1062,74 @@ class DrugiZaslon:
         # z daljincem pa jo potrebuje. Velja samo za ta zagon.
         if _ime_brskalnika(argv[0]) and "--force-renderer-accessibility" not in argv:
             argv.insert(1, "--force-renderer-accessibility")
-        izid = self._msg(["exec", shlex.join(argv)])
-        return '"success": true' in izid
+        zeton = secrets.token_hex(6)
+        okna_pred = _okna_namizja()
+        # Oznaka zagona je v ukazni vrstici lupine (sway pozene `sh -c`) in v okolju programa in njegovih otrok.
+        izid = self._msg(["exec", "%s=%s %s" % (ZAGON_SPREMENLJIVKA, zeton, _za_sway(argv))])
+        uspeh = '"success": true' in izid
+        self._zagon = dict(opis or {}, zeton=zeton, cas=time.monotonic(),
+                           okna_pred=None if okna_pred is None else {o["id"] for o in okna_pred}) if uspeh else None
+        if uspeh:
+            threading.Thread(target=self._opazuj_zagon, args=(self._zagon,), name="safeer-zagon", daemon=True).start()
+        return uspeh
+
+    def _opazuj_zagon(self, z: dict) -> None:
+        """Opazi, da je rod zagona zazivel. Sway ukaz `exec` izvede z zamikom, zato »ne tece« tik po zagonu se ne
+        pomeni »je koncal«; ko smo rod enkrat videli ziv, pa je njegov konec zanesljiv tudi pred ZAGON_NAJMANJ_S.
+        Program ene same instance (preda besedo ze odprtemu oknu in konca) tako prepoznamo v sekundi namesto v treh."""
+        rok = z["cas"] + ZAGON_NAJMANJ_S
+        while self._zagon is z and time.monotonic() < rok:
+            if zivi_zagon(z["zeton"]):
+                z["videl"] = True
+                return
+            time.sleep(ZAGON_OPAZUJ_S)
+
+    def izid_zagona(self) -> str:
+        """Kaj se je zgodilo z zadnjim zagonom, kadar na drugem zaslonu NI okna (to preveri klicatelj):
+        "" = se zaganja ali ne vemo; "koncan" = njegov rod je koncal brez okna; "na_namizju" = program ima okno
+        na namizju racunalnika (bil je ze odprt in je zagon samo predal besedo, ali pa se je odprl tam)."""
+        z = self._zagon
+        if not z or not z.get("zeton"):
+            return ""
+        if not z.get("videl") and time.monotonic() - z["cas"] < ZAGON_NAJMANJ_S:
+            return ""
+        if zivi_zagon(z["zeton"]):
+            z["videl"] = True
+            return ""
+        time.sleep(ZAGON_POTRDI_S)
+        if zivi_zagon(z["zeton"]):
+            return ""
+        okna = _okna_namizja()
+        if okna:
+            pidi = set()
+            najdi = z.get("pidi")
+            if callable(najdi):
+                try:
+                    pidi = set(najdi())
+                except Exception:
+                    pidi = set()
+            pred = z.get("okna_pred")
+            nova = None if pred is None else {o["id"] for o in okna} - pred
+            okno = okno_programa(okna, pidi, z.get("razredi") or [], nova)
+            if okno:
+                z["okno"] = okno
+                return "na_namizju"
+        return "koncan"
+
+    def opis_zagona(self) -> dict:
+        """Ime zadnjega zagnanega programa za napravo, ki gleda ({"name": ...}); prazno, ce ga ne poznamo."""
+        ime = str((self._zagon or {}).get("ime") or "")
+        return {"name": ime[:80]} if ime else {}
+
+    def pokazi_na_namizju(self) -> bool:
+        """Okno programa, ki se je namesto tu odprl (ali je ze bil odprt) na namizju, postavi v ospredje."""
+        okno = str((self._zagon or {}).get("okno") or "")
+        if not okno or not shutil.which("wmctrl") or not _namizje_x11():
+            return False
+        try:
+            return subprocess.run(["wmctrl", "-ia", okno], capture_output=True, timeout=5).returncode == 0
+        except Exception:
+            return False
 
     def pokazi(self, pidi: List[int]) -> bool:
         """Postavi v ospredje okno enega od teh procesov, ce je na drugem zaslonu."""
@@ -863,17 +1198,23 @@ class DrugiZaslon:
         return drevo.count('"pid":')
 
     # ----------------------------------------------------------------- slika in zvok
-    def ukaz_zajema(self, fps: int, qp: int, bitrate: str) -> List[str]:
-        """Gol H.264 (Annex-B) na stdout, kot ga pricakuje link_zaslon; vsak kader, tudi brez sprememb."""
+    def ukaz_zajema(self, fps: int, qp: int, bitrate: str, kodek: str = "h264", gop: int = 0) -> List[str]:
+        """Gol H.264 ali HEVC (Annex-B) na stdout, kot ga pricakuje link_zaslon; vsak kader, tudi brez sprememb.
+
+        `kodek`: "hevc" samo strojno (VAAPI); brez graficne kartice vedno H.264. `gop`: razmik kljucnih slik v
+        slikah; 0 = vsako sekundo (starejsi gledalec)."""
         z = wf_zmoznosti()
-        u = ["wf-recorder", "-o", IZHOD] + (["-D"] if z["no_damage"] else []) + \
-            (["-r", str(max(1, fps))] if z["framerate"] else []) + ["-m", "h264", "-f", "/dev/stdout"]
         gpu = self.graficna()
+        hevc = kodek == "hevc" and bool(gpu)
+        skupina = gop if gop > 0 else max(1, fps)
+        u = ["wf-recorder", "-o", IZHOD] + (["-D"] if z["no_damage"] else []) + \
+            (["-r", str(max(1, fps))] if z["framerate"] else []) + ["-m", "hevc" if hevc else "h264", "-f", "/dev/stdout"]
         if gpu:
-            parametri = ["rc_mode=CQP", "qp=%d" % qp, "profile=high", "bf=0", "g=%d" % max(1, fps)]
-            u += ["-c", "h264_vaapi", "-d", gpu]
+            parametri = ["rc_mode=CQP", "qp=%d" % qp, "profile=%s" % ("main" if hevc else "high"), "bf=0",
+                         "g=%d" % skupina]
+            u += ["-c", "hevc_vaapi" if hevc else "h264_vaapi", "-d", gpu]
         else:
-            parametri = ["preset=veryfast", "tune=zerolatency", "b=%s" % bitrate, "bf=0", "g=%d" % max(1, fps)]
+            parametri = ["preset=veryfast", "tune=zerolatency", "b=%s" % bitrate, "bf=0", "g=%d" % skupina]
             u += ["-c", "libx264", "-x", "yuv420p"]
         if z["codec_param"]:
             for p in parametri:
@@ -928,12 +1269,8 @@ class DrugiZaslon:
             self.vnos.zapri()
             self.fokus.ustavi()
             sway, self._sway = self._sway, None
-            if sway is not None and sway.poll() is None:
-                sway.terminate()
-                try:
-                    sway.wait(5)
-                except Exception:
-                    sway.kill()
+            if sway is not None:
+                otroci.ustavi(sway, rok=5)       # tudi ce je sway ze koncal, swaybg/Xwayland v skupini ne ostaneta
             self._wayland = self._ipc = ""
             if self._zvocni_modul:
                 pocisti_zvok()
