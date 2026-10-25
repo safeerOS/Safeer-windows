@@ -8,8 +8,9 @@ prenosom. Modul je skupen za Linux in Windows.
 Pravila (ista kot pri pomoci napravam, core/link_datoteke.py):
   * kar je na tem racunalniku ze v celoti preneseno (Safeer OS ali Control za naprave), gre z diska - brez torrenta;
   * disku pustimo rezervo; ce prostora ni, najprej odstranimo, cesar nihce vec ne gleda;
-  * kar se je preneslo zaradi gledanja in tega 48 ur nihce ni predvajal, se odstrani samo. Torrenta, ki ga je
-    uporabnik dodal sam (zaslon Magnet povezave), se ciscenje nikoli ne dotakne.
+  * kar se je preneslo zaradi gledanja in tega 12 ur nihce ni predvajal, se odstrani samo (lastnik 25. 10. 2026: na
+    napravi nic ne hranimo - prej 48 ur). Torrenta, ki ga je uporabnik dodal sam (zaslon Magnet povezave), in tistega,
+    ki ga je oznacil z »Obdrži«, se ciscenje nikoli ne dotakne.
 """
 
 from __future__ import annotations
@@ -23,8 +24,9 @@ from typing import Callable, Iterable, List, Optional
 
 from core import link_datoteke, os_torrent
 
-#: Po toliko casu brez predvajanja se prenos, ki je nastal zaradi gledanja, odstrani sam.
-RABA_VELJA_S = 48 * 3600
+#: Po toliko casu brez predvajanja se prenos, ki je nastal zaradi gledanja, odstrani sam (lastnik 25. 10. 2026: 12 ur po
+#: zadnjem predvajanju, na TV, telefonu, tablici, Linuxu in Windows enako; izjema »Obdrži« in torrenti iz Magnet povezav).
+RABA_VELJA_S = 12 * 3600
 #: Ob pomanjkanju prostora odstranimo tudi mlajse, a ne tistih, ki jih je kdo gledal v zadnjih urah.
 RABA_V_TEKU_S = 6 * 3600
 
@@ -237,8 +239,9 @@ _CISCENJE_TECE = False
 _ZADNJA_PRIPRAVA = 0.0
 
 
-def zazeni_ciscenje(razmik_s: float = 3 * 3600, zamik_s: float = 240) -> None:
-    """Safeer OS: prenose zaradi gledanja pregleda kmalu po zagonu in nato vsake tri ure. Ce je motor ugasnjen in
+def zazeni_ciscenje(razmik_s: float = 3600, zamik_s: float = 240) -> None:
+    """Safeer OS: prenose zaradi gledanja pregleda kmalu po zagonu (ostanki, starejsi od 12 ur) in nato vsako uro - prenos
+    izgine 12-13 ur po zadnjem predvajanju (pregled prebere samo zapis rabe; motor prizge le, ce je kaj za odstraniti). Ce je motor ugasnjen in
     je kaj za odstraniti, ga za pregled prizge in potem spet ugasne (ne ostane v ozadju samo zaradi ciscenja).
     Hisno opravilo ure storitev (core/storitve_na_zahtevo): tece v kratki niti, ko je na vrsti - prej je nit za to
     ves dan spala (izmerjeno 18. 10. 2026: ena nit manj v procesu Safeer OS)."""

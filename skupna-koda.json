@@ -1,6 +1,6 @@
 {
   "vir": "safeerOS/Safeer-linux",
-  "ref": "b7bb1bc7d8c2a7a3dc33c05e9c8bd3f410b568d2",
+  "ref": "5a5a5eadd2c28f2b5d4ef4998d21c2c4d613fbdc",
   "skupne": [
     "core/bank_guard.py",
     "core/bookmarks_importer.py",
@@ -71,6 +71,7 @@
     "core/sporocila/adapter.py",
     "core/sporocila/chatwoot.py",
     "core/sporocila/identiteta.py",
+    "core/sporocila/izbris_linka.py",
     "core/sporocila/matrix.py",
     "core/sporocila/model.py",
     "core/sporocila/priponke.py",

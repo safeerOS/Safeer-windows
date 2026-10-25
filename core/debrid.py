@@ -8,6 +8,7 @@ Klici so blokirajoci - samo z delovne niti.
 
 from __future__ import annotations
 
+import email.utils
 import json
 import logging
 import threading
@@ -16,7 +17,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
-from concurrent.futures import ThreadPoolExecutor
+from collections import OrderedDict
+from concurrent.futures import Future
 from dataclasses import dataclass
 from typing import Callable, Optional, Sequence
 
@@ -37,8 +39,10 @@ class Izid:
 
 @dataclass
 class Odgovor:
+    """[datum] = glava Date odgovora (ura streznika, ms; 0 = je ni) - za »nas torrent« pri pospravljanju."""
     koda: int
     telo: str
+    datum: int = 0
 
     @property
     def json(self):
@@ -52,10 +56,69 @@ class Odgovor:
         return 200 <= self.koda < 300
 
 
+def v_ozadju(fn: Callable, *a, **k) -> Future:
+    """[fn] na locenem demonu: izid prek Future. Ne ThreadPoolExecutor - njegove niti ob izhodu programa caka atexit (klic,
+    ki je zamudil rok, bi do 30 s zadrzal zapiranje Safeer OS)."""
+    f: Future = Future()
+
+    def delo() -> None:
+        if not f.set_running_or_notify_cancel():
+            return
+        try:
+            f.set_result(fn(*a, **k))
+        except BaseException as e:  # noqa: BLE001 - napaka gre klicatelju prek Future
+            f.set_exception(e)
+
+    threading.Thread(target=delo, name="safeer-debrid", daemon=True).start()
+    return f
+
+
+def _izid_do(f: Future, konec: float):
+    """Izid [f] do monotonega casa [konec]; None ob roku ali napaki."""
+    try:
+        return f.result(timeout=max(0.01, konec - time.monotonic()))
+    except Exception:  # noqa: BLE001 - kar ne odgovori v roku, ne steje
+        return None
+
+
+class Preklicano(Exception):
+    """Poskus je preklican (rok vzporednega kroga je potekel ali nov poskus): ne ustvari nicesar vec v racunu."""
+
+
+def preveri_preklic(preklic: Optional[threading.Event]) -> None:
+    """Grokov pregled 25. 10. 2026 (kot Android Debrid.preveriPreklic): pred vsakim klicem, ki v uporabnikovem racunu kaj
+    ustvari (addMagnet, selectFiles, magnet/upload, createtorrent, createusenetdownload, odklep). Blokirajoc klic HTTP
+    preklica ne vidi; nit, ki je zamudila rok, bi sicer po odgovoru nadaljevala in pustila torrent v racunu."""
+    if preklic is not None and preklic.is_set():
+        raise Preklicano()
+
+
+def _datum_ms(glave) -> int:
+    try:
+        d = email.utils.parsedate_to_datetime(str(glave.get("Date") or ""))
+        return int(d.timestamp() * 1000) if d is not None else 0
+    except (TypeError, ValueError, IndexError, OverflowError):
+        return 0
+
+
+def _beri_omejeno(o, meja: int = P.NAJVEC_ODGOVORA) -> bytes:
+    """Najvec [meja] bajtov; vecji odgovor je napaka (ne odrezemo ga - odrezan JSON bi bil napacen)."""
+    try:
+        dolzina = int(o.headers.get("Content-Length") or -1) if getattr(o, "headers", None) is not None else -1
+    except ValueError:
+        dolzina = -1
+    if dolzina > meja:
+        raise OSError("odgovor prevelik")
+    podatki = o.read(meja + 1) or b""
+    if len(podatki) > meja:
+        raise OSError("odgovor prevelik")
+    return podatki
+
+
 def klic(naslov: str, kljuc: Optional[str], metoda: str = "GET", obrazec: Optional[list] = None,
          rok: float = 20.0, telo: Optional[tuple] = None) -> Odgovor:
     """Klic s kljucem v glavi (nikoli v naslovu); [obrazec] gre kot application/x-www-form-urlencoded, [telo] je
-    (bajti, Content-Type) - npr. multipart z NZB za Usenet."""
+    (bajti, Content-Type) - npr. multipart z NZB za Usenet. Odgovor najvec P.NAJVEC_ODGOVORA bajtov (vecji je napaka)."""
     glave = {"Accept": "application/json", "User-Agent": "SafeerOS/1.0"}
     if kljuc:
         glave["Authorization"] = P.glava_avtorizacije(kljuc)
@@ -68,9 +131,10 @@ def klic(naslov: str, kljuc: Optional[str], metoda: str = "GET", obrazec: Option
     zahteva = urllib.request.Request(naslov, data=podatki, headers=glave, method=metoda)
     try:
         with urllib.request.urlopen(zahteva, timeout=rok) as o:
-            return Odgovor(o.status, o.read().decode("utf-8", "replace"))
+            return Odgovor(o.status, _beri_omejeno(o).decode("utf-8", "replace"), _datum_ms(o.headers))
     except urllib.error.HTTPError as e:
-        return Odgovor(e.code, (e.read() or b"").decode("utf-8", "replace"))
+        telo_n = _beri_omejeno(e) if e.fp is not None else b""
+        return Odgovor(e.code, telo_n.decode("utf-8", "replace"), _datum_ms(e.headers) if e.headers is not None else 0)
 
 
 # ---------------------------------------------------------------------- TorBox
@@ -108,8 +172,10 @@ def torbox_predpomnjeni(kljuc: str, hashi: Sequence[str], rok: float = 4.0) -> s
 
 
 def torbox_tok(kljuc: str, hash_: str, indeks: Optional[int], magnet: str, samo_predpomnjeno: bool,
-               casi_novih: list, cakaj: Callable[[float], None] = time.sleep) -> Izid:
-    """checkcached -> (createtorrent) -> requestdl. Nepredpomnjen: meja 60/uro ([casi_novih] se dopolni) in cakanje do 3 min."""
+               casi_novih: list, cakaj: Callable[[float], None] = time.sleep,
+               preklic: Optional[threading.Event] = None) -> Izid:
+    """checkcached -> (createtorrent) -> requestdl. Nepredpomnjen: meja 60/uro ([casi_novih] se dopolni) in cakanje do 3 min.
+    Preklican poskus ([preklic]) torrenta ne doda in ga ne steje v mejo."""
     try:
         pred = klic(P.TORBOX_OSNOVA + "/checkcached?hash=%s&format=object&list_files=true" % hash_, kljuc)
         if not _tb_uspeh(pred):
@@ -118,6 +184,7 @@ def torbox_tok(kljuc: str, hash_: str, indeks: Optional[int], magnet: str, samo_
         predpomnjen = vnos is not None
         if not predpomnjen and samo_predpomnjeno:
             return Izid(napaka=P.NAPAKA_NI_PREDPOMNJENO, ponudnik=P.TORBOX)
+        preveri_preklic(preklic)
         if not predpomnjen:
             zdaj = time.time()
             if not P.meja_novih_dovoli(casi_novih, zdaj):
@@ -148,6 +215,7 @@ def torbox_tok(kljuc: str, hash_: str, indeks: Optional[int], magnet: str, samo_
                     break
                 if cakano >= P.CAKAJ_NOVEGA_S:
                     return Izid(napaka=P.NAPAKA_PRENASA, ponudnik=P.TORBOX)
+                preveri_preklic(preklic)
                 cakaj(P.CAKAJ_KORAK_S)
                 cakano += P.CAKAJ_KORAK_S
         d = P.izberi_datoteko(datoteke, indeks)
@@ -161,6 +229,9 @@ def torbox_tok(kljuc: str, hash_: str, indeks: Optional[int], magnet: str, samo_
             return _tb_napaka(dl)
         _log.info("TorBox: tok pripravljen")
         return Izid(url=url, ponudnik=P.TORBOX)
+    except Preklicano:
+        _log.info("TorBox: preklicano")
+        return Izid(napaka=P.NAPAKA_STREZNIK, ponudnik=P.TORBOX)
     except Exception as e:  # noqa: BLE001
         _log.warning("TorBox: %s", type(e).__name__)
         return Izid(napaka=P.NAPAKA_STREZNIK, ponudnik=P.TORBOX)
@@ -168,50 +239,100 @@ def torbox_tok(kljuc: str, hash_: str, indeks: Optional[int], magnet: str, samo_
 
 # ---------------------------------------------------------------------- Real-Debrid
 
+#: Kratki roki za pospravljanje po neuspehu (kot Android POSPRAVI_*): okno z napako ne caka 20 s na brisanje.
+POSPRAVI_ROK_S = 5.0
+
+
+class _Cakani:
+    """Torrenti (storitev:id), na katere uporabnik na tem racunalniku caka (»samo takoj« izklopljen): poskus »samo takoj«
+    (tudi zapuscena nit preklicanega poskusa) jih ne izbrise. Samo v pomnilniku procesa, najvec 500 vnosov."""
+
+    def __init__(self) -> None:
+        self._zaklep = threading.Lock()
+        self._vnosi: set = set()
+
+    def oznaci(self, p: str, ident: str) -> None:
+        with self._zaklep:
+            if len(self._vnosi) < 500:
+                self._vnosi.add("%s:%s" % (p, ident))
+
+    def je(self, p: str, ident: str) -> bool:
+        with self._zaklep:
+            return "%s:%s" % (p, ident) in self._vnosi
+
+
+CAKANI = _Cakani()
+
+
 def _rd_napaka(o: Odgovor) -> Izid:
     j = o.json if isinstance(o.json, dict) else {}
     koda = j.get("error_code") if isinstance(j.get("error_code"), int) else None
     return Izid(napaka=P.rd_vrsta_napake(o.koda, koda), opis=str(j.get("error") or "")[:200], ponudnik=P.REAL_DEBRID)
 
 
-def rd_tok(kljuc: str, magnet: str, indeks: Optional[int], samo_predpomnjeno: bool,
-           cakaj: Callable[[float], None] = time.sleep) -> Izid:
-    """addMagnet -> info -> selectFiles -> info (»downloaded«) -> unrestrict/link. Ni takoj pripravljen in »samo
-    predpomnjeno«: torrent izbrisemo iz uporabnikovega racuna (ne pustimo ga za sabo)."""
-    tid = ""
+def _rd_izbrisi(kljuc: str, tid: str, dodano_ob: Optional[int], samo_predpomnjeno: bool) -> None:
+    """Pospravi torrent [tid], ki ga je dodal ta poskus ([dodano_ob] = glava Date odgovora addMagnet, ura streznika).
+    Ne izbrisemo torrenta, ki je bil v racunu ze prej (addMagnet za isti hash morda vrne obstojeci id): samo, ce »added«
+    iz torrents/info ni starejsi od [dodano_ob] (P.dodal_smo_mi) in ga pri »samo takoj« ne caka drug poskus. Neznano = ne."""
+    if samo_predpomnjeno and CAKANI.je(P.REAL_DEBRID, tid):
+        _log.info("Real-Debrid: torrent ni izbrisan (nanj caka drug poskus)")
+        return
+    try:
+        info = klic(P.RD_OSNOVA + "/torrents/info/" + tid, kljuc, rok=POSPRAVI_ROK_S)
+        dodano = P.rd_dodano_ms((info.json or {}).get("added") if isinstance(info.json, dict) else None)
+        if not P.dodal_smo_mi(dodano, dodano_ob):
+            _log.info("Real-Debrid: torrent ni izbrisan (ni dokaza, da ga je dodal ta poskus)")
+            return
+        klic(P.RD_OSNOVA + "/torrents/delete/" + tid, kljuc, "DELETE", rok=POSPRAVI_ROK_S)
+    except Exception as e:  # noqa: BLE001 - pospravljanje ne sme podreti izida
+        _log.info("Real-Debrid: pospravljanje %s", type(e).__name__)
 
-    def izbrisi() -> None:
-        try:
-            klic(P.RD_OSNOVA + "/torrents/delete/" + tid, kljuc, "DELETE")
-        except Exception:  # noqa: BLE001
-            pass
+
+def rd_tok(kljuc: str, magnet: str, indeks: Optional[int], samo_predpomnjeno: bool,
+           cakaj: Callable[[float], None] = time.sleep, preklic: Optional[threading.Event] = None) -> Izid:
+    """addMagnet -> info -> selectFiles -> info (»downloaded«) -> unrestrict/link. Ni takoj pripravljen in »samo
+    predpomnjeno«: torrent, ki ga je dodal ta poskus, izbrisemo v `finally` - tudi ob napaki omrezja, roku, preklicu in
+    praznih povezavah (Grokov pregled 25. 10. 2026; prej samo na dveh mestih, mrtev prenos je ostal v racunu). Pri
+    cakanju ostane (prenasa se naprej, naslednji poskus je takoj); pokvarjen se izbrise."""
+    stanje = {"tid": "", "dodano_ob": None, "pripravljen": False}
+
+    def pospravi() -> None:
+        if stanje["tid"]:
+            _rd_izbrisi(kljuc, stanje["tid"], stanje["dodano_ob"], samo_predpomnjeno)
+            stanje["tid"] = ""
 
     try:
+        preveri_preklic(preklic)
         dodaj = klic(P.RD_OSNOVA + "/torrents/addMagnet", kljuc, "POST", [("magnet", magnet)])
         if not dodaj.uspeh:
             return _rd_napaka(dodaj)
-        tid = str((dodaj.json or {}).get("id") or "")
+        tid = str((dodaj.json or {}).get("id") or "") if isinstance(dodaj.json, dict) else ""
         if not tid:
             return _rd_napaka(dodaj)
+        stanje.update(tid=tid, dodano_ob=dodaj.datum or None)
+        if not samo_predpomnjeno:
+            CAKANI.oznaci(P.REAL_DEBRID, tid)
         info = klic(P.RD_OSNOVA + "/torrents/info/" + tid, kljuc)
         for _ in range(10):
             j = info.json or {}
             if not info.uspeh or (j.get("files") or []) or P.rd_koncna_napaka(str(j.get("status") or "")):
                 break
+            preveri_preklic(preklic)
             cakaj(1.0)
             info = klic(P.RD_OSNOVA + "/torrents/info/" + tid, kljuc)
         if not info.uspeh:
-            izbrisi()
+            pospravi()
             return _rd_napaka(info)
         datoteke = [P.Datoteka(int(f.get("id") or 0), str(f.get("path") or "").rsplit("/", 1)[-1], int(f.get("bytes") or 0))
                     for f in ((info.json or {}).get("files") or []) if isinstance(f, dict)]
         d = P.izberi_datoteko(datoteke, indeks)
         if d is None:
-            izbrisi()
+            pospravi()
             return Izid(napaka=P.NAPAKA_NI_DATOTEKE, ponudnik=P.REAL_DEBRID)
+        preveri_preklic(preklic)
         izberi = klic(P.RD_OSNOVA + "/torrents/selectFiles/" + tid, kljuc, "POST", [("files", str(d.id))])
         if not izberi.uspeh:
-            izbrisi()
+            pospravi()
             return _rd_napaka(izberi)
         rok = 4.0 if samo_predpomnjeno else P.CAKAJ_NOVEGA_S
         korak = 1.0 if samo_predpomnjeno else P.CAKAJ_KORAK_S
@@ -220,27 +341,40 @@ def rd_tok(kljuc: str, magnet: str, indeks: Optional[int], samo_predpomnjeno: bo
         while info.uspeh and not P.rd_pripravljen(str((info.json or {}).get("status") or "")) and cakano < rok:
             if P.rd_koncna_napaka(str((info.json or {}).get("status") or "")):
                 break
+            preveri_preklic(preklic)
             cakaj(korak)
             cakano += korak
             info = klic(P.RD_OSNOVA + "/torrents/info/" + tid, kljuc)
-        stanje = str((info.json or {}).get("status") or "")
-        if not P.rd_pripravljen(stanje):
-            izbrisi()
-            napaka = (P.NAPAKA_NI_DATOTEKE if P.rd_koncna_napaka(stanje)
+        status = str((info.json or {}).get("status") or "")
+        if not P.rd_pripravljen(status):
+            # Pri cakanju ostane v racunu (prenasa se naprej); izbrisemo nepredpomnjenega (»samo takoj«) in pokvarjenega.
+            if samo_predpomnjeno or P.rd_koncna_napaka(status):
+                pospravi()
+            napaka = (P.NAPAKA_NI_DATOTEKE if P.rd_koncna_napaka(status)
                       else P.NAPAKA_NI_PREDPOMNJENO if samo_predpomnjeno else P.NAPAKA_PRENASA)
             return Izid(napaka=napaka, ponudnik=P.REAL_DEBRID)
         povezava = next(iter((info.json or {}).get("links") or []), "")
         if not povezava:
             return Izid(napaka=P.NAPAKA_NI_DATOTEKE, ponudnik=P.REAL_DEBRID)
+        # Pripravljen (»downloaded« s povezavo): ostane v racunu - predpomnjen ne zaseda aktivnega mesta.
+        stanje["pripravljen"] = True
+        preveri_preklic(preklic)
         odklep = klic(P.RD_OSNOVA + "/unrestrict/link", kljuc, "POST", [("link", povezava)])
-        url = str((odklep.json or {}).get("download") or "")
+        url = str((odklep.json or {}).get("download") or "") if isinstance(odklep.json, dict) else ""
         if not odklep.uspeh or not url.startswith("https://"):
             return _rd_napaka(odklep)
         _log.info("Real-Debrid: tok pripravljen")
         return Izid(url=url, ponudnik=P.REAL_DEBRID)
+    except Preklicano:
+        _log.info("Real-Debrid: preklicano")
+        return Izid(napaka=P.NAPAKA_STREZNIK, ponudnik=P.REAL_DEBRID)
     except Exception as e:  # noqa: BLE001
         _log.warning("Real-Debrid: %s", type(e).__name__)
         return Izid(napaka=P.NAPAKA_STREZNIK, ponudnik=P.REAL_DEBRID)
+    finally:
+        # »Samo takoj«: torrent, ki ni pripravljen, ne ostane v racunu ne glede na izhod (preklic, napaka, rok).
+        if samo_predpomnjeno and not stanje["pripravljen"]:
+            pospravi()
 
 
 # ---------------------------------------------------------------------- AllDebrid
@@ -264,11 +398,45 @@ def _ad_razvij(a, izid: list) -> None:
             izid.append((P.Datoteka(len(izid), str(n.get("n") or ""), int(n.get("s") or 0)), str(n["l"])))
 
 
-def ad_tok(kljuc: str, hash_: str, indeks: Optional[int], samo_predpomnjeno: bool,
-           cakaj: Callable[[float], None] = time.sleep) -> Izid:
-    """magnet/upload (`ready`) -> magnet/files -> link/unlock (link ali delayed). Ni pripravljen in »samo
-    predpomnjeno«: magnet izbrisemo (magnet/delete)."""
+AD_STANJE = "https://api.alldebrid.com/v4.1/magnet/status"
+
+
+def _ad_magnet_stanja(st: Odgovor) -> dict:
+    d = (st.json or {}).get("data") if isinstance(st.json, dict) else None
+    d = d if isinstance(d, dict) else {}
+    mm = d.get("magnets") if isinstance(d.get("magnets"), dict) else next(iter(d.get("magnets") or []), {})
+    return mm if isinstance(mm, dict) else {}
+
+
+def _ad_izbrisi(kljuc: str, mid: int, dodano_ob: Optional[int], samo_predpomnjeno: bool) -> None:
+    """Pospravi magnet [mid], ki ga je dodal ta poskus (kot _rd_izbrisi): samo, ce »uploadDate« (magnet/status) ni
+    starejsi od glave Date odgovora magnet/upload in ga pri »samo takoj« ne caka drug poskus. Neznano = ne izbrisemo."""
+    if samo_predpomnjeno and CAKANI.je(P.ALLDEBRID, str(mid)):
+        _log.info("AllDebrid: magnet ni izbrisan (nanj caka drug poskus)")
+        return
     try:
+        st = klic(AD_STANJE, kljuc, "POST", [("id", str(mid))], rok=POSPRAVI_ROK_S)
+        if not P.dodal_smo_mi(P.ad_dodano_ms(_ad_magnet_stanja(st).get("uploadDate")), dodano_ob):
+            _log.info("AllDebrid: magnet ni izbrisan (ni dokaza, da ga je dodal ta poskus)")
+            return
+        klic(P.AD_OSNOVA + "/magnet/delete", kljuc, "POST", [("id", str(mid))], rok=POSPRAVI_ROK_S)
+    except Exception as e:  # noqa: BLE001 - pospravljanje ne sme podreti izida
+        _log.info("AllDebrid: pospravljanje %s", type(e).__name__)
+
+
+def ad_tok(kljuc: str, hash_: str, indeks: Optional[int], samo_predpomnjeno: bool,
+           cakaj: Callable[[float], None] = time.sleep, preklic: Optional[threading.Event] = None) -> Izid:
+    """magnet/upload (`ready`) -> magnet/files -> link/unlock (link ali delayed). Ni pripravljen in »samo
+    predpomnjeno«: magnet, ki ga je dodal ta poskus, izbrisemo v `finally` (tudi ob napaki in preklicu)."""
+    stanje = {"mid": -1, "dodano_ob": None, "pripravljen": False}
+
+    def pospravi() -> None:
+        if stanje["mid"] >= 0:
+            _ad_izbrisi(kljuc, stanje["mid"], stanje["dodano_ob"], samo_predpomnjeno)
+            stanje["mid"] = -1
+
+    try:
+        preveri_preklic(preklic)
         nalozi = klic(P.AD_OSNOVA + "/magnet/upload", kljuc, "POST", [("magnets[]", hash_)])
         if not _ad_uspeh(nalozi):
             return _ad_napaka(nalozi)
@@ -280,28 +448,29 @@ def ad_tok(kljuc: str, hash_: str, indeks: Optional[int], samo_predpomnjeno: boo
         mid = int(m.get("id") or -1)
         if mid < 0:
             return _ad_napaka(nalozi)
+        stanje.update(mid=mid, dodano_ob=nalozi.datum or None)
+        if not samo_predpomnjeno:
+            CAKANI.oznaci(P.ALLDEBRID, str(mid))
         pripravljen = bool(m.get("ready"))
         if not pripravljen and samo_predpomnjeno:
-            try:
-                klic(P.AD_OSNOVA + "/magnet/delete", kljuc, "POST", [("id", str(mid))])
-            except Exception:  # noqa: BLE001
-                pass
+            pospravi()
             return Izid(napaka=P.NAPAKA_NI_PREDPOMNJENO, ponudnik=P.ALLDEBRID)
         cakano = 0.0
         while not pripravljen and cakano <= P.CAKAJ_NOVEGA_S:
+            preveri_preklic(preklic)
             cakaj(P.CAKAJ_KORAK_S)
             cakano += P.CAKAJ_KORAK_S
-            st = klic("https://api.alldebrid.com/v4.1/magnet/status", kljuc, "POST", [("id", str(mid))])
+            st = klic(AD_STANJE, kljuc, "POST", [("id", str(mid))])
             if not _ad_uspeh(st):
                 return _ad_napaka(st)
-            d = (st.json or {}).get("data") or {}
-            mm = d.get("magnets") if isinstance(d.get("magnets"), dict) else next(iter(d.get("magnets") or []), {})
-            koda = int((mm or {}).get("statusCode") or 0)
+            koda = int(_ad_magnet_stanja(st).get("statusCode") or 0)
             if koda >= 5:
+                pospravi()
                 return Izid(napaka=P.NAPAKA_NI_DATOTEKE, ponudnik=P.ALLDEBRID)
             pripravljen = koda == 4
         if not pripravljen:
             return Izid(napaka=P.NAPAKA_PRENASA, ponudnik=P.ALLDEBRID)
+        stanje["pripravljen"] = True
         dat = klic(P.AD_OSNOVA + "/magnet/files", kljuc, "POST", [("id[]", str(mid))])
         if not _ad_uspeh(dat):
             return _ad_napaka(dat)
@@ -310,6 +479,7 @@ def ad_tok(kljuc: str, hash_: str, indeks: Optional[int], samo_predpomnjeno: boo
         d = P.izberi_datoteko([s[0] for s in seznam], indeks)
         if d is None:
             return Izid(napaka=P.NAPAKA_NI_DATOTEKE, ponudnik=P.ALLDEBRID)
+        preveri_preklic(preklic)
         odklep = klic(P.AD_OSNOVA + "/link/unlock", kljuc, "POST", [("link", seznam[d.id][1])])
         if not _ad_uspeh(odklep):
             return _ad_napaka(odklep)
@@ -319,6 +489,7 @@ def ad_tok(kljuc: str, hash_: str, indeks: Optional[int], samo_predpomnjeno: boo
         for _ in range(30):
             if url or not zamik:
                 break
+            preveri_preklic(preklic)
             cakaj(2.0)
             z = klic(P.AD_OSNOVA + "/link/delayed", kljuc, "POST", [("id", str(zamik))])
             if not _ad_uspeh(z):
@@ -332,9 +503,15 @@ def ad_tok(kljuc: str, hash_: str, indeks: Optional[int], samo_predpomnjeno: boo
             return Izid(napaka=P.NAPAKA_STREZNIK, ponudnik=P.ALLDEBRID)
         _log.info("AllDebrid: tok pripravljen")
         return Izid(url=url, ponudnik=P.ALLDEBRID)
+    except Preklicano:
+        _log.info("AllDebrid: preklicano")
+        return Izid(napaka=P.NAPAKA_STREZNIK, ponudnik=P.ALLDEBRID)
     except Exception as e:  # noqa: BLE001
         _log.warning("AllDebrid: %s", type(e).__name__)
         return Izid(napaka=P.NAPAKA_STREZNIK, ponudnik=P.ALLDEBRID)
+    finally:
+        if samo_predpomnjeno and not stanje["pripravljen"]:
+            pospravi()
 
 
 # ---------------------------------------------------------------------- meritev
@@ -425,9 +602,12 @@ def usenet_nzb(povezava: str, rok: float = 30.0) -> tuple:
 
 
 def torbox_usenet(kljuc: str, nzb: bytes, ime_izdaje: str, indeks: Optional[int], samo_takoj: bool,
-                  cakaj: Callable[[float], None] = time.sleep, rok_cakanja: float = U.CAKAJ_PRENOSA_S) -> Izid:
-    """NZB -> TorBox createusenetdownload -> (cakanje na prenos) -> requestdl. Izid nosi ponudnika TorBox."""
+                  cakaj: Callable[[float], None] = time.sleep, rok_cakanja: float = U.CAKAJ_PRENOSA_S,
+                  preklic: Optional[threading.Event] = None) -> Izid:
+    """NZB -> TorBox createusenetdownload -> (cakanje na prenos) -> requestdl. Izid nosi ponudnika TorBox. Preklican
+    poskus ([preklic], npr. zamujen rok preverbe »Usenet pripravljen«) prenosa ne doda."""
     try:
+        preveri_preklic(preklic)
         meja = "safeer" + uuid.uuid4().hex
         ime = " ".join(str(ime_izdaje or "safeer").split())[:120] or "safeer"
         obrazec = U.vecdelni_obrazec([("name", ime), ("add_only_if_cached", "true" if samo_takoj else "false"),
@@ -467,6 +647,7 @@ def torbox_usenet(kljuc: str, nzb: bytes, ime_izdaje: str, indeks: Optional[int]
                 return Izid(napaka=P.NAPAKA_NI_DATOTEKE, ponudnik=P.TORBOX)
             if cakano >= rok_cakanja:
                 return Izid(napaka=P.NAPAKA_PRENASA, ponudnik=P.TORBOX)
+            preveri_preklic(preklic)
             cakaj(P.CAKAJ_KORAK_S)
             cakano += P.CAKAJ_KORAK_S
         d = P.izberi_datoteko(datoteke, indeks)
@@ -478,6 +659,9 @@ def torbox_usenet(kljuc: str, nzb: bytes, ime_izdaje: str, indeks: Optional[int]
             return _tb_napaka(dl)
         _log.info("usenet: tok pripravljen")
         return Izid(url=url, ponudnik=P.TORBOX)
+    except Preklicano:
+        _log.info("usenet TorBox: preklicano")
+        return Izid(napaka=P.NAPAKA_STREZNIK, ponudnik=P.TORBOX)
     except Exception as e:  # noqa: BLE001
         _log.warning("usenet TorBox: %s", type(e).__name__)
         return Izid(napaka=P.NAPAKA_STREZNIK, ponudnik=P.TORBOX)
@@ -496,6 +680,9 @@ class Debrid:
         self._zaklep = threading.Lock()
         self._kljuci: dict = {}          # predpomnilnik desifriranih kljucev (samo v pomnilniku)
         self._povezave_nzb: dict = {}    # id toka »usenet:…« -> povezava NZB s kljucem (samo v pomnilniku)
+        # Zadnji prenesen NZB (id toka -> (cas, bajti)): preverba »pripravljen« in nato poskus s cakanjem za isto izdajo
+        # ne preneseta NZB dvakrat (indeksatorji stejejo prenose NZB na dan).
+        self._nzb: "OrderedDict[str, tuple]" = OrderedDict()
 
     def _nastavitve(self) -> dict:
         d = self._beri()
@@ -585,8 +772,32 @@ class Debrid:
                            "vir": "Usenet", "usenet": True})
         return tokovi
 
+    #: Predpomnilnik NZB: najvec toliko izdaj, bajtov skupaj in sekund (NZB filma je obicajno 1-5 MB).
+    NZB_NAJVEC = 3
+    NZB_NAJVEC_BAJTOV = 30 * 1024 * 1024
+    NZB_VELJA_S = 900.0
+
+    def _nzb_zapomnjen(self, id_toka: str) -> Optional[bytes]:
+        with self._zaklep:
+            v = self._nzb.get(id_toka)
+            if v is None:
+                return None
+            if time.monotonic() - v[0] > self.NZB_VELJA_S:
+                self._nzb.pop(id_toka, None)
+                return None
+            return v[1]
+
+    def _zapomni_nzb(self, id_toka: str, nzb: bytes) -> None:
+        with self._zaklep:
+            self._nzb.pop(id_toka, None)
+            self._nzb[id_toka] = (time.monotonic(), nzb)
+            while self._nzb and (len(self._nzb) > self.NZB_NAJVEC
+                                 or sum(len(b) for _c, b in self._nzb.values()) > self.NZB_NAJVEC_BAJTOV):
+                self._nzb.popitem(last=False)
+
     def usenet_tok(self, id_toka: str, ime_izdaje: str, indeks: Optional[int] = None,
-                   samo_takoj: bool = False, rok_cakanja: float = U.CAKAJ_PRENOSA_S) -> Izid:
+                   samo_takoj: bool = False, rok_cakanja: float = U.CAKAJ_PRENOSA_S,
+                   preklic: Optional[threading.Event] = None) -> Izid:
         """NZB od indeksatorja (ta racunalnik), nato TorBox. Napaka indeksatorja je U.NAPAKA_INDEKSATOR."""
         k = self.kljuc(P.TORBOX)
         if not k:
@@ -595,10 +806,37 @@ class Debrid:
             povezava = self._povezave_nzb.get(id_toka)
         if not povezava:
             return Izid(napaka=U.NAPAKA_INDEKSATOR, ponudnik=P.TORBOX)
-        nzb, _napaka = usenet_nzb(povezava)
+        nzb = self._nzb_zapomnjen(id_toka)
         if nzb is None:
-            return Izid(napaka=U.NAPAKA_INDEKSATOR, ponudnik=P.TORBOX)
-        return torbox_usenet(k, nzb, ime_izdaje, indeks, samo_takoj, rok_cakanja=rok_cakanja)
+            nzb, _napaka = usenet_nzb(povezava)
+            if nzb is None:
+                return Izid(napaka=U.NAPAKA_INDEKSATOR, ponudnik=P.TORBOX)
+            self._zapomni_nzb(id_toka, nzb)
+        return torbox_usenet(k, nzb, ime_izdaje, indeks, samo_takoj, rok_cakanja=rok_cakanja, preklic=preklic)
+
+    def usenet_takoj(self, tokovi: Sequence[dict], rok: float = U.TAKOJ_ROK_S) -> Optional[tuple]:
+        """Lastnik 25. 10. 2026: Usenet, ki ga ima TorBox ze pripravljenega, gre pred vse druge vire. Prve U.TAKOJ_IZDAJ izdaj
+        [tokovi] (po kakovosti, najboljsa prva) preverimo hkrati (add_only_if_cached) z rokom [rok]; zmaga najboljsa
+        pripravljena. Vrne (indeks v [tokovi], Izid) ali None. Kar zamudi rok, ne doda nicesar (preklic)."""
+        izbrani = U.za_takojsnjo([float(t.get("gb") or 0.0) for t in tokovi])
+        if not izbrani:
+            return None
+        konec = time.monotonic() + max(0.1, rok)
+        preklic = threading.Event()
+        niti = [(i, v_ozadju(self.usenet_tok, str(tokovi[i].get("url") or ""), str(tokovi[i].get("naslov") or ""),
+                             None, True, P.CAKAJ_NOVEGA_S, preklic)) for i in izbrani]
+        try:
+            pripravljene = []
+            for _i, f in niti:
+                izid = _izid_do(f, konec)
+                pripravljene.append(izid if isinstance(izid, Izid) and izid.url else None)
+                if pripravljene[-1] is not None:
+                    break           # najboljsa pripravljena po kakovosti: slabsih ne cakamo
+        finally:
+            preklic.set()
+        k = U.najboljsa_pripravljena([x is not None for x in pripravljene])
+        _log.info("usenet takoj: %s", "izdaja %d pripravljena" % k if k >= 0 else "nobena pripravljena")
+        return (izbrani[k], pripravljene[k]) if k >= 0 else None
 
     # ---- nastavitve
     def samo_takoj(self) -> bool:
@@ -647,19 +885,22 @@ class Debrid:
             return set()
         return torbox_predpomnjeni(k, hashi)
 
-    def _poskus(self, p: str, hash_: str, indeks: Optional[int], magnet: str, samo_pred: bool) -> Izid:
+    def _poskus(self, p: str, hash_: str, indeks: Optional[int], magnet: str, samo_pred: bool,
+                preklic: Optional[threading.Event] = None) -> Izid:
         k = self.kljuc(p)
         if not k:
             return Izid(napaka=P.NAPAKA_KLJUC, ponudnik=p)
         if p == P.TORBOX:
             casi = list(self._nastavitve().get("torbox_novi") or [])
-            izid = torbox_tok(k, hash_, indeks, magnet, samo_pred, casi)
+            izid = torbox_tok(k, hash_, indeks, magnet, samo_pred, casi, preklic=preklic)
             zdaj = time.time()
             self._spremeni(lambda d: d.__setitem__("torbox_novi", [c for c in casi if 0 <= zdaj - c < P.URA_S]))
-            return izid
-        if p == P.REAL_DEBRID:
-            return rd_tok(k, magnet, indeks, samo_pred)
-        return ad_tok(k, hash_, indeks, samo_pred)
+        elif p == P.REAL_DEBRID:
+            izid = rd_tok(k, magnet, indeks, samo_pred, preklic=preklic)
+        else:
+            izid = ad_tok(k, hash_, indeks, samo_pred, preklic=preklic)
+        # Izid vedno nosi storitev, ki je odgovorila (sporocilo napake jo imenuje).
+        return izid if izid.ponudnik else Izid(izid.url, izid.napaka, izid.opis, p)
 
     def _zapomni_meritev(self, m: P.Meritev) -> None:
         self._spremeni(lambda d: d.setdefault("meritve", {}).__setitem__(
@@ -678,15 +919,18 @@ class Debrid:
         mag = P.magnet(h, ime_datoteke, sledilniki)
         samo = self.samo_takoj() if samo_takoj is None else bool(samo_takoj)
         if len(red) >= 2:
-            with ThreadPoolExecutor(max_workers=len(red)) as bazen:
-                niti = [(p, bazen.submit(self._poskus, p, h, indeks, mag, True)) for p in red]
-                konec = time.monotonic() + P.VZPOREDNO_ROK_S
-                izidi = []
+            # Vse hkrati, rok VZPOREDNO_ROK_S velja zares (prej je `with ThreadPoolExecutor` ob izhodu cakal na vse niti).
+            # Niti, ki zamudijo rok, so preklicane: po odgovoru ne ustvarijo nicesar vec in pospravijo svoje (Grok).
+            preklic = threading.Event()
+            niti = [(p, v_ozadju(self._poskus, p, h, indeks, mag, True, preklic)) for p in red]
+            konec = time.monotonic() + P.VZPOREDNO_ROK_S
+            izidi = []
+            try:
                 for p, f in niti:
-                    try:
-                        izidi.append((p, f.result(timeout=max(0.01, konec - time.monotonic()))))
-                    except Exception:  # noqa: BLE001 - kar ne odgovori v roku, ne steje
-                        izidi.append((p, Izid(napaka=P.NAPAKA_STREZNIK, ponudnik=p)))
+                    izid = _izid_do(f, konec)
+                    izidi.append((p, izid if isinstance(izid, Izid) else Izid(napaka=P.NAPAKA_STREZNIK, ponudnik=p)))
+            finally:
+                preklic.set()
         else:
             izidi = [(red[0], self._poskus(red[0], h, indeks, mag, True))]
         uspesni = [(p, i) for p, i in izidi if i.url]
@@ -701,13 +945,17 @@ class Debrid:
             izbrana = P.najhitrejsa(meritve)
             p, i = next(((p, i) for p, i in uspesni if p == izbrana), uspesni[0])
             return Izid(url=i.url, ponudnik=p)
-        napake = [i.napaka for _, i in izidi]
-        if P.poskusi_s_cakanjem(samo, napake):
-            p = red[0]
-            i = self._poskus(p, h, indeks, mag, False)
-            return Izid(i.url, i.napaka, i.opis, p)
+        po_storitvah = [(p, i.napaka) for p, i in izidi]
+        for p, n in po_storitvah:
+            _log.info("%s: %s", P.ime(p), n)
+        # Grokov pregled 25. 10. 2026: caka prva storitev po vrstnem redu, ki je rekla »ni predpomnjeno« - tudi, ce je
+        # prednostna padla na roku ali kljucu (prej je cakala samo prva, in ce je ta padla, ni cakal nihce).
+        cakalna = P.cakalna_storitev(samo, po_storitvah)
+        if cakalna is not None:
+            i = self._poskus(cakalna, h, indeks, mag, False)
+            return Izid(i.url, i.napaka, i.opis, cakalna)
         opis = next((P.ime(p) + ": " + i.opis for p, i in reversed(izidi) if i.opis), "")
-        return Izid(napaka=P.razlog_za_uporabnika(napake), opis=opis)
+        return Izid(napaka=P.razlog_po_storitvah(po_storitvah), opis=opis, ponudnik=P.ponudnik_napake(po_storitvah))
 
 
 def most(dbr: Debrid, a: list) -> dict:

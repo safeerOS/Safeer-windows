@@ -232,6 +232,45 @@ def za_samodejno(gb: Sequence[float]) -> list:
     return [i for i, g in enumerate(gb) if g <= NAJVEC_GB_SAMODEJNO][:POSKUSOV_SAMODEJNO]
 
 
+# ---------------------------------------------------------------------- vrstni red virov (lastnik, 25. 10. 2026 07:25)
+#: Usenet je najboljsi vir (placan, kakovost in hitrost): ce je indeksator vpisan, gre prvi. Preverba »pri TorBoxu
+#: pripravljen« tece hkrati s preverbo ⚡ in ima rok TAKOJ_ROK_S (z iskanjem pri indeksatorju), za prve TAKOJ_IZDAJ izdaj.
+TAKOJ_IZDAJ = 3
+TAKOJ_ROK_S = 6.0
+
+KORAK_USENET_TAKOJ = "usenet_takoj"
+KORAK_PREDPOMNJEN = "predpomnjen"
+KORAK_NEPOSREDNI = "neposredni"
+KORAK_USENET_CAKAJ = "usenet_cakaj"
+KORAK_WEBTOR = "webtor"
+KORAK_DEBRID_CAKAJ = "debrid_cakaj"
+
+
+def vrstni_red_virov(usenet: bool, webtor: bool) -> list:
+    """Samodejna izbira vira (skupno pravilo za Android, Linux in Windows; tests/skupni-primeri): (1) Usenet, ki ga ima
+    TorBox pripravljenega, (2) ⚡ torrent pri debridu, (3) neposredna povezava, (4) Usenet s cakanjem na prenos, (5) Webtor,
+    (6) debrid s cakanjem. [usenet] = indeksator in kljuc TorBox sta vpisana; [webtor] = rezerva Webtor je na voljo."""
+    red = [KORAK_USENET_TAKOJ] if usenet else []
+    red += [KORAK_PREDPOMNJEN, KORAK_NEPOSREDNI]
+    if usenet:
+        red.append(KORAK_USENET_CAKAJ)
+    if webtor:
+        red.append(KORAK_WEBTOR)
+    red.append(KORAK_DEBRID_CAKAJ)
+    return red
+
+
+def za_takojsnjo(gb: Sequence[float]) -> list:
+    """Indeksi izdaj (po vrstnem redu kakovosti - najboljsa predvajljiva prva) za preverbo »pri TorBoxu pripravljen«: prvih
+    TAKOJ_IZDAJ do NAJVEC_GB_SAMODEJNO (neznana velikost 0 je dovoljena)."""
+    return [i for i, g in enumerate(gb) if g <= NAJVEC_GB_SAMODEJNO][:TAKOJ_IZDAJ]
+
+
+def najboljsa_pripravljena(pripravljene: Sequence[bool]) -> int:
+    """Med preverjenimi izdajami (po kakovosti) prva pripravljena; -1 = nobena."""
+    return next((i for i, da in enumerate(pripravljene) if da), -1)
+
+
 def naslov_seznam(uid: int) -> str:
     return "%s/mylist?id=%d&bypass_cache=true" % (OSNOVA_TORBOX, uid)
 

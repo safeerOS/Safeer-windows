@@ -23,8 +23,12 @@ def preveri_tovor(tovor: dict) -> dict:
     besedilo = str(tovor.get("text") or tovor.get("besedilo") or "")
     if not besedilo or len(besedilo.encode("utf-8")) > NAJVEC_BESEDILA:
         raise ValueError("Sporočilo je prazno ali preveliko")
-    return {"conversation": str(tovor.get("conversation") or tovor.get("pogovor_id") or "")[:128],
+    telo = {"conversation": str(tovor.get("conversation") or tovor.get("pogovor_id") or "")[:128],
             "text": besedilo, "created_at": str(tovor.get("created_at") or datetime.now(timezone.utc).isoformat())[:64]}
+    # Zahteva za izbris (Android naloga 116, core/sporocila/izbris_linka.py): skupni id sporocila, ki ga izbrisemo.
+    if tovor.get("delete"):
+        telo["delete"] = str(tovor.get("delete"))[:64]
+    return telo
 
 
 class SafeerChatAdapter(Adapter):

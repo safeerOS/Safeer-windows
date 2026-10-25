@@ -92,9 +92,89 @@ def razlog_za_uporabnika(napake: Sequence[str]) -> str:
 
 
 def poskusi_s_cakanjem(samo_predpomnjeno: bool, napake: Sequence[str]) -> bool:
-    """Po neuspehu s samo predpomnjenim poskusimo s cakanjem (storitev torrent prenese) le, ce filter »samo takoj« ni
-    vklopljen in je razlog povsod »ni predpomnjeno«."""
+    """Skupno pravilo (tests/skupni-primeri): vse storitve so rekle »ni predpomnjeno«. Za izbiro storitve, ki res caka,
+    uporabi [cakalna_storitev] (Grokov pregled 25. 10. 2026)."""
     return not samo_predpomnjeno and bool(napake) and all(n == NAPAKA_NI_PREDPOMNJENO for n in napake)
+
+
+def razlog_po_storitvah(napake: Sequence[tuple]) -> str:
+    """Razlog za uporabnika iz (storitev, napaka) po vrstnem redu poskusov (prednostna prva) - kot Android
+    (DebridPravila.razlogPoStoritvah, Grokov pregled 25. 10. 2026). Ce je katera storitev rekla »ni predpomnjeno«, je
+    razlog to: ob cakanju jo bo ta storitev res prenesla ([cakalna_storitev]); zavrnjen kljuc, meja ali rok drugih tega
+    ne preglasi. Prej je napaka druge storitve (npr. rok RD) preglasila »ni predpomnjeno« in cakanja ni bilo."""
+    if any(n == NAPAKA_NI_PREDPOMNJENO for _p, n in napake):
+        return NAPAKA_NI_PREDPOMNJENO
+    return razlog_za_uporabnika([n for _p, n in napake])
+
+
+def cakalna_storitev(samo_predpomnjeno: bool, napake: Sequence[tuple]) -> Optional[str]:
+    """Storitev, ki torrent prenese, ko uporabnik dovoli cakanje (2. krog): prva po vrstnem redu, ki je rekla »ni
+    predpomnjeno«. Prej je cakala samo prva storitev - ce je ta padla na roku ali kljucu, ni cakal nihce. None = nihce
+    ne caka (»samo takoj« ali nobena storitev ni rekla »ni predpomnjeno«)."""
+    if samo_predpomnjeno:
+        return None
+    return next((p for p, n in napake if n == NAPAKA_NI_PREDPOMNJENO), None)
+
+
+def ponudnik_napake(napake: Sequence[tuple]) -> str:
+    """Storitev, ki jo sporocilo napake imenuje: prva z napako, ki jo uporabnik vidi ([razlog_po_storitvah]). "" = ni
+    poskusov."""
+    if not napake:
+        return ""
+    razlog = razlog_po_storitvah(napake)
+    return next((p for p, n in napake if n == razlog), napake[0][0])
+
+
+# ---------------------------------------------------------------------- pospravljanje: brisemo samo svoje
+
+#: Rezerva za locljivost ure streznika (glava Date je na sekundo): torrent, dodan najvec toliko pred odgovorom na nase
+#: dodajanje, se steje za nasega. Primerjamo samo uri istega streznika - ura racunalnika ne odloca.
+DODANO_REZERVA_MS = 10_000
+
+_ISO_CAS = re.compile(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.\d+)?(Z|[+-]\d{2}:?\d{2})?$")
+
+
+def rd_dodano_ms(added: object) -> Optional[int]:
+    """Real-Debrid »added« (torrents/info, ISO 8601, npr. 2026-10-25T01:02:03.000Z ali +01:00) v ms; brez pasu = UTC.
+    None = ga ni ali ni berljiv."""
+    from datetime import datetime, timedelta, timezone
+    m = _ISO_CAS.match(str(added or "").strip())
+    if not m:
+        return None
+    try:
+        t = datetime.strptime(m.group(1), "%Y-%m-%dT%H:%M:%S")
+    except ValueError:
+        return None
+    pas = m.group(2) or "Z"
+    zamik = 0
+    if pas != "Z":
+        znak = -1 if pas[0] == "-" else 1
+        hh, mm = int(pas[1:3]), int(pas[-2:])
+        zamik = znak * (hh * 60 + mm)
+    t = t.replace(tzinfo=timezone(timedelta(minutes=zamik)))
+    return int(t.timestamp() * 1000)
+
+
+def ad_dodano_ms(upload_date: object) -> Optional[int]:
+    """AllDebrid »uploadDate« (magnet/status, sekunde Unix) v ms; None = ga ni."""
+    try:
+        v = int(upload_date)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return v * 1000 if v > 0 else None
+
+
+def dodal_smo_mi(dodano_ms: Optional[int], odgovor_dodajanja_ms: Optional[int]) -> bool:
+    """Ali je torrent dodal ta poskus (smemo ga izbrisati): cas dodajanja po uri streznika (RD »added«, AD »uploadDate«)
+    ni starejsi od glave Date odgovora na nase dodajanje (ura istega streznika) z rezervo DODANO_REZERVA_MS. Torrenta,
+    ki ga je minuto prej dodala druga naprava, ne izbrisemo. Neznan cas ali brez glave Date = ne."""
+    return (dodano_ms is not None and odgovor_dodajanja_ms is not None and odgovor_dodajanja_ms > 0
+            and dodano_ms >= odgovor_dodajanja_ms - DODANO_REZERVA_MS)
+
+
+#: Najvec bajtov odgovora API debrid storitve (JSON) - ista meja kot Android (DebridPravila.NAJVEC_ODGOVORA, Grokov
+#: pregled 25. 10. 2026: prej branje brez meje).
+NAJVEC_ODGOVORA = 8 * 1024 * 1024
 
 
 # ---------------------------------------------------------------------- napake storitev

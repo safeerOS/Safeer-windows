@@ -7,7 +7,7 @@ import json
 import unittest
 from pathlib import Path
 
-from core import debrid_pravila as P, media_servers
+from core import debrid_pravila as P, media_servers, usenet_pravila as U
 
 PRIMERI = Path(__file__).resolve().parent / "skupni-primeri" / "debrid-serije.json"
 
@@ -57,6 +57,30 @@ def izracunaj(f, v):
         return _ali_none(media_servers.stremio_id_epizode_imdb(v["imdb"] or "", v["id_epizode"], v["sezona"], v["epizoda"]))
     if f == "imdb_iz_meta":
         return _ali_none(media_servers.stremio_imdb_iz_meta({"imdb_id": v["imdb_polje"]}, v["id"]))
+    # Grokov pregled 25. 10. 2026: (storitev, napaka) po vrstnem redu poskusov, pospravljanje samo svojih, meja odgovora.
+    if f == "razlog_po_storitvah":
+        return P.razlog_po_storitvah([tuple(x) for x in v["napake"]])
+    if f == "cakalna_storitev":
+        return P.cakalna_storitev(v["samo_predpomnjeno"], [tuple(x) for x in v["napake"]])
+    if f == "ponudnik_napake":
+        return P.ponudnik_napake([tuple(x) for x in v["napake"]])
+    if f == "rd_dodano_ms":
+        return P.rd_dodano_ms(v["added"])
+    if f == "ad_dodano_ms":
+        return P.ad_dodano_ms(v["upload_date"])
+    if f == "dodal_smo_mi":
+        return P.dodal_smo_mi(v["dodano_ms"], v["odgovor_ms"])
+    if f == "najvec_odgovora":
+        return P.NAJVEC_ODGOVORA
+    # Vrstni red virov (lastnik 25. 10. 2026 07:25): Usenet, ki ga ima TorBox pripravljenega, gre prvi.
+    if f == "vrstni_red_virov":
+        return U.vrstni_red_virov(v["usenet"], v["webtor"])
+    if f == "usenet_za_takojsnjo":
+        return U.za_takojsnjo(v["gb"])
+    if f == "usenet_za_samodejno":
+        return U.za_samodejno(v["gb"])
+    if f == "usenet_najboljsa_pripravljena":
+        return U.najboljsa_pripravljena(v["pripravljene"])
     raise KeyError("neznano pravilo: " + f)
 
 
