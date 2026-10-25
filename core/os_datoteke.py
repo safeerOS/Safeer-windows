@@ -255,23 +255,10 @@ def odpri(pot: str) -> bool:
 
 
 def pokazi_v_mapi(pot: str) -> bool:
-    """Odpre Nemo z oznaceno datoteko."""
-    pot = os.path.abspath(os.path.expanduser(str(pot or "")))
-    if not os.path.exists(pot) or shutil.which("nemo") is None:
-        return False
-    from core import varuh_procesov
-    try:
-        pid = varuh_procesov.zazeni_program(["nemo", pot], zasebni_webkit.okolje_za_zunanje())
-        if pid:
-            return True
-    except Exception:
-        pass
-    try:
-        subprocess.Popen(["nemo", pot], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True,
-                         env=zasebni_webkit.okolje_za_zunanje())
-        return True
-    except Exception:
-        return False
+    """Upravitelj datotek z oznaceno datoteko: Nemo na Linuxu, Raziskovalec na Windows. Ena funkcija za obe platformi
+    v core/platforma.py (25. 10. 2026; Windows je imel svojo kopijo v namizje_datoteke.py in os_backend_win.py)."""
+    from core import platforma
+    return platforma.pokazi_v_mapi(pot)
 
 
 # ------------------------------------------------------------------ ustvarjanje (desni klik v Datotekah)

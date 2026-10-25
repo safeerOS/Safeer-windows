@@ -1,10 +1,12 @@
 """Ena tema za vse Safeer OS na Windows: vmesnik, namizje (Qt Quick) in Splet (vgrajeni brskalnik).
 
-Barve so samo na enem mestu - v assets/os/os.css (privzeta tema Safeer in teme, ki jih uporabnik izbere v
-Nastavitvah). Lastnik, 13. 10. 2026: brskalnik ima isto temo kot namizje, uporabnik ne sme dobiti obcutka locene
+Barve so samo na enem mestu: assets/os/teme.json, ustvarjen iz assets/os/tokens.css v Safeer-linux (scripts/
+teme_json.py; isti v obeh repozitorijih, skupna-koda.json) - privzeta tema Safeer in teme, ki jih uporabnik izbere v
+Nastavitvah. Rezerva, dokler ga ni: bloki :root v assets/os/os.css. Lastnik, 13. 10. 2026: brskalnik ima isto temo kot namizje, uporabnik ne sme dobiti obcutka locene
 aplikacije; vse nastavitve si prilagodi sam."""
 from __future__ import annotations
 
+import json
 import re
 from typing import Dict, Optional
 
@@ -19,6 +21,19 @@ def _os_css() -> str:
             return f.read()
     except Exception:  # noqa: BLE001
         return ""
+
+
+def _teme_json() -> Dict[str, Dict[str, str]]:
+    """Barve vseh tem iz assets/os/teme.json ({ime: {spremenljivka: vrednost}}); {} ce datoteke ni ali ni veljavna."""
+    try:
+        from . import policy
+        with open(policy.shared_path("assets/os/teme.json"), encoding="utf-8") as f:
+            teme = json.load(f).get("teme")
+    except Exception:  # noqa: BLE001 - brez teme.json: rezerva os.css (_bloki)
+        return {}
+    if not isinstance(teme, dict):
+        return {}
+    return {str(k): {str(i): str(v) for i, v in b.items()} for k, b in teme.items() if isinstance(b, dict)}
 
 
 def _bloki(css: str) -> Dict[str, Dict[str, str]]:
@@ -60,7 +75,7 @@ def paleta(ime: Optional[str] = None) -> Dict[str, object]:
     """Barve teme za Qt (QML in slog brskalnika). Neznana tema -> Safeer."""
     ime = ime if ime in TEME else trenutna()
     if not _predpomnilnik:
-        _predpomnilnik.update(_bloki(_os_css()))
+        _predpomnilnik.update(_teme_json() or _bloki(_os_css()))
     surovo = dict(PRIVZETO)
     surovo.update(_predpomnilnik.get("safeer", {}))
     if ime != "safeer":

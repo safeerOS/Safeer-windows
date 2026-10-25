@@ -1,6 +1,6 @@
 {
   "vir": "safeerOS/Safeer-linux",
-  "ref": "d13659bc1b03902ca00d8bbd808a1f6452e20ad9",
+  "ref": "2f09ccdf5124b9aebab24c283348596693861bdd",
   "skupne": [
     "core/adblock.py",
     "core/bank_guard.py",
@@ -108,7 +108,18 @@
     "core/x11.py",
     "core/youtube_fast.py",
     "core/zakoniti_viri.py",
-    "core/zasebni_webkit.py"
+    "core/zasebni_webkit.py",
+    "core/platforma.py",
+    "core/os_most_metode.py",
+    "scripts/most_pregled.py",
+    "tests/test_platforma.py",
+    "tests/test_os_most_metode.py",
+    "tests/test_most_js.py",
+    "assets/os/most.js",
+    "assets/os/teme.json",
+    "assets/os/vrstica.js",
+    "assets/os/znak.svg",
+    "assets/os/qml/Lupa.qml"
   ],
   "zacasno_razlicne": [
     "core/config.py",
@@ -126,7 +137,29 @@
     "core/os_sporocila.py",
     "core/sporocila/email.py",
     "core/sporocila/ponudniki.py",
-    "core/sporocila/storitev.py"
+    "core/sporocila/storitev.py",
+    "assets/os/besedila.js",
+    "assets/os/delovna.css",
+    "assets/os/delovna.html",
+    "assets/os/delovna.js",
+    "assets/os/index.html",
+    "assets/os/iskanje.js",
+    "assets/os/os.css",
+    "assets/os/os.js",
+    "assets/os/sporocila-plosca.css",
+    "assets/os/sporocila-plosca.html",
+    "assets/os/sporocila-plosca.js",
+    "assets/os/vrstica.css",
+    "assets/os/vrstica.html",
+    "assets/os/qml/Datoteke.qml",
+    "assets/os/qml/Gumb.qml",
+    "assets/os/qml/IzbiraNaprave.qml",
+    "assets/os/qml/Meni.qml",
+    "assets/os/qml/MeniVnos.qml",
+    "assets/os/qml/Namizje.qml",
+    "assets/os/qml/Prilagodi.qml",
+    "assets/os/qml/Programi.qml",
+    "assets/os/qml/Steklo.qml"
   ],
   "samo_windows": [
     "core/gledalec_vnos.py",
@@ -135,6 +168,13 @@
     "core/link_media_sync.py",
     "core/link_multi_vnos.py",
     "core/link_workspace.py",
-    "core/media_zvocnik.py"
-  ]
+    "core/media_zvocnik.py",
+    "assets/os/namera-iskanja.js",
+    "assets/os/qml/ORacunalniku.qml",
+    "assets/os/qml/Prostori.qml",
+    "assets/os/qml/datoteke_logika.js"
+  ],
+  "preslikave": {
+    "assets/os/qml/": "windows/safeer_windows/qml/"
+  }
 }

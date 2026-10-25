@@ -587,19 +587,8 @@ class Seznami:
 # ---------------------------------------------------------------------- systemd-resolved / Windows DNS
 def vmesniki_povezani() -> List[str]:
     if sys.platform == "win32":
-        izhod: List[str] = []
-        try:
-            cmd = ["powershell", "-NoProfile", "-NonInteractive", "-Command",
-                   "Get-NetAdapter | Where-Object Status -eq 'Up' | Select-Object -ExpandProperty Name"]
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
-            if r.returncode == 0:
-                for line in r.stdout.splitlines():
-                    ime = line.strip()
-                    if ime and ime not in izhod:
-                        izhod.append(ime)
-        except Exception:
-            pass
-        return izhod or ["Ethernet", "Wi-Fi"]
+        from core import platforma
+        return platforma.dns_vmesniki(windows=True)
     koda, izpis = _zazeni(["nmcli", "-t", "-f", "DEVICE,TYPE,STATE", "device"])
     izhod = []
     if koda != 0:
@@ -613,15 +602,8 @@ def vmesniki_povezani() -> List[str]:
 
 def dns_vmesnika(vmesnik: str) -> str:
     if sys.platform == "win32":
-        try:
-            cmd = ["powershell", "-NoProfile", "-NonInteractive", "-Command",
-                   f"(Get-DnsClientServerAddress -InterfaceAlias '{vmesnik}' -AddressFamily IPv4).ServerAddresses"]
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
-            if r.returncode == 0:
-                return r.stdout.strip().replace("\r\n", " ")
-        except Exception:
-            pass
-        return ""
+        from core import platforma
+        return platforma.dns_vmesnika(vmesnik, windows=True)
     koda, izpis = _zazeni(["resolvectl", "dns", vmesnik])
     return izpis.split(":", 1)[1].strip() if koda == 0 and ":" in izpis else ""
 
@@ -687,25 +669,8 @@ def namesti_pravilo() -> bool:
 
 def usmeri(vmesnik: str, vrata: int, rezerva: Optional[List[str]] = None) -> bool:
     if sys.platform == "win32":
-        try:
-            dns_list = ["127.0.0.1"]
-            if rezerva:
-                for r in rezerva:
-                    if r not in dns_list:
-                        dns_list.append(r)
-            dns_ps = ", ".join(f"'{d}'" for d in dns_list)
-            cmd = ["powershell", "-NoProfile", "-NonInteractive", "-Command",
-                   f"Set-DnsClientServerAddress -InterfaceAlias '{vmesnik}' -ServerAddresses @({dns_ps})"]
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=8,
-                               creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-            if r.returncode != 0:
-                r = subprocess.run(["netsh", "interface", "ip", "set", "dns", f"name={vmesnik}", "static", "127.0.0.1"],
-                                   capture_output=True, text=True, timeout=5,
-                                   creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-            return r.returncode == 0
-        except Exception as e:
-            print(f"[SafeerOS] usmeri napaka na Windows ({vmesnik}): {e}")
-            return False
+        from core import platforma
+        return platforma.dns_usmeri(vmesnik, vrata, rezerva, windows=True)
     ok1, _ = _zazeni(["resolvectl", "dns", vmesnik, "%s:%d" % (NASLOV, vrata)] + list(rezerva or []), cas=30.0)
     ok2, _ = _zazeni(["resolvectl", "domain", vmesnik, "~."], cas=30.0)
     return ok1 == 0 and ok2 == 0
@@ -713,16 +678,8 @@ def usmeri(vmesnik: str, vrata: int, rezerva: Optional[List[str]] = None) -> boo
 
 def povrni(vmesnik: str) -> bool:
     if sys.platform == "win32":
-        try:
-            cmd = ["powershell", "-NoProfile", "-NonInteractive", "-Command",
-                   f"Set-DnsClientServerAddress -InterfaceAlias '{vmesnik}' -ResetServerAddresses"]
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=8)
-            if r.returncode != 0:
-                subprocess.run(["netsh", "interface", "ip", "set", "dns", f"name={vmesnik}", "dhcp"],
-                               capture_output=True, text=True, timeout=5)
-            return True
-        except Exception:
-            return False
+        from core import platforma
+        return platforma.dns_povrni(vmesnik, windows=True)
     return _zazeni(["resolvectl", "revert", vmesnik], cas=30.0)[0] == 0
 
 

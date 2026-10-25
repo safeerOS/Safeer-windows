@@ -59,14 +59,9 @@ def odpri(pot: str) -> bool:
 
 
 def pokazi_v_mapi(pot: str) -> bool:
-    pot = os.path.abspath(os.path.expanduser(str(pot or "")))
-    if not os.path.exists(pot):
-        return False
-    try:
-        subprocess.Popen(["explorer.exe", "/select," + pot], close_fds=True)
-        return True
-    except OSError:
-        return False
+    """Raziskovalec z oznaceno datoteko - core/platforma.py (ista funkcija kot os_datoteke.pokazi_v_mapi)."""
+    from core import platforma
+    return platforma.pokazi_v_mapi(pot, windows=True)
 
 
 def odpri_z(pot: str) -> bool:
