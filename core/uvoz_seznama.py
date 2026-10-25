@@ -23,7 +23,17 @@ def youtube_id(vnos: str) -> str:
     u = str(vnos or "").strip()
     if not re.search(r"(?i)(^|[/.@])(youtube\.com|youtu\.be|youtube-nocookie\.com)/", u):
         return ""
-    m = re.search(r"[?&]list=([A-Za-z0-9_-]{10,})", u)
+    # LL (vseckani), WL (pozneje), LM (YouTube Music vseckane) so kratki in zasebni: id vrnemo, uvozi pove razlog.
+    m = re.search(r"[?&]list=([A-Za-z0-9_-]{10,}|LL|WL|LM)(?:[&#]|$)", u)
+    return m.group(1) if m else ""
+
+
+#: Seznami, ki jih YouTube pokaze samo prijavljenemu lastniku (brez prijave jih ne beremo).
+ZASEBNI = frozenset({"LL", "WL", "LM"})
+
+
+def _video_id(vnos: str) -> str:
+    m = re.search(r"(?:[?&]v=|youtu\.be/)([A-Za-z0-9_-]{11})", str(vnos or ""))
     return m.group(1) if m else ""
 
 
@@ -88,7 +98,7 @@ def _besedilo(o: Any) -> str:
 
 def iz_youtube(d: Any) -> dict:
     """Posnetki seznama iz podatkov strani; razume staro (playlistVideoRenderer) in novo obliko (lockupViewModel)."""
-    izid = {"ime": "", "vnosi": [], "nadaljevanje": ""}
+    izid = {"ime": "", "vnosi": [], "nadaljevanje": "", "opozorilo": False}
 
     def hodi(x: Any, globina: int) -> None:
         if globina > 60:
@@ -105,6 +115,14 @@ def iz_youtube(d: Any) -> dict:
         ukaz = x.get("continuationCommand")
         if isinstance(ukaz, dict) and "BROWSE" in str(ukaz.get("request") or "") and ukaz.get("token"):
             izid["nadaljevanje"] = str(ukaz["token"])
+        if isinstance(x.get("alertRenderer"), dict) or isinstance(x.get("alertWithButtonRenderer"), dict):
+            izid["opozorilo"] = True       # »This playlist is private / does not exist«
+        panel = x.get("playlistPanelVideoRenderer")   # mix (RD...) in seznam ob posnetku na strani watch
+        if isinstance(panel, dict) and panel.get("videoId"):
+            izid["vnosi"].append({"id": str(panel["videoId"]), "naslov": _besedilo(panel.get("title")),
+                                  "kanal": _besedilo(panel.get("shortBylineText") or panel.get("longBylineText")),
+                                  "glasba": False})
+            return
         stari = x.get("playlistVideoRenderer")
         novi = x.get("lockupViewModel")
         if isinstance(stari, dict) and stari.get("videoId"):
@@ -141,12 +159,36 @@ def _youtube_skladba(v: dict) -> dict:
             "slika": "https://i.ytimg.com/vi/%s/mqdefault.jpg" % v["id"], "sekund": 0}
 
 
-def _uvozi_youtube(ident: str) -> Optional[dict]:
+def _mix(ident: str, video: str) -> Optional[dict]:
+    """Mix (RD...) nima strani seznama: posnetke beremo s strani watch (stranski seznam)."""
+    video = video or (ident[2:] if len(ident) == 13 else "")
+    if not video:
+        return None
+    podatki = json_za(_beri("https://www.youtube.com/watch?v=%s&list=%s&hl=en" % (video, ident), youtube=True),
+                      "ytInitialData")
+    if podatki is None:
+        return None
+    izid = iz_youtube(podatki)
+    try:
+        ime = podatki["contents"]["twoColumnWatchNextResults"]["playlist"]["playlist"]["title"]
+    except (KeyError, TypeError):
+        ime = ""
+    vnosi = list({v["id"]: v for v in izid["vnosi"]}.values())[:NAJVEC]
+    if not vnosi:
+        return None
+    return {"ime": str(ime or "YouTube Mix"), "vir": "YouTube", "skladbe": [_youtube_skladba(v) for v in vnosi]}
+
+
+def _uvozi_youtube(ident: str, video: str = "") -> Optional[dict]:
+    if ident.startswith("RD"):
+        return _mix(ident, video)
     html = _beri("https://www.youtube.com/playlist?list=%s&hl=en" % ident, youtube=True)
     podatki = json_za(html, "ytInitialData")
     if podatki is None:
         return None
     prva = iz_youtube(podatki)
+    if not prva["vnosi"] and prva["opozorilo"]:
+        raise ZasebenSeznam(ident)
     skladbe: dict[str, dict] = {}
     for v in prva["vnosi"]:
         skladbe.setdefault(v["id"], v)
@@ -200,17 +242,42 @@ def iz_spotify(html: str) -> Optional[dict]:
     return {"ime": str(e.get("name") or e.get("title") or "Spotify"), "vir": "Spotify", "skladbe": skladbe[:NAJVEC]}
 
 
+class ZasebenSeznam(Exception):
+    """YouTube seznama brez prijave ne pokaze (zaseben, Vseckani, Pozneje)."""
+
+
+def uvozi_z_razlogom(vnos: str) -> tuple[Optional[dict], str]:
+    """(seznam, "") ali (None, razlog): "ni_seznam", "zaseben", "ni_uspel" (omrezje, YouTube spremenil stran ...).
+    Lastnik 14. 10. 2026: najljubsega seznama ni mogel uvoziti, ni pa vedel zakaj."""
+    povezava = povezava_iz(vnos) or str(vnos or "").strip()
+    yt = youtube_id(povezava)
+    if yt in ZASEBNI:
+        return None, "zaseben"
+    if not yt and not spotify_id(povezava):
+        return None, "ni_seznam"
+    try:
+        izid = uvozi(povezava)
+    except ZasebenSeznam:
+        return None, "zaseben"
+    return (izid, "") if izid and izid.get("skladbe") else (None, "ni_uspel")
+
+
 def uvozi(vnos: str) -> Optional[dict]:
-    """{"ime", "vir", "skladbe": [{naslov, izvajalec, youtube, slika, sekund}]} ali None (ni javen, ni seznam)."""
+    """{"ime", "vir", "skladbe": [{naslov, izvajalec, youtube, slika, sekund}]} ali None (ni javen, ni seznam).
+    Zaseben seznam YouTube: izjema ZasebenSeznam (uvozi_z_razlogom jo pretvori v razlog)."""
     povezava = povezava_iz(vnos) or str(vnos or "").strip()
     yt = youtube_id(povezava)
     try:
         if yt:
-            return _uvozi_youtube(yt)
+            if yt in ZASEBNI:
+                raise ZasebenSeznam(yt)
+            return _uvozi_youtube(yt, _video_id(povezava))
         sp = spotify_id(povezava)
         if sp:
             izid = iz_spotify(_beri("https://open.spotify.com/embed/%s/%s" % sp))
             return izid if izid and izid["skladbe"] else None
+    except ZasebenSeznam:
+        raise
     except Exception:
         return None
     return None

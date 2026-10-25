@@ -23,6 +23,7 @@ import urllib.request
 from pathlib import Path
 
 from . import webkit_filters
+from .signed_feed import _atomic_write, isti_gostitelj
 
 EASYLIST_URL = "https://easylist.to/easylist/easylist.txt"
 FILTER_ID = "safeer-easylist"
@@ -70,6 +71,8 @@ def default_fetch(url: str, etag: str, last_modified: str):
         with urllib.request.urlopen(request, timeout=30) as response:  # noqa: S310 - fixed https URL
             if response.geturl().split(":", 1)[0].lower() != "https":
                 raise ListRejected("redirected away from HTTPS")
+            if not isti_gostitelj(url, response.geturl()):
+                raise ListRejected("redirected to another host")
             body = response.read(MAX_BYTES + 1)
             return response.status, body, response.headers.get("ETag", ""), response.headers.get("Last-Modified", "")
     except urllib.error.HTTPError as exc:
@@ -83,7 +86,7 @@ class FilterListAgent:
 
     def __init__(self, data_dir, on_rules, never_block_domains=(), fetch=default_fetch, url: str = EASYLIST_URL,
                  first_delay: float = FIRST_UPDATE_DELAY_SECONDS, interval: float = UPDATE_INTERVAL_SECONDS,
-                 retry: float = RETRY_SECONDS):
+                 retry: float = RETRY_SECONDS, skip_saved: bool = False):
         self.data_dir = Path(data_dir)
         self.on_rules = on_rules
         self.never_block_domains = tuple(never_block_domains)
@@ -99,6 +102,9 @@ class FilterListAgent:
         self.list_sha256 = ""
         self.fetched_at = 0.0
         self.loaded = threading.Event()
+        #: Shranjeni seznam je ze preveden (WebKit ga nalozi iz shrambe): ob zagonu ga ne pretvarjamo znova
+        #: (pretvorba EasyList v Pythonu stane ~150 MiB RAM-a, ki ostanejo procesu).
+        self.skip_saved = skip_saved
 
     # -- files -----------------------------------------------------------------------------------
     @property
@@ -117,14 +123,10 @@ class FilterListAgent:
             return {}
 
     def _write(self, data: bytes, etag: str, last_modified: str) -> None:
-        self.data_dir.mkdir(parents=True, exist_ok=True)
-        tmp = self.list_path.with_suffix(".tmp")
-        tmp.write_bytes(data)
-        os.replace(tmp, self.list_path)
+        # Kot podpisani seznam groznj: fsync pred zamenjavo, da izpad elektrike ne pusti pol datoteke.
+        _atomic_write(self.list_path, data)
         meta = {"sha256": _sha256(data), "etag": etag, "last_modified": last_modified, "fetched_at": time.time(), "url": self.url}
-        tmp = self.meta_path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(meta), "utf-8")
-        os.replace(tmp, self.meta_path)
+        _atomic_write(self.meta_path, json.dumps(meta).encode("utf-8"))
 
     # -- lifecycle -------------------------------------------------------------------------------
     def start(self) -> bool:
@@ -139,7 +141,10 @@ class FilterListAgent:
 
     def _run(self) -> None:
         try:
-            self.load_saved()
+            if not self.skip_saved:
+                self.load_saved()
+            else:
+                self.list_sha256 = str(self._read_meta().get("sha256") or "")
         except Exception as exc:  # noqa: BLE001 - a broken cache must never break start-up
             self.last_error = f"{exc.__class__.__name__}: {exc}"
         finally:
@@ -192,5 +197,33 @@ class FilterListAgent:
         self.list_sha256 = _sha256(data)
         self.on_rules(webkit_filters.to_json(rules), source)
 
+    def saved_sha256(self) -> str:
+        """SHA-256 shranjenega seznama iz meta podatkov (brez branja in pretvarjanja seznama)."""
+        return str(self._read_meta().get("sha256") or "") if self.list_path.is_file() else ""
+
     def status(self) -> dict:
         return {"rules": self.rule_count, "fetched_at": self.fetched_at, "last_error": self.last_error, "sha256": self.list_sha256[:16]}
+
+
+def pocisti_zacasne_filtre(mapa, starost_s: float = 3600.0) -> int:
+    """Odstrani zapuscene zacasne datoteke prevajanja WebKit (ContentRuleList-XXXXXX), ki ostanejo, ce se program
+    konca med prevajanjem (12. 10. 2026: 15 datotek, 195 MB). Prevedeni seznami (ContentRuleList-<id>) ostanejo;
+    datoteke, mlajse od ure, tudi (morda se ravno prevajajo)."""
+    import re
+    import time as _time
+    izbrisanih = 0
+    try:
+        imena = os.listdir(mapa)
+    except OSError:
+        return 0
+    for ime in imena:
+        if not re.fullmatch(r"ContentRuleList-[A-Za-z0-9]{6}", ime):
+            continue
+        pot = os.path.join(mapa, ime)
+        try:
+            if _time.time() - os.path.getmtime(pot) >= starost_s:
+                os.remove(pot)
+                izbrisanih += 1
+        except OSError:
+            continue
+    return izbrisanih
