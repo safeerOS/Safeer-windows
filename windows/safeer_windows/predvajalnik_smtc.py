@@ -49,6 +49,10 @@ class SafeerSmtc:
         self._most = None
         self._zeton = None
         self._zadnji_p: dict = {}
+        #: Zaprt pred koncem uvoza winrt (4-6 s iz izvora): _po_uvozu ne naredi nicesar (naloga 13: prej AttributeError
+        #: na pospravljenem predmetu in sesutje procesa pri izpisu sledi).
+        self._zaprto = False
+        self._priprava = None
         if not na_voljo():
             _log.info("SMTC ni na voljo (ni Windows ali manjkajo paketi winrt) - medijske tipke delujejo le s fokusom okna")
             return
@@ -78,7 +82,7 @@ class SafeerSmtc:
 
     def _po_uvozu(self, ok: bool) -> None:
         """GUI nit: winrt je uvozen - prijava v SMTC in prenos zadnjega znanega stanja."""
-        if not ok or self.pogon is None:
+        if not ok or getattr(self, "_zaprto", True) or getattr(self, "pogon", None) is None:
             return
         try:
             self._zazeni()
@@ -121,6 +125,13 @@ class SafeerSmtc:
         _log.info("SMTC: aktiven (%s)", self.ime)
 
     def zapri(self) -> None:
+        self._zaprto = True
+        priprava = getattr(self, "_priprava", None)
+        if priprava is not None:
+            try:
+                priprava.koncano.disconnect(self._po_uvozu)
+            except (RuntimeError, TypeError):
+                pass
         if not self.aktiven:
             return
         try:

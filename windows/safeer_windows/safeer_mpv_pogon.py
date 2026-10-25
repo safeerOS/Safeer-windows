@@ -168,10 +168,13 @@ def _pripravi_pot() -> None:
         os.path.join(tu, "vendor", "mpv"),                       # ob modulu (izdaja)
         os.path.join(tu, "libmpv"),
         os.path.join(os.path.dirname(os.path.dirname(tu)), "vendor", "mpv"),   # koren aplikacije
-        os.path.join(os.environ.get("USERPROFILE", ""), "Desktop", "vendor", "safeer-r1"),  # prototip r1
-        os.path.join(os.environ.get("USERPROFILE", ""), "Desktop", "vendor", "mpv"),  # prototip
-        os.path.join(os.environ.get("USERPROFILE", ""), "Desktop", "libmpv"),          # prototip (stari)
     ]
+    if os.environ.get("SAFEER_RAZVOJ") == "1":
+        # Prototipi na Namizju samo za razvoj: v paketu bi nepopolna priloga sicer nalozila DLL z Namizja
+        # (podtaknjena libmpv-2.dll; pomocnik, naloga 13, 25. 10. 2026).
+        dom = os.environ.get("USERPROFILE", "")
+        kandidati += [os.path.join(dom, "Desktop", "vendor", "safeer-r1"), os.path.join(dom, "Desktop", "vendor", "mpv"),
+                      os.path.join(dom, "Desktop", "libmpv")]
     for d in kandidati:
         if d and os.path.isfile(os.path.join(d, "libmpv-2.dll")):
             STANJE["mapa"] = d

@@ -31,5 +31,36 @@ class Smtc(unittest.TestCase):
         self.assertEqual(smtc._status({"stanje": "premor"}), "Paused")
 
 
+    def test_zaprt_pred_uvozom_winrt(self):
+        """Naloga 13 (pomocnik): okno zaprto pred koncem uvoza winrt - _po_uvozu ne naredi nicesar (prej
+        AttributeError in sesutje procesa)."""
+        s = smtc.SafeerSmtc.__new__(smtc.SafeerSmtc)
+        s.pogon, s.aktiven, s._zadnji_p, s._zaprto, s._priprava = LazenPogon(), False, {"stanje": "predvaja"}, False, None
+        zagnan = []
+        s._zazeni = lambda: zagnan.append(1)
+        s.zapri()
+        s._po_uvozu(True)
+        self.assertEqual(zagnan, [])
+        prazen = smtc.SafeerSmtc.__new__(smtc.SafeerSmtc)      # brez atributov (pospravljen predmet)
+        prazen._po_uvozu(True)
+
+
+class PredvajalnikVir(unittest.TestCase):
+    def test_naslov_brez_poizvedbe(self):
+        """Naslov okna in SMTC: samo ime datoteke - poizvedba lahko nosi zeton (naloga 13)."""
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from safeer_windows import safeer_predvajalnik as p
+        self.assertEqual(p.naslov_vira("https://x.example/film.mkv?token=skrivno#t=1"), "film.mkv")
+        self.assertEqual(p.naslov_vira("https://x.example/"), "x.example")
+        self.assertEqual(p.naslov_vira("http://h/pot/ime%20datoteke.mp4?x=1"), "ime datoteke.mp4")
+
+    def test_libmpv_z_namizja_samo_za_razvoj(self):
+        vir = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "safeer_windows",
+                                "safeer_mpv_pogon.py"), encoding="utf-8").read()
+        zacetek = vir.index("def _pripravi_pot")
+        telo = vir[zacetek:vir.index("for d in kandidati", zacetek)]
+        self.assertLess(telo.index('SAFEER_RAZVOJ'), telo.index('"Desktop"'))   # Namizje samo pod zastavico
+
+
 if __name__ == "__main__":
     unittest.main()

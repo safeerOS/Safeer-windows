@@ -43,6 +43,21 @@ def _uri_iz(vnos: str) -> str:
     return os.path.abspath(v)
 
 
+
+def naslov_vira(uri: str) -> str:
+    """Naslov za okno in sistemske medijske kontrole: samo ime datoteke, brez poizvedbe in sidra (naslov lahko nosi
+    zeton; pomocnik, naloga 13). Brez imena v poti: gostitelj."""
+    import urllib.parse
+    uri = str(uri or "")
+    if "://" not in uri:
+        return os.path.basename(uri)
+    try:
+        deli = urllib.parse.urlsplit(uri)
+    except ValueError:
+        return ""
+    ime = os.path.basename(urllib.parse.unquote(deli.path.rstrip("/")))
+    return ime or (deli.hostname or "")
+
 class SafeerPredvajalnikOkno(QMainWindow):
     def __init__(self, ustvari_pogon=None):
         super().__init__()
@@ -182,7 +197,7 @@ class SafeerPredvajalnikOkno(QMainWindow):
             uri = _uri_iz(v)
             if uri.lower().endswith(_PRIPONE_PODNAPISOV):
                 self.pred.pogon.nalozi_podnapis(uri); continue
-            self.pred.pogon.dodaj(uri, predvajaj=(n == 0), naslov=os.path.basename(uri) if "://" not in uri else uri)
+            self.pred.pogon.dodaj(uri, predvajaj=(n == 0), naslov=naslov_vira(uri))
             n += 1
         if n:
             self.statusBar().showMessage(f"Dodano: {n}", 3000)
