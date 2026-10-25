@@ -1,6 +1,33 @@
 {
- "opis": "Izjeme preverbe utrjenosti PE (windows/tools/pe_utrjenost.py). Izmerjeno 25. 10. 2026 na namescenem paketu 1.0.51 (testni PC, 111 datotek). Vsaka izjema ima razlog; nova datoteka brez zascite in brez izjeme ustavi gradnjo. ASLR, DEP in HEVA (64-bit) niso nikoli izjema.",
+ "opis": "Izjeme preverbe utrjenosti PE (windows/tools/pe_utrjenost.py). Izmerjeno 25. 10. 2026 na namescenem paketu 1.0.51 (testni PC, 111 datotek). Vsaka izjema ima razlog; nova datoteka brez zascite in brez izjeme ustavi gradnjo. ASLR, DEP in HEVA (64-bit) niso nikoli izjema. Tuje knjiznice, ki jih ne gradimo in nimajo CFG/CET (FFmpeg v PySide6, OpenBLAS v numpy), imajo izjemo pripeto na razlicico in SHA-256 (koordinator 25. 10. 2026: ne tiho).",
  "izjeme": {
+  "*/pyside6/[as][vw]*.dll": {
+   "dovoli": [
+    "CFG",
+    "CET"
+   ],
+   "razlicica": "PySide6 6.11.2 (kolo pyside6_addons-6.11.2-cp310-abi3-win_amd64)",
+   "sha256": {
+    "avcodec-61.dll": "3823070d38dc7dce277ccec165f99bbc02ad96bacc9afde1a00818e9d8350eb6",
+    "avformat-61.dll": "87ea82ab0620ea817c6bab0a4ff0f91a16080842f9b3208c49238458b99754d1",
+    "avutil-59.dll": "9d744dc6d44189a690d30b491b53aec1a9822a59aeb7b6f79253d219c0f0862d",
+    "swresample-5.dll": "2f709b4d0ca771b22f2fa61ce26355c85f49a61203de041e30acb499cc2ad11a",
+    "swscale-8.dll": "91fec4aa86bcac65778f8974ceea58fa1bf8696ad693fc4b478a7e2d43ade6bb"
+   },
+   "razlog": "FFmpeg, ki ga prinese PySide6 za QtMultimedia: rezervni predvajalnik (safeer_qt_pogon.py, ko libmpv ni na voljo - safeer_pogon_izbira.py). Tuja gradnja (Qt), ki je ne gradimo: /GS ima, brez /guard:cf in /CETCOMPAT. Izmerjeno v CI 25. 10. 2026 (tek 40200508307). Pripeto na SHA-256 iz kolesa: nova razlicica PySide6 ustavi gradnjo (vsota je v dnevniku), dokler je ne pregledamo in vsot ne posodobimo. Nadgradnja: rezerva brez QtMultimedia ali QtMultimedia z nasim utrjenim FFmpeg"
+  },
+  "*/numpy.libs/libscipy_openblas64_*.dll": {
+   "dovoli": [
+    "CFG",
+    "GS",
+    "CET"
+   ],
+   "razlicica": "numpy 2.5.4 (kolo numpy-2.5.4-cp312-cp312-win_amd64; pripeto v windows/requirements.txt)",
+   "sha256": {
+    "libscipy_openblas64_-ed4f167a5330424524f45258e7ca2c8d.dll": "ed4f167a5330424524f45258e7ca2c8d7f03c0cba1f30ee4985553ac1f88ecf8"
+   },
+   "razlog": "OpenBLAS iz kolesa numpy (MinGW/gfortran: brez /guard:cf, /GS in /CETCOMPAT). numpy rabita dxcam (zajem zaslona DXGI, ~2 ms na sliko namesto ~34 ms z GDI) in soundcard (zvok racunalnika pri deljenju zaslona); numpy.linalg ga nalozi ob uvozu numpy, zato ga brez numpy ne moremo izpustiti. Izmerjeno v CI 25. 10. 2026. Pripeto na SHA-256: nova razlicica ustavi gradnjo, dokler je ne pregledamo"
+  },
   "*/av.libs/*.dll": {
    "dovoli": [
     "CFG",

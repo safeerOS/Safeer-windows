@@ -9,6 +9,7 @@ Preverba paketa v CI (lastnik, 21. 10. 2026: vsaka nasa knjiznica in program sta
 ASLR, DEP in HEVA (64-bit) mora imeti VSAKA datoteka; nasi programi se CFG, /GS in CET; tuje knjiznice brez katere
 od teh samo z zapisano izjemo in razlogom (windows/tools/pe_izjeme.json). Manjkajoca zascita brez izjeme ustavi gradnjo.
 """
+import hashlib
 import json
 import os
 import struct
@@ -113,18 +114,37 @@ def je_go(pot):
     return b"\xff Go buildinf:" in p or b"Go build ID:" in p
 
 
-def _izjema(ime, izjeme, pot=""):
-    """(manjkajoce dovoljene zascite, razlog) iz seznama izjem: vzorec fnmatch na ime ali na pot (z /, male crke);
-    prvi ujemajoci se vzorec velja."""
+def sha256(pot):
+    h = hashlib.sha256()
+    with open(pot, "rb") as f:
+        for kos in iter(lambda: f.read(1 << 20), b""):
+            h.update(kos)
+    return h.hexdigest()
+
+
+def _izjema(ime, izjeme, pot="", sha=None):
+    """(manjkajoce dovoljene zascite, razlog, opozorilo) iz seznama izjem: vzorec fnmatch na ime ali na pot (z /, male
+    crke); prvi ujemajoci se vzorec velja. Izjema s kljucem "sha256" ({ime: vsota}) velja samo za datoteko s pripeto
+    vsoto (tuja knjiznica, ki je ne gradimo - npr. FFmpeg v PySide6, OpenBLAS v numpy): nova razlicica ustavi gradnjo,
+    dokler je kdo ne pregleda in vsote ne posodobi (koordinator 25. 10. 2026: izjema z razlogom, ne tiho).
+    `sha` je vsota datoteke ali funkcija, ki jo izracuna (samo, ko jo izjema zahteva)."""
     import fnmatch
     pot = str(pot or ime).replace("\\", "/").lower()
     for vzorec, podatki in izjeme.items():
         if fnmatch.fnmatch(ime.lower(), vzorec.lower()) or ("/" in vzorec and fnmatch.fnmatch(pot, vzorec.lower())):
-            return set(podatki.get("dovoli", [])), str(podatki.get("razlog", ""))
-    return set(), ""
+            pripete = podatki.get("sha256")
+            if pripete is not None:
+                vsota = (sha() if callable(sha) else sha) or ""
+                dovoljene = pripete.get(ime.lower(), []) if isinstance(pripete, dict) else []
+                dovoljene = [dovoljene] if isinstance(dovoljene, str) else list(dovoljene)
+                if vsota.lower() not in [str(d).lower() for d in dovoljene]:
+                    return set(), "", "SHA-256 %s ni pripeta v izjemi %s (%s) - nova razlicica: preglej" % (
+                        vsota or "?", vzorec, podatki.get("razlicica", ""))
+            return set(podatki.get("dovoli", [])), str(podatki.get("razlog", "")), ""
+    return set(), "", ""
 
 
-def odlocitev(ime, izid, go, izjeme, pot=""):
+def odlocitev(ime, izid, go, izjeme, pot="", sha=None):
     """Kaj manjka in ni izjema (prazen seznam = v redu) in katere izjeme so bile uporabljene (z razlogom)."""
     if "napaka" in izid:
         return ["ni PE: " + izid["napaka"]], []
@@ -132,14 +152,16 @@ def odlocitev(ime, izid, go, izjeme, pot=""):
     if ime.lower() in NASE:
         zahtevano += list(OBVEZNO_NASIM)
     manjka = [z for z in zahtevano if not izid.get(z)]
-    dovoli, razlog = _izjema(ime, izjeme, pot)
-    if go:
-        dovoli |= {"CFG", "GS", "CET"}
-        razlog = "Go: povezovalnik ne podpira /guard:cf, /GS in /CETCOMPAT (ASLR, HEVA, DEP ima)"
     if ime.lower() not in NASE:
         # Tuje knjiznice: CFG, /GS in CET se izmerijo; brez njih so dovoljene samo z zapisano izjemo.
         manjka += [z for z in ("CFG", "GS", "CET") if not izid.get(z) and z not in manjka]
+    dovoli, razlog, opozorilo = _izjema(ime, izjeme, pot, sha) if manjka else (set(), "", "")
+    if go:
+        dovoli |= {"CFG", "GS", "CET"}
+        razlog = "Go: povezovalnik ne podpira /guard:cf, /GS in /CETCOMPAT (ASLR, HEVA, DEP ima)"
     napake = [z for z in manjka if z not in dovoli or z in OBVEZNO_VSEM]
+    if napake and opozorilo:
+        napake.append(opozorilo)
     uporabljene = [z for z in manjka if z in dovoli and z not in OBVEZNO_VSEM]
     return napake, ([{"manjka": uporabljene, "razlog": razlog}] if uporabljene else [])
 
@@ -161,7 +183,7 @@ def preveri(poti, izjeme):
             except Exception as e:  # noqa: BLE001 - neberljiva datoteka je napaka preverbe
                 izid, go = {"napaka": str(e)}, False
             rel = os.path.relpath(pot, arg) if os.path.isdir(arg) else pot
-            n, u = odlocitev(os.path.basename(pot), izid, go, izjeme, rel)
+            n, u = odlocitev(os.path.basename(pot), izid, go, izjeme, rel, sha=lambda p=pot: sha256(p))
             porocilo[pot] = dict(izid, go=go, napake=n, izjeme=u)
             napak += bool(n)
     return porocilo, napak

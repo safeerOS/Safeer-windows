@@ -70,5 +70,46 @@ class DatotekeVRepozitoriju(unittest.TestCase):
         self.assertIn("--preveri", ci)
 
 
+
+class PripetaIzjema(unittest.TestCase):
+    """Tuja knjiznica brez CFG/CET (FFmpeg v PySide6, OpenBLAS v numpy): izjema velja samo za pripeto SHA-256 - nova
+    razlicica ustavi gradnjo in v dnevniku pove vsoto (CI 40200508307, 25. 10. 2026)."""
+    BREZ = dict(POPOLNO, CFG=False, CET=False)
+
+    def test_ffmpeg_pyside6_po_poti_v_ci(self):
+        pot = "SafeerBrowser\\_internal\\PySide6\\avcodec-61.dll"
+        prava = IZJEME["*/pyside6/[as][vw]*.dll"]["sha256"]["avcodec-61.dll"]
+        napake, izjeme = pe.odlocitev("avcodec-61.dll", self.BREZ, False, IZJEME, pot, sha=lambda: prava)
+        self.assertEqual((napake, izjeme[0]["manjka"]), ([], ["CFG", "CET"]))
+        self.assertIn("QtMultimedia", izjeme[0]["razlog"])
+        napake, _ = pe.odlocitev("avcodec-61.dll", self.BREZ, False, IZJEME, pot, sha=lambda: "ab" * 32)
+        self.assertEqual(napake[:2], ["CFG", "CET"])
+        self.assertIn("ab" * 32, napake[2])                       # nova vsota je v dnevniku CI
+        # Tudi /GS manjka: izjema ga ne dovoli.
+        napake, _ = pe.odlocitev("swscale-8.dll", dict(self.BREZ, GS=False), False, IZJEME,
+                                 "SafeerOS/_internal/PySide6/swscale-8.dll",
+                                 sha=lambda: IZJEME["*/pyside6/[as][vw]*.dll"]["sha256"]["swscale-8.dll"])
+        self.assertEqual(napake, ["GS"])
+
+    def test_openblas_numpy(self):
+        ime = "libscipy_openblas64_-ed4f167a5330424524f45258e7ca2c8d.dll"
+        izj = IZJEME["*/numpy.libs/libscipy_openblas64_*.dll"]
+        brez = dict(self.BREZ, GS=False)
+        pot = "SafeerOS\\_internal\\numpy.libs\\" + ime
+        napake, izjeme = pe.odlocitev(ime, brez, False, IZJEME, pot, sha=lambda: izj["sha256"][ime])
+        self.assertEqual(napake, [])
+        self.assertIn("dxcam", izjeme[0]["razlog"])
+        napake, _ = pe.odlocitev(ime, brez, False, IZJEME, pot, sha=lambda: "00" * 32)
+        self.assertTrue(napake and "ni pripeta" in napake[-1])
+
+    def test_vsota_datoteke_samo_ko_jo_izjema_rabi(self):
+        klici = []
+        pe.odlocitev("Qt6Core.dll", dict(POPOLNO, CET=False), False, IZJEME, "x/Qt6Core.dll",
+                     sha=lambda: klici.append(1) or "")
+        pe.odlocitev("avcodec-61.dll", POPOLNO, False, IZJEME, "x/PySide6/avcodec-61.dll",
+                     sha=lambda: klici.append(1) or "")
+        self.assertEqual(klici, [])                                # brez pripete izjeme ali brez manjkajoce zascite
+
+
 if __name__ == "__main__":
     unittest.main()
