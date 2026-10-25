@@ -10,6 +10,8 @@
     "core/debrid_pravila.py",
     "core/default_browser.py",
     "core/dlna_zvocniki.py",
+    "core/dovoljenja_strani.py",
+    "core/drm.py",
     "core/en_proces.py",
     "core/filter_lists.py",
     "core/gneca.py",

@@ -598,6 +598,27 @@ document.addEventListener('error', function (e) {
 """
 
 
+def _drm_skripta() -> str:
+    from core import drm
+    # Ovoj iz core/drm.SKRIPTA javi zahtevo z dogodkom v DOM; tu (namesto locenega sveta WebKitGTK) ga poslje mostu
+    # Safeer z zetonom - stran sama mostu ne more poslati nicesar, sprozi lahko le ponudbo, o kateri odloci uporabnik.
+    return drm.SKRIPTA + r"""
+(function () {
+  if (window.top !== window) return;
+  var poslano = {};
+  document.addEventListener("__safeerDrm", function (e) {
+    var s = String((e && e.detail) || "").slice(0, 64);
+    if (!/widevine|playready|com\.apple\.fps|fairplay/i.test(s) || poslano[s]) return;
+    poslano[s] = 1;
+    __safeerPost({action: 'drm_zahteva', sistem: s});
+  }, true);
+})();
+"""
+
+
+DRM_SCRIPT = _drm_skripta()
+
+
 def script_specs(settings: SettingsStore) -> List[Dict[str, Any]]:
     """Script list mirroring the Linux edition (name, source, start|ready, all_frames)."""
     auth = list(adblock.AUTH_SCRIPT_EXCLUSIONS)
@@ -612,6 +633,9 @@ def script_specs(settings: SettingsStore) -> List[Dict[str, Any]]:
         })
 
     add("safeer-media-kodeki", MEDIA_KODEKI_SCRIPT, None, ["safeer://*"], True, True)
+    # Zasciten video kot na Linuxu (core/drm.py, skupna koda): ovoj requestMediaKeySystemAccess javi zahtevo za
+    # Widevine/PlayReady takoj - Splet ponudi Safeer DRM, uporabnik odloci (dovoljenja_strani »drm«). Samo glavni okvir.
+    add("safeer-drm", DRM_SCRIPT, ["https://*"], None, True, False)
     if settings.get("gpc_dnt_enabled"):
         add("safeer-gpc", adblock.GPC_AND_DNT_SCRIPT, None, auth, True, True)
     if settings.get("adblock_enabled"):

@@ -856,10 +856,11 @@ def nastavi_samozagon(vklop: bool) -> bool:
 
 
 # ---------------------------------------------------------------------------- DRM storitve
-# Vgrajena pogona (Qt WebEngine, WebView2 v Safeer OS) nimata Widevine/PlayReady, zato
-# Netflix & co. v Spletu ne morejo predvajati. Microsoft Edge na Windows ima Widevine
-# (preverjeno z requestMediaKeySystemAccess), zato te storitve odpremo v Edge v nacinu
-# aplikacije: okno brez naslovne vrstice, prijave ostanejo v uporabnikovem Edge profilu.
+# Storitve s seznama se odprejo v Safeer DRM (Widevine, vdelan v okno Spleta/brskalnika, stalen profil SafeerDRMProfil -
+# prijava ostane); Microsoft Edge v nacinu aplikacije je samo rezerva, kadar Safeer DRM ni na voljo. Zaznava zascitenega
+# videa na drugih straneh je kot na Linuxu (core/drm.SKRIPTA v Spletu, policy.DRM_SCRIPT): stran, ki zahteva
+# Widevine/PlayReady, dobi ponudbo »Predvajaj v Safeer DRM«, odloci uporabnik (dovoljenja_strani »drm«). Seznam ostane
+# za stalen profil storitev in neposredno odpiranje iz Medijskega centra (25. 10. 2026).
 DRM_DOMENE = (
     "netflix.com", "primevideo.com", "amazon.com/gp/video", "disneyplus.com", "max.com",
     "hbomax.com", "skyshowtime.com", "tv.apple.com", "music.apple.com", "voyo.si",

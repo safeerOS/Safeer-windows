@@ -864,8 +864,12 @@ class SafeerBrowserApp(QObject):
     # -- start page bridge --------------------------------------------------
     def on_bridge_message(self, page: SafeerPage, payload: Dict[str, Any]) -> None:
         action = payload.get("action")
-        if action in ("media_unsupported", "increment_ads") and not policy.zeton_veljaven(payload):
+        if action in ("media_unsupported", "increment_ads", "drm_zahteva") and not policy.zeton_veljaven(payload):
             return   # sporocilo ni od skripte Safeer (brez zetona): stran ne sme sprozati teh dejanj
+        if action == "drm_zahteva":
+            # Stran je zahtevala Widevine/PlayReady (core/drm.SKRIPTA): vrstica z gumbom »Predvajaj v Safeer DRM«.
+            page.window_ref.drm_ponudi(page, str(payload.get("sistem") or "")[:64])
+            return
         if action == "media_unsupported":
             # Skripta Safeer na kateri koli strani: pogon nima zapisa, ki ga video zahteva. Splet ponudi predvajanje v Safeer predvajalniku.
             page.window_ref.oznaci_nepodprt_video(page, bool(payload.get("napaka")))
@@ -1273,8 +1277,63 @@ class BrowserWindow(QMainWindow):
             view.setProperty("safeer_video_samodejno", self._brez_sidra(url))
             self.na_predvajalnik(url)
 
+    def drm_ponudi(self, page, sistem: str = "") -> None:
+        """Stran zahteva zasciten video (Widevine/PlayReady, core/drm.SKRIPTA - kot Linux _drm_ponudi): vrstica nad
+        stranjo z gumbom »Predvajaj v Safeer DRM«. Nic se ne zazene samo; ob kliku velja nastavitev strani »drm«."""
+        view = next((v for v in self.views() if v.page() is page), None)
+        if view is None:
+            return
+        url = view.url().toString()
+        if not url.startswith("https://") or view.property("safeer_drm_zaprto") == self._brez_sidra(url):
+            return
+        view.setProperty("safeer_drm", self._brez_sidra(url))
+        self._osvezi_video_vrstico()
+
+    def _drm_besedilo(self, kljuc: str, **vrednosti) -> str:
+        from core import dovoljenja_strani, drm
+        jezik = str(getattr(self.app, "lang", "en") or "en")[:2]
+        vir = getattr(self.app, "jezik_vmesnika", None)
+        if vir is not None:
+            try:
+                jezik = str(vir())[:2]
+            except Exception:  # noqa: BLE001
+                pass
+        for tabela in (drm.BESEDILA, dovoljenja_strani.BESEDILA):
+            b = tabela.get(jezik, tabela["en"]).get(kljuc) or tabela["en"].get(kljuc)
+            if b:
+                return b.format(**vrednosti) if vrednosti else b
+        return kljuc
+
+    def _je_drm_ponudba(self, view) -> bool:
+        return bool(view is not None and view.property("safeer_drm")
+                    and view.property("safeer_drm") == self._brez_sidra(view.url().toString()))
+
+    def _drm_klik(self, view) -> None:
+        """»Predvajaj v Safeer DRM«: nastavitev strani »zavrni« velja, »vprasaj« vprasa in si zapomni (kot Linux)."""
+        from core import dovoljenja_strani
+        url = view.url().toString()
+        odl = dovoljenja_strani.odlocitev(self.app.settings, url, ["drm"])
+        if odl == "zavrni":
+            return
+        if odl == "vprasaj":
+            vprasanje = self._drm_besedilo("dv_zahteva", stran=dovoljenja_strani.gostitelj(url),
+                                           kaj=self._drm_besedilo("dv_drm").lower())
+            odgovor = QMessageBox.question(self, policy.APP_NAME, vprasanje)
+            dovoli = odgovor == QMessageBox.StandardButton.Yes
+            dovoljenja_strani.zapomni(self.app.settings, url, ["drm"], "dovoli" if dovoli else "zavrni")
+            if not dovoli:
+                return
+        if not self.odpri_drm(url, vsiljeno=True):
+            print("[SafeerBrowser] Safeer DRM ni na voljo za to stran", flush=True)
+
     def _osvezi_video_vrstico(self) -> None:
         view = self.current_view()
+        if self._je_drm_ponudba(view):
+            gost = (QUrl(view.url()).host() or "")
+            self.video_napis.setText(self._drm_besedilo("drm_zahteva", stran=gost))
+            self.video_gumb.setText(self._drm_besedilo("drm_predvajaj"))
+            self.video_vrstica.setVisible(True)
+            return
         vidno = bool(view is not None and self.na_predvajalnik is not None and view.property("safeer_video")
                      and view.property("safeer_video") == self._brez_sidra(view.url().toString()))
         if vidno:
@@ -1284,6 +1343,9 @@ class BrowserWindow(QMainWindow):
 
     def _zapri_video_vrstico(self) -> None:
         view = self.current_view()
+        if self._je_drm_ponudba(view):
+            view.setProperty("safeer_drm_zaprto", self._brez_sidra(view.url().toString()))
+            view.setProperty("safeer_drm", "")
         if view is not None:
             view.setProperty("safeer_video_zaprto", self._brez_sidra(view.url().toString()))
             view.setProperty("safeer_video", "")
@@ -1291,6 +1353,11 @@ class BrowserWindow(QMainWindow):
 
     def _predvajaj_v_predvajalniku(self) -> None:
         view = self.current_view()
+        if self._je_drm_ponudba(view):
+            view.setProperty("safeer_drm", "")
+            self._osvezi_video_vrstico()
+            self._drm_klik(view)
+            return
         if view is not None and self.na_predvajalnik is not None:
             self.na_predvajalnik(view.url().toString())
 
@@ -2349,9 +2416,11 @@ class BrowserWindow(QMainWindow):
         except Exception as e:  # noqa: BLE001
             print(f"[SafeerBrowser] Safeer DRM rezerva: {e}", flush=True)
 
-    def odpri_drm(self, url: str) -> bool:
-        """Storitev z DRM odpre v Safeer DRM nad zavihki tega okna. False = ni storitev z DRM ali ni na voljo."""
-        if not self._je_drm(url):
+    def odpri_drm(self, url: str, vsiljeno: bool = False) -> bool:
+        """Storitev z DRM odpre v Safeer DRM nad zavihki tega okna. False = ni storitev z DRM ali ni na voljo.
+        `vsiljeno`: katera koli stran https, za katero je uporabnik izbral »Predvajaj v Safeer DRM« (zahteva EME)."""
+        storitev = self._je_drm(url)
+        if not storitev and not (vsiljeno and str(url or "").startswith("https://")):
             return False
         try:
             from . import webview2_media
@@ -2363,7 +2432,8 @@ class BrowserWindow(QMainWindow):
                 self.tabs._stack.installEventFilter(self)
                 # Drug zavihek ali nov zavihek: predvajalnik se zapre (ne igra skrit v ozadju).
                 self.tabs.currentChanged.connect(lambda _i: self._drm.isVisible() and self._drm.close_and_home())
-            if not self._drm.open_url(url, stran=True, storitev=True):
+            # Stalen profil (prijava ostane) samo za storitve s seznama DRM_DOMENE; druge strani v zacasnem profilu.
+            if not self._drm.open_url(url, stran=True, storitev=storitev):
                 return False
         except Exception as e:  # noqa: BLE001
             print(f"[SafeerBrowser] Safeer DRM: {e}", flush=True)
