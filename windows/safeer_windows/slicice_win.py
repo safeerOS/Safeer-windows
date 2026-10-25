@@ -32,7 +32,7 @@ NAJVEC_BAJTOV = 200 * 1024 * 1024  # predpomnilnik na disku
 NAJVEC_SLIKE_B = 80 * 1024 * 1024  # vecjih slik ne dekodiramo (slicice ni, vmesnik pokaze ikono)
 NAJVEC_PIK = 50_000_000            # kot Linux core/link_datoteke: ~200 MB RGBA po pomanjsanju JPEG
 NAJVEC_ODGOVORA_B = 2 * 1024 * 1024  # slicica z naprave (Android: 256 px JPEG, nekaj deset kB)
-NAJVEC_NA_ZAHTEVO = 400            # toliko slicic vmesnik zahteva naenkrat (mapa ima najvec 500 vnosov)
+NAJVEC_NA_ZAHTEVO = 600            # toliko slicic vmesnik zahteva naenkrat (stran mape ima najvec 500 vnosov)
 DELAVCEV = 2                       # hkrati: mapa s sto videi ne zasede vseh jeder in diska
 ROK_VIDEA_S = 15
 ROK_NAPRAVE_S = 8.0
@@ -174,6 +174,16 @@ def pocisti(najvec_bajtov: int = NAJVEC_BAJTOV) -> int:
             n += 1
         except OSError:
             pass
+    # Zacasne datoteke (.jpg.<nit>.tmp), ki so ostale po sesutju, starejse od ure (pregled N6).
+    try:
+        meja = time.time() - 3600
+        for ime in os.listdir(m):
+            p = os.path.join(m, ime)
+            if ime.endswith(".tmp") and os.path.getmtime(p) < meja:
+                os.remove(p)
+                n += 1
+    except OSError:
+        pass
     return n
 
 
@@ -191,8 +201,8 @@ def _slika_pillow(pot: str, rob: int) -> Optional[bytes]:
                 pass
             if im.size[0] * im.size[1] > NAJVEC_PIK:
                 return b""
+            im.thumbnail((rob, rob))                 # najprej pomanjsaj, nato obrni (brez kopije v polni velikosti)
             im = ImageOps.exif_transpose(im)
-            im.thumbnail((rob, rob))
             if im.mode not in ("RGB", "L"):
                 im = im.convert("RGB")
             izhod = io.BytesIO()
@@ -240,22 +250,113 @@ def _pot_ffmpeg() -> str:
     return ""
 
 
+def slika_qt(pot: str, rob: int) -> Optional[bytes]:
+    """Slicica slike s Qt (rezerva brez Pillow - tudi za strežnik core/link_datoteke.REZERVA_SLIKE v paketu Windows,
+    ki je zgrajen brez PIL)."""
+    try:
+        return _slika_qt(pot, rob)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+# ------------------------------------------------------------------ ffmpeg v »poslu« (Job Object)
+_posel = [None]
+_posel_kljuc = threading.Lock()
+
+
+def _posel_windows():
+    """En Job Object z JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE za vse procese ffmpeg za slicice: ko se Safeer OS konca (tudi
+    sesuje), Windows zapre rocaj in ubije vse njegove ffmpeg - ne ostanejo v pomnilniku (pregled 25. 10. 2026, S6).
+    Samo ffmpeg, ne cel Safeer OS: programi, ki jih uporabnik zazene z namizja, morajo zivo ostati."""
+    with _posel_kljuc:
+        if _posel[0] is not None:
+            return _posel[0] or None
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            class _Osnovno(ctypes.Structure):
+                _fields_ = [("PerProcessUserTimeLimit", ctypes.c_int64), ("PerJobUserTimeLimit", ctypes.c_int64),
+                            ("LimitFlags", wintypes.DWORD), ("MinimumWorkingSetSize", ctypes.c_size_t),
+                            ("MaximumWorkingSetSize", ctypes.c_size_t), ("ActiveProcessLimit", wintypes.DWORD),
+                            ("Affinity", ctypes.c_size_t), ("PriorityClass", wintypes.DWORD),
+                            ("SchedulingClass", wintypes.DWORD)]
+
+            class _Io(ctypes.Structure):
+                _fields_ = [(n, ctypes.c_uint64) for n in ("ReadOperationCount", "WriteOperationCount",
+                                                           "OtherOperationCount", "ReadTransferCount",
+                                                           "WriteTransferCount", "OtherTransferCount")]
+
+            class _Razsirjeno(ctypes.Structure):
+                _fields_ = [("BasicLimitInformation", _Osnovno), ("IoInfo", _Io),
+                            ("ProcessMemoryLimit", ctypes.c_size_t), ("JobMemoryLimit", ctypes.c_size_t),
+                            ("PeakProcessMemoryUsed", ctypes.c_size_t), ("PeakJobMemoryUsed", ctypes.c_size_t)]
+            k32 = ctypes.windll.kernel32
+            k32.CreateJobObjectW.restype = wintypes.HANDLE
+            posel = k32.CreateJobObjectW(None, None)
+            info = _Razsirjeno()
+            info.BasicLimitInformation.LimitFlags = 0x2000          # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+            if not posel or not k32.SetInformationJobObject(wintypes.HANDLE(posel), 9, ctypes.byref(info),
+                                                            ctypes.sizeof(info)):
+                _posel[0] = 0
+                return None
+            _posel[0] = posel                                        # rocaj drzimo do konca procesa
+            return posel
+        except Exception:  # noqa: BLE001
+            _posel[0] = 0
+            return None
+
+
+def zazeni_v_poslu(ukaz: list, rok_s: float):
+    """(izhodna koda, stdout) procesa; na Windows v Job Object (ubit ob koncu Safeer OS), ob roku ubit."""
+    zastavice = 0x08000000 if sys.platform == "win32" else 0      # CREATE_NO_WINDOW: brez cmd okna
+    p = subprocess.Popen(ukaz, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                         creationflags=zastavice)
+    if sys.platform == "win32":
+        posel = _posel_windows()
+        if posel:
+            try:
+                import ctypes
+                from ctypes import wintypes
+                ctypes.windll.kernel32.AssignProcessToJobObject(wintypes.HANDLE(posel), wintypes.HANDLE(int(p._handle)))
+            except Exception:  # noqa: BLE001
+                pass
+    try:
+        izhod, _ = p.communicate(timeout=rok_s)
+        return p.returncode, izhod
+    except subprocess.TimeoutExpired:
+        p.kill()
+        try:
+            p.communicate(timeout=2)
+        except Exception:  # noqa: BLE001
+            pass
+        return -1, b""
+
+
 def _video(pot: str, rob: int) -> Optional[bytes]:
     ffmpeg = _pot_ffmpeg()
     if not ffmpeg:
         return None
-    zastavice = 0x08000000 if sys.platform == "win32" else 0      # CREATE_NO_WINDOW: brez cmd okna
+    from core import link_datoteke
     for zamik in ("3", "0"):                         # zacetek je pogosto crn; kratek posnetek da prvo sliko
         try:
-            r = subprocess.run([ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-ss", zamik, "-i", pot,
-                                "-frames:v", "1", "-vf", "scale='min(%d,iw)':-2" % rob, "-f", "image2pipe",
-                                "-vcodec", "mjpeg", "-q:v", "4", "-"],
-                               stdin=subprocess.DEVNULL, capture_output=True, timeout=ROK_VIDEA_S, creationflags=zastavice)
-        except Exception:  # noqa: BLE001 - ffmpeg obstane ali ga ni mogoce zagnati
+            koda, izhod = zazeni_v_poslu(link_datoteke.ukaz_slicice_videa(ffmpeg, pot, zamik, rob), ROK_VIDEA_S)
+        except Exception:  # noqa: BLE001 - ffmpeg ni mogoce zagnati
             return None
-        if r.returncode == 0 and len(r.stdout) > 200:
-            return r.stdout
+        if koda == 0 and len(izhod or b"") > 200:
+            return izhod
     return None
+
+
+#: Datoteke (kljuc predpomnilnika), za katere slicice v tej seji ni bilo mogoce narediti: ne poskusamo znova (S6).
+_ni_slicice: set = set()
+NAJVEC_NI_SLICICE = 5000
+
+
+def _zapomni_neuspeh(ime: str) -> None:
+    if len(_ni_slicice) > NAJVEC_NI_SLICICE:
+        _ni_slicice.clear()
+    _ni_slicice.add(ime)
 
 
 def naredi_lokalno(pot: str, rob: int = ROB) -> str:
@@ -271,6 +372,8 @@ def naredi_lokalno(pot: str, rob: int = ROB) -> str:
     znana = _iz_predpomnilnika(ime)
     if znana:
         return znana
+    if ime in _ni_slicice:
+        return ""
     if vrsta == "slika":
         if s.st_size > NAJVEC_SLIKE_B:
             return ""
@@ -279,7 +382,10 @@ def naredi_lokalno(pot: str, rob: int = ROB) -> str:
             podatki = _slika_qt(pot, rob)
     else:
         podatki = _video(pot, rob)
-    return _shrani(ime, podatki) if podatki else ""
+    if not podatki:
+        _zapomni_neuspeh(ime)
+        return ""
+    return _shrani(ime, podatki)
 
 
 # ------------------------------------------------------------------ naprava v Linku
@@ -301,6 +407,8 @@ def _prenesi_z_naprave(streznik: dict, oznaka: str) -> Optional[bytes]:
         glave = {"X-Safeer-Token": streznik["token"]} if streznik.get("token") else {}
         povezava.request("GET", "/thumb/" + urllib.parse.quote(oznaka, safe=""), headers=glave)
         odgovor = povezava.getresponse()
+        if odgovor.status == 404:
+            return b""                               # naprava slicice nima: v tej seji ne sprasujemo znova
         if odgovor.status != 200:
             return None
         if "image/" not in str(odgovor.getheader("Content-Type") or "image/jpeg"):
@@ -329,7 +437,11 @@ def naredi_z_naprave(id_naprave: str, oznaka: str, spremenjeno: float, velikost:
     znana = _iz_predpomnilnika(ime)
     if znana:
         return znana
+    if ime in _ni_slicice:
+        return ""
     podatki = _prenesi_z_naprave(s, oznaka)
+    if podatki == b"":
+        _zapomni_neuspeh(ime)
     return _shrani(ime, podatki) if podatki else ""
 
 
@@ -349,11 +461,13 @@ class Slicice:
         for i in range(max(1, delavcev)):
             threading.Thread(target=self._delavec, name="safeer-slicice-%d" % i, daemon=True).start()
 
-    def zahtevaj(self, izvor: str, elementi: list, streznik=None) -> dict:
+    def zahtevaj(self, izvor: str, elementi: list, streznik=None, nadaljuj: bool = False) -> dict:
         """Takoj vrne slicice, ki so ze v predpomnilniku ({id: pot}); ostale naredi v ozadju in vsako sporoci
-        z ob_slicici({"izvor", "id", "pot", "generacija"}). `izvor` je »ta« ali id naprave."""
+        z ob_slicici({"izvor", "id", "pot", "generacija"}). `izvor` je »ta« ali id naprave. `nadaljuj`: isti pogled
+        (»Nalozi vec«) - prejsnje zahteve ne preklice."""
         with self._kljuc:
-            self._generacija += 1
+            if not nadaljuj:
+                self._generacija += 1
             generacija = self._generacija
         takoj, delo = {}, []
         for e in list(elementi or [])[:NAJVEC_NA_ZAHTEVO]:

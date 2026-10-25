@@ -160,7 +160,7 @@ class NamizjeQml(QQuickView):
         else:
             # Ta racunalnik: samo absolutne poti do datotek (vmesnik jih dobi iz seznama mape).
             elementi = [e for e in elementi if isinstance(e, dict) and os.path.isabs(str(e.get("pot") or ""))]
-        r = self.slicice.zahtevaj(izvor, elementi, streznik)
+        r = self.slicice.zahtevaj(izvor, elementi, streznik, nadaljuj=bool(len(a) > 3 and a[3] is True))
         return dict(r, slicice={k: QUrl.fromLocalFile(p).toString() for k, p in r["slicice"].items()})
 
     def _jezik(self) -> str:

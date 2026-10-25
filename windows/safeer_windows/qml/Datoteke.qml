@@ -122,13 +122,13 @@ Steklo {
             if (r.server) streznik = r.server
             naslednjiOdmik = Number(r.next_offset || 0)
             elementi = elementi.concat((r.items || []).map(L.vnosNaprave))
-            naloziSlicice()
+            naloziSlicice(true)                  // nadaljevanje: prejsnje slicice se delajo naprej
         })
     }
 
     // ---------------------------------------------------------------- slicice (v ozadju, sproti)
     function izvorSlicic() { return vir.vrsta === "naprava" ? naprava : "ta" }
-    function naloziSlicice() {
+    function naloziSlicice(nadaljuj) {
         if (vir.vrsta === "smeti") return
         var izvor = izvorSlicic()
         var manjka = elementi.filter(function (e) { return L.imaSlicico(e) && !(e.pot in panel.slicice) })
@@ -137,7 +137,7 @@ Steklo {
             return izvor === "ta" ? { pot: e.pot, vrsta: e.vrsta }
                                   : { id: e.id, vrsta: e.vrsta, mime: e.mime, ime: e.ime, spremenjeno: e.spremenjeno, velikost: e.velikost }
         })
-        koren.klic("sliciceNamizja", [izvor, seznam, izvor === "ta" ? null : streznik], function (r) {
+        koren.klic("sliciceNamizja", [izvor, seznam, izvor === "ta" ? null : streznik, nadaljuj === true], function (r) {
             if (r && r.slicice) dodajSlicice(r.slicice)
         })
     }

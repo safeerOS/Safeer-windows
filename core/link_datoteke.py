@@ -634,13 +634,31 @@ CAKAJ_NA_SLICICO_S = 30.0
 NAJVEC_PIK_SLICICE = 50_000_000
 _slicice: "collections.OrderedDict[tuple, bytes]" = collections.OrderedDict()
 _slicice_kljuc = threading.Lock()
+#: Datoteke, za katere slicice ni bilo mogoce narediti (pokvarjena, prevelika, ffmpeg obstane): v tej seji je ne
+#: poskusamo znova - mreza na napravi sicer ob vsakem ogledu znova caka do 2 x 15 s (pregled 25. 10. 2026, S6).
+_brez_slicice: "collections.OrderedDict[tuple, bool]" = collections.OrderedDict()
+NAJVEC_BREZ_SLICICE = 2000
+#: Rezerva za slike brez Pillow (paket Windows je zgrajen brez PIL): funkcija (pot, rob) -> JPEG ali None. Windows jo
+#: nastavi na safeer_windows/slicice_win.slika_qt (Qt QImageReader); na Linuxu je Pillow vedno in rezerva ni potrebna.
+REZERVA_SLIKE = None
+#: Kako se zazene ffmpeg (Windows: v Job Object, da ob izhodu ne ostane - slicice_win.zazeni_v_poslu); None = run.
+ZAZENI_FFMPEG = None
 
 
 def _slicica_slike(pot: str, rob: int) -> Optional[bytes]:
     try:
         from PIL import Image, ImageOps
-    except Exception:  # noqa: BLE001 - brez Pillow slicic slik ni; naprava si pomaga sama
-        return None
+    except Exception:  # noqa: BLE001 - brez Pillow: rezerva platforme (Qt) ali slicice ni; naprava si pomaga sama
+        if REZERVA_SLIKE is None:
+            return None
+        if not _SLICICE_SLIK.acquire(timeout=CAKAJ_NA_SLICICO_S):
+            return None
+        try:
+            return REZERVA_SLIKE(pot, rob)
+        except Exception:  # noqa: BLE001
+            return None
+        finally:
+            _SLICICE_SLIK.release()
     if not _SLICICE_SLIK.acquire(timeout=CAKAJ_NA_SLICICO_S):
         return None
     try:
@@ -651,8 +669,10 @@ def _slicica_slike(pot: str, rob: int) -> Optional[bytes]:
                 pass
             if im.size[0] * im.size[1] > NAJVEC_PIK_SLICICE:
                 return None
-            im = ImageOps.exif_transpose(im)             # pokoncna fotografija ostane pokoncna
+            # Najprej pomanjsaj, nato obrni po EXIF: obrat v polni locljivosti bi naredil kopijo velikosti cele slike
+            # (pregled N3). Meja je kvadratna, zato vrstni red izida ne spremeni.
             im.thumbnail((rob, rob))
+            im = ImageOps.exif_transpose(im)             # pokoncna fotografija ostane pokoncna
             if im.mode not in ("RGB", "L"):
                 im = im.convert("RGB")
             izhod = io.BytesIO()
@@ -684,20 +704,31 @@ def _slicica_videa(pot: str, rob: int) -> Optional[bytes]:
         return None
     try:
         for zamik in ("3", "0"):                         # zacetek je pogosto crn; kratek posnetek da prvo sliko
+            ukaz = ukaz_slicice_videa(ffmpeg, pot, zamik, rob)
             try:
-                r = subprocess.run(
-                    [ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-ss", zamik, "-i", pot,
-                     "-frames:v", "1", "-vf", "scale='min(%d,iw)':-2" % rob, "-f", "image2pipe",
-                     "-vcodec", "mjpeg", "-q:v", "4", "-"],
-                    stdin=subprocess.DEVNULL, capture_output=True, timeout=15,
-                    creationflags=0x08000000 if os.name == "nt" else 0)   # CREATE_NO_WINDOW
+                if ZAZENI_FFMPEG is not None:
+                    koda, izhod = ZAZENI_FFMPEG(ukaz, 15)
+                else:
+                    r = subprocess.run(ukaz, stdin=subprocess.DEVNULL, capture_output=True, timeout=15,
+                                       creationflags=0x08000000 if os.name == "nt" else 0)   # CREATE_NO_WINDOW
+                    koda, izhod = r.returncode, r.stdout
             except Exception:  # noqa: BLE001
                 return None
-            if r.returncode == 0 and len(r.stdout) > 200:
-                return r.stdout
+            if koda == 0 and len(izhod or b"") > 200:
+                return izhod
         return None
     finally:
         _SLICICE_VIDEA.release()
+
+
+def ukaz_slicice_videa(ffmpeg: str, pot: str, zamik: str, rob: int) -> List[str]:
+    """Ukaz ffmpeg za eno sliko iz videa. `-protocol_whitelist file`: datoteka, ki je v resnici seznam predvajanja
+    (HLS, concat), ne sme racunalnika pripraviti do branja URL-jev; meja velja za obe stranici (pokoncen video ni visji
+    od roba) - pregled N4."""
+    return [ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-protocol_whitelist", "file",
+            "-ss", zamik, "-i", pot, "-frames:v", "1",
+            "-vf", "scale=%d:%d:force_original_aspect_ratio=decrease" % (rob, rob),
+            "-f", "image2pipe", "-vcodec", "mjpeg", "-q:v", "4", "-"]
 
 
 def naredi_slicico(pot: str, rob: int = SLICICA_ROB) -> Optional[bytes]:
@@ -713,13 +744,19 @@ def naredi_slicico(pot: str, rob: int = SLICICA_ROB) -> Optional[bytes]:
         if znana is not None:
             _slicice.move_to_end(kljuc)
             return znana
+        if kljuc in _brez_slicice:
+            return None                                   # v tej seji ze ni uspelo
     vrsta = vrsta_datoteke(pot)
     slicica = _slicica_slike(pot, rob) if vrsta == "image" else _slicica_videa(pot, rob) if vrsta == "video" else None
-    if slicica:
-        with _slicice_kljuc:
+    with _slicice_kljuc:
+        if slicica:
             _slicice[kljuc] = slicica
             while len(_slicice) > NAJVEC_SLICIC:
                 _slicice.popitem(last=False)
+        elif vrsta in ("image", "video"):
+            _brez_slicice[kljuc] = True
+            while len(_brez_slicice) > NAJVEC_BREZ_SLICICE:
+                _brez_slicice.popitem(last=False)
     return slicica
 
 
@@ -733,6 +770,13 @@ def postrezi_slicico(obravnava, streznik: "StreznikDatotek", oznaka: str, samo_g
     r = streznik.mape.razresi(oznaka)
     if r is None or not os.path.isfile(r[1]):
         _napaka_http(obravnava, 404, "datoteke ni")
+        return
+    if samo_glava:
+        # HEAD: brez izdelave slicice (pregled N7) - samo, ali je datoteka slika ali video.
+        obravnava.send_response(200 if vrsta_datoteke(r[1]) in ("image", "video") else 404)
+        obravnava.send_header("Content-Type", "image/jpeg")
+        obravnava.send_header("Content-Length", "0")
+        obravnava.end_headers()
         return
     slicica = naredi_slicico(r[1])
     if not slicica:

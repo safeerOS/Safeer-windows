@@ -115,6 +115,19 @@ HUBI_VELJAJO_S = 10.0
 HUBI_PRAZNI_VELJAJO_S = 30.0
 
 
+def _pripravi_slicice_streznika() -> None:
+    """Strežnik datotek (core/link_datoteke) na Windows: slike brez Pillow (paket je zgrajen brez PIL) naredi Qt,
+    ffmpeg za slicice videov tece v Job Object (ob koncu Safeer OS ga Windows ubije) - pregled 25. 10. 2026, V1/S6.
+    Na Linuxu ostane core/link_datoteke nespremenjen (Pillow je tam vedno)."""
+    try:
+        from core import link_datoteke
+        from safeer_windows import slicice_win
+        link_datoteke.REZERVA_SLIKE = slicice_win.slika_qt
+        link_datoteke.ZAZENI_FFMPEG = slicice_win.zazeni_v_poslu
+    except Exception as e:  # noqa: BLE001
+        print(f"[ControlBackend] slicice strežnika: {e}")
+
+
 def stevilo_ali_nic(v: Any) -> int:
     """Nenegativno celo stevilo iz odgovora naprave (next_offset, total) ali 0, ce ga ni ali ni veljavno."""
     if isinstance(v, bool):
@@ -153,6 +166,7 @@ class SafeerControlBackend:
         self.config_pot = config_pot
         self.nastavitve: Dict[str, Any] = {}
         self.nalozi_nastavitve()
+        _pripravi_slicice_streznika()
 
         self.device_id, self.device_ime = self._doloci_identiteto()
         self.lokalna_koda = str(100000 + secrets.randbelow(900000))
