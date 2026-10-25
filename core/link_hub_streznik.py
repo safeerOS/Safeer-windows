@@ -3392,6 +3392,60 @@ def mesh_vklopljen() -> bool:
     return os.environ.get("SAFEER_LINK_MESH", "1") != "0"
 
 
+#: Razmik rednega pregleda gostovanja (HubGostitelj.zacni_nadzor, kot Linux 25. 10. 2026).
+NADZOR_S = 20.0
+#: Preverjen oglas clana kroga (kljuc potrdila TLS = kljuc v krogu) velja toliko casa - brez rokovanja TLS ob vsakem pregledu.
+PREVERJEN_OGLAS_VELJA_S = 600.0
+
+
+class PreverjeniHubi:
+    """Oglasi mDNS clanov kroga, katerih potrdilo TLS nosi kljuc tega clana v krogu zaupanja (kot Linux 86f91f9 in
+    link_hub.poisci_hub_z_odtisom). Oglas sam (id, prioriteta) je nepreverjen: brez tega bi naprava v omrezju, ki oglasi
+    id clana z visjo prioriteto, racunalnik pripravila do tega, da neha gostiti.
+
+    Na Windows Control vedno gosti svoj Hub v Meshu (control_backend._zagotovi_mesh) in samodejne rezerve nima - razred
+    je tu za izvolitev (HubGostitelj.hubi), ce se Mesh izklopi (SAFEER_LINK_MESH=0).
+
+    [kljuc_clana](id) -> javni kljuc clana v krogu ali "" (ni clan ali umaknjen); [potrdilo](naslov) -> (odtis, kljuc)."""
+
+    def __init__(self, kljuc_clana: Callable[[str], str], potrdilo: Optional[Callable[[str], tuple]] = None,
+                 ura: Optional[Callable[[], float]] = None, velja_s: float = PREVERJEN_OGLAS_VELJA_S) -> None:
+        self.kljuc_clana = kljuc_clana
+        self.potrdilo = potrdilo or (lambda naslov: link_tls.potrdilo_huba(naslov, timeout=3.0))
+        self.ura = ura or time.monotonic
+        self.velja_s = velja_s
+        self._preverjeni: Dict[tuple, tuple] = {}      # (id, naslov, fp) -> (cas, ali velja)
+
+    def filtriraj(self, oglasi: List[dict]) -> List[dict]:
+        izid, zdaj = [], self.ura()
+        for h in oglasi or []:
+            hid, naslov = str(h.get("id") or ""), str(h.get("naslov") or "")
+            if not hid or not naslov.startswith("wss://"):
+                continue
+            try:
+                kljuc = self.kljuc_clana(hid) or ""
+            except Exception:  # noqa: BLE001 - krog ni berljiv: oglas ne steje
+                kljuc = ""
+            if not kljuc:
+                continue
+            k = (hid, naslov, str(h.get("fp") or "").lower())
+            v = self._preverjeni.get(k)
+            if v is None or zdaj - v[0] >= self.velja_s:
+                try:
+                    videni, kljuc_potrdila = self.potrdilo(naslov)
+                except Exception:  # noqa: BLE001 - nedosegljiv: ne steje (poskusimo ob naslednjem pregledu)
+                    videni, kljuc_potrdila = "", ""
+                v = (zdaj, bool(videni) and link_tls.isti(kljuc_potrdila, kljuc))
+                if videni:
+                    self._preverjeni[k] = v
+            if v[1]:
+                izid.append(h)
+        if len(self._preverjeni) > 64:
+            for k in sorted(self._preverjeni, key=lambda x: self._preverjeni[x][0])[:-64]:
+                self._preverjeni.pop(k, None)
+        return izid
+
+
 class HubGostitelj:
     """Zdruzi Hub, oglas in pravilo »gosti samo, kadar drugega ni«.
 
@@ -3416,14 +3470,48 @@ class HubGostitelj:
         self.nas_id = ""
         self._zaklep = threading.Lock()
         self.mesh = None
+        self._nadzor: Optional[threading.Thread] = None
+        self._nadzor_konec = threading.Event()
+
+    def zacni_nadzor(self, ob_spremembi: Optional[Callable[[tuple, tuple], None]] = None,
+                     razmik_s: float = NADZOR_S) -> None:
+        """Reden preveri() v ozadju (kot Linux 25. 10. 2026). [ob_spremembi]((mesh, gostimo) prej, zdaj) pove
+        odjemalcu, da naj se poveze drugam."""
+        if self._nadzor is not None:
+            return
+        self._nadzor_konec.clear()
+
+        def zanka() -> None:
+            while not self._nadzor_konec.wait(razmik_s):
+                prej = (mesh_vklopljen(), self.gostimo())
+                try:
+                    self.preveri()
+                except Exception as e:  # noqa: BLE001 - naslednji pregled poskusi znova
+                    print("[SafeerLink] pregled gostovanja: %s" % type(e).__name__, flush=True)
+                zdaj = (mesh_vklopljen(), self.gostimo())
+                if zdaj != prej and ob_spremembi is not None and not self._nadzor_konec.is_set():
+                    try:
+                        ob_spremembi(prej, zdaj)
+                    except Exception as e:  # noqa: BLE001
+                        print("[SafeerLink] sprememba gostovanja: %s" % type(e).__name__, flush=True)
+
+        self._nadzor = threading.Thread(target=zanka, name="safeer-link-gostitelj", daemon=True)
+        self._nadzor.start()
+
+    def ustavi_nadzor(self) -> None:
+        self._nadzor_konec.set()
+        self._nadzor = None
 
     def gostimo(self) -> bool:
         return self.streznik.tece()
 
     def preveri(self) -> bool:
         """En pregled: ce Huba ni, ga zazenemo; ce se je vrnil boljsi, se umaknemo."""
+        # V Mesh racunalnik gosti vedno: iskanje tujega Huba (mDNS + preverbe HTTP/TLS, vec sekund) je tam odvec - redni
+        # pregled (zacni_nadzor) je zato poceni (kot Linux fcffeaf).
+        v_mesh = mesh_vklopljen() and self.hubi is not None
         try:
-            najden = self.poisci()
+            najden = None if v_mesh else self.poisci()
         except Exception:
             najden = None
         try:
@@ -3468,6 +3556,7 @@ class HubGostitelj:
             return False
 
     def koncaj(self) -> None:
+        self.ustavi_nadzor()
         with self._zaklep:
             if self.mesh is not None:
                 self.mesh.ustavi()
