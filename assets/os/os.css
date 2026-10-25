@@ -21,15 +21,15 @@
 /* Teme: pet najbolj razsirjenih barvnih shem (vse MIT, uradne palete) + privzeta Safeer. Izbira v Nastavitve › Videz;
    shranjena v localStorage (safeer_tema) in uporabljena pred izrisom (skripta v <head>). */
 :root[data-tema="catppuccin"] { --ozadje:#1e1e2e; --stranska:rgba(24,24,37,.9); --kartica:rgba(49,50,68,.72); --kartica-poudarek:rgba(69,71,90,.92);
-  --rob:rgba(147,153,178,.28); --besedilo:#cdd6f4; --medlo:#a6adc8; --zelena:#94e2d5; --zelena-temna:#11111b; --rdeca:#f38ba8; --vnos:#181825; }
+  --rob:rgba(147,153,178,.28); --besedilo:#cdd6f4; --medlo:#a6adc8; --zelena:#94e2d5; --zelena-temna:#11111b; --rdeca:#f38ba8; --vnos:#181825; --ok:#a6e3a1; --fokus:#b4befe; }
 :root[data-tema="tokyonight"] { --ozadje:#1a1b26; --stranska:rgba(22,22,30,.9); --kartica:rgba(36,40,59,.74); --kartica-poudarek:rgba(41,46,66,.94);
-  --rob:rgba(86,95,137,.35); --besedilo:#c0caf5; --medlo:#a9b1d6; --zelena:#73daca; --zelena-temna:#15161e; --rdeca:#f7768e; --vnos:#16161e; }
+  --rob:rgba(86,95,137,.35); --besedilo:#c0caf5; --medlo:#a9b1d6; --zelena:#73daca; --zelena-temna:#15161e; --rdeca:#f7768e; --vnos:#16161e; --ok:#9ece6a; --fokus:#7aa2f7; }
 :root[data-tema="gruvbox"] { --ozadje:#282828; --stranska:rgba(29,32,33,.92); --kartica:rgba(60,56,54,.7); --kartica-poudarek:rgba(80,73,69,.92);
-  --rob:rgba(168,153,132,.3); --besedilo:#ebdbb2; --medlo:#a89984; --zelena:#8ec07c; --zelena-temna:#1d2021; --rdeca:#fb4934; --vnos:#1d2021; }
+  --rob:rgba(168,153,132,.3); --besedilo:#ebdbb2; --medlo:#a89984; --zelena:#8ec07c; --zelena-temna:#1d2021; --rdeca:#fb4934; --vnos:#1d2021; --ok:#b8bb26; --fokus:#83a598; }
 :root[data-tema="nord"] { --ozadje:#2e3440; --stranska:rgba(46,52,64,.9); --kartica:rgba(59,66,82,.74); --kartica-poudarek:rgba(67,76,94,.94);
-  --rob:rgba(216,222,233,.18); --besedilo:#eceff4; --medlo:#d8dee9; --zelena:#88c0d0; --zelena-temna:#2e3440; --rdeca:#bf616a; --vnos:#272c36; }
+  --rob:rgba(216,222,233,.18); --besedilo:#eceff4; --medlo:#d8dee9; --zelena:#88c0d0; --zelena-temna:#2e3440; --rdeca:#bf616a; --vnos:#272c36; --ok:#a3be8c; --fokus:#81a1c1; }
 :root[data-tema="dracula"] { --ozadje:#282a36; --stranska:rgba(33,34,44,.9); --kartica:rgba(68,71,90,.6); --kartica-poudarek:rgba(68,71,90,.95);
-  --rob:rgba(98,114,164,.35); --besedilo:#f8f8f2; --medlo:#bfc7d5; --zelena:#8be9fd; --zelena-temna:#21222c; --rdeca:#ff5555; --vnos:#21222c; }
+  --rob:rgba(98,114,164,.35); --besedilo:#f8f8f2; --medlo:#bfc7d5; --zelena:#8be9fd; --zelena-temna:#21222c; --rdeca:#ff5555; --vnos:#21222c; --ok:#50fa7b; --fokus:#bd93f9; }
 /* Izbira teme: vidne kartice s predogledom barv */
 .teme { display:grid; grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); gap:12px; margin:8px 0 18px; }
 .tema-kartica { text-align:left; padding:12px; border:1px solid var(--rob); border-radius:14px; background:var(--kartica); color:var(--besedilo); cursor:pointer; font:inherit; }
