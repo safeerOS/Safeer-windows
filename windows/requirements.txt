@@ -3,7 +3,7 @@
 # SHA-256 (odlocitev lastnika 25. 10. 2026). Nova razlicica = pregled + pe_utrjenost.py PAKET --pripni.
 PySide6==6.11.2
 pyinstaller==6.22.3  # koda zagonskega programa (runw.exe) je v pe_izjeme.json pripeta (sha256_kode)
-Pillow==11.3.0  # zajem zaslona (deljenje, »Deli z«), slicice; v SafeerOS.exe (prej izpuscen); .pyd pripeti v pe_izjeme.json
+Pillow==12.3.0  # zajem zaslona (deljenje, »Deli z«), slicice; v SafeerOS.exe (prej izpuscen); .pyd pripeti v pe_izjeme.json
 cryptography==46.0.7
 cffi==2.1.1  # pride s cryptography in soundcard; _cffi_backend.pyd je pripet
 python-vlc>=3.0.21203,<4

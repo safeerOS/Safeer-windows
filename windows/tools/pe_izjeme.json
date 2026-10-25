@@ -140,7 +140,7 @@
     "CFG",
     "CET"
    ],
-   "razlog": "Tuja datoteka (odlocitev lastnika 25. 10. 2026: tuje datoteke niso nasa skrb, mi skrbimo za svoje): razsiritve Python (CPython, PySide6, cryptography, cffi, PyAV 18.1.0, Pillow 11.3.0): uradne gradnje brez /guard:cf in /CETCOMPAT; /GS imajo. Izmerjeno 25. 10. 2026 (28 + 65 datotek; kolesi PyAV 49 in Pillow 8)",
+   "razlog": "Tuja datoteka (odlocitev lastnika 25. 10. 2026: tuje datoteke niso nasa skrb, mi skrbimo za svoje): razsiritve Python (CPython, PySide6, cryptography, cffi, PyAV 18.1.0, Pillow 12.3.0): uradne gradnje brez /guard:cf in /CETCOMPAT; /GS imajo. Izmerjeno 25. 10. 2026 (28 + 65 datotek; kolesi PyAV 49 in Pillow 8)",
    "tuja": true,
    "sha256": {
     "_asyncio.pyd": [
@@ -492,28 +492,28 @@
      "68abd3b3626acb404f75ecfd0e773ed33deebf1f58c7220c9ba99a3c6db9f1a7"
     ],
     "_avif.cp312-win_amd64.pyd": [
-     "7f993aed80d4dfcba1bae7e307e10da0fd42ae0fc46876032ac138ea511b55c3"
+     "6731dce52baab0b96b0eeb3c664844b5b42c2168ea8668af2430e2fbdd2dfbd8"
     ],
     "_imaging.cp312-win_amd64.pyd": [
-     "03c6629b37d514770d33bfeb1c02179e50779ae67587310310a96b2de5e7142a"
+     "c8c519ec72bf75b2945b4fc4afa854af2fca8b970a403134f9ddda3e164d85e9"
     ],
     "_imagingcms.cp312-win_amd64.pyd": [
-     "0e3dc1b806c412e07276fe4369750de020065026258810016c1bf7ababc93885"
+     "c89c633ae1bf3f26a327d14ff688db66628e19c9866ab925479f27dcb60a2d6f"
     ],
     "_imagingft.cp312-win_amd64.pyd": [
-     "fd46b2e9e341f3ae511ab4a332a759c3d7d53b147b938c86b9d33f1680e8da7f"
+     "77c6d37de41733df40fb36d9af47644989ac17da036515e759303969edb22c48"
     ],
     "_imagingmath.cp312-win_amd64.pyd": [
-     "7807d7ef526a05768ec10087df9a75cc58fc335ee3707b67c66c5d45fa3fe9ed"
+     "82ac45c41a008854d05f67deda298b65a7bed850d0d79a3af861ed583f6e7d62"
     ],
     "_imagingmorph.cp312-win_amd64.pyd": [
-     "e8037495949f3860cc24f4a4399a2995fea595388492df34dac5948f40704fbe"
+     "b8523bbce8b322b4b931863c61b8107156b3f23fe1bbbfe0bc3fa318ea662fb0"
     ],
     "_imagingtk.cp312-win_amd64.pyd": [
-     "1ed10383313c15359172ec2f224b66537ca893f8e9afa85355204826804bfbb3"
+     "690cc1cae4a2dc8594a342b9241e691dcc89d81dad4cddcefdf285275365a2b1"
     ],
     "_webp.cp312-win_amd64.pyd": [
-     "b279c625f07bcb2eaecc533fea418d2a538cbfb0161f09f7d50bf484958ef343"
+     "9823cebb84f425af3ac1e7437259bc176e7ad7e25d7fa829b0e1a3e55c11be70"
     ]
    }
   },
