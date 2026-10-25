@@ -1108,3 +1108,52 @@ body.en-razdelek #glavno { flex: 1; }
 body.en-razdelek #stranska, body.en-razdelek #vrh, body.en-razdelek .rocaj-vrstice, body.en-razdelek #mediaMini,
 body.en-razdelek .razdelek:not(.viden) { display: none !important; }
 body.en-razdelek #vsebina { padding-top: 30px; }
+
+/* ------------------------------------------------------------------ Prostori (Safeer Link Spaces, MVP - kot Linux 6241c32)
+ * Vrstica zgoraj (kot pregled navideznih namizij): ta racunalnik, zasloni povezanih naprav in »+«. Ploscice imajo stalna
+ * mesta; izbrana ima poudarjen rob, fokus tipkovnice je viden. Barve samo iz tokens.css (tudi tema Kontrast). */
+#slojProstori { z-index: 30; }
+.prostori-plosca {
+  left: 50%; top: 24px; transform: translateX(-50%); width: min(1120px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px); overflow-y: auto; padding: 18px 20px 14px;
+}
+.prostori-glava { display: flex; align-items: center; gap: 12px; }
+.prostori-glava h3 { margin: 0; font-size: 20px; flex: 1; }
+.prostori-trak {
+  display: flex; gap: 14px; overflow-x: auto; padding: 14px 4px 8px; margin: 0 -4px; scroll-snap-type: x proximity;
+  touch-action: pan-y;
+}
+.prostor-ovoj { display: flex; flex-direction: column; gap: 8px; flex: none; width: 196px; scroll-snap-align: start; }
+.prostor {
+  display: flex; flex-direction: column; gap: 10px; width: 100%; padding: 8px; border-radius: 16px; text-align: left;
+  background: var(--kartica); border: 2px solid var(--rob); color: var(--besedilo);
+}
+.prostor:hover { background: var(--kartica-poudarek); }
+.prostor-ovoj.izbran .prostor { border-color: var(--zelena); background: var(--kartica-poudarek); }
+.prostor:focus-visible { outline: 3px solid var(--fokus); outline-offset: 3px; }
+.prostor-slicica {
+  display: grid; place-items: center; aspect-ratio: 16 / 10; border-radius: 10px; overflow: hidden;
+  background: linear-gradient(135deg, var(--kartica-poudarek), var(--ozadje)) center / cover no-repeat; border: 1px solid var(--rob);
+}
+.prostor-slicica svg { width: 44px; height: 44px; fill: none; stroke: var(--zelena); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.prostor.ta .prostor-slicica svg { stroke: var(--besedilo); filter: drop-shadow(0 1px 3px var(--ozadje)); }
+.prostor.dodaj .prostor-slicica { background: transparent; border: 2px dashed var(--rob); }
+.prostor.brez .prostor-slicica { opacity: .55; filter: grayscale(1); }
+.prostor-napis { display: flex; flex-direction: column; gap: 3px; min-width: 0; padding: 0 4px 2px; }
+.prostor-napis b { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.prostor-napis small { display: flex; align-items: center; gap: 6px; color: var(--medlo); font-size: 12.5px; }
+.prostor-napis small .pika { width: 8px; height: 8px; }
+.prostor[aria-busy="true"] .prostor-slicica { outline: 2px solid var(--zelena); outline-offset: -2px; }
+@media (prefers-reduced-motion: no-preference) {
+  .prostor[aria-busy="true"] .prostor-slicica svg { animation: prostor-utrip 1.1s ease-in-out infinite alternate; }
+  @keyframes prostor-utrip { from { opacity: 1; } to { opacity: .35; } }
+}
+.prostor-aplikacija { align-self: stretch; height: 34px; font-size: 13px; }
+.prostori-stanje { min-height: 1.4em; margin-top: 6px; }
+@media (max-width: 640px) {
+  .prostor-ovoj { width: 150px; }
+}
+.prostori-gumb svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.prostor-napis small .pika { border-radius: 50%; background: var(--ok); display: inline-block; }
+.prostor-napis small .pika.siva { background: #6b7780; }
+

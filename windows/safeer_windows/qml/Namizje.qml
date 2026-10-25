@@ -30,6 +30,7 @@ Item {
             try { p = JSON.parse(podatki) } catch (e) {}
             if (vrsta === "datoteke" && p && p.pot === datoteke.vir.pot) datoteke.nalozi(true)
             if (vrsta === "slicica" && p) datoteke.slicicaPrisla(p)
+            if (vrsta === "prostori") prostori.odpri(p && p.smer < 0 ? -1 : 1)
             if (vrsta === "videz" && p) koren.uporabiVidez(p)
             if (vrsta === "iskanjeOdDrugod" && p && p.q) { polje.text = p.q; polje.forceActiveFocus() }
         }
@@ -236,13 +237,15 @@ Item {
         }
     }
 
-    // Safeer Link pod iskanjem
+    // Safeer Link in Prostori pod iskanjem
     property int napravVLinku: 0
-    Rectangle {
-        id: linkGumb
+    Row {
         anchors.horizontalCenter: parent.horizontalCenter
         y: iskanje.y + iskanje.height + 10
         visible: !zadetki.visible
+        spacing: 8
+    Rectangle {
+        id: linkGumb
         height: 26; width: linkVrstica.width + 22; radius: 13
         color: ml.containsMouse ? Qt.rgba(1, 1, 1, 0.16) : koren.plosca(koren.prosojnost)
         border.color: Qt.rgba(1, 1, 1, 0.12)
@@ -253,6 +256,23 @@ Item {
             Text { text: koren.t("link") + (koren.napravVLinku > 0 ? " · " + koren.t("napravN", { n: koren.napravVLinku }) : ""); color: koren.paleta.besedilo; font.pixelSize: 12 }
         }
         MouseArea { id: ml; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: koren.klic("odpriRazdelek", ["naprave"]) }
+    }
+    // Prostori (Safeer Link Spaces): zasloni povezanih naprav in navidezna namizja Windows (tudi Ctrl+Win+Tab).
+    Rectangle {
+        id: prostoriGumb
+        objectName: "prostoriGumb"
+        height: 26; width: prostoriNapis.width + 40; radius: 13
+        color: mpg.containsMouse ? Qt.rgba(1, 1, 1, 0.16) : koren.plosca(koren.prosojnost)
+        border.color: Qt.rgba(1, 1, 1, 0.12)
+        Behavior on color { ColorAnimation { duration: 150 } }
+        Text { x: 10; anchors.verticalCenter: parent.verticalCenter; text: "⧉"; color: koren.paleta.poudarek; font.pixelSize: 13 }
+        Text { id: prostoriNapis; x: 28; anchors.verticalCenter: parent.verticalCenter; color: koren.paleta.besedilo; font.pixelSize: 12
+               text: koren.prostoriBesedila.prostori || "Prostori" }
+        MouseArea { id: mpg; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: prostori.odpri(0)
+                    ToolTip.visible: containsMouse; ToolTip.delay: 500; ToolTip.text: koren.prostoriBesedila.prostoriNamig || "" }
+        Accessible.role: Accessible.Button
+        Accessible.name: koren.prostoriBesedila.prostori || "Prostori"
+    }
     }
 
     // ------------------------------------------------------------------ paneli
@@ -315,6 +335,7 @@ Item {
         })
         programi.nalozi()
         osveziLink()
+        koren.klic("besedilaProstorov", [], function (b) { if (b) koren.prostoriBesedila = b })
     }
     // Safeer Link se ob zagonu sele poveze: stevilo naprav osvezimo na 20 s.
     property var naprave: []
@@ -387,6 +408,8 @@ Item {
     }
     Prilagodi { id: prilagodi; z: 30; anchors.fill: parent }
     ORacunalniku { id: oRacunalniku; z: 30; anchors.fill: parent }
+    Prostori { id: prostori; objectName: "prostori"; z: 31; anchors.fill: parent; besedila: koren.prostoriBesedila }
+    property var prostoriBesedila: ({})
     // Disk iz »O tem racunalniku«: odpre ga v panelu Datoteke (ta racunalnik).
     function pokaziMapo(pot) {
         if (datoteke.naprava) { datoteke.naprava = ""; datoteke.viri = datoteke.lokalniViri }

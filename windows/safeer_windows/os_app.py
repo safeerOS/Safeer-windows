@@ -80,6 +80,10 @@ def _ozadje_za_splet():
         return None
 
 
+#: Prostori: branje, zdruzitev in zapis "prostori" v shrambo naenkrat (hkratna klica okna in namizja).
+_PROSTORI_ZAKLEP = threading.Lock()
+
+
 def _jezik_oken() -> str:
     from . import oddaljeni_zaslon
     return oddaljeni_zaslon._JEZIK
@@ -1081,7 +1085,16 @@ class SafeerOsWindow(QMainWindow):
         def ob_pritisku() -> None:
             if self.namizje_vklopljeno():
                 self.dispatcher.dispatch(lambda: self.nastavi_namizje(False))
-        vv.zazeni_bliznjico(ob_pritisku)
+        vv.zazeni_bliznjico(ob_pritisku, lambda: self.dispatcher.dispatch(self.odpri_prostore))
+
+    def odpri_prostore(self) -> None:
+        """Bliznjica Prostorov (Ctrl+Win+Tab): na namizju Safeer OS preklopnik na namizju, sicer v oknu Safeer OS."""
+        namizje = getattr(self, "namizje", None)
+        if namizje is not None and hasattr(namizje, "prostori"):
+            namizje.prostori(1)
+            return
+        self.prebudi()
+        self.poslji_dogodek("prostori", {"smer": 1})
 
     def _skrij_namizje(self) -> None:
         okno = getattr(self, "namizje", None)
@@ -1091,6 +1104,44 @@ class SafeerOsWindow(QMainWindow):
             okno.close()
             okno.deleteLater()
             self.namizje = None
+
+    # ------------------------------------------------------------------ Prostori (Safeer Link Spaces, MVP)
+    def _prostori(self) -> dict:
+        """Prostori za preklopnik (namizje QML in Safeer OS): naprave v ozjem krogu, ki znajo pokazati zaslon, in
+        zapomnjene brez povezave v stalnem vrstnem redu (core/link_prostori.py - isti modul kot Linux), ter navidezna
+        namizja Windows (namizja_win.py). Zapis je v shrambi Safeer OS (kljuc "prostori"); klic tece v niti mostu."""
+        from core import link_prostori
+        from . import namizja_win
+        cb = self.control_backend
+        zive = cb.vse_naprave() if cb.je_povezan() else []
+        with _PROSTORI_ZAKLEP:
+            znane = link_prostori.ocisti_znane(os_backend_win.nalozi_shrambo().get("prostori", []))
+            nove = link_prostori.zapomni(znane, zive, int(time.time()))
+            if nove != znane:                       # pise samo ob bistveni spremembi (link_prostori.zapomni)
+                s = os_backend_win.nalozi_shrambo()
+                s["prostori"] = nove
+                os_backend_win.shrani_shrambo(s)
+        namizja, trenutno = namizja_win.seznam(_jezik_oken())
+        povezan = cb.je_povezan()
+        return {"ok": povezan, "koda": "" if povezan else "ni_povezave", "prostori": link_prostori.prostori(nove, zive),
+                "namizja": namizja, "trenutno": trenutno}
+
+    def _prostor_odpri(self, id_naprave: str) -> dict:
+        """Zaslon prostora tukaj po obstojeci poti: racunalnik -> oddaljeni zaslon (oddaljeni_zaslon.py, miska in
+        tipkovnica), naprava Android -> Odpri tukaj s CEL_ZASLON (potrditev na napravi, nato okno_zaslona.py z vnosom).
+        Stran ne izbira programa ne poljubnega id-ja: velja samo prostor, ki je zdaj v Linku (za_odpiranje)."""
+        from core import link_prostori
+        cb = self.control_backend
+        p = link_prostori.za_odpiranje(cb.vse_naprave() if cb.je_povezan() else [], id_naprave)
+        if p is None:
+            return {"ok": False, "koda": "ni_prostora" if cb.je_povezan() else "ni_povezave"}
+        if p["nacin"] == link_prostori.NACIN_RACUNALNIK:
+            from . import oddaljeni_zaslon
+            self.dispatcher.dispatch(lambda: oddaljeni_zaslon.odpri(cb, p["id"], p["ime"]))
+            return {"ok": True, "nacin": p["nacin"], "ime": p["ime"]}
+        self._odpri_tukaj_zadnji = (p["id"], "", time.monotonic())
+        r = cb.odpri_tukaj(p["id"], link_prostori.CEL_ZASLON)
+        return dict(r if isinstance(r, dict) else {"ok": False}, nacin=p["nacin"], ime=p["ime"])
 
     def _odpri_okno_zaslona(self, podatki: dict) -> None:
         """Zaslon telefona ali tablice (share.screen start) v svojem oknu z misko in tipkovnico (okno_zaslona.py,
@@ -2960,6 +3011,16 @@ class SafeerOsWindow(QMainWindow):
                 self.dispatcher.dispatch(lambda: oddaljeni_zaslon.odpri(self.control_backend, id_n, ime, zaslon="apps"))
                 izid = dict(izid, tu=True, zaslon=True)
             return izid
+
+        # Prostori (Safeer Link Spaces): zasloni naprav v ozjem krogu in navidezna namizja Windows (kot Linux, MVP).
+        if metoda == "prostori":
+            return self._prostori()
+        if metoda == "prostorOdpri":
+            return self._prostor_odpri(str(a[0]) if a else "")
+        if metoda == "namizjeWindows":
+            from . import namizja_win
+            indeks = a[0] if a and isinstance(a[0], int) and not isinstance(a[0], bool) else -1
+            return namizja_win.preklopi(indeks, _jezik_oken())
 
         if metoda == "preimenujNapravo":
             id_n = str(a[0]) if a else ""

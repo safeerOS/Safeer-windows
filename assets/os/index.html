@@ -45,6 +45,9 @@
         <input id="iskanje" type="text" autocomplete="off" spellcheck="false" data-ph="pametnoIskanje" placeholder="Išči programe, datoteke, splet, naprave ...">
       </label>
       <div class="vrh-naprave">
+        <!-- Prostori (Safeer Link Spaces): zasloni povezanih naprav in navidezna namizja Windows, en klik ali bliznjica. -->
+        <button class="gumb-ikona prostori-gumb" id="gumbProstori" type="button" data-naslov="prostoriNamig" aria-haspopup="dialog"
+                aria-controls="slojProstori"><svg data-ikona="prostori"></svg></button>
         <span class="omrezje-znacka" id="stanjeOmrezje" title="Omrežje"><svg data-ikona="wifi"></svg><span>Povezano</span></span>
       </div>
       <div class="ura"><b id="ura">21:04</b><span id="datum">Sob, 26. sep. 2025</span></div>
@@ -734,6 +737,19 @@
       <button type="button" class="gumb glavni" id="mintSamoTokrat" data-t="samoTokrat"></button>
     </div>
   </div>
+</div>
+<!-- Prostori (Safeer Link Spaces, MVP - kot Linux): ta racunalnik, navidezna namizja Windows in zasloni povezanih naprav
+     (os.js prostori*, os_app._prostori, core/link_prostori.py, namizja_win.py). -->
+<div class="sloj" id="slojProstori"><div class="tancica"></div>
+  <section class="plosca prostori-plosca" role="dialog" aria-modal="true" aria-labelledby="prostoriNaslov" aria-describedby="prostoriPod">
+    <div class="prostori-glava">
+      <h3 id="prostoriNaslov" data-t="prostori"></h3>
+      <button type="button" class="gumb-ikona" id="prostoriZapri" data-naslov="zapri"><svg data-ikona="x"></svg></button>
+    </div>
+    <p class="drobno" id="prostoriPod" data-t="prostoriPod"></p>
+    <div class="prostori-trak" id="prostoriTrak" role="group" aria-labelledby="prostoriNaslov"></div>
+    <p class="drobno prostori-stanje" id="prostoriStanje" aria-live="polite"></p>
+  </section>
 </div>
 <div id="obvestilo"></div>
 <script src="besedila.js"></script>

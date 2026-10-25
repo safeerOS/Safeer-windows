@@ -106,6 +106,7 @@
     "core/link_mediji.py",
     "core/link_mesh.py",
     "core/link_programi.py",
+    "core/link_prostori.py",
     "core/link_sprotno.py",
     "core/link_sway.py",
     "core/link_vnos.py",

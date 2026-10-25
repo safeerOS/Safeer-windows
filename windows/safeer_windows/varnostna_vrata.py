@@ -20,15 +20,18 @@ import os
 import sys
 import threading
 import time
-from typing import Callable, Tuple
+from typing import Callable, Optional, Tuple
 
 NAJVEC_ZAGONOV = 3          # toliko zagonov brez stabilnega delovanja -> obicajno namizje Windows
 OKNO_S = 15 * 60            # steti se samo zagoni v zadnjih 15 minutah
 STABILNO_S = 90             # namizje, ki tece toliko casa, ni sesuto: stevec se pocisti
 
 # Bliznjica: Ctrl+Alt+Shift+W (»W« kot Windows). MOD_NOREPEAT: drzanje tipk je en pritisk.
-MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_NOREPEAT = 0x0001, 0x0002, 0x0004, 0x4000
-VK_W = 0x57
+MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN, MOD_NOREPEAT = 0x0001, 0x0002, 0x0004, 0x0008, 0x4000
+VK_W, VK_TAB = 0x57, 0x09
+#: Prostori (Safeer Link Spaces): Ctrl+Win+Tab - Win+Tab je Pogled opravil Windows, Ctrl+Alt+Tab trajni Alt+Tab.
+ID_PROSTORI = 0x5AFF
+BLIZNJICA_PROSTORI = "Ctrl+Win+Tab"
 WM_HOTKEY = 0x0312
 ID_BLIZNJICE = 0x5AFE
 BLIZNJICA = "Ctrl+Alt+Shift+W"
@@ -86,29 +89,37 @@ def pisi(zapis: dict) -> None:
 
 
 # ------------------------------------------------------------------ sistemska bliznjica
-def zazeni_bliznjico(ob_pritisku: Callable[[], None]) -> bool:
-    """Ctrl+Alt+Shift+W kjerkoli v Windows -> ob_pritisku() (iz niti bliznjice; klicatelj preda glavni niti).
-    Vrne False, ce ni Windows; ce je bliznjico ze zasedel drug program, to zapise v dnevnik."""
+def zazeni_bliznjico(ob_pritisku: Callable[[], None], ob_prostorih: Optional[Callable[[], None]] = None) -> bool:
+    """Ctrl+Alt+Shift+W kjerkoli v Windows -> ob_pritisku(); Ctrl+Win+Tab -> ob_prostorih() (iz niti bliznjic;
+    klicatelj preda glavni niti). Vrne False, ce ni Windows; zasedeno bliznjico zapise v dnevnik."""
     if sys.platform != "win32":
         return False
+    prijave = [(ID_BLIZNJICE, MOD_CONTROL | MOD_ALT | MOD_SHIFT | MOD_NOREPEAT, VK_W, ob_pritisku, BLIZNJICA)]
+    if ob_prostorih is not None:
+        prijave.append((ID_PROSTORI, MOD_CONTROL | MOD_WIN | MOD_NOREPEAT, VK_TAB, ob_prostorih, BLIZNJICA_PROSTORI))
 
     def nit() -> None:
         import ctypes
         from ctypes import wintypes
         u = ctypes.windll.user32
-        if not u.RegisterHotKey(None, ID_BLIZNJICE, MOD_CONTROL | MOD_ALT | MOD_SHIFT | MOD_NOREPEAT, VK_W):
-            print(f"[SafeerOS] Varnostna vrata: bliznjice {BLIZNJICA} ni mogoce prijaviti (zasedena?)", flush=True)
+        dejanja = {}
+        for ident, mod, vk, ob, ime in prijave:
+            if u.RegisterHotKey(None, ident, mod, vk):
+                dejanja[ident] = ob
+                print(f"[SafeerOS] Bliznjica {ime} prijavljena", flush=True)
+            else:
+                print(f"[SafeerOS] Bliznjice {ime} ni mogoce prijaviti (zasedena?)", flush=True)
+        if not dejanja:
             return
-        print(f"[SafeerOS] Varnostna vrata: {BLIZNJICA} vrne obicajno namizje Windows", flush=True)
         msg = wintypes.MSG()
         while u.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
-            if msg.message == WM_HOTKEY and msg.wParam == ID_BLIZNJICE:
+            if msg.message == WM_HOTKEY and msg.wParam in dejanja:
                 try:
-                    ob_pritisku()
+                    dejanja[msg.wParam]()
                 except Exception as e:  # noqa: BLE001
-                    print(f"[SafeerOS] Varnostna vrata: {e}", flush=True)
+                    print(f"[SafeerOS] Bliznjica: {e}", flush=True)
 
-    threading.Thread(target=nit, name="safeer-varnostna-vrata", daemon=True).start()
+    threading.Thread(target=nit, name="safeer-bliznjice", daemon=True).start()
     return True
 
 

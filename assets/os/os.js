@@ -46,6 +46,8 @@
     "tv-v-zivo": "M2 6h15v12H2z M6 21h7 M9.5 18v3 M19 9a3 3 0 0 1 0 6 M21 7a6 6 0 0 1 0 10",
     telefon: "M6 2h12a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z M12 18h.01",
     tablica: "M4 2h16a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z M12 18h.01",
+    // Prostori (Safeer Link Spaces): trije zasloni drug ob drugem (kot Linux)
+    prostori: "M8 5h8v14H8z M3 8h3v8H3z M18 8h3v8h-3z",
     iskra: "M12 2l2.4 5.6L20 10l-5.6 2.4L12 18l-2.4-5.6L4 10l5.6-2.4z M19 16l1.2 2.8L23 20l-2.8 1.2L19 24l-1.2-2.8L15 20l2.8-1.2z",
     sporocilo: "M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z",
     slika: "M4 4h16v16H4z M4 16l5-5 4 4 3-3 4 4 M15 8.5v.1",
@@ -3286,6 +3288,8 @@
 
   // ------------------------------------------------------------------ dogodki iz safeer_os.py
   window.safeerOsDogodek = function (vrsta, podatki) {
+    // Bliznjica Prostorov (os_app: sistemska bliznjica) ali gumb na namizju: preklopnik se odpre ali gre naprej.
+    if (vrsta === "prostori") odpriProstore(podatki && podatki.smer < 0 ? -1 : 1);
     if (vrsta === "stanje") narisiStanje(podatki);
     // Tema ali ozadje sta se spremenila drugje (Prilagodi namizje, Nastavitve namizja): okno sledi brez nalaganja.
     if (vrsta === "videz" && podatki) {
@@ -4139,6 +4143,215 @@
     document.addEventListener("scroll", zapriMeniPolja, true);
   }
 
+  // ------------------------------------------------------------------ Prostori (Safeer Link Spaces, MVP - kot Linux)
+  // Ta racunalnik, navidezna namizja Windows in zasloni povezanih naprav v enem preklopniku (pravila core/link_prostori.py,
+  // most os_app._prostori / _prostor_odpri, namizja_win.py). Odpre ga gumb v glavi, gumb na namizju ali bliznjica
+  // (os_app: sistemska bliznjica, dogodek »prostori«). Puscice izberejo, Enter odpre, Esc zapre. Izbira naprave odpre njen
+  // zaslon po obstojeci poti (oddaljeni zaslon racunalnika ali okno zaslona telefona z misko in tipkovnico).
+  var PR = { seznam: [], namizja: [], trenutno: -1, izbran: 0, odpira: "", stanje: "", prej: null, zanka: 0, nalozeno: false,
+             zap: 0, nalaga: false };
+  var PROSTOR_IKONA = { racunalnik: "namizje", tablica: "tablica", telefon: "telefon", tv: "zaslon", naprava: "naprave" };
+  function prostoriOdprto() { var s = $("slojProstori"); return !!(s && s.classList.contains("viden")); }
+  function prostorKdaj(sekunde) {
+    if (!sekunde) return "";
+    var r = sekunde - Date.now() / 1000, a = Math.abs(r);
+    try {
+      var f = new Intl.RelativeTimeFormat(LOKALE[jezik] || "en-GB", { numeric: "auto" });
+      if (a < 3600) return f.format(Math.round(r / 60), "minute");
+      if (a < 48 * 3600) return f.format(Math.round(r / 3600), "hour");
+      if (a < 30 * 86400) return f.format(Math.round(r / 86400), "day");
+      return new Date(sekunde * 1000).toLocaleDateString(LOKALE[jezik] || "en-GB");
+    } catch (e) {
+      return new Date(sekunde * 1000).toLocaleString(LOKALE[jezik] || "en-GB");
+    }
+  }
+  // Ploscice: ta racunalnik (ali vsako navidezno namizje Windows, ce jih je vec), naprave, »Dodaj napravo«.
+  function prostoriPloscice() {
+    var zacetek = PR.namizja.length > 1
+      ? PR.namizja.map(function (n) { return { namizje: true, indeks: n.indeks, ime: n.ime, ta: !!n.trenutno, id: "namizje:" + n.indeks }; })
+      : [{ ta: true, id: "" }];
+    return zacetek.concat(PR.seznam).concat([{ dodaj: true, id: "+" }]);
+  }
+  function prostorIme(p) {
+    if (p.namizje) return p.ime;
+    return p.ta ? t("taRacunalnik") : (p.dodaj ? t("prostorDodaj") : (p.ime || p.id));
+  }
+  function prostorPod(p) {
+    if (p.namizje) return p.ta ? t("prostorTaPod") : t("prostorNamizjeWindows");
+    if (p.ta) return t("prostorTaPod");
+    if (p.dodaj) return t("prostorDodajPod");
+    if (p.povezana) return t("prostorPovezana");
+    return p.videna ? t("prostorNazadnje", { kdaj: prostorKdaj(p.videna) }) : t("prostorNiPovezana");
+  }
+  function narisiProstore(fokus) {
+    var trak = $("prostoriTrak");
+    if (!trak) return;
+    var vse = prostoriPloscice();
+    PR.izbran = Math.max(0, Math.min(PR.izbran, vse.length - 1));
+    trak.innerHTML = "";
+    vse.forEach(function (p, i) {
+      var ovoj = el("div", "prostor-ovoj");
+      var b = el("button", "prostor" + (p.ta ? " ta" : "") + (p.dodaj ? " dodaj" : "") +
+        (!p.ta && !p.dodaj && !p.namizje && !p.povezana ? " brez" : ""));
+      b.type = "button";
+      var ime = prostorIme(p), pod = prostorPod(p);
+      var ikona = p.namizje || p.ta ? "namizje" : (p.dodaj ? "plus" : (PROSTOR_IKONA[p.vrsta] || "naprave"));
+      var slicica = el("span", "prostor-slicica", svg(ikona));
+      if ((p.ta || p.namizje) && S.zacetek && S.zacetek.ozadje) slicica.style.backgroundImage = 'url("' + String(S.zacetek.ozadje).replace(/"/g, "%22") + '")';
+      b.appendChild(slicica);
+      var napis = el("span", "prostor-napis");
+      napis.appendChild(el("b", "", ubezi(ime)));
+      napis.appendChild(el("small", "", (!p.ta && !p.dodaj && !p.namizje ? '<i class="pika' + (p.povezana ? "" : " siva") + '" aria-hidden="true"></i>' : "") + ubezi(pod)));
+      b.appendChild(napis);
+      b.setAttribute("aria-label", [ime, p.vrsta ? t("prostorVrsta_" + p.vrsta) : "", pod].filter(Boolean).join(", "));
+      if (p.ta) b.setAttribute("aria-current", "true");
+      if (PR.odpira && PR.odpira === p.id) b.setAttribute("aria-busy", "true");
+      b.addEventListener("click", function () { PR.izbran = i; oznaciProstor(false); prostorIzberi(p); });
+      b.addEventListener("focus", function () { if (PR.izbran !== i) { PR.izbran = i; oznaciProstor(false); } });
+      ovoj.appendChild(b);
+      trak.appendChild(ovoj);
+    });
+    $("prostoriStanje").textContent = PR.stanje;
+    oznaciProstor(fokus);
+  }
+  function oznaciProstor(fokus) {
+    var trak = $("prostoriTrak");
+    if (!trak) return;
+    Array.prototype.forEach.call(trak.querySelectorAll(".prostor-ovoj"), function (o, i) {
+      var izbran = i === PR.izbran;
+      o.classList.toggle("izbran", izbran);
+      Array.prototype.forEach.call(o.querySelectorAll("button"), function (b) { b.tabIndex = izbran ? 0 : -1; });
+      if (izbran && fokus) {
+        var b = o.querySelector("button.prostor");
+        b.focus();
+        if (b.scrollIntoView) b.scrollIntoView({ block: "nearest", inline: "nearest" });
+      }
+    });
+  }
+  function premakniProstor(smer) {
+    var n = prostoriPloscice().length;
+    PR.izbran = ((PR.izbran + smer) % n + n) % n;
+    oznaciProstor(true);
+  }
+  function nalozProstore(fokus, osvezi) {
+    var izbranId = (prostoriPloscice()[PR.izbran] || {}).id;
+    if (!PR.nalozeno) { PR.stanje = t("prostoriIscem"); narisiProstore(fokus); }
+    if (osvezi && PR.nalaga) return Promise.resolve();
+    var zap = ++PR.zap;
+    PR.nalaga = true;
+    var prej = PR.nalozeno ? JSON.stringify([PR.seznam, PR.namizja]) + "|" + PR.stanje : "";
+    return klic("prostori").then(function (r) {
+      if (zap !== PR.zap) return;
+      PR.nalaga = false;
+      PR.nalozeno = true;
+      PR.seznam = r && Array.isArray(r.prostori) ? r.prostori : [];
+      PR.namizja = r && Array.isArray(r.namizja) ? r.namizja : [];
+      if (r && r.koda === "ni_povezave") PR.stanje = t("prostorNiLinka");
+      else if (PR.stanje === t("prostoriIscem") || PR.stanje === t("prostorNiLinka")) PR.stanje = PR.seznam.length ? "" : t("prostoriPrazno");
+      var vse = prostoriPloscice(), i = vse.map(function (p) { return p.id; }).indexOf(izbranId);
+      if (i >= 0) PR.izbran = i;
+      if (prej && prej === JSON.stringify([PR.seznam, PR.namizja]) + "|" + PR.stanje) return;
+      if (prostoriOdprto()) narisiProstore(fokus);
+    }, function () {
+      if (zap !== PR.zap) return;
+      PR.nalaga = false;
+      PR.stanje = t("niUspelo");
+      if (prostoriOdprto()) narisiProstore(false);
+    });
+  }
+  function odpriProstore(smer) {
+    if (RAZDELEK || !$("slojProstori")) return;
+    if (prostoriOdprto()) { premakniProstor(smer || 1); return; }
+    PR.prej = document.activeElement;
+    PR.stanje = PR.nalozeno ? (PR.seznam.length ? "" : t("prostoriPrazno")) : "";
+    var n = prostoriPloscice().length;
+    PR.izbran = !PR.nalozeno ? 0 : (smer > 0 ? Math.min(1, n - 1) : (smer < 0 ? Math.max(0, n - 2) : 0));
+    $("slojProstori").classList.add("viden");
+    $("gumbProstori").setAttribute("aria-expanded", "true");
+    narisiProstore(true);
+    nalozProstore(true);
+    clearInterval(PR.zanka);
+    PR.zanka = setInterval(function () {
+      if (!prostoriOdprto()) { clearInterval(PR.zanka); return; }
+      if (!document.hidden) nalozProstore(true, true);
+    }, 5000);
+  }
+  function zapriProstore() {
+    var gumb = $("gumbProstori");
+    if (!gumb || (!prostoriOdprto() && gumb.getAttribute("aria-expanded") !== "true")) return;
+    $("slojProstori").classList.remove("viden");
+    gumb.setAttribute("aria-expanded", "false");
+    clearInterval(PR.zanka);
+    var prej = PR.prej;
+    PR.prej = null;
+    if (prej && prej.focus && document.contains(prej)) prej.focus(); else gumb.focus();
+  }
+  function prostorNapaka(r, p) {
+    var koda = String((r && r.koda) || ""), ime = prostorIme(p);
+    if (koda === "ni_prostora") return t("prostorNiVec", { ime: ime });
+    if (koda === "ni_povezave") return t("prostorNiLinka");
+    return r && r.message ? String(r.message) : t("niUspelo");
+  }
+  function prostorIzberi(p) {
+    if (p.namizje) {
+      zapriProstore();
+      if (!p.ta) klic("namizjeWindows", [p.indeks]).then(function (ok) { if (!ok) obvesti(t("niUspelo")); }, function () {});
+      return;
+    }
+    if (p.ta) { zapriProstore(); return; }
+    if (p.dodaj) {
+      zapriProstore();
+      klic(S.povezava && S.povezava.stanje === "povezan" ? "novaNaprava" : "prijava").catch(function () { obvesti(t("niUspelo")); });
+      return;
+    }
+    if (!p.povezana) { PR.stanje = t("prostorBrezPovezave", { ime: prostorIme(p) }); $("prostoriStanje").textContent = PR.stanje; return; }
+    if (PR.odpira) return;
+    PR.odpira = p.id;
+    PR.stanje = t("prostorOdpiram", { ime: prostorIme(p) });
+    narisiProstore(true);
+    klic("prostorOdpri", [p.id]).then(function (r) {
+      PR.odpira = "";
+      if (!r || !r.ok) {
+        PR.stanje = prostorNapaka(r, p);
+        if (prostoriOdprto()) narisiProstore(true); else obvesti(PR.stanje);
+        return;
+      }
+      PR.stanje = "";
+      zapriProstore();
+      // Android: na napravi se pokaze sistemska potrditev deljenja zaslona (zahteva jo za vsako sejo).
+      obvesti(r.nacin === "zaslon" ? t("prostorPotrdi", { ime: prostorIme(p) }) : t("prostorOdpiram", { ime: prostorIme(p) }));
+    }, function (e) {
+      PR.odpira = "";
+      PR.stanje = String(e || t("niUspelo"));
+      if (prostoriOdprto()) narisiProstore(true); else obvesti(PR.stanje);
+    });
+  }
+  function poveziProstore() {
+    var gumb = $("gumbProstori"), sloj = $("slojProstori");
+    if (!gumb || !sloj) return;
+    if (RAZDELEK) { gumb.hidden = true; return; }     // okna razdelkov: samo glavno okno
+    gumb.setAttribute("aria-expanded", "false");
+    gumb.addEventListener("click", function () { if (prostoriOdprto()) zapriProstore(); else odpriProstore(0); });
+    $("prostoriZapri").addEventListener("click", zapriProstore);
+    sloj.querySelector(".tancica").addEventListener("click", zapriProstore);
+    window.addEventListener("keydown", function (e) {
+      if (!prostoriOdprto()) return;
+      var k = e.key;
+      if (k === "Escape") { e.preventDefault(); e.stopImmediatePropagation(); zapriProstore(); return; }
+      if (k === "ArrowRight" || k === "ArrowDown") { e.preventDefault(); premakniProstor(1); }
+      else if (k === "ArrowLeft" || k === "ArrowUp") { e.preventDefault(); premakniProstor(-1); }
+      else if (k === "Home") { e.preventDefault(); PR.izbran = 0; oznaciProstor(true); }
+      else if (k === "End") { e.preventDefault(); PR.izbran = prostoriPloscice().length - 1; oznaciProstor(true); }
+      else if (k === "Tab") {
+        var gumbi = Array.prototype.filter.call(sloj.querySelectorAll("button"), function (b) { return b.tabIndex >= 0 && !b.hidden; });
+        var i = gumbi.indexOf(document.activeElement);
+        e.preventDefault();
+        if (gumbi.length) gumbi[(i + (e.shiftKey ? gumbi.length - 1 : 1)) % gumbi.length].focus();
+      }
+      e.stopImmediatePropagation();
+    }, true);
+  }
+
   function zacni() {
     if (/[?&]namizje=1/.test(location.search)) document.body.classList.add("namizje");
     if (RAZDELEK) {
@@ -4151,6 +4364,7 @@
     }
     prevedi();
     poveziDogodke();
+    poveziProstore();
     poveziMeniPolja();
     osveziUro();
     setInterval(osveziUro, 1000);

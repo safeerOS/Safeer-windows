@@ -141,6 +141,8 @@ class NamizjeQml(QQuickView):
             return sistem_podatki.diski()
         if metoda == "sliciceNamizja":
             return self._slicice(a)
+        if metoda == "besedilaProstorov":
+            return besedila_prostorov(_beri_besedila_os(), self._jezik())
         if metoda in self._metode:
             return self._metode[metoda](a)
         return self.os_okno._izvedi_metodo(metoda, a)
@@ -202,6 +204,16 @@ class NamizjeQml(QQuickView):
                 self._nadzor.addPath(self._spremljana)
         self.os_okno.dispatcher.dispatch(nastavi)
         return True
+
+    def prostori(self, smer: int = 1) -> None:
+        """Bliznjica Prostorov (Ctrl+Win+Tab): pokazi namizje (pomanjsaj okna) in odpri preklopnik Prostori."""
+        if _WIN:
+            u = ctypes.windll.user32
+            pladenj = u.FindWindowW("Shell_TrayWnd", None)
+            if pladenj:
+                u.PostMessageW(pladenj, 0x0111, 419, 0)     # WM_COMMAND MIN_ALL: pomanjsaj vsa okna
+        self.requestActivate()
+        self.dogodek("prostori", {"smer": -1 if smer < 0 else 1})
 
     def isci_od_drugod(self, niz: str) -> None:
         """Glas s telefona (search.query): pokazi namizje (pomanjsaj okna) in niz vpisi v iskanje."""
@@ -357,6 +369,34 @@ def ozadje_datoteka() -> str:
         if pot and os.path.isfile(pot):
             return QUrl.fromLocalFile(pot).toString()
     return ""
+
+
+def besedila_prostorov(besedilo_js: str, jezik: str = "sl") -> dict:
+    """Besedila Prostorov iz assets/os/besedila.js (vrstice »Object.assign(BESEDILA_OS.<jezik>, {"prostori": ...})«) -
+    ista kot v oknu Safeer OS, en vir za oba vmesnika. Manjkajoce v izbranem jeziku dopolni anglescina."""
+    import re
+    po_jezikih: dict = {}
+    for m in re.finditer(r'^Object\.assign\(BESEDILA_OS\.([a-z]{2}), (\{"prostori".*\})\);\s*$', besedilo_js or "", re.M):
+        try:
+            po_jezikih.setdefault(m.group(1), {}).update(json.loads(m.group(2)))
+        except ValueError:
+            continue
+    izid = dict(po_jezikih.get("en", {}))
+    izid.update(po_jezikih.get(jezik, {}))
+    return izid
+
+
+def _beri_besedila_os() -> str:
+    try:
+        from . import policy
+        pot = policy.shared_path("assets/os/besedila.js")
+    except Exception:  # noqa: BLE001
+        pot = str(Path(__file__).resolve().parents[2] / "assets" / "os" / "besedila.js")
+    try:
+        with open(pot, encoding="utf-8") as f:
+            return f.read()
+    except OSError:
+        return ""
 
 
 def slicica_za_qml(d: dict) -> dict:
