@@ -23,6 +23,7 @@ import json
 import mimetypes
 import os
 import re
+import re
 import secrets
 import shutil
 import socket
@@ -192,6 +193,25 @@ def _skrita_atribut(pot: str, koren: str = "") -> bool:
         pot = starsa
 
 
+#: Kratko ime 8.3 (APPDAT~1, SKRITA~1.TXT): Windows ga odpre kot dolgo ime.
+_KRATKO_IME_83 = re.compile(r"[^.~\\/]{1,6}~[0-9]{1,6}(\.[^.\\/]{1,3})?", re.IGNORECASE)
+
+
+def _preusmerjeno_ime(rel: str) -> bool:
+    """Komponenta oznake, ki jo Windows tiho preslika v drugo ime (pregled Grok W7, 25. 10. 2026): kratko ime 8.3,
+    koncna pika ali presledek (»AppData.« odpre AppData), dvopicje (tok ADS ali crka diska). Naprava jih ne
+    potrebuje - seznam ji da prava imena -, zato oznako s takim imenom zavrnemo ze pred razresevanjem poti.
+    Samo Windows: na Linuxu so »ime.« in »a:b« navadna imena datotek."""
+    if os.name != "nt":
+        return False
+    for d in str(rel or "").replace("\\", "/").split("/"):
+        if not d or d in (".", ".."):
+            continue
+        if ":" in d or d.endswith((".", " ")) or _KRATKO_IME_83.fullmatch(d):
+            return True
+    return False
+
+
 class DeljeneMape:
     """Izbrane mape (absolutne poti) in navidezne oznake.
 
@@ -280,8 +300,8 @@ class DeljeneMape:
             if not self.dom:
                 return None
             rel = oznaka[len("dom:"):].replace("\\", "/").lstrip("/")
-            if _je_unc(rel) or (len(rel) > 1 and rel[1] == ":"):
-                return None          # absolutna pot (C:...) ali UNC ni del domace mape
+            if _je_unc(rel) or (len(rel) > 1 and rel[1] == ":") or _preusmerjeno_ime(rel):
+                return None          # absolutna pot (C:...), UNC, kratko ime 8.3, »AppData.«, tok ADS
             try:
                 pot = os.path.realpath(os.path.join(self._domaca(), rel)) if rel else self._domaca()
             except (OSError, ValueError):
@@ -297,6 +317,8 @@ class DeljeneMape:
         except (ValueError, IndexError):
             return None
         rel = deli[2].replace("\\", "/").lstrip("/")
+        if _preusmerjeno_ime(rel):
+            return None
         try:
             pot = os.path.realpath(os.path.join(koren, rel)) if rel else koren
         except (OSError, ValueError):

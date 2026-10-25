@@ -68,6 +68,9 @@ def test_seznam_brez_skritih_appdata_in_skrivnosti(dom):
     "dom:../zunaj.txt", "dom:Dokumenti/../../zunaj.txt", "dom:.ssh/id_rsa", "dom:id_ed25519",
     "dom:Dokumenti/kljuc.pem", "dom:Dokumenti/gesla.kdbx", "dom:AppData/Local/Brskalnik/Cookies",
     "dom://streznik/deljeno/x", "dom:C:/Windows/win.ini",
+    # Pregled Grok W7: imena, ki jih Windows tiho preslika (8.3, koncna pika ali presledek, tok ADS).
+    "dom:APPDAT~1/Local/Brskalnik/Cookies", "dom:AppData./Local/Brskalnik/Cookies", "dom:AppData /Local",
+    "dom:Dokumenti/porocilo.txt:skrito", "dom:Dokumenti/porocilo.txt::$DATA", "dom:DOKUME~1/porocilo.txt",
 ])
 def test_zavrnjeno(dom, oznaka):
     assert ld.DeljeneMape([], dom=True).razresi(oznaka) is None
@@ -112,3 +115,28 @@ def test_ozji_krog_na_windows_dobi_dom_ne_diska():
     vir = (KOREN / "windows" / "safeer_windows" / "control_backend.py").read_text(encoding="utf-8")
     assert "tls_mapa=self.navidezni_zaslon.tls_mapa, dom=polno)" in vir
     assert "ves_disk=polno)" not in vir
+
+
+def test_dolgo_ime_s_tildo_ostane(dom):
+    """Pravo ime s tildo, ki ni kratko ime 8.3, ostane dosegljivo."""
+    (dom / "Dokumenti" / "kopija~1 porocila.txt").write_text("x", encoding="utf-8")
+    m = ld.DeljeneMape([], dom=True)
+    assert m.razresi("dom:Dokumenti/kopija~1 porocila.txt") is not None
+    assert m.razresi("share:0:x.txt") is None
+
+
+@pytest.mark.skipif(os.name != "nt", reason="kratka imena 8.3 ima samo Windows")
+def test_pravo_kratko_ime_skrite_mape(dom):
+    import ctypes
+    mapa = dom / "Dokumenti" / "SkritaMapaDolga"
+    mapa.mkdir()
+    (mapa / "v.txt").write_text("x", encoding="utf-8")
+    assert ctypes.windll.kernel32.SetFileAttributesW(str(mapa), 0x2)
+    buf = ctypes.create_unicode_buffer(520)
+    if not ctypes.windll.kernel32.GetShortPathNameW(str(mapa), buf, 520) or "~" not in buf.value:
+        pytest.skip("nosilec nima kratkih imen 8.3")
+    kratko = os.path.basename(buf.value)
+    m = ld.DeljeneMape([], dom=True)
+    assert m.razresi("dom:Dokumenti/" + kratko + "/v.txt") is None
+    assert m.razresi("dom:Dokumenti/SkritaMapaDolga/v.txt") is None
+
