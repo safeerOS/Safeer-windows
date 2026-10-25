@@ -54,6 +54,9 @@ NAJBOLJ_OMEJUJOC = ("brez", "zaslon", "izbrano", "polno")
 #: Kar profil zapise v core/link_dostop (ozji krog). Samo »polno« je ozji krog; skupna link_dostop.nastavi mu prek
 #: ozji_krog da tudi upravljanje (z) in mape (d).
 OZJI_KROG_PO_PROFILU = {"polno": ("d", "p", "v", "z"), "izbrano": (), "zaslon": (), "brez": ()}
+#: Oznaka v nastavitvah Controla: enkratna selitev izbir v core/link_dostop je opravljena (Grok X1, 25. 10. 2026).
+#: Pozneje uskladitev ob zagonu samo zozuje.
+SELITEV_OZJEGA_KROGA = "ozji_krog_preseljen"
 #: Seznami predvajanja so enaki na vseh uporabnikovih napravah v Linku (core/seznami_sink.py, SeznamiSink.kt na
 #: Androidu): druga naprava v Linku prebere sezname Medijskega centra (samo branje, brez posebne pravice).
 DEJANJA_SEZNAMI = ["lists.get"]
@@ -612,14 +615,55 @@ class SafeerControlBackend:
             return False
 
     def uskladi_ozji_krog_ob_zagonu(self) -> None:
-        """Enkrat ob zagonu: izbire iz prejsnjih razlicic (samo v nastavitvah Controla) gredo v core/link_dostop.
-        Vsako napravo pod isto kljucavnico kot nastavi_dovoljenje in s TRENUTNIM profilom: umik takoj po zagonu
-        ne sme povoziti starega posnetka (Grok W6)."""
+        """Ob zagonu uskladi profil Controla in core/link_dostop; velja manj pravic (Grok X1, 25. 10. 2026).
+
+        Razsiri samo ENKRATNA selitev (SELITEV_OZJEGA_KROGA): izbire iz razlicic, ko Windows link_dostop se ni pisal,
+        gredo tja - razen napravi, ki ji je bil dostop izrecno vzet (prazen zapis, npr. umik iz kroga) ali je umaknjena.
+        Pozneje uskladitev samo zozuje: kar je bilo vzeto drugje (umik iz kroga na drugi napravi, drug program, neuspel
+        zapis nastavitev - W5), se ob zagonu ne vrne; »polno« Controla brez ozjega kroga v link_dostop postane »brez«.
+        Prej je vsak zagon iz »polno« zapisal d,p,v,z in vrnjena naprava je imela ozji krog brez nove privolitve.
+        Vsaka naprava pod isto kljucavnico kot nastavi_dovoljenje in s TRENUTNIM profilom (Grok W6)."""
+        try:
+            from core import link_dostop
+            zapisi = link_dostop.vsi()
+        except Exception as e:  # noqa: BLE001 - zapisa ni mogoce prebrati: nic ne razsirimo
+            print(f"[ControlBackend] Ozji krog: zapisa dostopa ni mogoce prebrati ({type(e).__name__})")
+            return
+        selitev = not self.nastavitve.get(SELITEV_OZJEGA_KROGA)
+        zozeni = []
         for id_n in list((self.nastavitve.get("dovoljenja_naprav") or {}).keys()):
             with self._zaklep_dovoljenj():
                 profil = str((self.nastavitve.get("dovoljenja_naprav") or {}).get(id_n) or "")
-                if profil in PROFILI_DOSTOPA:
+                if profil not in PROFILI_DOSTOPA:
+                    continue
+                cilj = set(OZJI_KROG_PO_PROFILU.get(profil, ()))
+                try:
+                    zdaj, j = set(link_dostop.zmoznosti(id_n)), str(link_dostop.jedro(id_n) or "")
+                except Exception:  # noqa: BLE001
+                    continue
+                if cilj <= zdaj:
+                    self._uskladi_ozji_krog([str(id_n)], profil)              # zozi na izbiro uporabnika
+                    continue
+                if not j:
+                    continue                    # brez jedra link_dostop napravi ne more nic zapisati
+                vzeto = j in zapisi and not zapisi[j]
+                if selitev and not vzeto and not self._umaknjena_iz_kroga(id_n):
                     self._uskladi_ozji_krog([str(id_n)], profil)
+                    continue
+                if j in zapisi:
+                    # Dostop je bil vzet drugje: profil Controla gre na »brez« (vrnjena naprava zacne brez nicesar).
+                    dovoljenja = dict(self.nastavitve.get("dovoljenja_naprav") or {})
+                    dovoljenja[id_n] = "brez"
+                    self.nastavitve["dovoljenja_naprav"] = dovoljenja
+                    self._preklici_zetone(id_n)
+                    zozeni.append(id_n)
+        if selitev:
+            self.nastavitve[SELITEV_OZJEGA_KROGA] = True
+        if selitev or zozeni:
+            self.shrani_nastavitve()
+        if zozeni:
+            print(f"[ControlBackend] Ozji krog: {len(zozeni)} napravam je bil dostop vzet drugje - profil »brez«")
+            self._oddaj_dogodek("dovoljenja", dict(self.nastavitve.get("dovoljenja_naprav") or {}))
 
     def _ob_odvzemu_dostopa(self, jedro: str) -> None:
         """core/link_dostop: napravi z jedrom `jedro` je bil dostop zmanjsan. Vse njene identitete (seznam naprav in
@@ -644,6 +688,29 @@ class SafeerControlBackend:
                 self.navidezni_zaslon.ustavi_sejo(posiljatelj=i)
             except Exception as e:  # noqa: BLE001
                 print(f"[ControlBackend] Seje zaslona ni bilo mogoce ustaviti ({type(e).__name__})")
+            self._zozi_profil_po_odvzemu(i)
+
+    def _zozi_profil_po_odvzemu(self, id_n: str) -> None:
+        """Dostop vzet drugje (umik iz kroga, drug program): »polno« Controla brez ozjega kroga v link_dostop postane
+        »brez«, da vira ostaneta usklajena in ponovni zagon ali vrnitev naprave v krog ne vrne pravic (Grok X1)."""
+        from core import link_dostop
+        with self._zaklep_dovoljenj():
+            dovoljenja = dict(self.nastavitve.get("dovoljenja_naprav") or {})
+            if dovoljenja.get(id_n) != "polno":
+                return
+            try:
+                if link_dostop.v_ozjem_krogu(id_n):
+                    return
+            except Exception:  # noqa: BLE001 - ne vem ni da: profil se zozi
+                pass
+            dovoljenja[id_n] = "brez"
+            self.nastavitve["dovoljenja_naprav"] = dovoljenja
+            if not self.shrani_nastavitve():
+                print("[ControlBackend] Ozji krog: zozitve profila ni bilo mogoce zapisati (velja v pomnilniku)")
+        try:
+            self._oddaj_dogodek("dovoljenja", dovoljenja)
+        except Exception:  # noqa: BLE001 - okno se osvezi ob naslednjem dogodku
+            pass
 
     def _preveri_sejo_zaslona(self, posiljatelj: str) -> Tuple[bool, bool]:
         """(sme gledati, sme upravljati) za tekoco sejo zaslona; navidezni_zaslon jo poklice najvec enkrat na

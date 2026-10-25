@@ -37,6 +37,15 @@ class _Zaslon:
         return {"port": 1, "fp": "ab", "token": "z", "v": 2}
 
 
+def _ponaredek_zapisa(t):
+    """link_dostop.vsi/jedro/v_ozjem_krogu iz t.zapis (id = jedro): preizkus ne bere pravega dostop.json."""
+    return (mock.patch.object(link_dostop, "vsi",
+                              side_effect=lambda: {k: link_dostop.v_niz(v) for k, v in t.zapis.items()}),
+            mock.patch.object(link_dostop, "jedro", side_effect=lambda n: str(n or "")),
+            mock.patch.object(link_dostop, "v_ozjem_krogu",
+                              side_effect=lambda n: {"d", "p", "v", "z"} <= set(t.zapis.get(n, ()))))
+
+
 @unittest.skipIf(control_backend is None, "control_backend se ne uvozi")
 class OzjiKrog(unittest.TestCase):
     def setUp(self):
@@ -58,7 +67,7 @@ class OzjiKrog(unittest.TestCase):
                                side_effect=lambda n, d: self.zapis.__setitem__(n, set(d)) or True)
         p2 = mock.patch.object(link_dostop, "zmoznosti", side_effect=lambda n: set(self.zapis.get(n, ())))
         p3 = mock.patch.object(link_krog, "je_umaknjen", return_value=False)
-        for p in (p1, p2, p3):
+        for p in (p1, p2, p3) + _ponaredek_zapisa(self):
             p.start()
             self.addCleanup(p.stop)
 
@@ -154,7 +163,7 @@ class PregledGrok(unittest.TestCase):
                   mock.patch.object(link_dostop, "zmoznosti", side_effect=lambda n: set(self.zapis.get(n, ()))),
                   mock.patch.object(link_krog, "je_umaknjen", return_value=False),
                   mock.patch.object(control_backend.SafeerControlBackend, "_fizicna_po_krogu",
-                                    staticmethod(lambda i: ""))):
+                                    staticmethod(lambda i: ""))) + _ponaredek_zapisa(self):
             p.start()
             self.addCleanup(p.stop)
 
@@ -242,14 +251,23 @@ class OdvzemIzSkupneKode(unittest.TestCase):
     """Safeer-linux eebfe57: core/link_dostop.ob_odvzemu - umik iz kroga ali manj pravic v kateremkoli programu tega
     procesa takoj konca sejo zaslona in zetone naprave na Windows."""
 
+    def setUp(self):
+        self.zapis = {}
+        for p in _ponaredek_zapisa(self):
+            p.start()
+            self.addCleanup(p.stop)
+
     def test_odvzem_konca_sejo_in_zetone(self):
         b = control_backend.SafeerControlBackend.__new__(control_backend.SafeerControlBackend)
+        b.shrani_nastavitve = lambda: True
+        b._oddaj_dogodek = lambda *a, **k: None
         b.naprave = [{"id": "n-0123456789abcdef"}, {"id": "n-0123456789abcdef-os"}, {"id": "n-ffffffffffffffff"}]
         b.nastavitve = {"dovoljenja_naprav": {"n-0123456789abcdef-control": "polno"}}
         preklicani = []
         b._preklici_zetone = lambda n: preklicani.append(n)
         b.navidezni_zaslon = _Zaslon()
-        b._ob_odvzemu_dostopa("n-0123456789abcdef")
+        with mock.patch.object(link_dostop, "jedro", side_effect=lambda n: str(n)[:18]):
+            b._ob_odvzemu_dostopa("n-0123456789abcdef")
         pricakovano = ["n-0123456789abcdef", "n-0123456789abcdef-control", "n-0123456789abcdef-os"]
         self.assertEqual(sorted(preklicani), pricakovano)
         self.assertEqual(sorted(b.navidezni_zaslon.ustavljeno), pricakovano)
@@ -332,3 +350,104 @@ class VnosSeje(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipIf(control_backend is None, "control_backend se ne uvozi")
+class PregledGrokX1(unittest.TestCase):
+    """Pregled Grok 20, X1 (25. 10. 2026): uskladitev ob zagonu je ob vsakem zagonu iz »polno« Controla zapisala
+    d,p,v,z v link_dostop - dostop, vzet drugje (umik iz kroga z druge naprave, drug program, neuspel zapis W5), se je
+    vrnil brez nove privolitve. Zdaj razsiri samo enkratna selitev; pozneje velja manj pravic."""
+    TEL = "n-0123456789abcdef"
+    DPVZ = {"d", "p", "v", "z"}
+
+    def setUp(self):
+        b = control_backend.SafeerControlBackend.__new__(control_backend.SafeerControlBackend)
+        b.nastavitve = {"dovoljenja_naprav": {self.TEL: "polno"}, control_backend.SELITEV_OZJEGA_KROGA: True}
+        b.naprave = [{"id": self.TEL}]
+        b._opozorjena_dovoljenja = set()
+        self.shranjeno = []
+        b.shrani_nastavitve = lambda: self.shranjeno.append(dict(b.nastavitve)) or True
+        self.dogodki = []
+        b._oddaj_dogodek = lambda *a, **k: self.dogodki.append(a)
+        b._datoteke = {}
+        self.preklicani = []
+        b._preklici_zetone = lambda n: self.preklicani.append(n)
+        b.navidezni_zaslon = _Zaslon()
+        self.b = b
+        self.zapis = {}
+        self.umaknjen = False
+        for p in (mock.patch.object(link_dostop, "nastavi",
+                                    side_effect=lambda n, d: self.zapis.__setitem__(n, set(d)) or True),
+                  mock.patch.object(link_dostop, "zmoznosti", side_effect=lambda n: set(self.zapis.get(n, ()))),
+                  mock.patch.object(link_krog, "je_umaknjen", side_effect=lambda n: self.umaknjen)) + \
+                _ponaredek_zapisa(self):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_zagon_ne_vrne_dostopa_vzetega_drugje(self):
+        self.zapis[self.TEL] = set()                    # umik iz kroga na drugi napravi (ob_umiku_iz_kroga)
+        self.b.uskladi_ozji_krog_ob_zagonu()
+        self.assertEqual(self.zapis[self.TEL], set())
+        self.assertEqual(self.b.nastavitve["dovoljenja_naprav"][self.TEL], "brez")
+        self.assertEqual(self.b.dovoljenje_za(self.TEL), "brez")
+        self.assertIn(self.TEL, self.preklicani)
+        self.assertTrue(self.shranjeno)
+
+    def test_po_vrnitvi_v_krog_brez_nove_privolitve_nic(self):
+        self.zapis[self.TEL] = set()
+        self.b.uskladi_ozji_krog_ob_zagonu()
+        self.umaknjen = False                           # naprava je spet v krogu (nova seznanitev)
+        self.b.uskladi_ozji_krog_ob_zagonu()
+        self.assertEqual(self.zapis[self.TEL], set())
+        self.assertFalse(self.b._dejanje_dovoljeno(self.TEL, "files.list"))
+
+    def test_delni_zapis_drugega_programa_ne_razsiri(self):
+        self.zapis[self.TEL] = {"p"}                    # drug program je vzel ozji krog, pustil programe
+        self.b.uskladi_ozji_krog_ob_zagonu()
+        self.assertEqual(self.zapis[self.TEL], {"p"})
+        self.assertEqual(self.b.nastavitve["dovoljenja_naprav"][self.TEL], "brez")
+
+    def test_selitev_enkrat_nato_samo_zozuje(self):
+        del self.b.nastavitve[control_backend.SELITEV_OZJEGA_KROGA]
+        self.b.uskladi_ozji_krog_ob_zagonu()            # izbira iz razlicice, ko Windows link_dostop ni pisal
+        self.assertEqual(self.zapis[self.TEL], self.DPVZ)
+        self.assertTrue(self.b.nastavitve[control_backend.SELITEV_OZJEGA_KROGA])
+        self.assertTrue(self.shranjeno[-1][control_backend.SELITEV_OZJEGA_KROGA])
+        self.zapis[self.TEL] = set()                    # nato umik drugje
+        self.b.uskladi_ozji_krog_ob_zagonu()
+        self.assertEqual(self.zapis[self.TEL], set())
+
+    def test_selitev_ne_vrne_izrecno_vzetega_ali_umaknjene(self):
+        del self.b.nastavitve[control_backend.SELITEV_OZJEGA_KROGA]
+        self.zapis[self.TEL] = set()
+        self.b.uskladi_ozji_krog_ob_zagonu()
+        self.assertEqual(self.zapis[self.TEL], set())
+        self.assertEqual(self.b.nastavitve["dovoljenja_naprav"][self.TEL], "brez")
+        drugi = "n-fedcba9876543210"
+        self.b.nastavitve["dovoljenja_naprav"][drugi] = "polno"
+        del self.b.nastavitve[control_backend.SELITEV_OZJEGA_KROGA]
+        self.umaknjen = True
+        self.b.uskladi_ozji_krog_ob_zagonu()
+        self.assertNotIn(drugi, self.zapis)
+
+    def test_zagon_zozi_po_izbiri_controla(self):
+        self.b.nastavitve["dovoljenja_naprav"][self.TEL] = "brez"
+        self.zapis[self.TEL] = set(self.DPVZ)
+        self.b.uskladi_ozji_krog_ob_zagonu()
+        self.assertEqual(self.zapis[self.TEL], set())
+
+    def test_odvzem_drugje_zozi_profil_controla(self):
+        self.zapis[self.TEL] = set()
+        self.b._ob_odvzemu_dostopa(self.TEL)
+        self.assertEqual(self.b.nastavitve["dovoljenja_naprav"][self.TEL], "brez")
+        self.assertTrue(self.shranjeno)
+        self.assertIn(self.TEL, self.b.navidezni_zaslon.ustavljeno)
+
+    def test_odvzem_brez_izgube_ozjega_kroga_profila_ne_spremeni(self):
+        self.zapis[self.TEL] = set(self.DPVZ)
+        self.b._ob_odvzemu_dostopa(self.TEL)
+        self.assertEqual(self.b.nastavitve["dovoljenja_naprav"][self.TEL], "polno")
+        self.b.nastavitve["dovoljenja_naprav"][self.TEL] = "zaslon"     # izbira uporabnika ostane
+        self.zapis[self.TEL] = set()
+        self.b._ob_odvzemu_dostopa(self.TEL)
+        self.assertEqual(self.b.nastavitve["dovoljenja_naprav"][self.TEL], "zaslon")
