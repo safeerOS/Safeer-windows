@@ -177,6 +177,87 @@ def test_zeton_mostu_ne_uide_strani():
     assert sporocilo["action"] == "drm_zahteva" and policy.zeton_veljaven(sporocilo)
 
 
+_NODE_X2 = r"""
+// Grok X2: stran po nastanku dokumenta (ali pred DOMContentLoaded) zamenja Function.prototype.call/apply,
+// String.prototype.slice/charAt in console.log, ali doda Object.prototype.toJSON. Zeton ne sme uiti, sporocila z
+// zetonom stran ne sme ponarediti. Skripta se vbrizga ob nastanku (pred stranjo), telo ob DOMContentLoaded.
+const ujeto = [], ukradeno = [], poslusalci = [];
+const napad = process.argv[1];
+globalThis.location = { href: "https://napad.example/" };
+globalThis.window = globalThis; window.top = window;
+globalThis.document = { readyState: "loading" };
+window.addEventListener = (ime, f) => { if (ime === "DOMContentLoaded") poslusalci.push(f); };
+console.log = (x) => ujeto.push(String(x));
+const json = JSON.stringify;
+new Function(require("fs").readFileSync(0, "utf8"))();
+// Stran:
+console.log = (x) => ukradeno.push("log:" + String(x));
+if (napad === "call") {
+  Function.prototype.call = function (t, ...r) {
+    ukradeno.push("call:" + r.map(String).join("|")); return Reflect.apply(this, t, r); };
+  Function.prototype.apply = function (t, r) {
+    ukradeno.push("apply:" + Array.from(r || []).map(String).join("|")); return Reflect.apply(this, t, r || []); };
+}
+if (napad === "niz") {
+  String.prototype.slice = function () { return '{"action":"ponaredek"'; };
+  String.prototype.charAt = function () { return "}"; };
+}
+if (napad === "tojson") {
+  Object.defineProperty(Object.prototype, "toJSON", { value: function () { return { action: "ponaredek" }; },
+                                                       configurable: true, writable: true });
+}
+document.readyState = "interactive";
+for (const f of poslusalci) f({});
+setTimeout(() => { delete Object.prototype.toJSON; process.stderr.write(json({ ujeto, ukradeno }) + "\n"); }, 30);
+"""
+
+
+@pytest.mark.skipif(not shutil.which("node"), reason="brez node")
+@pytest.mark.parametrize("napad", ["call", "niz", "tojson"])
+def test_x2_zeton_ne_uide_in_sporocila_ni_mogoce_ponarediti(napad):
+    """Pregled Grok 20, X2: __safeerLog.call je sel skozi Function.prototype.call strani (zeton v drugem argumentu),
+    s.slice/s.charAt skozi String.prototype (stran je zamenjala vsebino sporocila, zeton pa je ostal pravi),
+    Object.prototype.toJSON je zamenjal sporocilo. Skripta »ob nalaganju« je bila vbrizgana sele ob DocumentReady."""
+    vir = policy.wrap_script("setTimeout(function () { __safeerPost({action: 'drm_zahteva', sistem: 'x'}); }, 5);",
+                             None, None)
+    _x2_preveri(vir, napad, poslano=napad != "tojson")
+
+
+def _x2_preveri(vir, napad, poslano=True):
+    import json
+    r = subprocess.run(["node", "-e", _NODE_X2, napad], input=vir, capture_output=True, text=True, timeout=20)
+    assert r.returncode == 0, r.stderr
+    izid = json.loads(r.stderr.strip().splitlines()[-1])
+    assert not [u for u in izid["ukradeno"] if policy.STEVEC_ZETON in u], izid["ukradeno"]
+    for sporocilo in izid["ujeto"]:
+        sporocilo = json.loads(sporocilo[len(policy.BRIDGE_PREFIX):])
+        assert sporocilo["action"] == "drm_zahteva" and sporocilo.get("sistem") == "x", sporocilo
+    if poslano:
+        assert len(izid["ujeto"]) == 1
+        assert policy.zeton_veljaven(json.loads(izid["ujeto"][0][len(policy.BRIDGE_PREFIX):]))
+
+
+@pytest.mark.skipif(not shutil.which("node"), reason="brez node")
+def test_x2_telo_ob_nalaganju_po_zamenjavi_console_log():
+    """Skripta »ob nalaganju« (prej DocumentReady): stran pred DOMContentLoaded zamenja console.log - most je bil
+    vzet ob nastanku dokumenta, sporocilo gre v Safeer, stran zetona ne dobi."""
+    _x2_preveri(policy.wrap_script("__safeerPost({action: 'drm_zahteva', sistem: 'x'});", None, None,
+                                   ob_nalaganju=True), "log")
+
+
+def test_x2_skripte_z_mostom_ob_nastanku_dokumenta():
+    """Skripta, ki poslje v most (__safeerPost), mora biti vbrizgana ob nastanku dokumenta: ob DocumentReady je stran
+    console.log ze lahko zamenjala (safeer-cosmetic je tako posiljal increment_ads z zetonom na vsaki strani)."""
+    from safeer_windows.policy import SettingsStore
+    nastavitve = SettingsStore.__new__(SettingsStore)
+    nastavitve.get = lambda k, d=None: True
+    specs = policy.script_specs(nastavitve)
+    assert any(s["name"] == "safeer-cosmetic" for s in specs)
+    for s in specs:
+        if "__safeerPost(" in s["source"].split("function __safeerPost", 1)[1].split("\n", 1)[1]:
+            assert s["at_start"], s["name"]
+
+
 def test_zaprta_ponudba_velja_za_gostitelja_v_zavihku():
     """Grok W8: zaprte ponudbe stran ne prikaze znova z drugo poizvedbo istega gostitelja."""
     lastnosti = {}

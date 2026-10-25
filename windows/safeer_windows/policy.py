@@ -505,15 +505,22 @@ def adapt_linux_script(source: str) -> str:
     return adapted.replace("window.webkit.messageHandlers.safeer.postMessage(", "__safeerPost(")
 
 
-def wrap_script(source: str, include: Optional[Iterable[str]], exclude: Optional[Iterable[str]], top_frame_only: bool = False) -> str:
+def wrap_script(source: str, include: Optional[Iterable[str]], exclude: Optional[Iterable[str]],
+                top_frame_only: bool = False, ob_nalaganju: bool = False) -> str:
+    """Ovoj skripte Safeerja. Vbrizga se VEDNO ob nastanku dokumenta (pred skriptami strani); `ob_nalaganju` = telo
+    pocaka na DOMContentLoaded (prej DocumentReady - takrat je stran console.log ze lahko zamenjala; Grok X2)."""
     include_rx = json.dumps([pattern_to_regex(p) for p in (include or [])])
     exclude_rx = json.dumps([pattern_to_regex(p) for p in (exclude or [])])
-    # Pregled Grok W8 (25. 10. 2026): stran ne sme dobiti zetona. console.log in JSON.stringify vzamemo ob nastanku
-    # dokumenta (pred skriptami strani - kasnejsa zamenjava jih ne vidi), zeton pa dodamo v NIZ, ne v predmet
-    # (nastavljalnik »t« na Object.prototype bi ga sicer prebral).
+    # Pregled Grok W8 in X2 (25. 10. 2026): stran ne sme dobiti zetona in ne sme ponarediti sporocila z zetonom.
+    # Vse, kar __safeerPost klice, vzamemo ob nastanku dokumenta, VEZANO (bind): kasnejsa zamenjava console.log,
+    # JSON.stringify, Function.prototype.call/apply ali String.prototype.slice tega ne doseze (prej je sel
+    # __safeerLog.call skozi Function.prototype.call strani). Zeton gre v NIZ, ne v predmet (nastavljalnik »t« na
+    # Object.prototype bi ga prebral); Object.prototype.toJSON strani bi zamenjal vsebino sporocila - takrat nic.
     prelude = (
         "(function () {\n"
-        "var __safeerLog = console.log, __safeerJson = JSON.stringify;\n"
+        "var __safeerLog = console.log.bind(console), __safeerJson = JSON.stringify,"
+        " __safeerVzemi = Function.prototype.call.bind(String.prototype.slice),"
+        " __safeerLastna = Function.prototype.call.bind(Object.prototype.hasOwnProperty);\n"
         "var __safeerUrl = String(location.href);\n"
         "function __safeerMatches(list) { for (var i = 0; i < list.length; i++) { "
         "if (new RegExp(list[i], 'i').test(__safeerUrl)) return true; } return false; }\n"
@@ -521,12 +528,20 @@ def wrap_script(source: str, include: Optional[Iterable[str]], exclude: Optional
         "if (__safeerInclude.length && !__safeerMatches(__safeerInclude)) return;\n"
         "if (__safeerMatches(__safeerExclude)) return;\n"
         + ("if (window.top !== window) return;\n" if top_frame_only else "")
-        + "function __safeerPost(message) { try { var s = __safeerJson(message);"
-        " if (typeof s !== 'string' || s.charAt(s.length - 1) !== '}') return;"
-        " s = s.slice(0, -1) + (s.length > 2 ? ',' : '') + '\"t\":\"" + STEVEC_ZETON + "\"}';"
-        " __safeerLog.call(console, '" + BRIDGE_PREFIX + "' + s); } catch (e) {} }\n"
+        + "function __safeerPost(message) { try { if (__safeerLastna(Object.prototype, 'toJSON')) return;"
+        " var s = __safeerJson(message);"
+        " if (typeof s !== 'string' || s[s.length - 1] !== '}') return;"
+        " s = __safeerVzemi(s, 0, -1) + (s.length > 2 ? ',' : '') + '\"t\":\"" + STEVEC_ZETON + "\"}';"
+        " __safeerLog('" + BRIDGE_PREFIX + "' + s); } catch (e) {} }\n"
     )
-    return prelude + adapt_linux_script(source) + "\n})();\n"
+    telo = adapt_linux_script(source)
+    if ob_nalaganju:
+        # Poslusalec na window v fazi zajema, prijavljen pred skriptami strani: stran ga ne more ustaviti.
+        telo = ("function __safeerTelo() {\n" + telo + "\n}\n"
+                "if (document.readyState === 'loading')"
+                " window.addEventListener('DOMContentLoaded', __safeerTelo, true);\n"
+                "else __safeerTelo();\n")
+    return prelude + telo + "\n})();\n"
 
 
 YOUTUBE_PATTERNS = ["*://*.youtube.com/*", "*://youtube.com/*"]
@@ -644,10 +659,12 @@ def script_specs(settings: SettingsStore) -> List[Dict[str, Any]]:
     specs: List[Dict[str, Any]] = []
 
     def add(name, source, include, exclude, at_start, all_frames):
+        # Vse ob nastanku dokumenta (Grok X2): skripta »ob nalaganju« (prej DocumentReady) dobi most, ki ga stran se ni
+        # mogla zamenjati, njeno telo pa tece ob DOMContentLoaded kot prej.
         specs.append({
             "name": name,
-            "source": wrap_script(source, include, exclude, top_frame_only=not all_frames),
-            "at_start": at_start,
+            "source": wrap_script(source, include, exclude, top_frame_only=not all_frames, ob_nalaganju=not at_start),
+            "at_start": True,
             "all_frames": all_frames,
         })
 
