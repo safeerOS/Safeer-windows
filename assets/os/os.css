@@ -1096,3 +1096,15 @@ body.vrstica-skrita.nacin-splet .rocaj-vrstice { display: block; }
 .disk-vrstica b { display: block; height: 100%; background: var(--zelena); border-radius: 2px; }
 .mape-seznam button.disk.malo .disk-vrstica b { background: var(--opozorilo, #e5a50a); }
 .mape-seznam button.disk.malo small { color: var(--opozorilo, #e5a50a); }
+
+/* O tem racunalniku: kartica na vrhu Nastavitev (lastnik, 25. 10. 2026). */
+.o-racunalniku-kartica { border: 1px solid var(--rob); border-radius: 18px; background: rgba(255, 255, 255, .045); padding: 18px 22px 6px; margin: 6px 0 26px; max-width: 900px; }
+.o-racunalniku-kartica h2 { margin-top: 0; }
+.o-racunalniku-kartica .bliznjice { margin-bottom: 14px; }
+
+/* Okno enega razdelka na namizju (okno_razdelka.py): brez stranske vrstice in glave cele lupine, kot na Linuxu. */
+body.en-razdelek #aplikacija { display: flex; }
+body.en-razdelek #glavno { flex: 1; }
+body.en-razdelek #stranska, body.en-razdelek #vrh, body.en-razdelek .rocaj-vrstice, body.en-razdelek #mediaMini,
+body.en-razdelek .razdelek:not(.viden) { display: none !important; }
+body.en-razdelek #vsebina { padding-top: 30px; }

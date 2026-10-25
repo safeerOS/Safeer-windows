@@ -338,7 +338,25 @@
   ];
 
   // ------------------------------------------------------------------ navigacija
+  // Okno enega razdelka na namizju (safeer_windows/okno_razdelka.py, lastnik 25. 10. 2026: »desni gumb -> Nastavitve
+  // sistema odpre staro aplikacijo namesto elegantnega novega okna«): Nastavitve, Safeer Link, Zapiski in Sporocila se
+  // z namizja odprejo vsak v svojem oknu - brez stranske vrstice in glave cele lupine (kot Linux, safeer_os.py
+  // _odpri_okno_razdelka). Razdelek, ki ga to okno nima, odpre namizje oz. Safeer OS (klic »odpriRazdelek«).
+  var RAZDELEK = (location.search.match(/[?&]razdelek=(nastavitve|naprave|zapiski|sporocila)(?:&|$)/) || [])[1] || "";
+  var PODSTRANI_OKNA = { nastavitve: ["omrezje", "zvok"] };
+  function vTemOknu(razdelek) {
+    return !RAZDELEK || razdelek === RAZDELEK || (PODSTRANI_OKNA[RAZDELEK] || []).indexOf(razdelek) >= 0;
+  }
   function pojdi(razdelek) {
+    var osnova = String(razdelek || "").split("#")[0];
+    if (!vTemOknu(osnova)) { klic("odpriRazdelek", [razdelek]); return; }
+    if (osnova !== razdelek) {
+      // »nastavitve#blokScit«: razdelek in nato blok v njem
+      pojdi(osnova);
+      var blok = document.getElementById(razdelek.split("#")[1]);
+      if (blok) setTimeout(function () { blok.scrollIntoView({ block: "start", behavior: "smooth" }); }, 120);
+      return;
+    }
     if (document.body.classList.contains("nacin-splet") && razdelek !== "splet") {
       klic("zapriSplet", [razdelek]);
     }
@@ -4123,6 +4141,14 @@
 
   function zacni() {
     if (/[?&]namizje=1/.test(location.search)) document.body.classList.add("namizje");
+    if (RAZDELEK) {
+      document.body.classList.add("en-razdelek", "razdelek-" + RAZDELEK);
+      var jezikRazdelka = (location.search.match(/[?&]jezik=([a-z]{2})(?:&|$)/) || [])[1];
+      if (jezikRazdelka && BESEDILA_OS[jezikRazdelka]) jezik = jezikRazdelka;
+      // Takoj pokazi pravi razdelek (brez domacega zaslona vmes); podatke nalozi pojdi() po »zacetek«.
+      S.razdelek = RAZDELEK;
+      document.querySelectorAll(".razdelek").forEach(function (r) { r.classList.toggle("viden", r.id === "r-" + RAZDELEK); });
+    }
     prevedi();
     poveziDogodke();
     poveziMeniPolja();
@@ -4157,6 +4183,12 @@
       narisiSpletnoZacetno();
       osveziIskalneNaprave();
       nalozPrograme();
+      if (RAZDELEK) {
+        // Okno enega razdelka: ta razdelek (ali kar je Safeer OS poslal ob odprtju z »pojdi«), brez domacega zaslona.
+        pojdi(S.razdelek && S.razdelek !== "domov" && vTemOknu(S.razdelek) ? S.razdelek : RAZDELEK);
+        document.title = t(RAZDELEK === "naprave" ? "safeerLink" : RAZDELEK) || document.title;
+        return;
+      }
       osveziStanje();
       osveziOkna();
       narisiNedavneDomov();

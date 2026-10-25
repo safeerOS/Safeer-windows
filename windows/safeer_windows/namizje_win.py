@@ -306,7 +306,8 @@ class NamizjeOkno(QWidget):  # type: ignore[misc]
         return z
 
     def odpri_razdelek(self, razdelek: str) -> bool:
-        self.os_okno.dispatcher.dispatch(lambda: self.os_okno.prebudi(razdelek))
+        # Nastavitve, Safeer Link ... v svojem oknu Safeer OS (okno_razdelka.py), drugo v glavnem oknu.
+        self.os_okno.dispatcher.dispatch(lambda: self.os_okno.odpri_razdelek_namizja(razdelek))
         return True
 
     def spremljaj_mapo(self, pot: str) -> bool:

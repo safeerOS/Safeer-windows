@@ -1047,14 +1047,62 @@ class SafeerOsWindow(QMainWindow):
                 return
             from . import namizje_qml
             self.namizje = namizje_qml.NamizjeQml(self)
+            if not self.namizje.nalozeno():
+                # Varnostna vrata: namizje, ki se ne nalozi (napaka QML), ne sme prekriti namizja Windows s praznim
+                # oknom - izklopi se in ostane obicajno namizje; vklopis ga z enim klikom v Nastavitvah.
+                print("[SafeerOS] Namizje QML se ni nalozilo - ostane obicajno namizje Windows.", flush=True)
+                self.namizje.close()
+                self.namizje.deleteLater()
+                self.namizje = None
+                self.nastavi_namizje(False)
+                self.prebudi("nastavitve")
+                return
             self.namizje.pokazi()
+
+    def zacni_namizje_ob_zagonu(self) -> None:
+        """Namizje ob zagonu programa, z varnostnimi vrati: po NAJVEC_ZAGONOV zagonih brez stabilnega delovanja
+        (sesutje ob zagonu) ostane obicajno namizje Windows (varnostna_vrata.py)."""
+        from . import varnostna_vrata as vv
+        pokazi, zapis = vv.ob_zagonu(vv.beri(), vv.zdaj())
+        vv.pisi(zapis)
+        if not pokazi:
+            print("[SafeerOS] Varnostna vrata: namizje se je vec zagonov zapored sesulo - obicajno namizje Windows.",
+                  flush=True)
+            self.nastavi_namizje(False)
+            self.prebudi("nastavitve")
+            return
+        self.pokazi_namizje()
+        QTimer.singleShot(vv.STABILNO_S * 1000, lambda: vv.pisi(vv.stabilno(vv.beri())))
+
+    def zacni_varnostna_vrata(self) -> None:
+        """Sistemska bliznjica Ctrl+Alt+Shift+W: obicajno namizje Windows, tudi ce namizje Safeer OS ne odgovarja."""
+        from . import varnostna_vrata as vv
+
+        def ob_pritisku() -> None:
+            if self.namizje_vklopljeno():
+                self.dispatcher.dispatch(lambda: self.nastavi_namizje(False))
+        vv.zazeni_bliznjico(ob_pritisku)
 
     def _skrij_namizje(self) -> None:
         okno = getattr(self, "namizje", None)
         if okno is not None:
+            if hasattr(okno, "ustavi"):
+                okno.ustavi()
             okno.close()
             okno.deleteLater()
             self.namizje = None
+
+    def odpri_razdelek_namizja(self, razdelek: str) -> None:
+        """Razdelek z namizja (desni klik -> Nastavitve sistema, Safeer Link ...). Nastavitve, Safeer Link, Zapiski in
+        Sporocila se odprejo v svojem oknu (okno_razdelka.py - kot na Linuxu), ne v celem glavnem oknu z vrstico, ki
+        je lastnika spominjalo na staro aplikacijo (25. 10. 2026). Ostali razdelki gredo v glavno okno kot prej."""
+        try:
+            from . import okno_razdelka
+            if okno_razdelka.odpri(self, razdelek, SafeerOsPage, most_js, _jezik_oken()):
+                return
+        except Exception as e:  # noqa: BLE001 - okno razdelka ni uspelo: vsaj glavno okno na pravem mestu
+            print(f"[SafeerOS] Okno razdelka {razdelek}: {e}", flush=True)
+        self.prebudi(razdelek)
 
     def prebudi(self, razdelek: str = "") -> None:
         """Druga kopija je bila zagnana (ikona, bliznjica): pokazi to okno in odpri zeleni razdelek."""
@@ -2228,6 +2276,12 @@ class SafeerOsWindow(QMainWindow):
         payload_js = json.dumps(podatki, ensure_ascii=False)
         cmd = f"window.safeerOsDogodek && window.safeerOsDogodek({json.dumps(vrsta)}, {payload_js});"
         self.dispatcher.dispatch(lambda: self.view.page().runJavaScript(cmd))
+        # Okna razdelkov (Nastavitve, Safeer Link ... z namizja) so ista stran: dobijo iste dogodke (povezava, naprave).
+        for okno in list((getattr(self, "okna_razdelkov", None) or {}).values()):
+            try:
+                okno.dogodek(vrsta, podatki)
+            except Exception:  # noqa: BLE001
+                pass
 
     def _na_dogodek_linka(self, vrsta: str, podatki: Any) -> None:
         if vrsta in ("povezava", "stanje", "naprave"):
@@ -2836,7 +2890,8 @@ class SafeerOsWindow(QMainWindow):
         if metoda == "datotekeNaprave":
             id_n = str(a[0]) if a else ""
             mapa = str(a[1]) if len(a) > 1 else ""
-            return self.control_backend.datoteke_naprave(id_n, mapa)
+            odmik = a[2] if len(a) > 2 and isinstance(a[2], int) and not isinstance(a[2], bool) else 0
+            return self.control_backend.datoteke_naprave(id_n, mapa, odmik)
 
         if metoda == "odpriDatotekoNaprave":
             id_n = str(a[0]) if a else ""
@@ -3365,6 +3420,16 @@ class SafeerOsWindow(QMainWindow):
         self._pocisceno = True
         self._koncujem = True
         try:
+            for okno in list((getattr(self, "okna_razdelkov", None) or {}).values()):
+                okno.zapri_zares()
+        except Exception:
+            pass
+        try:
+            if getattr(self, "namizje", None) is not None and hasattr(self.namizje, "ustavi"):
+                self.namizje.ustavi()          # slicice v ozadju (namizje_qml): brez cakanja na ffmpeg ob izhodu
+        except Exception:
+            pass
+        try:
             if hasattr(self.media_player, "zapri_pogon"):
                 self.media_player.zapri_pogon()
         except Exception:
@@ -3483,9 +3548,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     # Namizje Safeer OS (po vzoru Linuxa): vklop/izklop se zapomni; ob vklopu glavno okno caka v ozadju.
     if args.namizje or args.brez_namizja:
         window.nastavi_namizje(bool(args.namizje))
+    window.zacni_varnostna_vrata()
     if window.namizje_vklopljeno():
-        window.pokazi_namizje()
-        if not (args.razdelek or args.control or magnet or args.okno):
+        window.zacni_namizje_ob_zagonu()
+        if window.namizje_vklopljeno() and not (args.razdelek or args.control or magnet or args.okno):
             window.hide()
 
     koda = app.exec()
