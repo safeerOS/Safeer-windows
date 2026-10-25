@@ -1033,6 +1033,9 @@ class SafeerOsWindow(QMainWindow):
         s["namizje"] = bool(vklop)
         os_backend_win.shrani_shrambo(s)
         if vklop:
+            # Uporabnik ga je vklopil sam: stevec sesutij in razlog samodejnega izklopa se pocistita (S5).
+            from . import varnostna_vrata as vv
+            vv.pisi({"zacetki": []})
             self.dispatcher.dispatch(self.pokazi_namizje)
         else:
             self.dispatcher.dispatch(self._skrij_namizje)
@@ -1049,15 +1052,23 @@ class SafeerOsWindow(QMainWindow):
                 if port:
                     self.namizje.pokazi(f"http://127.0.0.1:{port}/os/delovna.html")
                 return
-            from . import namizje_qml
-            self.namizje = namizje_qml.NamizjeQml(self)
-            if not self.namizje.nalozeno():
+            try:
+                from . import namizje_qml
+                self.namizje = namizje_qml.NamizjeQml(self)
+                nalozeno = self.namizje.nalozeno()
+            except Exception as e:  # noqa: BLE001 - npr. manjka modul QtQuick v paketu (pregled S4)
+                print(f"[SafeerOS] Namizje QML ni mogoce ustvariti: {e}", flush=True)
+                nalozeno = False
+            if not nalozeno:
                 # Varnostna vrata: namizje, ki se ne nalozi (napaka QML), ne sme prekriti namizja Windows s praznim
                 # oknom - izklopi se in ostane obicajno namizje; vklopis ga z enim klikom v Nastavitvah.
                 print("[SafeerOS] Namizje QML se ni nalozilo - ostane obicajno namizje Windows.", flush=True)
-                self.namizje.close()
-                self.namizje.deleteLater()
+                if getattr(self, "namizje", None) is not None:
+                    self.namizje.close()
+                    self.namizje.deleteLater()
                 self.namizje = None
+                from . import varnostna_vrata as vv
+                vv.pisi(dict(vv.beri(), razlog="nalaganje", izklopljeno_ob=vv.zdaj()))
                 self.nastavi_namizje(False)
                 self.prebudi("nastavitve")
                 return
@@ -1076,16 +1087,48 @@ class SafeerOsWindow(QMainWindow):
             self.prebudi("nastavitve")
             return
         self.pokazi_namizje()
-        QTimer.singleShot(vv.STABILNO_S * 1000, lambda: vv.pisi(vv.stabilno(vv.beri())))
+
+        def ce_tece() -> None:
+            if getattr(self, "namizje", None) is not None:   # ne ce se ni naložilo (razlog »nalaganje« ostane)
+                vv.pisi(vv.stabilno(vv.beri()))
+        QTimer.singleShot(vv.STABILNO_S * 1000, ce_tece)
 
     def zacni_varnostna_vrata(self) -> None:
         """Sistemska bliznjica Ctrl+Alt+Shift+W: obicajno namizje Windows, tudi ce namizje Safeer OS ne odgovarja."""
         from . import varnostna_vrata as vv
 
         def ob_pritisku() -> None:
-            if self.namizje_vklopljeno():
-                self.dispatcher.dispatch(lambda: self.nastavi_namizje(False))
+            # Nit bliznjice: dela tudi, ko glavna nit visi (pregled V2) - zapis takoj, skrivanje v glavni niti s
+            # potrditvijo, sicer konec procesa (namizje Windows je ves cas pod oknom).
+            if not self.namizje_vklopljeno():
+                return
+
+            def zapisi() -> None:
+                s = os_backend_win.nalozi_shrambo()
+                s["namizje"] = False
+                os_backend_win.shrani_shrambo(s)
+                vv.pisi(dict(vv.stabilno(vv.beri()), razlog="bliznjica"))
+
+            def v_glavno(potrdi) -> None:
+                def skrij() -> None:
+                    try:
+                        self._skrij_namizje()
+                    finally:
+                        potrdi()
+                self.dispatcher.dispatch(skrij)
+            vv.vrata(zapisi, v_glavno)
         vv.zazeni_bliznjico(ob_pritisku, lambda: self.dispatcher.dispatch(self.odpri_prostore))
+
+    def _razlog_izklopa_namizja(self) -> str:
+        if self.namizje_vklopljeno():
+            return ""
+        from . import varnostna_vrata as vv
+        return str(vv.beri().get("razlog") or "")
+
+    @staticmethod
+    def _stanje_bliznjic() -> dict:
+        from . import varnostna_vrata as vv
+        return dict(vv.STANJE)
 
     def odpri_prostore(self) -> None:
         """Bliznjica Prostorov (Ctrl+Win+Tab): na namizju Safeer OS preklopnik na namizju, sicer v oknu Safeer OS."""
@@ -2637,6 +2680,10 @@ class SafeerOsWindow(QMainWindow):
                 "sistem": f"Windows {platform.release()}",
                 "samozagon": os_backend_win.samozagon_vklopljen(),
                 "namizjeSafeer": self.namizje_vklopljeno(),
+                # Zakaj je namizje izklopljeno samodejno (»sesutja«, »nalaganje«) - Nastavitve to povedo (S5).
+                "namizjeRazlog": self._razlog_izklopa_namizja(),
+                # Ali sistemski bliznjici delata (vmesnik ju oglasuje samo takrat - N9).
+                "bliznjice": self._stanje_bliznjic(),
                 "povezava": self.control_backend.stanje_povezave(),
                 "tema": tema.trenutna(),
                 "temaShranjena": "tema" in os_backend_win.nalozi_shrambo(),
@@ -3515,6 +3562,9 @@ class SafeerOsWindow(QMainWindow):
         try:
             if getattr(self, "namizje", None) is not None and hasattr(self.namizje, "ustavi"):
                 self.namizje.ustavi()          # slicice v ozadju (namizje_qml): brez cakanja na ffmpeg ob izhodu
+                # Cist izhod z namizjem ni sesutje: stevec zagonov se pocisti (pregled S5).
+                from . import varnostna_vrata as vv
+                vv.pisi(vv.stabilno(vv.beri()))
         except Exception:
             pass
         try:

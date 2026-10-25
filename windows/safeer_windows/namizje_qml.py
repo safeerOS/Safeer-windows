@@ -143,6 +143,9 @@ class NamizjeQml(QQuickView):
             return self._slicice(a)
         if metoda == "besedilaProstorov":
             return besedila_prostorov(_beri_besedila_os(), self._jezik())
+        if metoda == "bliznjice":
+            from . import varnostna_vrata as vv
+            return dict(vv.STANJE)
         if metoda in self._metode:
             return self._metode[metoda](a)
         return self.os_okno._izvedi_metodo(metoda, a)

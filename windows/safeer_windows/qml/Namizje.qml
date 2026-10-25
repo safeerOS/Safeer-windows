@@ -273,7 +273,10 @@ Item {
         Text { id: prostoriNapis; x: 28; anchors.verticalCenter: parent.verticalCenter; color: koren.paleta.besedilo; font.pixelSize: 12
                text: koren.prostoriBesedila.prostori || "Prostori" }
         MouseArea { id: mpg; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: prostori.odpri(0)
-                    ToolTip.visible: containsMouse; ToolTip.delay: 500; ToolTip.text: koren.prostoriBesedila.prostoriNamig || "" }
+                    ToolTip.visible: containsMouse; ToolTip.delay: 500
+                    ToolTip.text: koren.bliznjice.prostori === false
+                                  ? String(koren.prostoriBesedila.prostoriNamig || "").replace(/\s*\([^()]*\)\s*$/, "")
+                                  : (koren.prostoriBesedila.prostoriNamig || "") }
         Accessible.role: Accessible.Button
         Accessible.name: koren.prostoriBesedila.prostori || "Prostori"
     }
@@ -340,6 +343,7 @@ Item {
         programi.nalozi()
         osveziLink()
         koren.klic("besedilaProstorov", [], function (b) { if (b) koren.prostoriBesedila = b })
+        koren.klic("bliznjice", [], function (b) { if (b) koren.bliznjice = b })
     }
     // Safeer Link se ob zagonu sele poveze: stevilo naprav osvezimo na 20 s.
     property var naprave: []
@@ -379,6 +383,8 @@ Item {
     }
     Menu {
         id: meniNamizja
+        // Bliznjica, ki je ni bilo mogoce prijaviti (zasedel jo je drug program), se v meniju ne oglasuje (N9).
+        onAboutToShow: koren.klic("bliznjice", [], function (b) { if (b) koren.bliznjice = b })
         objectName: "meniNamizja"
         background: Rectangle { implicitWidth: 330; radius: 12; color: koren.paleta.vnos; border.color: Qt.rgba(1, 1, 1, 0.14) }
         MenuItem {
@@ -404,7 +410,7 @@ Item {
         MenuItem {
             // Varnostna vrata (pravilo lastnika): en klik nazaj na obicajno namizje Windows; vklop spet v Nastavitvah
             // (»Safeer OS kot namizje«). Isto naredi sistemska bliznjica Ctrl+Alt+Shift+W, tudi ce namizje ne odgovarja.
-            text: koren.t("obicajnoNamizje") + "    Ctrl+Alt+Shift+W"
+            text: koren.t("obicajnoNamizje") + (koren.bliznjice.varnostna === false ? "" : "    " + koren.t("bliznjicaVrata"))
             contentItem: Text { text: parent.text; color: koren.paleta.besedilo; font.pixelSize: 13; leftPadding: 6 }
             background: Rectangle { radius: 8; color: parent.highlighted ? koren.poudarekA(0.22) : "transparent" }
             onTriggered: koren.klic("namizjeSafeer", [false])
@@ -414,6 +420,7 @@ Item {
     ORacunalniku { id: oRacunalniku; z: 30; anchors.fill: parent }
     Prostori { id: prostori; objectName: "prostori"; z: 31; anchors.fill: parent; besedila: koren.prostoriBesedila }
     property var prostoriBesedila: ({})
+    property var bliznjice: ({})
     // Disk iz »O tem racunalniku«: odpre ga v panelu Datoteke (ta racunalnik).
     function pokaziMapo(pot) {
         if (datoteke.naprava) { datoteke.naprava = ""; datoteke.viri = datoteke.lokalniViri }

@@ -206,6 +206,16 @@
       scitNapaka_ni_resolved: "Lo Scudo di sistema non è ancora disponibile in questa versione Windows."
     }
   };
+  // Zakaj je namizje Safeer OS izklopljeno samodejno in ali sistemski bliznjici delata (pregled 25. 10. 2026, S5/N9).
+  var BESEDILA_VRATA = {
+    sl: { namizjeRazlog_sesutja: "Namizje Safeer OS se je ob zagonu večkrat zapored sesulo, zato je ostalo običajno namizje Windows. Vklopiš ga znova tukaj.", namizjeRazlog_nalaganje: "Namizja Safeer OS ni bilo mogoče naložiti, zato je ostalo običajno namizje Windows. Vklopiš ga znova tukaj.", namizjeRazlog_bliznjica: "Namizje Safeer OS si izklopil z bližnjico Ctrl+Alt+Shift+W. Vklopiš ga znova tukaj.", bliznjicaVrataNi: "Bližnjica Ctrl+Alt+Shift+W zdaj ne deluje (uporablja jo drug program). Namizje Windows dosežeš tukaj ali v meniju namizja." },
+    en: { namizjeRazlog_sesutja: "The Safeer OS desktop crashed several times in a row at startup, so the normal Windows desktop stayed. You can turn it on again here.", namizjeRazlog_nalaganje: "The Safeer OS desktop could not be loaded, so the normal Windows desktop stayed. You can turn it on again here.", namizjeRazlog_bliznjica: "You turned the Safeer OS desktop off with Ctrl+Alt+Shift+W. You can turn it on again here.", bliznjicaVrataNi: "The Ctrl+Alt+Shift+W shortcut is not working right now (another program uses it). You can reach the Windows desktop here or in the desktop menu." },
+    de: { namizjeRazlog_sesutja: "Der Safeer-OS-Desktop ist beim Start mehrmals hintereinander abgestürzt, daher blieb der normale Windows-Desktop. Du kannst ihn hier wieder einschalten.", namizjeRazlog_nalaganje: "Der Safeer-OS-Desktop konnte nicht geladen werden, daher blieb der normale Windows-Desktop. Du kannst ihn hier wieder einschalten.", namizjeRazlog_bliznjica: "Du hast den Safeer-OS-Desktop mit Strg+Alt+Umschalt+W ausgeschaltet. Du kannst ihn hier wieder einschalten.", bliznjicaVrataNi: "Die Tastenkombination Strg+Alt+Umschalt+W funktioniert gerade nicht (ein anderes Programm verwendet sie). Den Windows-Desktop erreichst du hier oder im Desktop-Menü." },
+    es: { namizjeRazlog_sesutja: "El escritorio de Safeer OS falló varias veces seguidas al iniciarse, así que se quedó el escritorio normal de Windows. Puedes volver a activarlo aquí.", namizjeRazlog_nalaganje: "No se pudo cargar el escritorio de Safeer OS, así que se quedó el escritorio normal de Windows. Puedes volver a activarlo aquí.", namizjeRazlog_bliznjica: "Desactivaste el escritorio de Safeer OS con Ctrl+Alt+Mayús+W. Puedes volver a activarlo aquí.", bliznjicaVrataNi: "El atajo Ctrl+Alt+Mayús+W no funciona ahora (lo usa otro programa). Puedes llegar al escritorio de Windows aquí o en el menú del escritorio." },
+    fr: { namizjeRazlog_sesutja: "Le bureau Safeer OS a planté plusieurs fois de suite au démarrage, le bureau Windows habituel est donc resté. Tu peux le réactiver ici.", namizjeRazlog_nalaganje: "Le bureau Safeer OS n’a pas pu être chargé, le bureau Windows habituel est donc resté. Tu peux le réactiver ici.", namizjeRazlog_bliznjica: "Tu as désactivé le bureau Safeer OS avec Ctrl+Alt+Maj+W. Tu peux le réactiver ici.", bliznjicaVrataNi: "Le raccourci Ctrl+Alt+Maj+W ne fonctionne pas pour le moment (un autre programme l’utilise). Tu peux atteindre le bureau Windows ici ou dans le menu du bureau." },
+    it: { namizjeRazlog_sesutja: "Il desktop di Safeer OS si è bloccato più volte di seguito all’avvio, quindi è rimasto il normale desktop di Windows. Puoi riattivarlo qui.", namizjeRazlog_nalaganje: "Non è stato possibile caricare il desktop di Safeer OS, quindi è rimasto il normale desktop di Windows. Puoi riattivarlo qui.", namizjeRazlog_bliznjica: "Hai disattivato il desktop di Safeer OS con Ctrl+Alt+Maiusc+W. Puoi riattivarlo qui.", bliznjicaVrataNi: "La scorciatoia Ctrl+Alt+Maiusc+W ora non funziona (la usa un altro programma). Puoi raggiungere il desktop di Windows qui o nel menu del desktop." }
+  };
+  Object.keys(BESEDILA_VRATA).forEach(function (koda) { Object.assign(BESEDILA_WINDOWS[koda], BESEDILA_VRATA[koda]); });
   var BESEDILA_MEDIA = {
     sl: { mediaPredaja:"Nadaljuj z druge naprave",mediaPredajaOpis:"Kaj predvaja ali je nazadnje gledala druga naprava – nadaljuj tukaj pri isti sekundi.",mediaPredajaVprasam:"Sprašujem naprave …",mediaPredajaNic:"Nobena naprava v Safeer Linku zdaj ničesar ne predvaja.",mediaPredajaIgra:"igra",mediaPredajaNazadnje:"nazadnje",mediaPredajaTukaj:"Nadaljuj tukaj",mediaPredajaTukajUstavi:"Nadaljuj tukaj in ustavi tam",mediaPredajaNapaka:"Naprav ni bilo mogoče vprašati.",mediaOpis:"Filmi, serije in glasba iz vseh tvojih virov v enem katalogu.",mediaOsvezi:"Osveži vire",mediaNastavitve:"Nastavitve",mediaNastavitveNaslov:"Nastavitve Safeer Media",mediaNastavitveOpis:"Uvoz in izvoz JSON knjižnic, neposreden vnos kode ter upravljanje virov.",mediaUvozDatoteke:"Naloži izvoženo JSON datoteko",mediaUvozDatotekeOpis:"Izberite .json datoteko kataloga ali virov, ki ste jo izvozili prej ali prejeli iz druge naprave.",mediaIzberiDatoteko:"Izberi .json datoteko",mediaNobenaDatoteka:"Nobena datoteka ni izbrana",mediaUvoziDatoteko:"Uvozi datoteko",mediaVnosJson:"Vnesi svojo JSON kodo",mediaVnosJsonOpis:"Prilepite JSON seznam medijev, prilagojeno konfiguracijo ali vir s tokovi.",mediaJsonImePh:"Ime zbirke ali vira (neobvezno)",mediaUvoziKodo:"Uvozi JSON kodo",mediaVstaviPrimer:"Primer kode (Code Example)",mediaPocisti:"Počisti",mediaPrimerVstavljen:"Primer JSON kode je bil uspešno vstavljen.",mediaIzvozJson:"Izvozi vsebine v JSON",mediaIzvozJsonOpis:"Prenesite celotno zbirko vaših virov in nastavitev v datoteko za varnostno kopijo ali prenos.",mediaPrenesiIzvoz:"Prenesi izvoženi JSON",mediaUvozUspesen:"Uspešno uvoženo: {n} vsebin v vir '{vir}'.",mediaUvozVirovUspesen:"Uspešno posodobljenih/dodanih virov: {n}.",mediaUvozNapaka:"Napaka pri uvozu JSON.",mediaVnesiteJson:"Prosimo, vnesite ali izberite veljavno JSON kodo.",mediaPredvaja:"PREDVAJA SE V SAFEER OS",mediaNapaka:"Tega toka ni mogoče predvajati. Poskusi drugo različico.",mediaIsci:"Išči filme, serije, videe, glasbo in radio",mediaVse:"Vse",mediaFilmi:"Filmi",mediaSerije:"Serije",mediaGlasba:"Glasba",mediaPrazno:"Ni zadetkov. Dodaj vir ali spremeni iskanje.",mediaViri:"Tvoji viri",mediaViriOpis:"Spletno stran, javni API, RSS ali M3U dodaš samo enkrat.",mediaVirIme:"Ime vira (neobvezno)",mediaVirUrl:"https://tilvids.com",mediaDodaj:"Dodaj vir",mediaZadetkov:"{n} enotnih vsebin",mediaRazlicic:"{n} različic",mediaVirDodan:"Vir je dodan in katalog združen.",mediaVirPodvojen:"Ta vir je že dodan.",mediaVirNapaka:"Vira ni bilo mogoče prebrati.",mediaOsvezeno:"Viri so osveženi.",mediaBrezVirov:"Dodaj prvi spletni vir; lokalne mape so vključene samodejno.",mediaVirElementov:"{n} vsebin",zvocnikNa:"Na zvočnik",zvocnikIscem:"Iščem zvočnike v omrežju …",zvocnikNiNajdenih:"Ni najdenih zvočnikov. Zvočnik mora biti prižgan in v istem omrežju (DLNA).",zvocnikIgra:"Zdaj igra na: {ime}",zvocnikZaseden:"{ime} igra {vir} – pritisni še enkrat za preklop",zvocnikNaslov:"Na zvočniku: {ime}",zvocnikPremor:"Premor / nadaljuj",zvocnikNazaj:"Nazaj na računalnik",zvocnikNiVir:"Te vsebine zvočnik ne more predvajati."},
     en: { mediaPredaja:"Continue from another device",mediaPredajaOpis:"What another device is playing or last watched – continue here at the same second.",mediaPredajaVprasam:"Asking devices …",mediaPredajaNic:"No device in Safeer Link is playing anything right now.",mediaPredajaIgra:"playing",mediaPredajaNazadnje:"last",mediaPredajaTukaj:"Continue here",mediaPredajaTukajUstavi:"Continue here and stop there",mediaPredajaNapaka:"Could not ask the devices.",mediaOpis:"Movies, series and music from all your sources in one catalogue.",mediaOsvezi:"Refresh sources",mediaNastavitve:"Settings",mediaNastavitveNaslov:"Safeer Media Settings",mediaNastavitveOpis:"Import and export JSON libraries, enter custom code, and manage sources.",mediaUvozDatoteke:"Upload exported JSON file",mediaUvozDatotekeOpis:"Select a .json file of catalogue or sources previously exported or shared.",mediaIzberiDatoteko:"Choose .json file",mediaNobenaDatoteka:"No file selected",mediaUvoziDatoteko:"Import file",mediaVnosJson:"Add your own JSON code",mediaVnosJsonOpis:"Paste a JSON list of media, custom configuration, or streams.",mediaJsonImePh:"Collection or source name (optional)",mediaUvoziKodo:"Import JSON code",mediaVstaviPrimer:"Code Example",mediaPocisti:"Clear",mediaPrimerVstavljen:"JSON code example successfully inserted.",mediaIzvozJson:"Export catalogue to JSON",mediaIzvozJsonOpis:"Download the full collection of your sources and settings for backup or sharing.",mediaPrenesiIzvoz:"Download exported JSON",mediaUvozUspesen:"Successfully imported: {n} items into '{vir}'.",mediaUvozVirovUspesen:"Successfully updated/added sources: {n}.",mediaUvozNapaka:"Error importing JSON.",mediaVnesiteJson:"Please enter or select valid JSON code.",mediaPredvaja:"PLAYING IN SAFEER OS",mediaNapaka:"This stream cannot be played. Try another version.",mediaIsci:"Search movies, series and music",mediaVse:"All",mediaFilmi:"Movies",mediaSerije:"Series",mediaGlasba:"Music",mediaPrazno:"No results. Add a source or change the search.",mediaViri:"Your sources",mediaViriOpis:"Add a website, public API, RSS or M3U only once.",mediaVirIme:"Source name (optional)",mediaVirUrl:"https://example.com/catalogue.json",mediaDodaj:"Add source",mediaZadetkov:"{n} unique titles",mediaRazlicic:"{n} versions",mediaVirDodan:"Source added and catalogue merged.",mediaVirPodvojen:"This source has already been added.",mediaVirNapaka:"The source could not be read.",mediaOsvezeno:"Sources refreshed.",mediaBrezVirov:"Add your first web source; local folders are included automatically.",mediaVirElementov:"{n} titles",zvocnikNa:"To speaker",zvocnikIscem:"Searching for speakers in your network…",zvocnikNiNajdenih:"No speakers found. The speaker must be on and in the same network (DLNA).",zvocnikIgra:"Now playing on {ime}",zvocnikZaseden:"{ime} is playing {vir} – press again to switch",zvocnikNaslov:"On speaker: {ime}",zvocnikPremor:"Pause / resume",zvocnikNazaj:"Back to this computer",zvocnikNiVir:"The speaker cannot play this item."},
@@ -2607,6 +2617,28 @@
     if (!b.hidden) $("domPosodobitevNaslov").textContent = t("posodobitevNaVoljo", { opis: st.opis });
   }
 
+  // Pod stikalom »Safeer OS kot namizje«: zakaj je izklopljeno samodejno in ali bliznjica Ctrl+Alt+Shift+W dela.
+  function narisiOpomboNamizja() {
+    var stikalo = $("stikaloNamizje"), z = S.zacetek || {};
+    var op = $("namizjeOpomba");
+    if (!op) {
+      op = el("p", "namizje-opomba", "");
+      op.id = "namizjeOpomba";
+      op.setAttribute("role", "status");
+      stikalo.insertAdjacentElement("afterend", op);
+    }
+    var deli = [];
+    if (!z.namizjeSafeer && ["sesutja", "nalaganje", "bliznjica"].indexOf(z.namizjeRazlog) >= 0) deli.push(t("namizjeRazlog_" + z.namizjeRazlog));
+    if (z.bliznjice && z.bliznjice.varnostna === false) deli.push(t("bliznjicaVrataNi"));
+    op.textContent = deli.join(" ");
+    op.hidden = stikalo.hidden || !deli.length;
+  }
+  // Bliznjica Ctrl+Win+Tab, ki je ni bilo mogoce prijaviti, se v namigu ne oglasuje.
+  function brezNedelujoceBliznjice() {
+    var g = $("gumbProstori"), bl = S.zacetek && S.zacetek.bliznjice;
+    if (g && bl && bl.prostori === false) g.title = t("prostoriNamig").replace(/\s*\([^()]*\)\s*$/, "");
+  }
+
   function narisiNastavitve() {
     narisiTeme();
     kontrole($("hitreNastavitve"), false);
@@ -2616,6 +2648,7 @@
     if ($("stikaloNamizje")) {
       $("stikaloNamizje").hidden = !(S.zacetek && S.zacetek.namizje === "windows");
       $("stikaloNamizje").setAttribute("aria-checked", S.zacetek && S.zacetek.namizjeSafeer ? "true" : "false");
+      narisiOpomboNamizja();
     }
     var cilj = $("skupineNastavitev");
     cilj.innerHTML = "";
@@ -4380,6 +4413,7 @@
       prilagodiPlatformo(z.namizje);
       if (BESEDILA_OS[z.jezik]) jezik = z.jezik;
       prevedi();
+      brezNedelujoceBliznjice();
       if (Array.isArray(z.spletne)) S.spletne = z.spletne;
       if (Array.isArray(z.nedavne_app)) S.nedavneApp = z.nedavne_app;
       if (z.ozadje) $("ozadje").style.backgroundImage = 'url("' + z.ozadje.replace(/"/g, "%22") + '")';

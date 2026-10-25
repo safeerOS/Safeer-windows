@@ -32,6 +32,10 @@ VK_W, VK_TAB = 0x57, 0x09
 #: Prostori (Safeer Link Spaces): Ctrl+Win+Tab - Win+Tab je Pogled opravil Windows, Ctrl+Alt+Tab trajni Alt+Tab.
 ID_PROSTORI = 0x5AFF
 BLIZNJICA_PROSTORI = "Ctrl+Win+Tab"
+#: Ali sta bliznjici prijavljeni (None = se ne vemo / ni Windows): vmesnik bliznjico oglasuje samo, ce dela (N9).
+STANJE = {"varnostna": None, "prostori": None}
+#: Toliko sekund vrata cakajo, da glavna nit skrije namizje; potem je glavna nit zamrznjena in proces se konca (V2).
+ROK_GLAVNE_NITI_S = 3.0
 WM_HOTKEY = 0x0312
 ID_BLIZNJICE = 0x5AFE
 BLIZNJICA = "Ctrl+Alt+Shift+W"
@@ -104,7 +108,9 @@ def zazeni_bliznjico(ob_pritisku: Callable[[], None], ob_prostorih: Optional[Cal
         u = ctypes.windll.user32
         dejanja = {}
         for ident, mod, vk, ob, ime in prijave:
-            if u.RegisterHotKey(None, ident, mod, vk):
+            ok = bool(u.RegisterHotKey(None, ident, mod, vk))
+            STANJE["varnostna" if ident == ID_BLIZNJICE else "prostori"] = ok
+            if ok:
                 dejanja[ident] = ob
                 print(f"[SafeerOS] Bliznjica {ime} prijavljena", flush=True)
             else:
@@ -121,6 +127,29 @@ def zazeni_bliznjico(ob_pritisku: Callable[[], None], ob_prostorih: Optional[Cal
 
     threading.Thread(target=nit, name="safeer-bliznjice", daemon=True).start()
     return True
+
+
+def vrata(zapisi: Callable[[], None], v_glavno: Callable[[Callable[[], None]], None],
+          koncaj: Optional[Callable[[], None]] = None, cakaj_s: float = ROK_GLAVNE_NITI_S) -> bool:
+    """Varnostna vrata iz niti bliznjice, tudi ko glavna nit (Qt, QML) visi (pregled 25. 10. 2026, V2):
+    1. zapisi() takoj shrani »namizje izklopljeno« (ob naslednjem zagonu ostane namizje Windows);
+    2. v_glavno(potrdi) prosi glavno nit, naj namizje skrije in potrdi(); 3. ce potrditve v `cakaj_s` ni, glavna nit
+    visi: proces se konca (koncaj, privzeto os._exit) - namizje Raziskovalca je ves cas pod oknom in je takoj vidno.
+    Vrne True, ce je glavna nit odgovorila."""
+    try:
+        zapisi()
+    except Exception as e:  # noqa: BLE001
+        print(f"[SafeerOS] Varnostna vrata: zapis ni uspel ({e})", flush=True)
+    potrjeno = threading.Event()
+    try:
+        v_glavno(potrjeno.set)
+    except Exception:  # noqa: BLE001
+        pass
+    if potrjeno.wait(cakaj_s):
+        return True
+    print("[SafeerOS] Varnostna vrata: glavna nit ne odgovarja - Safeer OS se zapre, ostane namizje Windows.", flush=True)
+    (koncaj or (lambda: os._exit(3)))()
+    return False
 
 
 def zdaj() -> float:

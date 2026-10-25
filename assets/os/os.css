@@ -314,6 +314,7 @@ h2 .dodatno + .dodatno { margin-left: 14px; }
   border: 1px solid var(--rob); text-align: left; width: 100%;
 }
 .stikalo:hover { border-color: var(--zelena); }
+.namizje-opomba { margin: -4px 4px 4px; color: var(--medlo); font-size: 14px; line-height: 1.45; }
 .stikalo svg { color: var(--zelena); }
 .stikalo div { flex: 1; }
 .stikalo small { display: block; color: var(--medlo); font-size: 14px; margin-top: 3px; }
