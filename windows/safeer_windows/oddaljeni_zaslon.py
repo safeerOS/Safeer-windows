@@ -589,8 +589,12 @@ class OddaljeniZaslon(QWidget):
         self._ura.setInterval(1000)
         self._ura.timeout.connect(self._osvezi_podatke)
         self._prvic_prikazano = False
-        # Okno, ki ga nihce ne pokaze (preizkusi, skrito odpiranje), sejo vseeno zacne.
-        QTimer.singleShot(1500, lambda: None if self._zacel else self.povezi())
+        # Okno, ki ga nihce ne pokaze (preizkusi, skrito odpiranje), sejo vseeno zacne. Casovnik je otrok okna: ce se
+        # okno prej zapre (WA_DeleteOnClose), se ne sprozi na unicenem predmetu.
+        self._rezervni_zacetek = QTimer(self)
+        self._rezervni_zacetek.setSingleShot(True)
+        self._rezervni_zacetek.timeout.connect(lambda: None if self._zacel else self.povezi())
+        self._rezervni_zacetek.start(1500)
 
     def showEvent(self, dogodek) -> None:  # noqa: N802 - Qt
         super().showEvent(dogodek)
