@@ -91,8 +91,9 @@ class Priklop(unittest.TestCase):
         self.assertIn("policy.zeton_veljaven(payload)", telo)
         i = telo.index("policy.zeton_veljaven(payload)")
         self.assertLess(i, telo.index("oznaci_nepodprt_video"))
+        self.assertLess(i, telo.index("drm_ponudi"))           # ponudba Safeer DRM samo s skripte Safeer (25. 10.)
         self.assertNotIn("_omejevalnik_stevca.dovoli", telo)   # stevca ni vec (1.0.43)
-        self.assertIn('("media_unsupported", "increment_ads")', telo)
+        self.assertIn('("media_unsupported", "increment_ads", "drm_zahteva")', telo)
 
 
 if __name__ == "__main__":
