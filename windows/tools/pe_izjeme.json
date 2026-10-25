@@ -47,25 +47,29 @@
    "dovoli": [
     "CET"
    ],
-   "razlog": "zagonski program PyInstaller (uradni bootloader) brez /CETCOMPAT; CFG in /GS ima. Nadgradnja: lasten bootloader z /CETCOMPAT"
+   "razlog": "zagonski program PyInstaller (uradni bootloader) brez /CETCOMPAT; CFG in /GS ima. Nadgradnja: lasten bootloader z /CETCOMPAT. Rok 31. 12. 2026 (pregled Grok W14): do tedaj lasten zagonski program PyInstaller z /CETCOMPAT oziroma .NET 9; po roku gradnja pade",
+   "rok": "2026-12-31"
   },
   "safeeros.exe": {
    "dovoli": [
     "CET"
    ],
-   "razlog": "zagonski program PyInstaller (uradni bootloader) brez /CETCOMPAT; Go zaganjalnik z istim imenom ima izjemo Go"
+   "razlog": "zagonski program PyInstaller (uradni bootloader) brez /CETCOMPAT; Go zaganjalnik z istim imenom ima izjemo Go. Rok 31. 12. 2026 (pregled Grok W14): do tedaj lasten zagonski program PyInstaller z /CETCOMPAT oziroma .NET 9; po roku gradnja pade",
+   "rok": "2026-12-31"
   },
   "safeercontrol.exe": {
    "dovoli": [
     "CET"
    ],
-   "razlog": "kot safeeros.exe"
+   "razlog": "kot safeeros.exe. Rok 31. 12. 2026 (pregled Grok W14): do tedaj lasten zagonski program PyInstaller z /CETCOMPAT oziroma .NET 9; po roku gradnja pade",
+   "rok": "2026-12-31"
   },
   "safeermediawebview.exe": {
    "dovoli": [
     "CET"
    ],
-   "razlog": ".NET 8 apphost (PublishSingleFile) brez CETCOMPAT; oznako CetCompat da sele .NET 9 SDK. Exe je v repozitoriju (CI ga ne gradi) - CET ob naslednji gradnji z .NET 9"
+   "razlog": ".NET 8 apphost (PublishSingleFile) brez CETCOMPAT; oznako CetCompat da sele .NET 9 SDK. Exe je v repozitoriju (CI ga ne gradi) - CET ob naslednji gradnji z .NET 9. Rok 31. 12. 2026 (pregled Grok W14): do tedaj lasten zagonski program PyInstaller z /CETCOMPAT oziroma .NET 9; po roku gradnja pade",
+   "rok": "2026-12-31"
   },
   "api-ms-win-*.dll": {
    "dovoli": [

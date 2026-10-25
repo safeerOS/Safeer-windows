@@ -111,5 +111,74 @@ class PripetaIzjema(unittest.TestCase):
         self.assertEqual(klici, [])                                # brez pripete izjeme ali brez manjkajoce zascite
 
 
+
+def _pe(odsek=b"", prekrivek=b""):
+    """Najmanjsa datoteka PE32+ z enim odsekom (0x200-0x400) in poljubnim prekrivkom za njim."""
+    import struct
+    p = bytearray(0x400)
+    p[0:2] = b"MZ"
+    struct.pack_into("<I", p, 0x3C, 0x40)
+    p[0x40:0x44] = b"PE\0\0"
+    struct.pack_into("<HHH", p, 0x44, 0x8664, 1, 0)
+    struct.pack_into("<H", p, 0x40 + 20, 0xF0)
+    struct.pack_into("<H", p, 0x40 + 24, 0x20B)
+    struct.pack_into("<IIII", p, 0x40 + 24 + 0xF0 + 8, 0x200, 0x1000, 0x200, 0x200)
+    p[0x200:0x200 + len(odsek)] = odsek
+    return bytes(p) + prekrivek
+
+
+class PregledGrok(unittest.TestCase):
+    """Pregled Grok 7 (25. 10. 2026): W14 izjema za nas program samo z rokom, W15 Go samo v odsekih, W16 PE po glavi,
+    W17 izjema brez razloga."""
+
+    def test_w14_nas_program_samo_z_rokom(self):
+        brez_cet = dict(POPOLNO, CET=False)
+        brez_roka = {"safeerbrowser.exe": {"dovoli": ["CET"], "razlog": "bootloader"}}
+        napake, _ = pe.odlocitev("SafeerBrowser.exe", brez_cet, False, brez_roka)
+        self.assertEqual(napake[0], "CET")
+        self.assertIn("nima roka", napake[1])
+        z_rokom = {"safeerbrowser.exe": {"dovoli": ["CET"], "razlog": "bootloader", "rok": "2026-12-31"}}
+        napake, izjeme = pe.odlocitev("SafeerBrowser.exe", brez_cet, False, z_rokom, danes="2026-10-25")
+        self.assertEqual((napake, izjeme[0]["rok"]), ([], "2026-12-31"))
+        napake, _ = pe.odlocitev("SafeerBrowser.exe", brez_cet, False, z_rokom, danes="2027-01-01")
+        self.assertIn("potekla", napake[-1])
+        # Lastna razsiritev safeer_*.pyd ne gre skozi pod splosno izjemo *.pyd (W17).
+        napake, _ = pe.odlocitev("safeer_x.pyd", dict(POPOLNO, CFG=False), False, IZJEME)
+        self.assertIn("CFG", napake)
+        # Vse izjeme za nase programe v pe_izjeme.json imajo rok.
+        for ime in ("safeerbrowser.exe", "safeeros.exe", "safeercontrol.exe", "safeermediawebview.exe"):
+            self.assertTrue(IZJEME[ime].get("rok"), ime)
+
+    def test_w15_go_samo_v_odsekih(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as mapa:
+            go = os.path.join(mapa, "go.exe")
+            with open(go, "wb") as f:
+                f.write(_pe(odsek=b"\xff Go buildinf:\x08\x02"))
+            arhiv = os.path.join(mapa, "pyinst.exe")
+            with open(arhiv, "wb") as f:
+                f.write(_pe(prekrivek=b"MEI\x0c\x0b\n\x0b\x0e" + b"Go build ID: x" * 3))
+            self.assertTrue(pe.je_go(go))
+            self.assertFalse(pe.je_go(arhiv))                     # niz v arhivu PyInstaller ni program Go
+
+    def test_w16_pe_po_glavi(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as mapa:
+            for ime in ("kontrolnik.ocx", "brez_koncnice"):
+                with open(os.path.join(mapa, ime), "wb") as f:
+                    f.write(_pe())
+            with open(os.path.join(mapa, "besedilo.txt"), "wb") as f:
+                f.write(b"MZ to ni program")
+            porocilo, _ = pe.preveri([mapa], IZJEME)
+            self.assertEqual(sorted(os.path.basename(k) for k in porocilo), ["brez_koncnice", "kontrolnik.ocx"])
+        ci = (KOREN / ".github" / "workflows" / "windows-package.yml").read_text(encoding="utf-8")
+        self.assertIn("pe_utrjenost.py build/windows/out --porocilo", ci)   # namestitveni program (meritev)
+
+    def test_w17_izjema_brez_razloga(self):
+        self.assertEqual(pe.napake_izjem(IZJEME), [])
+        self.assertTrue(pe.napake_izjem({"x.dll": {"dovoli": ["CFG"], "razlog": " "}}))
+        self.assertTrue(pe.napake_izjem({"x.dll": {"razlog": "zakaj"}}))
+
+
 if __name__ == "__main__":
     unittest.main()

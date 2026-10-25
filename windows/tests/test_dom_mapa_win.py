@@ -1,4 +1,5 @@
-"""Ozji krog dobi uporabnikove mape - BREZ AppData, skritih map in skrivnosti (DeljeneMape.dom, kot Safeer-linux a26daa2).
+"""Ozji krog dobi uporabnikove mape - BREZ AppData, skritih map in skrivnosti
+(DeljeneMape.dom, kot Safeer-linux a26daa2).
 
 Lastnik 25. 10. 2026 10:49 (ena privolitev) in koordinator 25. 10.: na Windows uporabniski profil (Namizje, Dokumenti,
 Slike, Prenosi ...) brez AppData, map z zacetno piko, datotek in map z atributom Skrito ali Sistem in znanih skrivnosti.

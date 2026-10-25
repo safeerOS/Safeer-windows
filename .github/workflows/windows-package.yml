@@ -132,6 +132,9 @@ jobs:
           if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup --no-progress -y }
       - name: Portable ZIP, installer and checksums
         run: python windows/build_windows.py package
+      - name: PE hardening of the installer (measure only, Grok W16)
+        # Namestitveni program nastane sele tu (Inno Setup): najprej izmerimo, nato odlocimo o --preveri.
+        run: python windows/tools/pe_utrjenost.py build/windows/out --porocilo build/windows/out/pe-namestitveni.json
       - name: Install, launch and uninstall
         run: python windows/build_windows.py install-test
       - name: Upload Windows packages
