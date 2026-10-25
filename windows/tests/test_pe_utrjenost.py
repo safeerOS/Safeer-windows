@@ -76,20 +76,21 @@ class PripetaIzjema(unittest.TestCase):
     razlicica ustavi gradnjo in v dnevniku pove vsoto (CI 40200508307, 25. 10. 2026)."""
     BREZ = dict(POPOLNO, CFG=False, CET=False)
 
-    def test_ffmpeg_pyside6_po_poti_v_ci(self):
-        pot = "SafeerBrowser\\_internal\\PySide6\\avcodec-61.dll"
-        prava = IZJEME["*/pyside6/[as][vw]*.dll"]["sha256"]["avcodec-61.dll"]
-        napake, izjeme = pe.odlocitev("avcodec-61.dll", self.BREZ, False, IZJEME, pot, sha=lambda: prava)
-        self.assertEqual((napake, izjeme[0]["manjka"]), ([], ["CFG", "CET"]))
-        self.assertIn("QtMultimedia", izjeme[0]["razlog"])
-        napake, _ = pe.odlocitev("avcodec-61.dll", self.BREZ, False, IZJEME, pot, sha=lambda: "ab" * 32)
-        self.assertEqual(napake[:2], ["CFG", "CET"])
-        self.assertIn("ab" * 32, napake[2])                       # nova vsota je v dnevniku CI
-        # Tudi /GS manjka: izjema ga ne dovoli.
-        napake, _ = pe.odlocitev("swscale-8.dll", dict(self.BREZ, GS=False), False, IZJEME,
-                                 "SafeerOS/_internal/PySide6/swscale-8.dll",
-                                 sha=lambda: IZJEME["*/pyside6/[as][vw]*.dll"]["sha256"]["swscale-8.dll"])
-        self.assertEqual(napake, ["GS"])
+    def test_libmpv_nasa_gradnja_z_rokom_in_vsoto(self):
+        """libmpv gradimo sami (milutv-libmpv): izjema za CFG/CET samo z rokom IN pripeto vsoto (25. 10. 2026)."""
+        izj = IZJEME["libmpv-2.dll"]
+        pot = "SafeerBrowser\\_internal\\safeer_windows\\vendor\\mpv\\libmpv-2.dll"
+        napake, izjeme = pe.odlocitev("libmpv-2.dll", self.BREZ, False, IZJEME, pot,
+                                      sha=lambda: izj["sha256"]["libmpv-2.dll"], danes="2026-10-25")
+        self.assertEqual((napake, izjeme[0]["manjka"], izjeme[0]["rok"]), ([], ["CFG", "CET"], "2026-12-31"))
+        napake, _ = pe.odlocitev("libmpv-2.dll", self.BREZ, False, IZJEME, pot, sha=lambda: "ab" * 32,
+                                 danes="2026-10-25")
+        self.assertIn("ab" * 32, napake[-1])                      # nova vsota je v dnevniku CI
+        napake, _ = pe.odlocitev("libmpv-2.dll", self.BREZ, False, IZJEME, pot,
+                                 sha=lambda: izj["sha256"]["libmpv-2.dll"], danes="2027-01-01")
+        self.assertIn("potekla", napake[-1])
+        # FFmpeg iz PySide6 ni vec v paketu (build_windows.odstrani_ffmpeg_pyside): izjeme zanj ni.
+        self.assertNotIn("*/pyside6/[as][vw]*.dll", IZJEME)
 
     def test_openblas_numpy(self):
         ime = "libscipy_openblas64_-ed4f167a5330424524f45258e7ca2c8d.dll"

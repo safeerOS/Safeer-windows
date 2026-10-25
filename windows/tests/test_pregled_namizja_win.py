@@ -327,5 +327,55 @@ class Paket(unittest.TestCase):
                          ["QtQuick.Controls.impl", "QtQuick.Templates"])
 
 
+
+class LibmpvVPaketu(unittest.TestCase):
+    """CI 25. 10. 2026 (pomocnik, naloga 13): gradnja je iskala libmpv v windows/vendor/mpv, fetch_libmpv pa ga
+    razpakira v windows/safeer_windows/vendor/mpv - uradni paket je bil brez libmpv. Rabi tudi novejsi MSVC runtime."""
+
+    def setUp(self):
+        sys.path.insert(0, str(KOREN / "windows"))
+        import build_windows
+        import fetch_libmpv
+        self.b, self.f = build_windows, fetch_libmpv
+
+    def test_ista_pot_kot_fetch(self):
+        self.assertEqual(os.path.normcase(os.path.abspath(self.b.VENDOR_MPV)), os.path.normcase(self.f.CILJ))
+
+    def test_runtime_zamenjan_povsod(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as m:
+            vendor = os.path.join(m, "vendor")
+            os.makedirs(os.path.join(vendor, "runtime"))
+            for ime in self.b.MSVC_RUNTIME:
+                with open(os.path.join(vendor, "runtime", ime), "wb") as f:
+                    f.write(b"novi " + ime.encode())
+            app = os.path.join(m, "app")
+            for mapa in ("_internal", os.path.join("_internal", "PySide6"), os.path.join("_internal", "shiboken6")):
+                os.makedirs(os.path.join(app, mapa))
+                for ime in ("MSVCP140.dll", "vcruntime140.dll", "VCRUNTIME140_1.dll", "drugo.dll"):
+                    with open(os.path.join(app, mapa, ime), "wb") as f:
+                        f.write(b"stari")
+            zamenjane = self.b.zamenjaj_msvc_runtime(app, vendor)
+            self.assertEqual(len(zamenjane), 9)
+            with open(os.path.join(app, "_internal", "shiboken6", "MSVCP140.dll"), "rb") as f:
+                self.assertEqual(f.read(), b"novi msvcp140.dll")
+            with open(os.path.join(app, "_internal", "drugo.dll"), "rb") as f:
+                self.assertEqual(f.read(), b"stari")
+            self.assertEqual(self.b.zamenjaj_msvc_runtime(app, os.path.join(m, "ni")), [])   # brez libmpv nic
+
+    def test_ffmpeg_pyside_brez_vticnika_multimedia(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as pyside:
+            for ime in ("avcodec-61.dll", "avutil-59.dll", "swscale-8.dll", "Qt6Core.dll", "QtCore.pyd"):
+                open(os.path.join(pyside, ime), "wb").close()
+            os.makedirs(os.path.join(pyside, "plugins", "multimedia"))
+            self.assertEqual(self.b.odstrani_ffmpeg_pyside(pyside), [])          # vticnik je: FFmpeg ostane
+            os.rmdir(os.path.join(pyside, "plugins", "multimedia"))
+            self.assertEqual(sorted(self.b.odstrani_ffmpeg_pyside(pyside)),
+                             ["avcodec-61.dll", "avutil-59.dll", "swscale-8.dll"])
+            self.assertEqual(sorted(os.listdir(pyside)), ["Qt6Core.dll", "QtCore.pyd", "plugins"])
+        self.assertIn("multimedia", self.b.UNUSED_PLUGIN_DIRS)                   # prune vticnike odstrani
+
+
 if __name__ == "__main__":
     unittest.main()

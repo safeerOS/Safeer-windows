@@ -16,6 +16,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -114,7 +115,11 @@ def shared_imports() -> list:
     return sorted(n for n in names if n != "__future__" and not n.startswith("core."))
 
 
-VENDOR_MPV = os.path.join(WINDOWS, "vendor", "mpv")
+#: libmpv: kamor ga razpakira windows/fetch_libmpv.py (CILJ). Prej je gradnja iskala windows/vendor/mpv in uradni paket
+#: je bil BREZ libmpv (CI 25. 10. 2026: »windows/vendor/mpv ni prisoten«; pomocnik na testnem PC, naloga 13).
+VENDOR_MPV = os.path.join(WINDOWS, "safeer_windows", "vendor", "mpv")
+#: MSVC runtime, ki ga libmpv potrebuje (manifest.json: novejsi od tistega, ki ga prinese PySide6).
+MSVC_RUNTIME = ("msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll")
 _MPV_OBVEZNO = ("libmpv-2.dll", "libEGL.dll", "libGLESv2.dll", "manifest.json", "safeer-capabilities.json",
                 os.path.join("runtime", "msvcp140.dll"), os.path.join("runtime", "vcruntime140.dll"),
                 os.path.join("runtime", "vcruntime140_1.dll"), os.path.join("licenses", "COPYING.LGPL-2.1"))
@@ -127,11 +132,12 @@ def mpv_vendor_args() -> list:
     DLL ali runtime ustavi gradnjo, ne tiho izpusti) in gradnja prilozi tudi python-mpv.
     """
     if not os.path.isdir(VENDOR_MPV):
-        print("libmpv: windows/vendor/mpv ni prisoten -> brez libmpv (Medijski center: LibVLC/HTML5)", flush=True)
+        print("libmpv: windows/safeer_windows/vendor/mpv ni prisoten (python windows/fetch_libmpv.py) -> brez libmpv "
+              "(Medijski center: LibVLC/HTML5)", flush=True)
         return []
     manjka = [f for f in _MPV_OBVEZNO if not os.path.isfile(os.path.join(VENDOR_MPV, f))]
     if manjka:
-        raise SystemExit("libmpv: windows/vendor/mpv je nepopoln, manjka: " + ", ".join(manjka))
+        raise SystemExit("libmpv: windows/safeer_windows/vendor/mpv je nepopoln, manjka: " + ", ".join(manjka))
     try:
         import mpv  # noqa: F401
     except Exception as e:  # noqa: BLE001
@@ -209,8 +215,51 @@ def pyinstaller() -> None:
             # SafeerOS.exe uporablja _internal brskalnika: dodaj, kar ima samo gradnja Safeer OS (QtQuick, QML ...).
             copied = merge_internal(os.path.join(DIST, "SafeerOS", "_internal"), os.path.join(APP_DIR, "_internal"))
             print(f"merge: {len(copied)} datotek iz gradnje SafeerOS v _internal brskalnika")
+    zamenjane = zamenjaj_msvc_runtime(APP_DIR)
+    if zamenjane:
+        print(f"MSVC runtime iz vendor/mpv/runtime: {len(zamenjane)} kopij ({', '.join(sorted(set(zamenjane)))})")
     # Na koncu, ko je v _internal vse za oba exe: neuporabljeni moduli Qt in QML (QML namizja ostane).
     prune_bundle()
+
+
+def zamenjaj_msvc_runtime(app_dir: str, vendor: str = "") -> list:
+    """Vse kopije msvcp140/vcruntime140(_1) v paketu zamenja z novejsimi iz vendor/mpv/runtime (runtime MSVC je nazaj
+    zdruzljiv). pyi_rth_pyside6 nalozi shiboken6 PRED zaganjalnikom, zato starejsi msvcp140 iz PySide6 pride v proces
+    pred predpripravi_runtime in libmpv ne stece (»MSVC runtime prestar«: 14.44 < 14.51; testni PC, naloga 13,
+    25. 10. 2026). Brez libmpv v paketu ne naredi nicesar. Vrne imena zamenjanih datotek."""
+    runtime = os.path.join(vendor or VENDOR_MPV, "runtime")
+    viri = {ime: os.path.join(runtime, ime) for ime in MSVC_RUNTIME if os.path.isfile(os.path.join(runtime, ime))}
+    if len(viri) != len(MSVC_RUNTIME):
+        return []
+    zamenjane = []
+    for mapa, _podmape, datoteke in os.walk(app_dir):
+        for ime in datoteke:
+            vir = viri.get(ime.lower())
+            cilj = os.path.join(mapa, ime)
+            v_runtime = os.path.normcase(os.path.abspath(mapa)) == os.path.normcase(os.path.abspath(runtime))
+            if vir and not v_runtime:
+                shutil.copy2(vir, cilj)
+                zamenjane.append(ime.lower())
+    return zamenjane
+
+
+#: FFmpeg, ki ga PySide6 prinese samo za vticnik QtMultimedia (plugins/multimedia/ffmpegmediaplugin.dll - edini, ki ga
+#: uvozi; izmerjeno na kolesih PySide6 6.11.2, 25. 10. 2026). prune_bundle vticnike multimedia odstrani, zato je ta
+#: FFmpeg v paketu mrtva tuja koda brez CFG/CET (13+ MB).
+FFMPEG_PYSIDE = re.compile(r"^(avcodec|avformat|avutil|avfilter|avdevice|swresample|swscale|postproc)-[0-9]+\.dll$",
+                           re.I)
+
+
+def odstrani_ffmpeg_pyside(pyside: str) -> list:
+    """Odstrani FFmpeg iz korena mape PySide6, ce vticnikov multimedia ni (nihce ga ne nalozi). Vrne imena."""
+    if os.path.isdir(os.path.join(pyside, "plugins", "multimedia")):
+        return []
+    odstranjene = []
+    for ime in os.listdir(pyside) if os.path.isdir(pyside) else []:
+        if FFMPEG_PYSIDE.match(ime):
+            os.remove(os.path.join(pyside, ime))
+            odstranjene.append(ime)
+    return odstranjene
 
 
 def dir_size(path: str) -> int:
@@ -330,6 +379,9 @@ def prune_bundle() -> None:
         for name in os.listdir(plugins):
             if name.lower() in UNUSED_PLUGIN_DIRS:
                 shutil.rmtree(os.path.join(plugins, name), ignore_errors=True)
+    odstranjen_ffmpeg = odstrani_ffmpeg_pyside(pyside)
+    if odstranjen_ffmpeg:
+        print("prune: FFmpeg PySide6 brez vticnika multimedia odstranjen:", ", ".join(sorted(odstranjen_ffmpeg)))
     binaries = {}
     for dirpath, _dirs, files in os.walk(APP_DIR):
         for name in files:
