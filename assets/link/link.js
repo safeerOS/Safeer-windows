@@ -2290,7 +2290,9 @@
       kartica.appendChild(glava);
       var izbire = document.createElement("div");
       izbire.className = "dovoljenje-izbire";
-      [["polno", "pravicaPolno", "pravicaPolnoOpis"], ["izbrano", "pravicaIzbrano", "pravicaIzbranoOpis"], ["zaslon", "pravicaZaslon", "pravicaZaslonOpis"], ["brez", "pravicaBrez", "pravicaBrezOpis"]].forEach(function (p) {
+      // Kot Linux: ozji krog (vse, z upravljanjem in Safeer Vnos) ali brez dostopa; »izbrano« in »zaslon« iz prejsnjih
+      // razlicic se samo pokazeta kot izbrana pravica (✓), ne ponujata se vec.
+      [["polno", "pravicaPolno", "pravicaPolnoOpis"], ["brez", "pravicaBrez", "pravicaBrezOpis"]].forEach(function (p) {
         var gumb = document.createElement("button");
         gumb.className = profil === p[0] ? "izbran" : "";
         gumb.innerHTML = "<b>" + ubezi(t(p[1])) + "</b><small>" + ubezi(t(p[2])) + "</small>";

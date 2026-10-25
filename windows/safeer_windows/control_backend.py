@@ -44,10 +44,14 @@ DEJANJA_MEDIJ = ["media"]
 #: (core/link_predvajanje.py, isti protokol kot Linux in Predaja.kt na Androidu). Samo naprava s pravico do
 #: datotek (profil polno ali izbrano) - datoteka gre le iz deljenih map, play.stop je samo premor.
 DEJANJA_PREDAJA = ["play.state", "play.stop", "play.offer"]
-#: Profili dostopa naprave do tega racunalnika (izbira v Safeer Linku / Controlu). »brez« = umik iz ozjega kroga.
+#: Profili dostopa naprave do tega racunalnika. Kot Linux (link_dostop.ozji_krog, 25. 10. 2026): izbira je samo
+#: »polno« (ozji krog: upravljanje, Safeer Vnos, datoteke, programi, predvajalnik) ali »brez« (umik - naprava samo
+#: pomaga pri povezavi). »izbrano« in »zaslon« sta iz prejsnjih razlicic: vmesnik ju ne ponuja vec, ze izbrane pa
+#: veljajo naprej kot omejena pravica ZUNAJ ozjega kroga (stari zapisi se sami ne sirijo - pravilo Linuxa).
 PROFILI_DOSTOPA = ("polno", "izbrano", "zaslon", "brez")
-#: Profil -> zmoznosti v core/link_dostop (d datoteke, p programi, v predvajalnik, z zaslon in upravljanje).
-OZJI_KROG_PO_PROFILU = {"polno": ("d", "p", "v", "z"), "izbrano": ("d",), "zaslon": ("z",), "brez": ()}
+#: Kar profil zapise v core/link_dostop (ozji krog). Samo »polno« je ozji krog; skupna link_dostop.nastavi mu prek
+#: ozji_krog da tudi upravljanje (z) in mape (d).
+OZJI_KROG_PO_PROFILU = {"polno": ("d", "p", "v", "z"), "izbrano": (), "zaslon": (), "brez": ()}
 #: Seznami predvajanja so enaki na vseh uporabnikovih napravah v Linku (core/seznami_sink.py, SeznamiSink.kt na
 #: Androidu): druga naprava v Linku prebere sezname Medijskega centra (samo branje, brez posebne pravice).
 DEJANJA_SEZNAMI = ["lists.get"]

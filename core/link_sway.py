@@ -823,6 +823,30 @@ def _ze_urejeno(okno: dict, platno: Tuple[int, int]) -> bool:
     return okno.get("type") == "floating_con" and (int(r.get("width") or 0), int(r.get("height") or 0)) == platno
 
 
+def razdeli_merilo(merilo: float) -> tuple:
+    """Merilo navideznega namizja za gledalca (npr. 1,25 ali 1,5) -> (celo merilo izhoda, merilo pisav).
+
+    Lastnik 25. 10. 2026 09:13: »pri povecavi 125/150 % izvor nastavi DPI, ne bitnega raztega«. Delno merilo izhoda
+    (sway `output scale 1.25`) programi brez wp_fractional_scale (GTK3, Qt5, Xwayland) narisejo v 2x in sway sliko
+    pomanjsa - mehke pisave. Zato izhod dobi samo celo merilo (1, 2, 3 - ostro za vse), ostanek pa programi dobijo kot
+    DPI pisav (GDK_DPI_SCALE, QT_FONT_DPI): besedilo je narisano v pravi velikosti, brez prevzorcenja."""
+    try:
+        m = float(merilo)
+    except (TypeError, ValueError):
+        return 1, 1.0
+    if not (m == m) or m < 1.0:
+        return 1, 1.0
+    celo = max(1, int(m + 1e-9))
+    return celo, round(m / celo, 4)
+
+
+def okolje_dpi(pisava: float) -> dict:
+    """Okolje programa na navideznem namizju za merilo pisav (razdeli_merilo); pri 1 nic."""
+    if not pisava or abs(float(pisava) - 1.0) < 1e-3:
+        return {}
+    return {"GDK_DPI_SCALE": "%.4g" % float(pisava), "QT_FONT_DPI": str(int(round(96 * float(pisava))))}
+
+
 def merilo_platna(sirina: int, visina: int, w: int, h: int) -> float:
     """Koliko povecati platno, da zapolni zaslon brez obrezovanja (sway zna ulomke po 1/120)."""
     if w <= 0 or h <= 0:
@@ -855,8 +879,10 @@ class DrugiZaslon:
         from core.link_fokus import Fokus
         self.fokus = Fokus(self)
         self._merilo = 1.0
-        #: Merilo za navadne programe (po napravi, ki gleda); igra s fiksnim platnom ima svoje.
+        #: Merilo za navadne programe (po napravi, ki gleda); igra s fiksnim platnom ima svoje. Izhod dobi samo celi del,
+        #: ostanek gre v DPI pisav novih programov (razdeli_merilo).
         self._osnova = 1.0
+        self._pisava = 1.0
         self._urejena_platna: Dict[int, int] = {}
         self._opazovalec: Optional[subprocess.Popen] = None
         #: Zadnji zagon programa: oznaka, cas, okna namizja pred zagonom in opis programa (link_programi).
@@ -948,6 +974,7 @@ class DrugiZaslon:
                     print("[drugi zaslon] tece (%s, %dx%d)" % (self._wayland, sirina, visina), flush=True)
                     self._merilo = 1.0
                     self._osnova = 1.0
+                    self._pisava = 1.0
                     self._urejena_platna = {}
                     self._opazuj_okna()
                     return True
@@ -970,10 +997,28 @@ class DrugiZaslon:
             merilo = min(3.0, max(1.0, float(merilo)))
         except (TypeError, ValueError):
             merilo = 1.0
-        if abs(merilo - self._osnova) > 1e-6:
-            self._osnova = merilo
+        celo, self._pisava = razdeli_merilo(merilo)
+        if abs(celo - self._osnova) > 1e-6:
+            self._osnova = float(celo)
             self._urejena_platna = {}
             self.uredi_platno()
+
+    def pripravi_za_gledalca(self, pogled) -> None:
+        """`apps.launch` z `view` (naprava, ki bo gledala): velikost in merilo navideznega namizja se nastavita PRED
+        zagonom programa - program tako dobi pravi DPI pisav ze ob zagonu (env ne more spremeniti tekocega programa).
+        Lastnik 25. 10. 2026 09:13: navidezno namizje v locljivosti in DPI gledalca. Isto kot screen.start (link_zaslon)."""
+        if not isinstance(pogled, dict):
+            return
+        from core import link_zaslon
+        velikost = link_zaslon.velikost_za_gledalca(pogled, (self.sirina, self.visina))
+        if not self.zazeni(*velikost):
+            return
+        self.velikost(*velikost)
+        self.osnovno_merilo(link_zaslon.merilo_za_gledalca(pogled, velikost))
+
+    def okolje_programa(self) -> dict:
+        """Okolje, ki ga dobi nov program na tem zaslonu: DPI pisav po napravi, ki gleda (razdeli_merilo)."""
+        return okolje_dpi(self._pisava)
 
     # ----------------------------------------------------------------- igre cez cel zaslon
     def _opazuj_okna(self) -> None:
@@ -1069,7 +1114,9 @@ class DrugiZaslon:
         zeton = secrets.token_hex(6)
         okna_pred = _okna_namizja()
         # Oznaka zagona je v ukazni vrstici lupine (sway pozene `sh -c`) in v okolju programa in njegovih otrok.
-        izid = self._msg(["exec", "%s=%s %s" % (ZAGON_SPREMENLJIVKA, zeton, _za_sway(argv))])
+        # DPI pisav po napravi, ki gleda (delno merilo, razdeli_merilo): vrednosti sestavimo sami iz stevil.
+        dpi = "".join("%s=%s " % (k, v) for k, v in sorted(self.okolje_programa().items()))
+        izid = self._msg(["exec", "%s%s=%s %s" % (dpi, ZAGON_SPREMENLJIVKA, zeton, _za_sway(argv))])
         uspeh = '"success": true' in izid
         self._zagon = dict(opis or {}, zeton=zeton, cas=time.monotonic(),
                            okna_pred=None if okna_pred is None else {o["id"] for o in okna_pred}) if uspeh else None

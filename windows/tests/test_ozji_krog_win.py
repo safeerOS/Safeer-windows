@@ -68,9 +68,19 @@ class OzjiKrog(unittest.TestCase):
         for akcija in ("screen.start", "key", "mouse.click", "apps.launch", "files.list"):
             self.assertTrue(self.b._dejanje_dovoljeno("tv", akcija), akcija)
 
+    def test_skupno_pravilo_linuxa(self):
+        """Ozji krog je skupna koda (core/link_dostop.ozji_krog, Safeer-linux a26daa2): vsaka privolitev da tudi
+        upravljanje in Safeer Vnos (z) in mape (d)."""
+        self.assertEqual(link_dostop.ozji_krog({"p"}), {"p", "d", "z"})
+        self.assertEqual(link_dostop.ozji_krog(set()), set())
+        izvor = open(os.path.join(KOREN, "assets", "os", "os.js"), encoding="utf-8").read()
+        self.assertIn('[["polno", t("dovoliVse")], ["brez", t("dovoliBrez")]]', izvor)   # Linux nima »samo mape/ogled«
+
     def test_samo_ogled_zaslona_brez_vnosa(self):
+        """Profil iz prejsnjih razlicic (vmesnik ga ne ponuja vec): ostane omejena pravica ZUNAJ ozjega kroga."""
+        self.zapis["tv"] = {"d", "p", "v", "z"}                     # podedovano iz starega kroga
         self.assertTrue(self.b.nastavi_dovoljenje("tv", "zaslon"))
-        self.assertEqual(self.zapis["tv"], {"z"})
+        self.assertEqual(self.zapis["tv"], set())
         self.assertTrue(self.b._dejanje_dovoljeno("tv", "screen.start"))
         for akcija in ("key", "mouse.click", "touch", "apps.launch", "files.list"):
             self.assertFalse(self.b._dejanje_dovoljeno("tv", akcija), akcija)
@@ -105,7 +115,7 @@ class OzjiKrog(unittest.TestCase):
         self.b.nastavitve["dovoljenja_naprav"] = {"tv": "polno", "tel": "zaslon", "nov": "vprasaj"}
         self.zapis["tel"] = {"d", "p", "v", "z"}                     # podedovano, uporabnik pa je izbral ogled
         self.b.uskladi_ozji_krog_ob_zagonu()
-        self.assertEqual(self.zapis, {"tv": {"d", "p", "v", "z"}, "tel": {"z"}})
+        self.assertEqual(self.zapis, {"tv": {"d", "p", "v", "z"}, "tel": set()})
 
     def test_seja_zaslona_po_profilu(self):
         odgovori = []

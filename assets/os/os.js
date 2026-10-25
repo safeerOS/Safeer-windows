@@ -3094,7 +3094,8 @@
       cakajocaDovoljenja.shift();
       pokaziDovoljenje();
     }
-    [["polno", t("dovoliVse")], ["izbrano", t("dovoliDatoteke")], ["zaslon", t("dovoliZaslon")]].forEach(function (m) {
+    // Ena privolitev kot na Linuxu (link_dostop.ozji_krog): ozji krog z upravljanjem in Safeer Vnos ali brez dostopa.
+    [["polno", t("dovoliVse")], ["brez", t("dovoliBrez")]].forEach(function (m) {
       var g = el("button", "vrstica"); g.textContent = m[1];
       g.addEventListener("click", function () {
         klic("nastaviDovoljenje", [n.id, m[0]]).then(function (ok) {
