@@ -417,6 +417,12 @@ class _SafeerAssetHandler(BaseHTTPRequestHandler):
         url_path = urllib.parse.urlsplit(self.path).path
         # Varnostna omejitev: samo relativne poti znotraj assets_root
         rel = url_path.lstrip("/")
+        # Samo nas izvor (127.0.0.1/localhost z nasimi vrati): tuja stran z imenom, ki kaze na 127.0.0.1 (DNS rebinding),
+        # ne dobi niti vmesnika niti ozadja.
+        vrata = self.server.server_address[1]
+        if (self.headers.get("Host") or "").strip().lower() not in ("127.0.0.1:%d" % vrata, "localhost:%d" % vrata):
+            self.send_error(403)
+            return
         if rel == "ozadje-namizja":
             self._poslji_ozadje()
             return
@@ -425,7 +431,7 @@ class _SafeerAssetHandler(BaseHTTPRequestHandler):
         try:
             resolved = target.resolve()
             base_resolved = Path(self.assets_root).resolve()
-            if not str(resolved).startswith(str(base_resolved)):
+            if not resolved.is_relative_to(base_resolved):
                 self.send_error(403)
                 return
         except Exception:
@@ -497,6 +503,9 @@ class _SafeerAssetHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", vrsta)
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-cache")
+        # Uporabnikova slika: samo za nas vmesnik (tuja stran je ne more vstaviti kot <img>), brez ugibanja vrste.
+        self.send_header("Cross-Origin-Resource-Policy", "same-origin")
+        self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
         self.wfile.write(data)
 
@@ -897,6 +906,14 @@ class SafeerOsWindow(QMainWindow):
         # rqbit (magnet) ne ostane teci brez Safeer OS, tudi ce se program konca brez zapiranja okna.
         try:
             QApplication.instance().aboutToQuit.connect(self._ustavi_torrente)
+        except Exception:  # noqa: BLE001
+            pass
+        # Odjava ali zaustavitev Windows: Qt najprej poslje commitDataRequest, nato zapre vsa okna. Z vklopljenim
+        # namizjem bi closeEvent okno le skril in izhod preprecil - zato _koncujem, da se izvede pravo zapiranje
+        # (Link, torrenti, Scit, profil Spleta); aboutToQuit je rezerva, ce zapiranja oken ni bilo (pregled 25. 10. 2026).
+        try:
+            QApplication.instance().commitDataRequest.connect(self._ob_koncu_seje)
+            QApplication.instance().aboutToQuit.connect(self._pocisti)
         except Exception:  # noqa: BLE001
             pass
 
@@ -3175,6 +3192,12 @@ class SafeerOsWindow(QMainWindow):
             self.namizje.osvezi_videz()
         if getattr(self, "control_window", None) is not None and hasattr(self.control_window, "uporabi_temo"):
             self.control_window.uporabi_temo(tema.link_css(p))
+        # Tudi glavno okno Safeer OS: novo ozadje (Prilagodi namizje) in tema brez ponovnega nalaganja strani.
+        try:
+            self.poslji_dogodek("videz", {"ozadje": "/ozadje-namizja?v=%d" % int(time.time() * 1000),
+                                          "tema": tema.trenutna()})
+        except Exception as e:  # noqa: BLE001
+            print("[SafeerOS] videz okna:", e, flush=True)
 
     def _link_stran(self, url: str) -> bool:
         """Stran z naprave v Linku (agent, daljinec): odpre se v samostojnem oknu Safeer Browserja (lastnik, 13. 10. 2026),
@@ -3321,6 +3344,10 @@ class SafeerOsWindow(QMainWindow):
             print(f"[SafeerMedia] pogon: LibVLC (mpv izbira ni uspela: {e})", flush=True)
         return vlc_player.VlcPlayerWidget(self)
 
+    def _ob_koncu_seje(self, *_args) -> None:
+        """Windows se odjavlja ali zaustavlja: okna se morajo res zapreti (ne le skriti kot namizje)."""
+        self._koncujem = True
+
     def closeEvent(self, event) -> None:
         if getattr(self, "namizje", None) is not None and not getattr(self, "_koncujem", False):
             # Safeer OS je namizje: zapiranje okna ga le skrije (namizje, Link in predvajanje tecejo naprej).
@@ -3328,6 +3355,15 @@ class SafeerOsWindow(QMainWindow):
             self.hide()
             event.ignore()
             return
+        self._pocisti()
+        event.accept()
+
+    def _pocisti(self) -> None:
+        """Zapre vse storitve Safeer OS natanko enkrat (zaprtje okna, odjava Windows ali aboutToQuit)."""
+        if getattr(self, "_pocisceno", False):
+            return
+        self._pocisceno = True
+        self._koncujem = True
         try:
             if hasattr(self.media_player, "zapri_pogon"):
                 self.media_player.zapri_pogon()
@@ -3337,7 +3373,10 @@ class SafeerOsWindow(QMainWindow):
             self.control_backend.koncaj()
         except Exception:
             pass
-        self._ustavi_torrente()
+        try:
+            self._ustavi_torrente()
+        except Exception:
+            pass
         try:
             self.sporocila.zapri()
         except Exception:
@@ -3355,7 +3394,6 @@ class SafeerOsWindow(QMainWindow):
             self.browser_app.shutdown()
         except Exception:
             pass
-        event.accept()
 
 
 def main(argv: Optional[List[str]] = None) -> int:

@@ -921,6 +921,17 @@ def fake_bank_page_verdict(url: str, signals: Any):
     return adblock.fake_bank_page_verdict(url, signals if isinstance(signals, dict) else None)
 
 
+# Viri safeer://home, ki jih sme naloziti samo nasa stran (safeer://): ozadje je lahko uporabnikova fotografija,
+# tema.css pove izbrano temo. Spletna stran jih ne more vstaviti (<img>, <link>) - pregled 25. 10. 2026.
+SAMO_NAS_IZVOR = ("ozadje", "tema.css")
+
+
+def scheme_izvor_dovoljen(path: str, izvor_shema: str) -> bool:
+    """Ali sme pobudnik (shema izvora, ki zahteva vir) dobiti ta vir safeer://home."""
+    ime = (path or "/").lstrip("/")
+    return ime not in SAMO_NAS_IZVOR or (izvor_shema or "").lower() == "safeer"
+
+
 def scheme_resource(host: str, path: str, query: str, lang: str = "sl") -> Optional[Tuple[str, bytes]]:
     """Content for safeer://home/... requests; None means not found."""
     if (host or "").lower() != "home":

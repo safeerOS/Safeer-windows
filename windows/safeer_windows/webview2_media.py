@@ -58,6 +58,27 @@ def pocisti_seje(koren: Optional[Path] = None, razen: str = "", starejse_od_s: f
     return pobrisanih
 
 
+def predvajalnik_na_voljo() -> bool:
+    """Ali se predvajalnik (Safeer DRM ali rezerva WebView2) sploh lahko odpre - brez ustvarjanja okna."""
+    if sys.platform != "win32":
+        return False
+    koren_paketa = Path(__file__).resolve().parents[1]
+    if (koren_paketa / "SafeerMediaWebView.exe").is_file() or (koren_paketa / "SafeerDRM" / "safeer-drm.exe").is_file():
+        return True
+    try:
+        return safeer_drm_prenos.izvrsljiva() is not None
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def https_naslov(url: str) -> str:
+    """Predvajalnik odpre samo https: http:// se prepise v https://, drugo ostane prazno."""
+    url = str(url or "").strip()
+    if url.lower().startswith("http://"):
+        url = "https://" + url[7:]
+    return url if url.lower().startswith("https://") else ""
+
+
 class WebView2MediaWidget(QWidget):
     def __init__(self, on_home: Callable[[], None], parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -221,7 +242,8 @@ class WebView2MediaWidget(QWidget):
         return sys.platform == "win32" and self.executable.is_file()
 
     def open_url(self, url: str, stran: bool = False, storitev: bool = False) -> bool:
-        if not self.available or not url.startswith("https://"):
+        url = https_naslov(url)
+        if not self.available or not url:
             return False
         self.stop()
         self.page_mode = bool(stran or storitev)

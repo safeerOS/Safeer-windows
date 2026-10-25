@@ -2881,20 +2881,25 @@
   // ------------------------------------------------------------------ naloga 131: debrid storitve
   // Izbira »Debrid« ob zvrsteh: prek katere storitve (TorBox, Real-Debrid, AllDebrid) gredo torrenti; privzeto tista,
   // za katero je vpisan kljuc. Kljuci se vpisejo v oknu »Debrid storitve«; jedro jih hrani sifrirane, v vmesnik ne pridejo.
-  var debridStanje = null, debridNalagam = false;
+  // debridPrazno: cas, ko je most vrnil prazno (null). Takrat pokazemo prazen izbor, a ga NE shranimo: nov poskus ob
+  // naslednjem izrisu po vsaj 30 s ali ob zaprtju okna Debrid (pregled 25. 10. 2026 - prej je »Dodaj« ostal do odprtja okna).
+  var debridStanje = null, debridNalagam = false, debridPrazno = 0;
   function narisiDebrid(vidno) {
     var polje = $("mediaDebridPolje"), izbira = $("mediaDebrid"); if (!polje || !izbira) return;
     polje.hidden = !vidno;
     if (!vidno) return;
-    if (!debridStanje) {
+    if (!debridStanje && !(debridPrazno && Date.now() - debridPrazno < 30000)) {
       if (debridNalagam) return;
       debridNalagam = true;
       // Brez stanja (null) ne klicemo znova v neskoncnost - to je zamrznilo stran; pokazemo prazen izbor (»Dodaj«).
-      klic("mediaDebrid", []).then(function (s) { debridStanje = s && typeof s === "object" ? s : { storitve: [] }; debridNalagam = false; narisiDebrid(true); })
-        .catch(function () { debridNalagam = false; });
+      klic("mediaDebrid", []).then(function (s) {
+        debridNalagam = false;
+        if (s && typeof s === "object") { debridStanje = s; debridPrazno = 0; } else debridPrazno = Date.now();
+        narisiDebrid(true);
+      }).catch(function () { debridNalagam = false; });
       return;
     }
-    var s = debridStanje, z = (s.storitve || []).filter(function (x) { return x.kljuc; });
+    var s = debridStanje || { storitve: [] }, z = (s.storitve || []).filter(function (x) { return x.kljuc; });
     izbira.innerHTML = "";
     if (!z.length) izbira.add(new Option(t("debridDodaj"), ""));
     z.forEach(function (x) { izbira.add(new Option((s.oznaka || "⚡") + " " + x.ime, x.id)); });
@@ -2977,6 +2982,7 @@
   }
 
   function zapriSloje() {
+    debridPrazno = 0;          // zaprto okno Debrid: naslednji izris stanje vprasa znova
     document.querySelectorAll(".sloj").forEach(function (s) { s.classList.remove("viden"); });
     if ($("iskanje").value && document.activeElement !== $("iskanje")) $("iskanje").value = "";
   }
@@ -3263,6 +3269,11 @@
   // ------------------------------------------------------------------ dogodki iz safeer_os.py
   window.safeerOsDogodek = function (vrsta, podatki) {
     if (vrsta === "stanje") narisiStanje(podatki);
+    // Tema ali ozadje sta se spremenila drugje (Prilagodi namizje, Nastavitve namizja): okno sledi brez nalaganja.
+    if (vrsta === "videz" && podatki) {
+      if (podatki.ozadje) $("ozadje").style.backgroundImage = 'url("' + String(podatki.ozadje).replace(/"/g, "%22") + '")';
+      if (podatki.tema && podatki.tema !== trenutnaTema()) nastaviTemo(podatki.tema);
+    }
     if (vrsta === "okna") narisiOkna(podatki);
     if (vrsta === "pojdi") window.safeerOsPojdi(podatki);
     if (vrsta === "posodobitev") pokaziPosodobitevDoma(podatki);

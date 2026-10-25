@@ -278,6 +278,9 @@ class SafeerSchemeHandler(QWebEngineUrlSchemeHandler):
 
     def requestStarted(self, job: QWebEngineUrlRequestJob) -> None:
         url = job.requestUrl()
+        if not policy.scheme_izvor_dovoljen(url.path(), job.initiator().scheme()):
+            job.fail(QWebEngineUrlRequestJob.Error.RequestDenied)
+            return
         try:
             query = url.query(QUrl.ComponentFormattingOption.FullyEncoded)
             result = policy.scheme_resource(url.host(), url.path(), query, self.browser.lang)
@@ -1561,8 +1564,9 @@ class BrowserWindow(QMainWindow):
         text = url.toString()
         if (is_main_frame and nav_type in (QWebEnginePage.NavigationType.NavigationTypeLinkClicked,
                                            QWebEnginePage.NavigationType.NavigationTypeTyped)
-                and self._je_drm(text)):
-            QTimer.singleShot(0, lambda: self.odpri_drm(text))
+                and self._je_drm(text) and self._drm_mozen(text) and not self._drm_obidi_zdaj(url)):
+            # Navigacijo zavrnemo samo, ce se bo predvajalnik res odprl; sicer se stran nalozi v zavihku (ne prazen zavihek).
+            QTimer.singleShot(0, lambda: self.odpri_drm(text) or self._drm_neuspeh(page, text))
             return False
         if self.media_mode and is_main_frame and url.scheme().lower() in ("http", "https"):
             host = (url.host() or "").lower()
@@ -2312,12 +2316,46 @@ class BrowserWindow(QMainWindow):
         except Exception:  # noqa: BLE001
             return False
 
+    def _drm_mozen(self, url: str) -> bool:
+        """Ali bo Safeer DRM odprl ta naslov: https (http se prepise) in predvajalnik je na voljo."""
+        try:
+            from . import webview2_media
+            if not webview2_media.https_naslov(url):
+                return False
+            drm = getattr(self, "_drm", None)
+            return bool(drm.available) if drm is not None else webview2_media.predvajalnik_na_voljo()
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _drm_obidi_zdaj(self, url: QUrl) -> bool:
+        """Ena navigacija na isti gostitelj v 10 s po neuspehu predvajalnika gre v zavihek (brez zanke)."""
+        obidi = getattr(self, "_drm_obidi", None)
+        if not obidi:
+            return False
+        gostitelj, cas = obidi
+        if (url.host() or "").lower() == gostitelj and time.monotonic() - cas < 10:
+            self._drm_obidi = None
+            return True
+        return False
+
+    def _drm_neuspeh(self, page, url: str) -> None:
+        """Predvajalnik se kljub preverbi ni odprl: stran se nalozi v zavihku, kot da DRM ne bi bilo (brez zanke)."""
+        self._drm_obidi = ((QUrl(url).host() or "").lower(), time.monotonic())
+        try:
+            if page is not None:
+                page.load(QUrl(url))
+            else:
+                self.load_in_current(url)
+        except Exception as e:  # noqa: BLE001
+            print(f"[SafeerBrowser] Safeer DRM rezerva: {e}", flush=True)
+
     def odpri_drm(self, url: str) -> bool:
         """Storitev z DRM odpre v Safeer DRM nad zavihki tega okna. False = ni storitev z DRM ali ni na voljo."""
         if not self._je_drm(url):
             return False
         try:
             from . import webview2_media
+            url = webview2_media.https_naslov(url) or url
             if getattr(self, "_drm", None) is None:
                 self._drm = webview2_media.WebView2MediaWidget(on_home=self._zapri_drm, parent=self.tabs)
                 if getattr(self._drm, "gumb_domov", None) is not None:
