@@ -77,6 +77,81 @@ class DatotekeNaprave(unittest.TestCase):
                 return [{"id": "n-tel", "ime": "Telefon"}, {"id": "n-tuj", "ime": "Tuj"}]
         self.assertEqual([n["kljuc"] for n in namizje_qml.naprave_za_izbiro(Cb())], ["n-tel"])
 
+    def test_delni_dostop_androida(self):
+        """Android 14 »Izberi fotografije«: access gre v Datoteke (partial/none), neznana vrednost ne."""
+        primeri = (("partial", "partial"), ("none", "none"), ("full", "full"), ("<b>", ""), (None, ""))
+        for vrednost, pricakovano in primeri:
+            self.b.ukaz_pocakaj = lambda *a, v=vrednost, **k: {"ok": True,
+                                                                 "data": {"items": [], "shared": True, "access": v}}
+            self.assertEqual(self.b.datoteke_naprave("n-tel", "media:camera")["access"], pricakovano)
+
+    def test_prosnja_za_dostop(self):
+        """files.request_access samo napravi v ozjem krogu; razlog je samo notifications ali off (kot Linux a26daa2)."""
+        self.assertEqual(self.b.prosi_dostop_naprave("n-tuj")["koda"], "ni_ozji_krog")
+        self.assertEqual(self.klici, [])
+        odgovori = [{"ok": True, "data": {"shown": True}},
+                    {"ok": True, "data": {"shown": False, "reason": "notifications"}},
+                    {"ok": True, "data": {"reason": "off"}}, {"ok": True, "data": {"reason": "<script>"}},
+                    {"ok": False, "code": "timeout"}]
+
+        def ukaz(id_n, akcija, parametri, cas=0):
+            self.klici.append((id_n, akcija, dict(parametri)))
+            return odgovori.pop(0)
+        self.b.ukaz_pocakaj = ukaz
+        izidi = [self.b.prosi_dostop_naprave("n-tel") for _ in range(5)]
+        self.assertEqual(self.klici[0], ("n-tel", "files.request_access", {}))
+        self.assertEqual([(r["ok"], r["shown"], r["reason"]) for r in izidi],
+                         [(True, True, ""), (True, False, "notifications"), (True, False, "off"), (True, False, ""),
+                          (False, False, "")])
+
+
+class DostopVQml(unittest.TestCase):
+    """Gumb »Prosi za dostop na napravi« in stavek o izbranih fotografijah v vseh 6 jezikih, klic do Pythona."""
+
+    def test_besedila_gumb_in_klic(self):
+        import re
+        qml = os.path.join(KOREN, "windows", "safeer_windows", "qml")
+        with open(os.path.join(qml, "Namizje.qml"), encoding="utf-8") as f:
+            namizje = f.read()
+        for k in ("prosiZaDostop", "prosnjaPrikazana", "prosnjaObvestila", "prosnjaIzklopljeno", "napravaDeliIzbrane"):
+            self.assertEqual(len(re.findall(r"\b%s: \"" % k, namizje)), 6, k)
+        with open(os.path.join(qml, "Datoteke.qml"), encoding="utf-8") as f:
+            datoteke = f.read()
+        self.assertIn('koren.klic("prosiDostopNaprave"', datoteke)
+        self.assertIn('objectName: "prosiZaDostop"', datoteke)
+        self.assertIn('dostopNaprave = r.access || ""', datoteke)
+        with open(os.path.join(KOREN, "windows", "safeer_windows", "os_app.py"), encoding="utf-8") as f:
+            self.assertIn('metoda == "prosiDostopNaprave"', f.read())
+
+    def test_slicica_naprave_z_velikostjo(self):
+        """GET /thumb/<id>?s=<rob> kot Linux core/link_slicice_naprav (Android 128-512, racunalnik ga prezre)."""
+        try:
+            from safeer_windows import slicice_win
+        except Exception:  # pragma: no cover
+            self.skipTest("slicice_win se ne uvozi")
+        from core import link_tls
+        poti = []
+
+        class Povezava:
+            def __init__(self, *a, **k):
+                pass
+
+            def request(self, metoda, pot, headers=None):
+                poti.append(pot)
+
+            def getresponse(self):
+                raise OSError("brez omrezja")
+
+            def close(self):
+                pass
+        slicice_win._mrtvi.clear()
+        with mock.patch.object(link_tls, "_PripetaHttps", Povezava):
+            slicice_win._prenesi_z_naprave({"base_url": "https://192.168.0.9:8443", "fp": "aa" * 32, "token": "t"},
+                                           "media:image:7")
+        slicice_win._mrtvi.clear()
+        self.assertEqual(poti, ["/thumb/media%3Aimage%3A7?s=" + str(slicice_win.ROB)])
+
+
 
 if __name__ == "__main__":
     unittest.main()

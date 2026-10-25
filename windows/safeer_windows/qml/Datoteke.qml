@@ -32,6 +32,8 @@ Steklo {
     property string obdobjeOd: ""
     property string obdobjeDo: ""
     property int naslednjiOdmik: 0       // naprava ima se vnosov (nalaganje po delih)
+    // Android 14 »Izberi fotografije« (kot Linux a26daa2): naprava deli samo izbrane (partial) ali nic (none).
+    property string dostopNaprave: ""
     readonly property bool naNapravi: vir.vrsta === "naprava"
     readonly property var prikazani: L.razvrsti(L.filtriraj(elementi, filter, L.obmocje(obdobje, Date.now(), obdobjeOd, obdobjeDo)), razvrstitev)
 
@@ -68,7 +70,7 @@ Steklo {
     Timer { interval: 60000; running: panel.visible && !panel.naprava; repeat: true; onTriggered: panel.naloziDiske() }
 
     function odpri(v) {
-        vir = v; filter = ""; poljeFilter.text = ""; naslednjiOdmik = 0
+        vir = v; filter = ""; poljeFilter.text = ""; naslednjiOdmik = 0; dostopNaprave = ""
         if (v.foto) { pogled = "mreza"; razvrstitev = "nastanek" }
         nalozi(false)
     }
@@ -96,6 +98,7 @@ Steklo {
                 if (!r.shared) { stanje = "neDeli"; elementi = []; return }
                 if (r.server) streznik = r.server
                 naslednjiOdmik = Number(r.next_offset || 0)
+                dostopNaprave = r.access || ""
                 var vnosi = (r.items || []).map(L.vnosNaprave)
                 elementi = vnosi
                 if (vir.pot === "") {   // koren naprave: bliznjica Fotografije in mape tudi v stranski vrstici
@@ -112,6 +115,16 @@ Steklo {
         if (vir.vrsta === "lokalno") { koren.klic("mapa", [vir.pot], konec); koren.klic("spremljajMapo", [vir.pot]) }
         else if (vir.vrsta === "smeti") koren.klic("smeti", [], konec)
         else koren.klic("nedavne", [], konec)
+    }
+    // Prosnja na napravi (files.request_access): naprava pokaze prosnjo svojemu uporabniku, odloca ona.
+    function prosiZaDostop() {
+        var ime = imeNaprave
+        koren.klic("prosiDostopNaprave", [naprava], function (r) {
+            if (r && r.shown) koren.obvesti(koren.t("prosnjaPrikazana", { naprava: ime }))
+            else if (r && r.reason === "notifications") koren.obvesti(koren.t("prosnjaObvestila", { naprava: ime }))
+            else if (r && r.reason === "off") koren.obvesti(koren.t("prosnjaIzklopljeno", { naprava: ime }))
+            else koren.obvesti(koren.t("niOdgovorila"))
+        }, function () { koren.obvesti(koren.t("niOdgovorila")) })
     }
     // Naprava z veliko datotekami (galerija telefona) jih da po delih: »Naloži več« prinese naslednji del.
     function naloziVec() {
@@ -313,6 +326,19 @@ Steklo {
                        ToolTip.visible: hov1.hovered; ToolTip.text: koren.t("pogledSeznam"); HoverHandler { id: hov1 } }
                 Gumb { besedilo: "▦"; poudarjen: panel.pogled === "mreza"; Accessible.name: koren.t("pogledMreza"); onKlik: panel.pogled = "mreza"
                        ToolTip.visible: hov2.hovered; ToolTip.text: koren.t("pogledMreza"); HoverHandler { id: hov2 } }
+            }
+            // Naprava deli samo izbrane fotografije ali nic: stavek in prosnja na napravi (kot Linux a26daa2).
+            RowLayout {
+                objectName: "vrsticaDostopa"
+                Layout.fillWidth: true; spacing: 8
+                visible: panel.vir.vrsta === "naprava" && (panel.dostopNaprave === "partial" || panel.dostopNaprave === "none"
+                                                           || panel.stanje === "neDeli")
+                Text { Layout.fillWidth: true; wrapMode: Text.Wrap; visible: panel.dostopNaprave === "partial"
+                       text: koren.t("napravaDeliIzbrane", { naprava: panel.imeNaprave })
+                       color: koren.paleta.medlo; font.pixelSize: 12 }
+                Item { Layout.fillWidth: true; visible: panel.dostopNaprave !== "partial" }
+                Gumb { objectName: "prosiZaDostop"; besedilo: koren.t("prosiZaDostop"); Accessible.name: koren.t("prosiZaDostop")
+                       onKlik: panel.prosiZaDostop() }
             }
             Item {
                 Layout.fillWidth: true; Layout.fillHeight: true

@@ -3052,6 +3052,9 @@ class SafeerOsWindow(QMainWindow):
             odmik = a[2] if len(a) > 2 and isinstance(a[2], int) and not isinstance(a[2], bool) else 0
             return self.control_backend.datoteke_naprave(id_n, mapa, odmik)
 
+        if metoda == "prosiDostopNaprave":
+            return self.control_backend.prosi_dostop_naprave(str(a[0]) if a else "")
+
         if metoda == "odpriDatotekoNaprave":
             id_n = str(a[0]) if a else ""
             id_dat = str(a[1]) if len(a) > 1 else ""

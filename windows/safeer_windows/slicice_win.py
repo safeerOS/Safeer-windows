@@ -4,7 +4,8 @@ Lastnik, 25. 10. 2026: »pomanjsanih slicic nisi vgradil« - in naj delajo tudi 
 
 - Ta racunalnik: slika s Pillow (JPEG se dekodira ze pomanjsan - draft, obrnjena po EXIF), sicer s Qt QImageReader;
   video z nasim ffmpeg (%LOCALAPPDATA%\\SafeerOS\\ffmpeg, ffmpeg_win.pot_ffmpeg), slika s tretje sekunde.
-- Naprava v Linku: `GET <base_url>/thumb/<id>` z zetonom v glavi X-Safeer-Token in pripetim potrdilom (odtis `fp`) -
+- Naprava v Linku: `GET <base_url>/thumb/<id>?s=<ROB>` (Android 128-512, racunalnik ga prezre) z zetonom v glavi
+  X-Safeer-Token in pripetim potrdilom (odtis `fp`) -
   isti streznik in isti zeton, kot ju naprava da v odgovoru na `files.list` (Android DatotekeStreznik, Linux in
   Windows core/link_datoteke). Naprava sama preveri, ali ta racunalnik sme do njenih datotek (krog, zmoznost »files«);
   mi ne vidimo nicesar, cesar nam ni dala.
@@ -405,7 +406,7 @@ def _prenesi_z_naprave(streznik: dict, oznaka: str) -> Optional[bytes]:
     try:
         povezava = link_tls._PripetaHttps(u.hostname, u.port or 443, streznik["fp"], timeout=ROK_NAPRAVE_S)
         glave = {"X-Safeer-Token": streznik["token"]} if streznik.get("token") else {}
-        povezava.request("GET", "/thumb/" + urllib.parse.quote(oznaka, safe=""), headers=glave)
+        povezava.request("GET", "/thumb/" + urllib.parse.quote(oznaka, safe="") + "?s=%d" % ROB, headers=glave)
         odgovor = povezava.getresponse()
         if odgovor.status == 404:
             return b""                               # naprava slicice nima: v tej seji ne sprasujemo znova

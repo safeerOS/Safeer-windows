@@ -2416,7 +2416,26 @@ class SafeerControlBackend:
             "reason": podatki.get("reason") or podatki.get("razlog") or "",
             "next_offset": stevilo_ali_nic(podatki.get("next_offset")),
             "total": stevilo_ali_nic(podatki.get("total")),
+            # Android 14 »Izberi fotografije«: naprava deli samo izbrane (partial) ali nic (none); kot Linux a26daa2.
+            "access": str(podatki.get("access") or "") if podatki.get("access") in ("full", "partial", "none") else "",
         }
+
+    def prosi_dostop_naprave(self, id_naprave: str) -> dict:
+        """»Prosi za dostop« v Datotekah naprave, ki deli samo izbrane fotografije ali nic (files.request_access brez
+        parametrov; kot Linux safeer_os.prosi_dostop_naprave). Naprava pokaze prosnjo svojemu uporabniku - o dostopu
+        odloca ona. Odgovor: shown, reason (notifications = obvestila za Safeer izklopljena, off = deljenje
+        izklopljeno).
+        Samo naprave v ozjem krogu."""
+        id_naprave = str(id_naprave or "")
+        if not id_naprave:
+            return {"ok": False, "koda": "manjka_naprava"}
+        if not self.v_ozjem_krogu(id_naprave):
+            return {"ok": False, "koda": "ni_ozji_krog"}
+        r = self.ukaz_pocakaj(id_naprave, "files.request_access", {}, cas=8.0)
+        d = r.get("data") if isinstance(r, dict) and isinstance(r.get("data"), dict) else {}
+        razlog = str(d.get("reason") or "")
+        return {"ok": bool(isinstance(r, dict) and r.get("ok")), "shown": d.get("shown") is True,
+                "reason": razlog if razlog in ("notifications", "off") else ""}
 
     def odpri_datoteko_naprave(self, id_naprave: str, id_datoteke: str) -> dict:
         """Zaprosi oddaljeno napravo, naj odpre datoteko s svojim programom."""
