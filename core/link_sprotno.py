@@ -532,8 +532,13 @@ class Sprotno:
             t.bralcev += 1
         poslano = 0
         cakam = 0
+        # Streznik datotek pove, ali naprava tok se sme dobiti (odvzem predvajalnika ali umik iz kroga konca tudi tok,
+        # ki ze tece - core/link_datoteke._Straza; sedmi pregled, 25. 10. 2026).
+        se_velja = getattr(obravnava, "safeer_se_velja", None)
         try:
             while True:
+                if se_velja is not None and not se_velja():
+                    break
                 t.zadnji_bralec = time.time()
                 dolzina = os.path.getsize(t.datoteka) if os.path.exists(t.datoteka) else 0
                 if dolzina > poslano:

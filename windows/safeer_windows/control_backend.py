@@ -185,6 +185,14 @@ class SafeerControlBackend:
         # Umik iz kroga ali manj pravic (tudi z druge naprave, core/link_krog) konca tekoco sejo takoj (Grok W2).
         self.navidezni_zaslon.preveri_sejo = self._preveri_sejo_zaslona
         self._zaklep_dov = threading.RLock()
+        # Skupna koda (Safeer-linux eebfe57): ob vsakem zmanjsanju dostopa - okno, umik iz kroga (core/link_krog),
+        # drug program - core/link_dostop poklice programe, ki so se javili. Seja zaslona in zetoni koncajo TAKOJ,
+        # ne sele ob naslednji preverbi seje (W2, ena sekunda).
+        try:
+            from core import link_dostop
+            link_dostop.ob_odvzemu(self._ob_odvzemu_dostopa)
+        except Exception as e:  # noqa: BLE001 - brez klica ostane preverba seje vsako sekundo
+            print(f"[ControlBackend] ob_odvzemu ni prijavljen ({type(e).__name__})")
         self.povezava: Optional[link_hub.Povezava] = None
         self.naprave: List[dict] = []
         #: "Poslji na napravo": ponudba druge naprave, ki tu caka na Sprejmi/Zavrni (core/link_predvajanje.ponudba_iz).
@@ -612,6 +620,30 @@ class SafeerControlBackend:
                 profil = str((self.nastavitve.get("dovoljenja_naprav") or {}).get(id_n) or "")
                 if profil in PROFILI_DOSTOPA:
                     self._uskladi_ozji_krog([str(id_n)], profil)
+
+    def _ob_odvzemu_dostopa(self, jedro: str) -> None:
+        """core/link_dostop: napravi z jedrom `jedro` je bil dostop zmanjsan. Vse njene identitete (seznam naprav in
+        zapisana dovoljenja) izgubijo zetone datotek, njena seja zaslona se konca."""
+        from core import link_dostop
+        jedro = str(jedro or "")
+        for d in list((getattr(self, "_datoteke", None) or {}).values()):
+            try:
+                d.preklici_napravo(jedro)           # tudi oznake, ki jih ni v seznamu naprav (Linux eebfe57)
+            except Exception:  # noqa: BLE001
+                pass
+        ids = {str(n.get("id") or "") for n in list(self.naprave or [])}
+        ids |= {str(k) for k in (self.nastavitve.get("dovoljenja_naprav") or {})}
+        for i in sorted(x for x in ids if x):
+            try:
+                if link_dostop.jedro(i) != jedro:
+                    continue
+            except Exception:  # noqa: BLE001
+                continue
+            self._preklici_zetone(i)
+            try:
+                self.navidezni_zaslon.ustavi_sejo(posiljatelj=i)
+            except Exception as e:  # noqa: BLE001
+                print(f"[ControlBackend] Seje zaslona ni bilo mogoce ustaviti ({type(e).__name__})")
 
     def _preveri_sejo_zaslona(self, posiljatelj: str) -> Tuple[bool, bool]:
         """(sme gledati, sme upravljati) za tekoco sejo zaslona; navidezni_zaslon jo poklice najvec enkrat na

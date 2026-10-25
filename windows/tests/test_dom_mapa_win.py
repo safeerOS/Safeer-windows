@@ -51,7 +51,8 @@ def dom(tmp_path, monkeypatch):
 def test_samo_ozji_krog_in_samo_dom(dom):
     assert ld.DeljeneMape([], dom=False).razresi("dom:Dokumenti/porocilo.txt") is None
     m = ld.DeljeneMape([], dom=True)
-    assert m.koren() == [{"id": "dom:", "name": "Uporabnik", "type": "folder"}]
+    # Ime je nevtralno (ne uporabnisko ime iz poti profila; Safeer-linux eebfe57).
+    assert m.koren() == [{"id": "dom:", "name": "Home", "type": "folder"}]
     i, pot = m.razresi("dom:Dokumenti/porocilo.txt")
     assert i == -2 and pot.endswith("porocilo.txt")
     assert m.oznaka_poti(pot) == "dom:Dokumenti/porocilo.txt"
@@ -140,4 +141,93 @@ def test_pravo_kratko_ime_skrite_mape(dom):
     m = ld.DeljeneMape([], dom=True)
     assert m.razresi("dom:Dokumenti/" + kratko + "/v.txt") is None
     assert m.razresi("dom:Dokumenti/SkritaMapaDolga/v.txt") is None
+
+
+# ------------------------------------------------------------------ Safeer-linux eebfe57 (pregled 6, U9) na Windows
+def test_skrivnosti_po_vsebini_in_imenu(dom):
+    (dom / "Dokumenti" / "beleska.txt").write_text("-----BEGIN OPENSSH PRIVATE KEY-----\nx", encoding="utf-8")
+    (dom / "Dokumenti" / "github_rsa").write_text("x", encoding="utf-8")
+    (dom / "Dokumenti" / "Passwords.csv").write_text("url,user,pass", encoding="utf-8")
+    (dom / "Dokumenti" / "github_rsa.pub").write_text("ssh-ed25519 AAAA", encoding="utf-8")
+    m = ld.DeljeneMape([], dom=True)
+    imena = {v["name"] for v in m.seznam("dom:Dokumenti")}
+    assert {"beleska.txt", "github_rsa", "Passwords.csv"}.isdisjoint(imena)
+    assert "github_rsa.pub" in imena                               # javni kljuc ni skrivnost
+    for ime in ("beleska.txt", "github_rsa", "Passwords.csv"):
+        assert m.razresi("dom:Dokumenti/" + ime) is None, ime
+
+
+def test_izbrana_mapa_brez_skrivnosti(dom):
+    (dom / "Dokumenti" / "Login Data").write_text("x", encoding="utf-8")
+    m = ld.DeljeneMape([str(dom / "Dokumenti")])
+    imena = {v["name"] for v in m.seznam("share:0:")}
+    assert "Login Data" not in imena and "kljuc.pem" not in imena and "porocilo.txt" in imena
+    assert m.razresi("share:0:Login Data") is None and m.razresi("share:0:kljuc.pem") is None
+
+
+def test_ime_domace_mape_po_jeziku(dom):
+    m = ld.DeljeneMape([], dom=True)
+    m.jezik = "sl"
+    assert m.koren()[0]["name"] == "Domača mapa"                  # ne uporabnisko ime (ime mape profila)
+    m.jezik = "de"
+    assert m.koren()[0]["name"] == "Persönlicher Ordner"
+
+
+def test_urejanje_doma(dom, monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(dom))
+    monkeypatch.setenv("USERPROFILE", str(dom))
+    d = ld.Datoteke([], tls_mapa=str(tmp_path / "tls"), dom=True)
+    try:
+        u = d.streznik.uredi
+        assert u("dom:Dokumenti", {"op": "delete"})[0] == 403          # mapa uporabnika ostane
+        assert u("dom:Dokumenti", {"op": "rename", "name": "X"})[0] == 403
+        assert u("dom:Dokumenti/porocilo.txt", {"op": "rename", "name": ".bashrc"})[0] == 403
+        assert u("dom:Dokumenti/porocilo.txt", {"op": "rename", "name": "kljuc.pem"})[0] == 403
+        assert u("dom:Dokumenti/porocilo.txt", {"op": "move", "folder": "dom:"})[0] == 403
+        assert u("dom:Dokumenti/porocilo.txt", {"op": "rename", "name": "porocilo-2.txt"})[0] == 200
+    finally:
+        d.ustavi()
+
+
+class _Obravnava:
+    def __init__(self):
+        import io
+        self.headers = {}
+        self.wfile = io.BytesIO()
+        self.close_connection = False
+
+    def send_response(self, *_a):
+        pass
+
+    def send_header(self, *_a):
+        pass
+
+    def end_headers(self):
+        pass
+
+
+def test_prenos_se_prekine_ob_odvzemu(tmp_path, monkeypatch):
+    """U9: odvzem dostopa konca tudi prenos, ki ze tece (preverba najvec enkrat na sekundo)."""
+    monkeypatch.setattr(ld, "PREVERI_MED_POSILJANJEM_S", 0.0)
+    monkeypatch.setattr(ld, "VELIKOST_KOSA", 1024)
+    f = tmp_path / "film.bin"
+    f.write_bytes(b"x" * 10240)
+    klici = []
+    o = _Obravnava()
+    ld._poslji_datoteko(o, str(f), False, se_velja=lambda: klici.append(1) or len(klici) < 3)
+    assert 0 < len(o.wfile.getvalue()) < 10240 and o.close_connection
+    o2 = _Obravnava()
+    ld._poslji_datoteko(o2, str(f), False)
+    assert len(o2.wfile.getvalue()) == 10240
+
+
+def test_preklic_vseh_oznak_naprave(tmp_path):
+    d = ld.Datoteke([str(tmp_path)], tls_mapa=str(tmp_path / "tls"))
+    try:
+        s = d.streznik
+        z1, z2, z3 = (s.zeton_za(n) for n in ("n-0123456789abcdef", "n-0123456789abcdef-os", "n-ffffffffffffffff"))
+        assert d.preklici_napravo("n-0123456789abcdef") == 2
+        assert not s.zeton_velja(z1) and not s.zeton_velja(z2) and s.zeton_velja(z3)
+    finally:
+        d.ustavi()
 

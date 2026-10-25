@@ -238,6 +238,29 @@ class PregledGrok(unittest.TestCase):
 
 
 @unittest.skipIf(control_backend is None, "control_backend se ne uvozi")
+class OdvzemIzSkupneKode(unittest.TestCase):
+    """Safeer-linux eebfe57: core/link_dostop.ob_odvzemu - umik iz kroga ali manj pravic v kateremkoli programu tega
+    procesa takoj konca sejo zaslona in zetone naprave na Windows."""
+
+    def test_odvzem_konca_sejo_in_zetone(self):
+        b = control_backend.SafeerControlBackend.__new__(control_backend.SafeerControlBackend)
+        b.naprave = [{"id": "n-0123456789abcdef"}, {"id": "n-0123456789abcdef-os"}, {"id": "n-ffffffffffffffff"}]
+        b.nastavitve = {"dovoljenja_naprav": {"n-0123456789abcdef-control": "polno"}}
+        preklicani = []
+        b._preklici_zetone = lambda n: preklicani.append(n)
+        b.navidezni_zaslon = _Zaslon()
+        b._ob_odvzemu_dostopa("n-0123456789abcdef")
+        pricakovano = ["n-0123456789abcdef", "n-0123456789abcdef-control", "n-0123456789abcdef-os"]
+        self.assertEqual(sorted(preklicani), pricakovano)
+        self.assertEqual(sorted(b.navidezni_zaslon.ustavljeno), pricakovano)
+
+    def test_prijava_v_skupni_kodi(self):
+        vir = open(os.path.join(KOREN, "windows", "safeer_windows", "control_backend.py"), encoding="utf-8").read()
+        self.assertIn("link_dostop.ob_odvzemu(self._ob_odvzemu_dostopa)", vir)
+        self.assertTrue(hasattr(link_dostop, "ob_odvzemu") and hasattr(link_dostop, "ob_umiku_iz_kroga"))
+
+
+@unittest.skipIf(control_backend is None, "control_backend se ne uvozi")
 class SejaPoUmiku(unittest.TestCase):
     """Grok W2/W10: tekoca seja zaslona preveri dovoljenje (najvec enkrat na sekundo) in se ob umiku konca."""
 

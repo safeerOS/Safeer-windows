@@ -28,6 +28,7 @@ import secrets
 import shutil
 import socket
 import ssl
+import stat
 import subprocess
 import threading
 import time
@@ -161,18 +162,97 @@ def _obcutljiva(pot: str) -> bool:
 
 #: Datoteke s skrivnostmi, ki jih domaca mapa in ves disk ne dajata napravam (zasebni kljuci SSH, potrdila s kljucem,
 #: zbirke gesel) - tudi, ce niso v skriti mapi. Isti seznam kot Safeer-linux core/link_datoteke._skrivnost (a26daa2).
+#: Sedmi pregled (naloga 6, Safeer-linux eebfe57): tudi kopije in drugace poimenovani kljuci, zbirke gesel in piskotkov
+#: brskalnikov z znanimi imeni (Login Data, Cookies, logins.json, key4.db), izvozi gesel in vsebina
+#: (_vsebina_skrivnost).
 _SKRIVNOSTI_IMENA = frozenset(("id_rsa", "id_dsa", "id_ecdsa", "id_ed25519", "id_ecdsa_sk", "id_ed25519_sk",
-                               "wallet.dat", "credentials", "credentials.json", "client_secret.json"))
+                               "wallet.dat", "credentials", "credentials.json", "client_secret.json", "deploy_key",
+                               "netrc", "_netrc", "pgpass", "git-credentials", "login data", "login data for account",
+                               "web data", "cookies", "local state", "key3.db", "key4.db", "logins.json",
+                               "signons.sqlite", "cookies.sqlite", "cert9.db", "accesskeys.csv", "credentials.csv",
+                               "krb5.keytab", "secrets.json", "secrets.yaml", "secrets.yml"))
 _SKRIVNOSTI_KONCNICE = frozenset((".pem", ".key", ".p12", ".pfx", ".kdbx", ".kdb", ".jks", ".keystore", ".ppk",
-                                  ".gpg", ".pgp", ".asc", ".ovpn"))
+                                  ".gpg", ".pgp", ".asc", ".ovpn", ".kbx", ".keychain", ".keychain-db", ".opvault",
+                                  ".1pif", ".psafe3", ".keytab", ".p8", ".pkcs8", ".pkcs12", ".jwk", ".tfstate",
+                                  ".tfvars", ".env"))
+#: Kljuc SSH s pripono ali kopija (id_rsa.bak, id_ed25519_delo, github_rsa, deploy_ed25519~); javni (.pub) ni skrivnost.
+_KLJUC_SSH = re.compile(r"^(?:id_(?:rsa|dsa|ecdsa|ed25519)|.+_(?:rsa|dsa|ecdsa|ed25519)(?:_sk)?(?:[._~-].*)?$)")
+#: Izvozi gesel (Chrome Passwords.csv, bitwarden_export_*.json, gesla.txt): ime + vrsta besedila ali tabele.
+_IZVOZ_GESEL = re.compile(r"password|passwort|mot.de.passe|contrase|geslo|gesla|bitwarden|lastpass|1password|keepass|"
+                          r"dashlane|nordpass|enpass")
+_KONCNICE_IZVOZA = frozenset((".csv", ".json", ".txt", ".xml", ".xlsx", ".ods", ".tsv"))
+#: Zacetek datoteke s skrivnostjo, ne glede na ime (prvih nekaj KB).
+_GLAVE_SKRIVNOSTI = (b"PuTTY-User-Key-File", b"\x03\xd9\xa2\x9a", b"openssh-key-v1")
 #: FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM: Raziskovalec jih ne kaze (AppData, NTUSER.DAT, stare povezave).
 _SKRITA_ATRIBUT = 0x2 | 0x4
 
 
+def _vsebina_skrivnost(pot: str) -> bool:
+    """Ali je datoteka po vsebini skrivnost: zasebni kljuc PEM/OpenSSH/PuTTY, zbirka KeePass, kljuci AWS. Datoteke, ki
+    je ni mogoce prebrati, ne damo itak (razresi/prenos pade) - tu ni skrivnost."""
+    try:
+        if not stat.S_ISREG(os.stat(pot).st_mode):
+            return False
+        with open(pot, "rb") as f:
+            glava = f.read(4096)
+    except (OSError, ValueError):
+        return False
+    if glava.startswith(_GLAVE_SKRIVNOSTI):
+        return True
+    if b"-----BEGIN" in glava and (b"PRIVATE KEY" in glava or b"PGP PRIVATE KEY BLOCK" in glava):
+        return True
+    return b"aws_secret_access_key" in glava.lower()
+
+
 def _skrivnost(pot: str) -> bool:
-    """Datoteka s skrivnostjo po imenu (kljuc, potrdilo s kljucem, zbirka gesel, nastavitve VPN s kljucem)."""
-    ime = os.path.basename(str(pot or "")).lower()
-    return ime in _SKRIVNOSTI_IMENA or os.path.splitext(ime)[1] in _SKRIVNOSTI_KONCNICE
+    """Datoteka s skrivnostjo po imenu (kljuc, potrdilo s kljucem, zbirka gesel, nastavitve VPN s kljucem, izvoz gesel)
+    in - kadar je `pot` absolutna pot do datoteke - po vsebini (_vsebina_skrivnost). Kot Safeer-linux eebfe57."""
+    pot = str(pot or "")
+    ime = os.path.basename(pot).lower()
+    koncnica = os.path.splitext(ime)[1]
+    if ime in _SKRIVNOSTI_IMENA or koncnica in _SKRIVNOSTI_KONCNICE:
+        return True
+    if not ime.endswith(".pub") and _KLJUC_SSH.match(ime):
+        return True
+    if koncnica in _KONCNICE_IZVOZA and _IZVOZ_GESEL.search(ime):
+        return True
+    if ime.startswith("krb5cc"):
+        return True
+    return os.path.isabs(pot) and _vsebina_skrivnost(pot)
+
+
+#: Mape s profili programov brez pike v imenu (gesla, piskotki); Windows: profili programov, kos, zacasne mape
+#: namestitve - ne glede na atribut Skrito. Registri uporabnika (NTUSER.DAT) in sistema (Windows/System32/config).
+_ZASEBNE_MAPE_DOMA = frozenset(("snap",))
+_ZASEBNE_WINDOWS = frozenset(("appdata", "programdata", "$recycle.bin", "system volume information", "config.msi",
+                              "$windows.~bt", "$windows.~ws", "$sysreset"))
+_ZASEBNA_IMENA_WINDOWS = ("ntuser.dat", "usrclass.dat")
+_SISTEMSKE_DATOTEKE_WINDOWS = frozenset(("pagefile.sys", "hiberfil.sys", "swapfile.sys"))
+
+
+def _zasebna(pot: str) -> bool:
+    """Ali absolutna (razresena) pot vodi skozi mapo s profili programov ali zasebni del Windows (Linux eebfe57)."""
+    deli = [d.lower() for d in str(pot or "").replace("\\", "/").replace(os.sep, "/").split("/") if d]
+    if any(d in _ZASEBNE_WINDOWS for d in deli):
+        return True
+    if any(deli[i:i + 3] == ["windows", "system32", "config"] for i in range(len(deli))):
+        return True
+    if deli and (deli[-1] in _SISTEMSKE_DATOTEKE_WINDOWS or deli[-1].startswith(_ZASEBNA_IMENA_WINDOWS)):
+        return True
+    dom = os.path.realpath(os.path.expanduser("~"))
+    if pot != dom and str(pot).startswith(dom + os.sep):
+        prvi = os.path.relpath(pot, dom).split(os.sep)[0]
+        return prvi.lower() in _ZASEBNE_MAPE_DOMA
+    return False
+
+
+#: Ime domace mape v seznamu za naprave: nevtralno, ne ime mape (to je navadno uporabnisko ime; Linux eebfe57).
+IME_DOMA = {"sl": "Domača mapa", "en": "Home", "de": "Persönlicher Ordner", "es": "Carpeta personal",
+            "fr": "Dossier personnel", "it": "Cartella home"}
+
+
+def ime_doma(jezik: Optional[str]) -> str:
+    return IME_DOMA.get(str(jezik or "en")[:2].lower(), IME_DOMA["en"])
 
 
 def _skrita_atribut(pot: str, koren: str = "") -> bool:
@@ -231,6 +311,8 @@ class DeljeneMape:
         #: Prenosi, Glasba, Videoposnetki ...) - BREZ AppData, map z zacetno piko, datotek in map z atributom Skrito
         #: ali Sistem, datotek s skrivnostmi in povezav (simbolnih, junction) ven iz profila ali v AppData.
         self.dom = bool(dom)
+        #: Jezik vmesnika tega racunalnika (ime domace mape v seznamu); nastavi ga Control.
+        self.jezik: Optional[str] = None
         self.nastavi(poti or [])
 
     @staticmethod
@@ -243,7 +325,7 @@ class DeljeneMape:
         if pot != koren and not pot.startswith(koren + os.sep):
             return None              # .. ali povezava ven iz domace mape
         if pot != koren and (_skrita(os.path.relpath(pot, koren)) or _skrita_atribut(pot, koren)
-                             or _skrivnost(pot)):
+                             or _skrivnost(pot) or _zasebna(pot)):
             return None
         if _obcutljiva(pot):
             return None              # AppData, sistemska mapa, registrski panj, UNC
@@ -262,7 +344,7 @@ class DeljeneMape:
                  for i, p in enumerate(self.poti)]
         if self.ves_disk:
             dom = os.path.realpath(os.path.expanduser("~"))
-            vnosi.append({"id": "disk:" + dom, "name": os.path.basename(dom) or dom, "type": "folder"})
+            vnosi.append({"id": "disk:" + dom, "name": ime_doma(self.jezik), "type": "folder"})
             if os.name == "nt":
                 # Windows nima enega korena: pokažemo vse dejansko priklopljene črke diskov.
                 for crka in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
@@ -272,8 +354,7 @@ class DeljeneMape:
             else:
                 vnosi.append({"id": "disk:/", "name": "/", "type": "folder"})
         elif self.dom:
-            dom = self._domaca()
-            vnosi.append({"id": "dom:", "name": os.path.basename(dom) or dom, "type": "folder"})
+            vnosi.append({"id": "dom:", "name": ime_doma(self.jezik), "type": "folder"})
         return vnosi
 
     def razresi(self, oznaka: str) -> Optional[Tuple[int, str]]:
@@ -293,7 +374,7 @@ class DeljeneMape:
                 pot = os.path.realpath(surova)
             except (OSError, ValueError):
                 return None
-            if _skrita(pot) or _obcutljiva(pot):
+            if _skrita(pot) or _obcutljiva(pot) or _skrivnost(pot) or _zasebna(pot):
                 return None
             return (-1, pot) if os.path.exists(pot) else None
         if oznaka.startswith("dom:"):
@@ -326,6 +407,10 @@ class DeljeneMape:
         if pot != koren and not pot.startswith(koren + os.sep):
             return None
         if pot != koren and _skrita(os.path.relpath(pot, koren)):
+            return None
+        # Tudi v izbrani deljeni mapi ne damo skrivnosti in profilov programov (kot domaca mapa; Linux eebfe57, U13) -
+        # razen ce je uporabnik delil prav tako mapo (koren sam).
+        if pot != koren and (_skrivnost(pot) or (_zasebna(pot) and not _zasebna(koren))):
             return None
         if _obcutljiva(pot):
             return None
@@ -390,8 +475,9 @@ class DeljeneMape:
         except OSError:
             return None
         vnosi: List[dict] = []
+        zasebni_koren = _zasebna(koren)
         for ime in imena:
-            if ime.startswith("."):
+            if ime.startswith(".") or _skrivnost(ime):
                 continue
             cela = os.path.join(pot, ime)
             try:
@@ -401,6 +487,8 @@ class DeljeneMape:
                 realna = os.path.realpath(cela)
                 if _obcutljiva(realna):
                     continue  # podatki programov, sistemska mapa ali omrezna (UNC) pot
+                if _skrivnost(realna) or (_zasebna(realna) and not zasebni_koren):
+                    continue  # razresi je tudi ne da
                 try:
                     rel = os.path.relpath(realna, koren).replace(os.sep, "/")
                 except ValueError:
@@ -699,11 +787,35 @@ def postrezi_datoteko(obravnava, streznik: "StreznikDatotek", oznaka: str, samo_
     if r is None or not os.path.isfile(r[1]):
         _napaka_http(obravnava, 404, "datoteke ni")
         return
-    _poslji_datoteko(obravnava, r[1], samo_glava)
+    zeton = z.strip() if z else None
+    _poslji_datoteko(obravnava, r[1], samo_glava, se_velja=lambda: streznik.zeton_velja(zeton))
 
 
-def _poslji_datoteko(obravnava, pot: str, samo_glava: bool) -> None:
-    """Datoteka z diska s podporo za `Range` (zeton je ze preverjen)."""
+#: Med posiljanjem datoteke ali toka tako pogosto preverimo, ali zeton naprave se velja: odvzem dostopa (umik iz
+#: ozjega kroga) konca tudi prenos, ki ze tece - ne sele naslednjo zahtevo (Safeer-linux eebfe57, sedmi pregled U9).
+PREVERI_MED_POSILJANJEM_S = 1.0
+
+
+class _Straza:
+    """Med posiljanjem: `se_velja()` najvec enkrat na PREVERI_MED_POSILJANJEM_S."""
+
+    def __init__(self, se_velja) -> None:
+        self._se_velja = se_velja
+        self._naslednja = time.monotonic() + PREVERI_MED_POSILJANJEM_S
+
+    def velja(self) -> bool:
+        if self._se_velja is None or time.monotonic() < self._naslednja:
+            return True
+        self._naslednja = time.monotonic() + PREVERI_MED_POSILJANJEM_S
+        try:
+            return bool(self._se_velja())
+        except Exception:  # noqa: BLE001 - »ne vem« ni »da«
+            return False
+
+
+def _poslji_datoteko(obravnava, pot: str, samo_glava: bool, se_velja=None) -> None:
+    """Datoteka z diska s podporo za `Range` (zeton je ze preverjen). `se_velja()`: ali naprava datoteko se sme dobiti
+    (preverba med posiljanjem, _Straza); ko ne vec, se posiljanje prekine in povezava zapre."""
     velikost = os.path.getsize(pot)
     vrsta = mimetypes.guess_type(pot)[0] or "application/octet-stream"
     zacetek, konec = 0, velikost - 1
@@ -738,11 +850,16 @@ def _poslji_datoteko(obravnava, pot: str, samo_glava: bool) -> None:
     obravnava.end_headers()
     if samo_glava:
         return
+    straza = _Straza(se_velja)
     try:
         with open(pot, "rb") as d:
             d.seek(zacetek)
             ostane = dolzina
             while ostane > 0:
+                if not straza.velja():
+                    print("[SafeerDatoteke] prenos prekinjen: naprava nima vec dostopa", flush=True)
+                    obravnava.close_connection = True
+                    break
                 kos = d.read(min(VELIKOST_KOSA, ostane))
                 if not kos:
                     break
@@ -765,6 +882,11 @@ _SLICICE_VIDEA = threading.BoundedSemaphore(2)
 _SLICICE_SLIK = threading.BoundedSemaphore(2)
 CAKAJ_NA_SLICICO_S = 30.0
 NAJVEC_PIK_SLICICE = 50_000_000
+#: Za slike brez pomanjsanega dekodiranja (PNG, WebP, GIF ...) nizja meja (Linux eebfe57, pregled 6 U8).
+NAJVEC_PIK_SLICICE_BREZ_DRAFT = 24_000_000
+#: Formati, ki jih Pillow za slicico sploh poskusi odpreti - po VSEBINI, ne po koncnici: brez EPS/PS (Ghostscript,
+#: CVE-2023-36664, CVE-2024-29510) in redkih dekodirnikov (Linux eebfe57, U4).
+FORMATI_SLICIC = ("JPEG", "PNG", "WEBP", "GIF", "BMP", "HEIF", "AVIF")
 _slicice: "collections.OrderedDict[tuple, bytes]" = collections.OrderedDict()
 _slicice_kljuc = threading.Lock()
 #: Datoteke, za katere slicice ni bilo mogoce narediti (pokvarjena, prevelika, ffmpeg obstane): v tej seji je ne
@@ -795,12 +917,14 @@ def _slicica_slike(pot: str, rob: int) -> Optional[bytes]:
     if not _SLICICE_SLIK.acquire(timeout=CAKAJ_NA_SLICICO_S):
         return None
     try:
-        with Image.open(pot) as im:
+        Image.init()
+        with Image.open(pot, formats=[f for f in FORMATI_SLICIC if f in Image.OPEN]) as im:
             try:
                 im.draft("RGB", (rob * 2, rob * 2))      # JPEG se dekodira ze pomanjsan
             except Exception:  # noqa: BLE001
                 pass
-            if im.size[0] * im.size[1] > NAJVEC_PIK_SLICICE:
+            meja = NAJVEC_PIK_SLICICE if im.format == "JPEG" else NAJVEC_PIK_SLICICE_BREZ_DRAFT
+            if im.size[0] * im.size[1] > meja:
                 return None
             # Najprej pomanjsaj, nato obrni po EXIF: obrat v polni locljivosti bi naredil kopijo velikosti cele slike
             # (pregled N3). Meja je kvadratna, zato vrstni red izida ne spremeni.
@@ -942,13 +1066,17 @@ def posreduj_tok(obravnava, streznik: "StreznikDatotek", skrivnost: str, samo_gl
     if cilj is None:
         _napaka_http(obravnava, 404, "toka ni")
         return
+    zeton = z.strip() if z else None
+
+    def se_velja() -> bool:
+        return streznik.lokalni_tok(skrivnost) is not None and streznik.zeton_velja(zeton)
     if cilj.startswith("file://"):
         # Film je na tem racunalniku ze v celoti (npr. prenesen v Safeer OS): postrezemo ga z diska.
         pot = cilj[len("file://"):]
         if not os.path.isfile(pot):
             _napaka_http(obravnava, 404, "datoteke ni")
             return
-        _poslji_datoteko(obravnava, pot, samo_glava)
+        _poslji_datoteko(obravnava, pot, samo_glava, se_velja=se_velja)
         return
     u = urllib.parse.urlparse(cilj)
     glave = {"Range": obravnava.headers["Range"]} if obravnava.headers.get("Range") else {}
@@ -965,7 +1093,12 @@ def posreduj_tok(obravnava, streznik: "StreznikDatotek", skrivnost: str, samo_gl
         obravnava.end_headers()
         if samo_glava:
             return
+        straza = _Straza(se_velja)
         while True:
+            if not straza.velja():
+                print("[SafeerDatoteke] tok prekinjen: naprava nima vec dostopa", flush=True)
+                obravnava.close_connection = True
+                break
             kos = r.read(VELIKOST_KOSA)
             if not kos:
                 break
@@ -1081,6 +1214,22 @@ class StreznikDatotek:
                 self._zetoni.pop(z, None)
         return len(stari)
 
+    def preklici_jedro(self, jedro_naprave: str) -> int:
+        """Preklice zetone VSEH oznak naprave s tem jedrom (Safeer OS, Control, brskalnik na njej): odvzem dostopa ali
+        umik iz kroga (Linux eebfe57). Prenosi in tokovi, ki tecejo, se koncajo ob naslednji preverbi (_Straza)."""
+        if not jedro_naprave:
+            return 0
+        try:
+            from core import link_dostop
+            jedro = link_dostop.jedro
+        except Exception:  # noqa: BLE001
+            return 0
+        with self._kljucavnica:
+            stari = [z for z, v in self._zetoni.items() if jedro(v[0]) == jedro_naprave]
+            for z in stari:
+                self._zetoni.pop(z, None)
+        return len(stari)
+
     def dodaj_tok(self, lokalni_url: str) -> str:
         """Lokalni tok (samo 127.0.0.1) objavi za naprave z zetonom; vrne pot `/m/<skrivnost>/<ime>`."""
         u = urllib.parse.urlparse(lokalni_url)
@@ -1130,18 +1279,28 @@ class StreznikDatotek:
         i, pot = r
         if i >= 0 and pot == self.mape.poti[i]:
             return 403, {"ok": False, "napaka": "ni_dovoljeno"}  # deljene mape same ne brisemo in ne preimenujemo
-        if i < 0 and pot in (os.sep, os.path.realpath(os.path.expanduser("~"))):
+        dom = os.path.realpath(os.path.expanduser("~"))
+        if i < 0 and pot in (os.sep, dom):
+            return 403, {"ok": False, "napaka": "ni_dovoljeno"}
+        if i < 0 and os.path.isdir(pot) and os.path.dirname(pot) == dom:
+            # Mape neposredno v domaci mapi (Dokumenti, Slike, Prenosi ...) so mape uporabnika: naprava jih ne brise,
+            # ne preimenuje in ne premika - njihovo vsebino pa ureja (Linux eebfe57, pregled 6 U5).
             return 403, {"ok": False, "napaka": "ni_dovoljeno"}
         try:
             if ukaz == "delete":
                 link_urejanje.v_smeti(pot)
                 return 200, {"ok": True, "op": ukaz}
             if ukaz == "rename":
-                nova = link_urejanje.preimenuj(pot, str(zahteva.get("name") or ""))
+                novo_ime = str(zahteva.get("name") or "")
+                if _ime_za_zagon(novo_ime):
+                    return 403, {"ok": False, "napaka": "nevarna_vrsta"}
+                nova = link_urejanje.preimenuj(pot, novo_ime)
             elif ukaz == "move":
                 cilj = self.mape.razresi(str(zahteva.get("folder") or ""))
                 if cilj is None:
                     return 404, {"ok": False, "napaka": "ni_mape"}
+                if os.path.realpath(cilj[1]) == dom or _ime_za_zagon(os.path.basename(pot)):
+                    return 403, {"ok": False, "napaka": "ni_dovoljeno"}
                 nova = link_urejanje.premakni(pot, cilj[1])
             else:
                 if os.path.isdir(pot) or vrsta_datoteke(pot) != "image":
@@ -1153,6 +1312,12 @@ class StreznikDatotek:
         except (ValueError, TypeError):
             return 400, {"ok": False, "napaka": "napacna_zahteva"}
         return 200, {"ok": True, "op": ukaz, "id": self.mape.oznaka_poti(nova), "name": os.path.basename(nova)}
+
+
+def _ime_za_zagon(ime: str) -> bool:
+    """Ime, ki ga naprava ne sme dati: skrita datoteka ali mapa (.ssh ...) ali ime s skrivnostjo (Linux eebfe57 U5)."""
+    ime = os.path.basename(str(ime or "").strip())
+    return not ime or ime.startswith(".") or _skrivnost(ime)
 
 
 class Datoteke:
@@ -1220,6 +1385,14 @@ class Datoteke:
 
     def ustavi(self) -> None:
         self.streznik.ustavi()
+
+    def preklici_napravo(self, jedro_naprave: str) -> int:
+        """Napravi je bil dostop vzet (core/link_dostop.ob_odvzemu): zetoni vseh njenih oznak ne veljajo vec, tekoci
+        prenosi in tokovi se prekinejo (Linux eebfe57)."""
+        n = self.streznik.preklici_jedro(jedro_naprave)
+        if n:
+            print(f"[SafeerDatoteke] odvzem dostopa: {n} zetonov preklicanih", flush=True)
+        return n
 
     def seznam(self, oznaka: str, id_naprave: str, hub_url: str = "") -> dict:
         """Odgovor na ukaz `files.list` (podatki v `control.result`).

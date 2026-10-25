@@ -522,7 +522,11 @@ class Krog:
         if not isinstance(tuj, dict):
             return False
         spremenjeno = False
+        umaknjena: set = set()
         with self._zaklep:
+            # Krog te naprave (ne preizkusni ali zacasni): katere naprave (jedra kljucev) so bile clan pred zdruzitvijo -
+            # ki niso vec, izgubijo dostop do vsebin tega racunalnika (core/link_dostop.ob_umiku_iz_kroga).
+            jedra_prej = self.znani()[0] if self is _krog else set()
             for i, u in (tuj.get("umiki") or {}).items():
                 if not isinstance(u, dict):
                     continue
@@ -589,6 +593,10 @@ class Krog:
                 self._shrani()
             if spremenjeno:
                 _ob_spremembi()
+                if jedra_prej:
+                    umaknjena = jedra_prej - self.znani()[0]
+        if umaknjena:
+            _po_umiku(umaknjena, self._zaklep)
         return spremenjeno
 
     def _shrani(self) -> None:
@@ -616,12 +624,39 @@ def krog() -> Krog:
         return _krog
 
 
+def _po_umiku(jedra: set, zaklep_kroga=None) -> None:
+    """Naprave (jedra kljucev) niso vec v krogu te naprave: dostop do vsebin tega racunalnika (ozji krog,
+    core/link_dostop) jim gre takoj - tudi ce se z istim kljucem znova seznanijo (sedmi pregled, 25. 10. 2026).
+    Klicatelj, ki se drzi zaklepa kroga (umakni znotraj svojega `with krog._zaklep`), dobi klic v svoji niti: zapis
+    dovoljenj bere krog pod svojim zaklepom (vrstni red zaklepov dostop -> krog)."""
+    def klic() -> None:
+        try:
+            from core import link_dostop
+            link_dostop.ob_umiku_iz_kroga(set(jedra))
+        except Exception as e:  # noqa: BLE001 - umik iz kroga velja tudi, ce zapisa dovoljenj ni mogoce spremeniti
+            print(f"[SafeerKrog] dostopa umaknjenih naprav ni bilo mogoce vzeti: {e}", flush=True)
+    drzi = False
+    try:
+        drzi = bool(zaklep_kroga is not None and zaklep_kroga._is_owned())
+    except Exception:  # noqa: BLE001 - zaklep brez _is_owned: varneje v svoji niti
+        drzi = zaklep_kroga is not None
+    if drzi:
+        threading.Thread(target=klic, name="safeer-umik-dostopa", daemon=True).start()
+    else:
+        klic()
+
+
 def pozabi_krog() -> None:
     """Odjava te naprave (»Odjavi to napravo«): krajevna kopija kroga zaupanja, stiki in sosedje Link Mesh gredo
-    stran. Odjavljena naprava ne sme vec poznati naprav, s katerimi je bila povezana (lastnik, 12. 10. 2026)."""
+    stran. Odjavljena naprava ne sme vec poznati naprav, s katerimi je bila povezana (lastnik, 12. 10. 2026) - in
+    nobena od njih nima vec dostopa do vsebin tega racunalnika (ob ponovni prijavi samo z novo privolitvijo)."""
     global _krog
     with _zaklep:
         pot = _pot_kroga()
+        try:
+            jedra = (_krog if _krog is not None else Krog(pot)).znani()[0]
+        except Exception:  # noqa: BLE001 - pokvarjen krog: odjava se vseeno izvede
+            jedra = set()
         for dat in (pot, pot + "-stiki.json", os.path.join(_mapa_nastavitev(), "mesh-sosedje.json")):
             try:
                 os.remove(dat)
@@ -629,6 +664,8 @@ def pozabi_krog() -> None:
                 pass
         _krog = None
     _ob_spremembi()
+    if jedra:
+        _po_umiku(jedra)
 
 
 def sprejmi(tuj) -> bool:
