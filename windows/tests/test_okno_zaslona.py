@@ -53,8 +53,13 @@ class Preveri(unittest.TestCase):
     def test_odziv(self):
         besedilo, gumb = gv.odziv({"ok": False, "koda": "vnos_ni_vklopljen"}, "sl")
         self.assertIn("Safeer Vnos", besedilo)
-        self.assertIn("Dostopnost", besedilo)
+        self.assertIn(gv.t("odpriNastavitve", "sl"), besedilo)     # oznake menija so na vsaki napravi drugacne
         self.assertTrue(gumb)
+        for koda in ("ni_dovoljeno", "ni_ozji_krog", "ni_v_ozjem_krogu"):
+            besedilo, gumb = gv.odziv({"ok": False, "koda": koda}, "sl")
+            self.assertIn("ožji krog", besedilo)
+            self.assertFalse(gumb)
+        self.assertEqual(gv.odziv({"ok": False, "koda": "nekaj_novega"}, "en")[0], gv.t("vnosNiUspel", "en"))
         self.assertEqual(gv.odziv({"ok": True}), ("", False))
         for j in ("sl", "en", "de", "es", "fr", "it"):
             self.assertEqual(set(gv.BESEDILA[j]), set(gv.BESEDILA["sl"]), j)

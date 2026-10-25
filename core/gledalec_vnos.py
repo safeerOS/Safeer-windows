@@ -32,38 +32,50 @@ NAJVEC_KORAKOV = 10
 BESEDILA = {
     "sl": {"nazaj": "Nazaj", "domov": "Domov", "opravila": "Odprte aplikacije", "obvestila": "Obvestila",
            "celozaslonsko": "Celozaslonsko (F11)", "zapri": "Zapri", "zaslon": "Zaslon",
-           "vnosNi": "Za upravljanje z miško in tipkovnico na napravi vklopi Safeer Vnos: Nastavitve → Dostopnost → "
-                     "Nameščene aplikacije → Safeer Vnos.",
+           "vnosNi": "Za upravljanje z miško in tipkovnico na napravi vklopi Safeer Vnos – gumb »Odpri "
+                     "nastavitve na napravi« odpre pravo stran.",
+           "niDovoljeno": "Naprava upravljanja s tega računalnika ne dovoli. Na napravi v Safeer Linku dodaj ta"
+                          " računalnik v ožji krog.",
            "odpriNastavitve": "Odpri nastavitve na napravi", "vnosNiUspel": "Naprava vnosa ni izvedla.",
            "nastavitveOdprte": "Na napravi so se odprle nastavitve dostopnosti – vklopi Safeer Vnos."},
     "en": {"nazaj": "Back", "domov": "Home", "opravila": "Recent apps", "obvestila": "Notifications",
            "celozaslonsko": "Full screen (F11)", "zapri": "Close", "zaslon": "Screen",
-           "vnosNi": "To control the device with your mouse and keyboard, turn on Safeer Vnos on it: Settings → "
-                     "Accessibility → Installed apps → Safeer Vnos.",
+           "vnosNi": "To control the device with your mouse and keyboard, turn on Safeer Vnos on it – the "
+                     "“Open settings on the device” button opens the right page.",
+           "niDovoljeno": "The device does not allow control from this computer. On the device, add this "
+                          "computer to the inner circle in Safeer Link.",
            "odpriNastavitve": "Open settings on the device", "vnosNiUspel": "The device did not carry out the input.",
            "nastavitveOdprte": "Accessibility settings opened on the device – turn on Safeer Vnos."},
     "de": {"nazaj": "Zurück", "domov": "Start", "opravila": "Letzte Apps", "obvestila": "Benachrichtigungen",
            "celozaslonsko": "Vollbild (F11)", "zapri": "Schließen", "zaslon": "Bildschirm",
-           "vnosNi": "Um das Gerät mit Maus und Tastatur zu steuern, schalte dort Safeer Vnos ein: Einstellungen → "
-                     "Bedienungshilfen → Installierte Apps → Safeer Vnos.",
+           "vnosNi": "Um das Gerät mit Maus und Tastatur zu steuern, schalte dort Safeer Vnos ein – die "
+                     "Schaltfläche „Einstellungen auf dem Gerät öffnen“ öffnet die richtige Seite.",
+           "niDovoljeno": "Das Gerät erlaubt keine Steuerung von diesem Computer. Füge diesen Computer auf dem "
+                          "Gerät in Safeer Link zum engeren Kreis hinzu.",
            "odpriNastavitve": "Einstellungen auf dem Gerät öffnen", "vnosNiUspel": "Das Gerät hat die Eingabe nicht ausgeführt.",
            "nastavitveOdprte": "Auf dem Gerät wurden die Bedienungshilfen geöffnet – schalte Safeer Vnos ein."},
     "es": {"nazaj": "Atrás", "domov": "Inicio", "opravila": "Apps recientes", "obvestila": "Notificaciones",
            "celozaslonsko": "Pantalla completa (F11)", "zapri": "Cerrar", "zaslon": "Pantalla",
-           "vnosNi": "Para controlar el dispositivo con el ratón y el teclado, activa en él Safeer Vnos: Ajustes → "
-                     "Accesibilidad → Aplicaciones instaladas → Safeer Vnos.",
+           "vnosNi": "Para controlar el dispositivo con el ratón y el teclado, activa en él Safeer Vnos: "
+                     "el botón «Abrir ajustes en el dispositivo» abre la página correcta.",
+           "niDovoljeno": "El dispositivo no permite el control desde este ordenador. En el dispositivo, añade "
+                          "este ordenador al círculo cercano en Safeer Link.",
            "odpriNastavitve": "Abrir ajustes en el dispositivo", "vnosNiUspel": "El dispositivo no realizó la acción.",
            "nastavitveOdprte": "Se abrieron los ajustes de accesibilidad en el dispositivo: activa Safeer Vnos."},
     "fr": {"nazaj": "Retour", "domov": "Accueil", "opravila": "Applis récentes", "obvestila": "Notifications",
            "celozaslonsko": "Plein écran (F11)", "zapri": "Fermer", "zaslon": "Écran",
-           "vnosNi": "Pour piloter l’appareil avec la souris et le clavier, active Safeer Vnos dessus : Paramètres → "
-                     "Accessibilité → Applications installées → Safeer Vnos.",
+           "vnosNi": "Pour piloter l’appareil avec la souris et le clavier, active Safeer Vnos dessus : le"
+                     " bouton « Ouvrir les paramètres sur l’appareil » ouvre la bonne page.",
+           "niDovoljeno": "L’appareil n’autorise pas le contrôle depuis cet ordinateur. Sur l’appareil, ajoute "
+                          "cet ordinateur au cercle proche dans Safeer Link.",
            "odpriNastavitve": "Ouvrir les paramètres sur l’appareil", "vnosNiUspel": "L’appareil n’a pas exécuté la saisie.",
            "nastavitveOdprte": "Les paramètres d’accessibilité se sont ouverts sur l’appareil : active Safeer Vnos."},
     "it": {"nazaj": "Indietro", "domov": "Home", "opravila": "App recenti", "obvestila": "Notifiche",
            "celozaslonsko": "Schermo intero (F11)", "zapri": "Chiudi", "zaslon": "Schermo",
-           "vnosNi": "Per controllare il dispositivo con mouse e tastiera, attiva Safeer Vnos: Impostazioni → "
-                     "Accessibilità → App installate → Safeer Vnos.",
+           "vnosNi": "Per controllare il dispositivo con mouse e tastiera, attiva Safeer Vnos: il pulsante"
+                     " «Apri le impostazioni sul dispositivo» apre la pagina giusta.",
+           "niDovoljeno": "Il dispositivo non consente il controllo da questo computer. Sul dispositivo, "
+                          "aggiungi questo computer alla cerchia ristretta in Safeer Link.",
            "odpriNastavitve": "Apri le impostazioni sul dispositivo", "vnosNiUspel": "Il dispositivo non ha eseguito l’input.",
            "nastavitveOdprte": "Sul dispositivo si sono aperte le impostazioni di accessibilità: attiva Safeer Vnos."},
 }
@@ -265,6 +277,10 @@ def odziv(odgovor: dict, jezik: str = "sl") -> Tuple[str, bool]:
         return "", False
     if koda == "vnos_ni_vklopljen":
         return t("vnosNi", jezik), True
+    if koda in ("ni_dovoljeno", "ni_ozji_krog", "ni_v_ozjem_krogu", "dovoljenje_potrebno"):
+        # Naprava (Android Daljinec.zavrnitevDostopa, OzjiKrogPravila) ali racunalnik upravljanja ni odprl: stavek,
+        # kaj narediti, ne oznaka (lastnik, 25. 10. 2026: ena privolitev - ozji krog na napravi odpre upravljanje).
+        return t("niDovoljeno", jezik), False
     if koda in ("potrebno_dovoljenje_obracanje",):
         return str(odgovor.get("sporocilo") or odgovor.get("message") or ""), False
     return t("vnosNiUspel", jezik), False
