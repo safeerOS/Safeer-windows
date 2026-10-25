@@ -514,6 +514,7 @@ class VlcPlayerWidget(QWidget):
         if self.player:
             self.player.stop()
         self.timer.stop()
+        self._budnost(False)
 
     def _set_volume(self, value: int) -> None:
         if self.player:
@@ -533,9 +534,29 @@ class VlcPlayerWidget(QWidget):
         seconds = max(0, milliseconds // 1000)
         return f"{seconds // 60:02d}:{seconds % 60:02d}"
 
+    def _budnost(self, igra: bool) -> None:
+        """Med predvajanjem racunalnik ne zaspi sam, med videom zaslon ne ugasne; premor, konec in ustavitev sprostijo
+        (Windows: budnost_win). Slika = LibVLC ima izhod za video (glasba ga nima)."""
+        try:
+            from . import budnost_win
+            slika = False
+            if igra:
+                try:
+                    slika = int(self.player.has_vout() or 0) > 0
+                except Exception:  # noqa: BLE001
+                    slika = (getattr(self, "current_item", None) or {}).get("vrsta") in ("video", "tv")
+            budnost_win.ob_predvajanju("predvajanje", {"stanje": "predvaja" if igra else "premor", "steze": {"slika": slika}})
+        except Exception:  # noqa: BLE001 - predvajanje ne sme pasti zaradi budnosti
+            pass
+
     def _update_state(self) -> None:
         if not self.player:
             return
+        try:
+            igra = bool(self.player.is_playing())
+        except Exception:  # noqa: BLE001
+            igra = False
+        self._budnost(igra)
         if not self.seeking:
             self.position.setValue(max(0, int(self.player.get_position() * 1000)))
         current, length = self.player.get_time(), self.player.get_length()

@@ -486,6 +486,7 @@ class SafeerMpvPogon:
         `video` je prazen, ce je le ena video sled (ni kaj izbirati)."""
         zvok, podnapisi, video = [], [{"indeks": -1, "ime": "Brez"}], []
         trenutni_zvok, trenutni_pod, trenutni_video = -1, -1, -1
+        slika = False   # izbrana video sled, ki ni naslovnica albuma (budnost: zaslon ne ugasne)
         try:
             for t in (self._mpv.track_list or []):
                 tip = t.get("type")
@@ -496,6 +497,7 @@ class SafeerMpvPogon:
                                   "visina": t.get("demux-h") or 0, "bitnost": t.get("hls-bitrate") or t.get("demux-bitrate") or 0})
                     if t.get("selected"):
                         trenutni_video = tid
+                        slika = slika or not t.get("albumart")
                 elif tip == "audio":
                     zvok.append({"indeks": tid, "ime": ime or f"Zvok {tid}"})
                     if t.get("selected"):
@@ -512,7 +514,7 @@ class SafeerMpvPogon:
             video.sort(key=lambda v: (-(v["visina"] or 0), -(v["bitnost"] or 0)))
         return {"zvok": zvok, "trenutniZvok": trenutni_zvok,
                 "podnapisi": podnapisi, "trenutniPodnapis": trenutni_pod,
-                "video": video, "trenutniVideo": trenutni_video}
+                "video": video, "trenutniVideo": trenutni_video, "slika": slika}
 
     def nastavi_kakovost(self, indeks) -> bool:
         """Preklopi video sled (kakovost HLS/DASH); predvajanje se nadaljuje z istega mesta."""

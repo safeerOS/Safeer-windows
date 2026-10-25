@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (QComboBox, QHBoxLayout, QLabel, QPushButton, QSiz
                                QVBoxLayout, QWidget)
 
 from .predvajalnik_nadaljuj import Sledilec
-from .safeer_mpv_okno import SafeerMpvVideo
+from .safeer_mpv_okno import SafeerMpvVideo, _budnost
 from .vlc_player import _BESEDILA, _dovoljen_podnapis
 
 _log = logging.getLogger("safeer.media.mpv")
@@ -311,6 +311,7 @@ class MpvPlayerWidget(QWidget):
         if self.pogon:
             self._shrani_polozaj()
             self.pogon.ustavi()
+        _budnost(None, "predvajanje")
 
     def close_player(self) -> None:
         self.stop()
@@ -365,6 +366,7 @@ class MpvPlayerWidget(QWidget):
         except Exception as e:  # noqa: BLE001
             _log.debug("podatki: %s", e); return
         self._zadnji_podatki = p
+        _budnost(p, "predvajanje")   # racunalnik ne zaspi med filmom (Windows)
         try:
             self._nadaljuj.ob_podatkih(p)
         except Exception as e:  # noqa: BLE001
@@ -576,3 +578,4 @@ class MpvPlayerWidget(QWidget):
         if self.pogon:
             self._shrani_polozaj()
             self.pogon.zapri(); self.pogon = None; self.player = None
+        _budnost(None, "predvajanje")
