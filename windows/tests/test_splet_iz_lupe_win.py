@@ -137,3 +137,47 @@ def test_enter_pred_osvezitvijo_seznama_isce_trenutno_besedilo():
         assert polje.property("text") == ""
     finally:
         pogled.deleteLater()
+
+
+class _GlavnoOkno:
+    """Nadomestek SafeerOsWindow za odpri_control: glavno okno skrito (namizje QML spredaj)."""
+
+    def __init__(self, prej):
+        self.dispatcher = types.SimpleNamespace(dispatch=lambda f: f())
+        self.klici = []
+        self._prej = prej
+        self.control_window = types.SimpleNamespace(osvezi_stran=lambda: None, show=lambda: None,
+                                                    pojdi_na_razdelek=lambda r, i: self.klici.append(("razdelek", r)))
+        self.os_vsebnik = object()
+        self.zaslon = types.SimpleNamespace(setCurrentWidget=lambda w: self.klici.append(("zaslon", w)))
+
+    def setWindowTitle(self, t):  # noqa: N802
+        pass
+
+    def poslji_dogodek(self, *a):
+        pass
+
+    def _pokazi_okno_za_gledalca(self):
+        self.klici.append(("pokazi", self._prej))
+        p, self._prej = self._prej, ""
+        return p
+
+    def _vrni_okno_po_gledalcu(self, prej):
+        self.klici.append(("vrni", prej))
+
+
+@pytest.mark.parametrize("prej", ["skrito", "pomanjsano", ""])
+def test_control_iz_okna_link_vidno_in_nazaj_na_namizje(prej):
+    """»Odpri Safeer Control« v oknu Safeer Link ob namizju QML (testni PC 25. 10.: ni se pokazalo nic): glavno okno
+    s Controlom se pokaze; ob koncu Controla gre v prejsnje stanje (skrito -> spet namizje QML)."""
+    from safeer_windows import os_app
+    okno = _GlavnoOkno(prej)
+    assert os_app.SafeerOsWindow.odpri_control(okno, "mape") is True
+    assert ("pokazi", prej) in okno.klici and ("razdelek", "mape") in okno.klici
+    os_app.SafeerOsWindow.odpri_control(okno)                  # drugi klic med odprtim Controlom ne pozabi stanja
+    os_app.SafeerOsWindow._na_skritje_controla(okno)
+    vrnjeno = [k for k in okno.klici if k[0] == "vrni"]
+    assert vrnjeno == ([("vrni", prej)] if prej else [])
+    os_app.SafeerOsWindow._na_skritje_controla(okno)          # se enkrat: nic vec
+    assert [k for k in okno.klici if k[0] == "vrni"] == vrnjeno
+

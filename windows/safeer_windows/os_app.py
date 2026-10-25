@@ -2579,6 +2579,11 @@ class SafeerOsWindow(QMainWindow):
             self.control_window.show()
             self.zaslon.setCurrentWidget(self.control_window)
             self.setWindowTitle("Safeer OS · Naprave")
+            # Ob namizju QML je glavno okno skrito: »Odpri Safeer Control« v oknu Safeer Link ni pokazal nicesar
+            # (testni PC 25. 10. 2026, kot prej Splet iz lupe). Okno pokazemo in ga ob koncu vrnemo v prejsnje stanje.
+            prej = self._pokazi_okno_za_gledalca()
+            if prej and not getattr(self, "_okno_pred_controlom", ""):
+                self._okno_pred_controlom = prej
         self.dispatcher.dispatch(_odpri)
         return True
 
@@ -2588,6 +2593,9 @@ class SafeerOsWindow(QMainWindow):
             self.zaslon.setCurrentWidget(self.os_vsebnik)
             self.setWindowTitle("Safeer OS")
             self.poslji_dogodek("fokus", None)
+            prej, self._okno_pred_controlom = getattr(self, "_okno_pred_controlom", ""), ""
+            if prej:
+                self._vrni_okno_po_gledalcu(prej)          # nazaj na namizje QML (skrito ali pomanjsano okno)
         self.dispatcher.dispatch(_preklopi)
 
     def vrni_odgovor(self, klic_id: int, ok: bool, podatki: Any) -> None:
