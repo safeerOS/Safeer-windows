@@ -185,6 +185,8 @@ class SafeerControlBackend:
         #: Safeer Chat: potrditve sredisca in prejem sporocil (os_app nastavi ob_klepetu).
         self._klepet_cakajoci: Dict[str, list] = {}
         self.ob_klepetu: Optional[Callable[[dict], None]] = None
+        #: Seznam naprav se je spremenil (os_app: cakajoci izbrisi sporocil gredo napravam, ki so spet tu).
+        self.ob_napravah: Optional[Callable[[], None]] = None
         #: Magnet povezava z druge naprave (magnet.open): os_app jo odpre v Medijskem centru istega procesa.
         self.ob_magnetu: Optional[Callable[[str], None]] = None
         #: Medijski center (os_app): ob_mediju(ukaz, params) -> izid dict ali None (ni obdelano -> navidezni zaslon).
@@ -1360,7 +1362,9 @@ class SafeerControlBackend:
                 ime=self.device_ime,
                 sinhronizira=False,
                 odtis=odtis or None,
-                dodatne_zmoznosti=["files", "remote", "desktop", "screen", "apps", "chat", "lists"]
+                # chat.delete: zna zahtevo za izbris sporocila (payload.delete) - Android in Linux sicer »Izbrisi na
+                # vseh« do tega racunalnika zadrzita (core/sporocila/izbris_linka.py, kot Linux 25. 10. 2026).
+                dodatne_zmoznosti=["files", "remote", "desktop", "screen", "apps", "chat", "chat.delete", "lists"]
                 # Magnet povezave z drugih naprav odpre Safeer OS na tem racunalniku.
                 + (["magnet"] if self.magnet_na_voljo() or self.tok_torrenta_na_voljo() else []),
                 katalog=self.navidezni_zaslon.katalog_aplikacij,
@@ -1439,6 +1443,12 @@ class SafeerControlBackend:
             self.naprave = seznam
             self._oddaj_dogodek("naprave", self.naprave)
             self._oddaj_dogodek("stanje", self.stanje_linka())
+            if self.ob_napravah is not None:
+                # Izbrisi, ki cakajo na napravo (bila je brez povezave): morda je zdaj tu (Sporocila, os_app).
+                try:
+                    self.ob_napravah()
+                except Exception as e:  # noqa: BLE001
+                    print(f"[ControlBackend] Ob seznamu naprav: {type(e).__name__}")
             for naprava in nova_brez_dovoljenja:
                 if naprava["id"] not in self._opozorjena_dovoljenja:
                     self._opozorjena_dovoljenja.add(naprava["id"])
@@ -2049,21 +2059,48 @@ class SafeerControlBackend:
             izhod.append({"id": naslov, "ime": n.get("ime", ""), "platforma": n.get("platforma", "")})
         return izhod
 
-    def poslji_klepet(self, id_naprave: str, besedilo: str, cas: str, cakaj: float = 10.0) -> str:
-        """chat.send napravi v Linku; vrne "accepted", "queued" ali kodo napake."""
+    def poslji_klepet(self, id_naprave: str, besedilo: str, cas: str, cakaj: float = 10.0, ident: str = "",
+                      izbrisi: str = "") -> str:
+        """chat.send napravi v Linku; vrne "accepted", "queued" ali kodo napake. [ident] je id sporocila (UUID), pod
+        katerim ga hrani prejemnik - skupni id za izbris na vseh napravah. [izbrisi]: zahteva, naj prejemnik izbrise
+        nase sporocilo s tem skupnim id-jem (payload.delete, kot Android in Linux)."""
         if not self.je_povezan():
             return "ni_povezave"
-        ref = "klepet-" + secrets.token_urlsafe(9)
+        ref = str(ident) if ident else "klepet-" + secrets.token_urlsafe(9)
         vnos = [threading.Event(), "potek"]
         self._klepet_cakajoci[ref] = vnos
+        tovor = {"text": str(besedilo), "created_at": str(cas)}
+        if izbrisi:
+            tovor["delete"] = str(izbrisi)
         try:
-            if not self.povezava.poslji({"id": ref, "type": "chat.send", "target": str(id_naprave),
-                                         "payload": {"text": str(besedilo), "created_at": str(cas)}}):
+            if not self.povezava.poslji({"id": ref, "type": "chat.send", "target": str(id_naprave), "payload": tovor}):
                 return "ni_povezave"
             vnos[0].wait(cakaj)
             return vnos[1]
         finally:
             self._klepet_cakajoci.pop(ref, None)
+
+    def poslji_klepet_z_id(self, id_naprave: str, besedilo: str, cas: str) -> dict:
+        """Klepet s skupnim id-jem (UUID): {"stanje", "id"} - Sporocila ga shranijo pod istim id-jem kot prejemnik,
+        zato ga je pozneje mogoce izbrisati na vseh napravah (metoda »Klepet« na Linuxu)."""
+        import uuid
+        ident = str(uuid.uuid4())
+        return {"stanje": self.poslji_klepet(id_naprave, besedilo, cas, ident=ident), "id": ident}
+
+    def poslji_izbris(self, id_naprave: str, skupni: str, cakaj: float = 10.0) -> str:
+        """»Izbrisi na vseh mojih napravah«: zahteva za izbris sporocila [skupni] napravi, ki ga je prejela (metoda
+        »KlepetIzbrisi« na Linuxu). Naprava je v seznamu, a zmoznosti chat.delete ne javi (starejsa razlicica bi zahtevo
+        pokazala kot sporocilo) - ne posljemo, vrnemo "ne_zna" (zahteva pocaka v vrsti Sporocil)."""
+        from core.sporocila import izbris_linka
+        prijave = [n.get("zmoznosti") or [] for n in self.naprave
+                   if id_naprave and (n.get("naprava") == id_naprave or n.get("id") == id_naprave)]
+        if izbris_linka.izbris_na_drugi(prijave) == izbris_linka.NA_DRUGI_NE:
+            return "ne_zna"
+        import uuid
+        from datetime import datetime, timezone
+        cas = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+        return self.poslji_klepet(id_naprave, izbris_linka.BESEDILO_IZBRISA, cas, cakaj=cakaj, ident=str(uuid.uuid4()),
+                                  izbrisi=skupni)
 
     def ukaz_pocakaj(self, id_naprave: str, dejanje: str, parametri: Optional[dict] = None, cas: float = 12.0) -> dict:
         if not self.je_povezan():

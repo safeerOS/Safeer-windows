@@ -3629,6 +3629,12 @@
       (seznam || []).forEach(function (s) {
         var m = el("div", "mehurcek " + (s.smer === "ven" ? "ven" : "noter"));
         m.textContent = s.besedilo || ""; m.appendChild(el("time", "", ubezi(kratekCas(s.cas)))); cilj.appendChild(m);
+        if (pogovor.kanal_id === "safeer-link") m.addEventListener("contextmenu", function (e) {
+          // Izbran del besedila: obicajni meni (Kopiraj); sicer izbris sporocila.
+          if (String(window.getSelection ? window.getSelection() : "").trim()) return;
+          e.preventDefault(); e.stopPropagation();
+          pokaziMeniSporocila(pogovor, s, e.clientX, e.clientY);
+        });
         // zadetek-iskanja, ne zadetek: .zadetek je vrstica iskalnika (flex, ozadje) in je mehurcek razlezla (kot Linux).
         if (S.sporocilaOznaciId && s.id === S.sporocilaOznaciId) { m.classList.add("zadetek-iskanja"); oznacen = m; }
       }); cilj.scrollTop = cilj.scrollHeight;
@@ -3636,6 +3642,51 @@
       if (S.sporocilaOseba) narisiPano(S.sporocilaOseba, pogovor, seznam || []);
       if (pogovor.neprebrano) { pogovor.neprebrano = 0; naloziSporocila(); }
     });
+  }
+  // Izbris sporocila Safeer Linka (lastnik 23. 10. 2026, kot Linux in Android): desni klik na mehurcek - »pri meni«,
+  // pri lastnem poslanem s skupnim id-jem tudi »na vseh mojih napravah« (zahteva gre napravi, ki ga je prejela -
+  // core/sporocila/izbris_linka.py) in izbris celega pogovora (samo tukaj). Prvi klik vprasa, drugi izvede.
+  var SKUPNI_ID_POSLANEGA = /^chat:ven:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  function zapriMeniSporocila() { var m = $("sporocilaMeni"); if (m) m.remove(); }
+  function pokaziMeniSporocila(pogovor, s, x, y) {
+    zapriMeniSporocila();
+    var m = el("div", "meni-polja spor-meni"); m.id = "sporocilaMeni"; m.setAttribute("role", "menu");
+    var postavke = [["sporIzbrisiPriMeni", function () { izbrisiSporocilo(pogovor, s.id, false); }]];
+    if (s.smer === "ven" && SKUPNI_ID_POSLANEGA.test(s.id || "")) postavke.push(["sporIzbrisiNaVseh", function () { izbrisiSporocilo(pogovor, s.id, true); }]);
+    postavke.push(["dejanjeIzbrisiPogovor", function () { izbrisiPogovor(pogovor); }]);
+    postavke.forEach(function (p) {
+      var g = el("button"); g.type = "button"; g.textContent = t(p[0]); g.setAttribute("role", "menuitem");
+      g.addEventListener("click", function (e) {
+        e.stopPropagation();
+        if (!g.classList.contains("potrdi")) {
+          Array.prototype.forEach.call(m.querySelectorAll("button.potrdi"), function (b) { b.classList.remove("potrdi"); b.textContent = b._prej; });
+          g._prej = g.textContent; g.textContent = t("sporIzbrisiPotrdi"); g.classList.add("potrdi");
+          return;
+        }
+        zapriMeniSporocila(); p[1]();
+      });
+      m.appendChild(g);
+    });
+    document.body.appendChild(m);
+    var r = m.getBoundingClientRect();
+    m.style.left = Math.max(4, Math.min(x, window.innerWidth - r.width - 4)) + "px";
+    m.style.top = Math.max(4, Math.min(y, window.innerHeight - r.height - 4)) + "px";
+    m.querySelector("button").focus();
+  }
+  document.addEventListener("click", function (e) { var m = $("sporocilaMeni"); if (m && !m.contains(e.target)) zapriMeniSporocila(); });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape") zapriMeniSporocila(); });
+  function izbrisiSporocilo(pogovor, id, naVseh) {
+    klic("sporocilaIzbrisi", [pogovor.kanal_id, pogovor.id, id, !!naVseh]).then(function (r) {
+      obvesti(t(!naVseh ? "sporIzbrisano" : (r && r.izbris === "caka" ? "sporIzbrisanoCaka" : "sporIzbrisanoNaVseh")));
+      naloziVsebinoPogovora(pogovor); naloziSporocila();
+    }, function () { obvesti(t("niUspelo")); });
+  }
+  function izbrisiPogovor(pogovor) {
+    klic("sporocilaIzbrisiPogovor", [pogovor.kanal_id, pogovor.id]).then(function (p) {
+      obvesti(t("dejanjePogovorIzbrisan", { n: 1 }));
+      if (p) posodobiSeznamIzOdgovora(p);
+      uskladiOdprtPogovor();
+    }, function () { obvesti(t("niUspelo")); });
   }
   /* Po osvezitvi seznama: odprt pogovor dobi nova sporocila, izginul (odstranjen kanal) se zapre.
      Prej je desna stran ostala na starem stanju, dokler pogovora nisi znova odprl. */

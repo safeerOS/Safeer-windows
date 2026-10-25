@@ -842,9 +842,13 @@ class SafeerOsWindow(QMainWindow):
         self.sporocila = os_sporocila.SporocilaOS(os.path.join(os_backend_win.CONFIG_DIR, "sporocila.sqlite3"))
         _korak("sporocila")
         # Safeer Chat: po Linku, ki ga drzi vgrajeni Control.
-        self.sporocila.poslji_klepet = lambda n, b, c: self.control_backend.poslji_klepet(n, b, c)
+        # Odgovor nosi stanje in skupni id sporocila (izbris na vseh napravah, kot Linux in Android).
+        self.sporocila.poslji_klepet = lambda n, b, c: self.control_backend.poslji_klepet_z_id(n, b, c)
         self.sporocila.naprave_klepeta = lambda: self.control_backend.naprave_za_klepet()
+        # »Izbrisi na vseh mojih napravah« (lastnik 23. 10. 2026): zahteva po Linku napravi, ki je sporocilo prejela.
+        self.sporocila.izbrisi_klepet = lambda n, i: self.control_backend.poslji_izbris(n, i)
         self.control_backend.ob_klepetu = self._prejmi_klepet
+        self.control_backend.ob_napravah = self._poslji_cakajoca_brisanja
         # Magnet z druge naprave v Linku (magnet.open) se odpre tukaj, v Medijskem centru.
         self.control_backend.ob_magnetu = lambda uri: self.odpri_magnet("naprava:" + uri)
         # Daljinec (Link) upravlja Medijski center: tipke play_pause/stop/next/previous in ukaz "media".
@@ -2123,10 +2127,33 @@ class SafeerOsWindow(QMainWindow):
 
         view.page().runJavaScript("window.getSelection ? String(window.getSelection()) : ''", 0, _potrdi)
 
+    def _poslji_cakajoca_brisanja(self) -> None:
+        """Cakajoci izbrisi na drugih napravah (Sporocila): poskusimo, ko se seznam naprav spremeni - najvec na 30 s,
+        v svoji niti (nit povezave ne sme cakati na potrditve sredisca)."""
+        zdaj = time.monotonic()
+        if zdaj - getattr(self, "_brisanja_poskus", -1e9) < 30.0:
+            return
+        self._brisanja_poskus = zdaj
+        if not os_sporocila.cakajo_brisanja(self.sporocila.storitev.pot):
+            return
+
+        def poslji() -> None:
+            try:
+                self.sporocila.poslji_cakajoca_brisanja()
+            except Exception as e:  # noqa: BLE001 - izbris ostane v vrsti, poskusimo ob naslednji spremembi seznama
+                print(f"[SafeerOS] Cakajocih izbrisov ni bilo mogoce poslati: {type(e).__name__}", flush=True)
+        threading.Thread(target=poslji, name="safeer-izbrisi-klepeta", daemon=True).start()
+
     def _prejmi_klepet(self, sporocilo: dict) -> None:
         """chat.send z druge naprave (nit povezave): shrani, osvezi Sporocila in pokaze obvestilo."""
         telo = sporocilo.get("payload") if isinstance(sporocilo.get("payload"), dict) else {}
         od = str(sporocilo.get("sender_device") or sporocilo.get("sender") or "")
+        if telo.get("delete"):
+            # Zahteva za izbris (payload.delete, kot Android in Linux): izbrise se samo sporocilo, ki ga je poslala ta
+            # naprava; odprta Sporocila se osvezijo.
+            if self.sporocila.prejmi_izbris(od, str(telo["delete"])):
+                self.poslji_dogodek("sporocilaNova", {"od": od, "izbris": True})
+            return
         posiljatelj = str(sporocilo.get("sender") or "")
         ime = next((n.get("ime", "") for n in self.control_backend.naprave
                     if n.get("id") == posiljatelj or (n.get("naprava") and n.get("naprava") == od)), "") \
@@ -3480,6 +3507,11 @@ class SafeerOsWindow(QMainWindow):
             return s.zacni_klepet(prvi, str(a[1]) if len(a) > 1 else "")
         if metoda == "sporocilaPogovor":
             return s.pogovor(str(a[0]), str(a[1]))
+        if metoda == "sporocilaIzbrisi":
+            # Izbris sporocila Safeer Chat: [kanal, pogovor, sporocilo, na_vseh] - pri meni ali na vseh mojih napravah.
+            return s.izbrisi_sporocilo(str(a[0]), str(a[1]), str(a[2]), bool(a[3]) if len(a) > 3 else False)
+        if metoda == "sporocilaIzbrisiPogovor":
+            return s.izbrisi_pogovor(str(a[0]), str(a[1]))
         if metoda == "sporocilaDodaj":
             return s.dodaj_kanal(a[0] if a and isinstance(a[0], dict) else {})
         if metoda == "sporocilaPoslji":
