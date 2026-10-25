@@ -715,7 +715,7 @@ class SafeerOsWindow(QMainWindow):
         # Film iz torrenta (dodatek): branje torrenta traja - stran med tem pove, da ga pripravljamo.
         self.media_center.ob_pripravi_torrenta = lambda item: self.poslji_dogodek(
             "mediaTorrent", {"naslov": str(item.get("naslov") or "")})
-        # Prenosi zaradi gledanja, ki jih 48 ur nihce ni predvajal, se odstranijo sami.
+        # Prenosi zaradi gledanja, ki jih 12 ur nihce ni predvajal, se odstranijo sami.
         os_torrent_tok.zazeni_ciscenje()
         # Visina zaslona (v pravih pikah) za izbiro najboljsega toka: na zaslonu 1080p ne jemljemo 4K z 18 GB.
         try:
@@ -3264,7 +3264,7 @@ class SafeerOsWindow(QMainWindow):
         if metoda == "mediaKnjiznicaOdstrani":
             return bool(self._knjiznica().odstrani(str(a[0]) if a else ""))
         if metoda == "mediaKnjiznicaObdrzi":
-            # »Obdrži«: prenos ne potece po 48 urah (oznako hrani naprava, ki film hrani).
+            # »Obdrži«: prenos ne potece po 12 urah (oznako hrani naprava, ki film hrani).
             return bool(self._knjiznica().obdrzi(str(a[0]) if a else "", bool(a[1]) if len(a) > 1 else True))
         if metoda == "mediaKnjiznicaPredvajaj":
             r = self._knjiznica().predvajaj(str(a[0]) if a else "")

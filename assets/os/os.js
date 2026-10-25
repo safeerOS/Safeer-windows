@@ -4649,7 +4649,7 @@
       };
       card.onmouseleave = function () { if (potrjeno) { potrjeno = false; odstrani.classList.remove("potrdi"); odstrani.textContent = "✕"; } };
       card.appendChild(odstrani);
-      // »Obdrži«: prenos ne poteče po 48 urah. Samo pri napravi, ki to zna (jedro pove true/false; sicer null).
+      // »Obdrži«: prenos ne poteče po 12 urah. Samo pri napravi, ki to zna (jedro pove true/false; sicer null).
       if (x.obdrzi === true || x.obdrzi === false) {
         if (x.obdrzi) meta.appendChild(el("span", "media-obdrzano", ubezi(t("knjiznicaObdrzanoOznaka"))));
         var obdrzi = el("span", "media-obdrzi" + (x.obdrzi ? " je" : ""),

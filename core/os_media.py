@@ -16,6 +16,7 @@ import math
 import mimetypes
 import os
 import re
+import shutil
 import socket
 import subprocess
 import threading
@@ -1441,39 +1442,74 @@ class MediaCenter:
         self._dynamic_items[item_id] = resolved
         return resolved
 
+    #: Iskanje Usenet (zadnje: (kljuc, Future)) - en zaklep za razred, iskanje je eno naenkrat.
+    _usenet_zaklep = threading.Lock()
+
+    def _usenet_mogoc(self, tip: str, ident: str) -> bool:
+        """Usenet prek TorBoxa (naloga 141) pride v postev: film ali epizoda z id-jem IMDb, vpisan indeksator in TorBox."""
+        if tip not in ("movie", "series") or not usenet_pravila.iscemo(ident) or not self.debrid.usenet_na_voljo():
+            return False
+        # Serija brez epizode (tt…) bi iskala film z istim id-jem; film z epizodno obliko pa ni film.
+        return (tip == "series") == (":" in ident)
+
+    def _usenet_zadetki(self, item_id: str, item: dict, ident: str, rok: Optional[float] = None) -> list:
+        """Izdaje Usenet po kakovosti za to napravo (najboljsa predvajljiva prva). Indeksator vprasamo enkrat za vse korake
+        (pripravljen, nato s cakanjem); iskanje, ki zamudi [rok], tece naprej v ozadju in ga naslednji korak pocaka."""
+        kljuc_iskanja = (item_id, ident)
+        with self._usenet_zaklep:
+            zadnje = getattr(self, "_usenet_iskanje", None)
+            if zadnje is None or zadnje[0] != kljuc_iskanja or (zadnje[1].done() and zadnje[1].exception() is not None):
+                vrstni = dict(self._jezik_zvoka(item)) if hasattr(self, "_jezik_zvoka") else {}
+                visina = int(getattr(self, "visina_zaslona", 0) or 1080)
+
+                def isci() -> list:
+                    z = self.debrid.usenet_isci(ident)
+                    return tok_izbira.uredi(z, lambda t: str(t.get("opis") or ""), tok_izbira.Zmoznosti(visina=visina),
+                                            naslov=lambda t: "", **vrstni) if z else []
+
+                zadnje = (kljuc_iskanja, debrid.v_ozadju(isci))
+                self._usenet_iskanje = zadnje
+        try:
+            return list(zadnje[1].result(timeout=rok) or [])
+        except Exception:  # noqa: BLE001 - rok ali napaka indeksatorja: brez Useneta v tem koraku
+            return []
+
+    def _usenet_razreseno(self, item_id: str, item: dict, t: dict, izid, rezerve: list) -> dict:
+        tok = {"url": izid.url, "vir": "Usenet · " + debrid_pravila.ime(izid.ponudnik), "opis": str(t.get("opis") or "")}
+        razlicice = [tok] + list(rezerve[:9])
+        resolved = dict(item, url=izid.url, razlicice=razlicice, stevilo_razlicic=len(razlicice), debrid=izid.ponudnik,
+                        usenet=True)
+        self._dynamic_items[item_id] = resolved
+        return resolved
+
+    def _razresi_usenet_takoj(self, item_id: str, item: dict, ident: str, rezerve: list,
+                              rok: float = usenet_pravila.TAKOJ_ROK_S) -> Optional[dict]:
+        """Lastnik 25. 10. 2026 (07:25): Usenet, ki ga ima TorBox ze pripravljenega, gre prvi - najboljsa kakovost in
+        hitrost, placan. Rok [rok] skupaj z iskanjem pri indeksatorju (preverba ⚡ tece hkrati), prve tri izdaje."""
+        konec = time.monotonic() + rok
+        zadetki = self._usenet_zadetki(item_id, item, ident, rok)
+        ostane = konec - time.monotonic()
+        if not zadetki or ostane <= 0.2:
+            return None
+        izbira = self.debrid.usenet_takoj(zadetki, ostane)
+        if izbira is None:
+            return None
+        return self._usenet_razreseno(item_id, item, zadetki[izbira[0]], izbira[1], rezerve)
+
     def _razresi_usenet(self, item_id: str, item: dict, tip: str, ident: str, rezerve: list,
                         samo_takoj: bool = False) -> Optional[dict]:
         """Usenet prek TorBoxa (kot Safeer OS za Android, naloga 141): uporabnikov indeksator najde izdaje, TorBox jih
         prenese in pretaka. Samodejno najboljsa do 15 GB, najvec dva poskusa; povezave ostanejo rezerva. None = ni Useneta
         ali ni uspelo - takrat gre izbira naprej (debrid torrent, povezave) brez okna »Izberi vir«."""
-        if tip not in ("movie", "series") or not usenet_pravila.iscemo(ident) or not self.debrid.usenet_na_voljo():
+        if not self._usenet_mogoc(tip, ident):
             return None
-        # Serija brez epizode (tt…) bi iskala film z istim id-jem; film z epizodno obliko pa ni film.
-        if (tip == "series") != (":" in ident):
-            return None
-        # Isti zadetki za oba kroga (najprej samo pripravljeno, nato s cakanjem) - indeksator vprasamo enkrat.
-        kljuc_iskanja = (item_id, ident)
-        if getattr(self, "_usenet_zadnje", (None, None))[0] == kljuc_iskanja:
-            zadetki = self._usenet_zadnje[1]
-        else:
-            zadetki = self.debrid.usenet_isci(ident)
-            self._usenet_zadnje = (kljuc_iskanja, zadetki)
-        if not zadetki:
-            return None
-        zadetki = tok_izbira.uredi(zadetki, lambda t: str(t.get("opis") or ""),
-                                   tok_izbira.Zmoznosti(visina=int(getattr(self, "visina_zaslona", 0) or 1080)),
-                                   naslov=lambda t: "", **(self._jezik_zvoka(item) if hasattr(self, "_jezik_zvoka") else {}))
+        zadetki = self._usenet_zadetki(item_id, item, ident)
         for i in usenet_pravila.za_samodejno([float(t.get("gb") or 0.0) for t in zadetki]):
             t = zadetki[i]
             izid = self.debrid.usenet_tok(str(t["url"]), str(t.get("naslov") or ""), samo_takoj=samo_takoj,
                                           rok_cakanja=debrid_pravila.CAKAJ_NOVEGA_S)
             if izid.url:
-                tok = {"url": izid.url, "vir": "Usenet · " + debrid_pravila.ime(izid.ponudnik), "opis": str(t.get("opis") or "")}
-                razlicice = [tok] + list(rezerve[:9])
-                resolved = dict(item, url=izid.url, razlicice=razlicice, stevilo_razlicic=len(razlicice), debrid=izid.ponudnik,
-                                usenet=True)
-                self._dynamic_items[item_id] = resolved
-                return resolved
+                return self._usenet_razreseno(item_id, item, t, izid, rezerve)
         return None
 
     def _save(self, data: dict) -> None:
@@ -3556,46 +3592,59 @@ class MediaCenter:
             # (zasebno, hitro, obicajno boljsa kakovost) - kot Safeer OS za Android (naloga 130), brez »Izberi vir«.
             torrenti = [t for t in tokovi if t.get("torrent") and t.get("hash")]
             aktivna = self.debrid.aktivna() if torrenti else None
+            hashi: list = []
             if aktivna:
                 jezik = self._jezik_zvoka(item) if hasattr(self, "_jezik_zvoka") else {}
                 torrenti = tok_izbira.uredi(torrenti, lambda t: str(t.get("opis") or "%s %s" % (t.get("vir", ""), t.get("kakovost", ""))),
                                             tok_izbira.Zmoznosti(visina=int(getattr(self, "visina_zaslona", 0) or 1080)),
                                             naslov=lambda t: "", **jezik)
-                if pripravi_torrent:
-                    hashi = [str(t["hash"]) for t in torrenti]
-                    k = debrid_pravila.samodejni_torrent(aktivna, hashi, self.debrid.predpomnjeni(hashi))
+                hashi = [str(t["hash"]) for t in torrenti]
+            # Vrstni red virov (lastnik 25. 10. 2026 07:25, skupno pravilo usenet_pravila.vrstni_red_virov): z vpisanim
+            # indeksatorjem gre Usenet, ki ga ima TorBox pripravljenega, prvi (placan, najboljsa kakovost in hitrost);
+            # preverba ⚡ tece hkrati z njim. Nato ⚡ torrent, povezave, Usenet s cakanjem, debrid s cakanjem.
+            usenet = bool(pripravi_torrent) and self._usenet_mogoc(tip, ident)
+            pred_f = debrid.v_ozadju(self.debrid.predpomnjeni, hashi) if usenet and aktivna and hashi else None
+            for korak in usenet_pravila.vrstni_red_virov(usenet, webtor=False):
+                if korak == usenet_pravila.KORAK_USENET_TAKOJ:
+                    resolved = self._razresi_usenet_takoj(item_id, item, ident, neposredni)
+                    if resolved:
+                        return resolved
+                elif korak == usenet_pravila.KORAK_PREDPOMNJEN and aktivna and pripravi_torrent:
+                    try:
+                        pred = pred_f.result(timeout=10) if pred_f is not None else self.debrid.predpomnjeni(hashi)
+                    except Exception:  # noqa: BLE001 - brez preverbe ⚡ gre izbira naprej
+                        pred = set()
+                    k = debrid_pravila.samodejni_torrent(aktivna, hashi, pred)
                     if k >= 0:
                         resolved = self._razresi_debrid(item_id, item, torrenti[k], neposredni)
                         if resolved.get("url") and not resolved.get("napaka_koda"):
                             return resolved
-            if neposredni:
-                if drugi_http and str(item.get("url") or "").startswith(("http://", "https://")):
-                    # Kartica ima tudi druge (vdelane) vire: tokove dodatka dodamo kot dodatne razlicice.
-                    razlicice = drugi_http + [t for t in neposredni[:10] if t["url"] not in {v.get("url") for v in drugi_http}]
-                    resolved = dict(item, razlicice=razlicice, stevilo_razlicic=len(razlicice))
-                else:
-                    resolved = dict(item, url=neposredni[0]["url"], razlicice=neposredni[:10], stevilo_razlicic=len(neposredni[:10]))
-                if neposredni[0].get("podnapisi") and not resolved.get("podnapisi"):
-                    resolved["podnapisi"] = list(neposredni[0]["podnapisi"])
-                if neposredni[0].get("glave") and not resolved.get("glave"):
-                    resolved["glave"] = dict(neposredni[0]["glave"])
-                self._dynamic_items[item_id] = resolved
-                return resolved
-            if drugi_http:
-                return dict(item, razlicice=drugi_http, stevilo_razlicic=len(drugi_http))
-            # Usenet prek TorBoxa (lastnik 24.-25. 10. 2026): uporabnik ne caka na prenos, ce je kaj takoj predvajljivo.
-            # Izmerjeno na TV: pripravljen torrent ⚡ zacne v ~2 s, preverba »Usenet pripravljen« traja 2-6 s na izdajo -
-            # zato najprej ⚡ torrent in povezave (zgoraj), nato Usenet, ki ga ima TorBox pripravljenega, sele nato s prenosom.
-            if pripravi_torrent:
-                for takoj in (True, False):
-                    resolved = self._razresi_usenet(item_id, item, tip, ident, [], samo_takoj=takoj)
+                elif korak == usenet_pravila.KORAK_NEPOSREDNI:
+                    if neposredni:
+                        if drugi_http and str(item.get("url") or "").startswith(("http://", "https://")):
+                            # Kartica ima tudi druge (vdelane) vire: tokove dodatka dodamo kot dodatne razlicice.
+                            razlicice = drugi_http + [t for t in neposredni[:10] if t["url"] not in {v.get("url") for v in drugi_http}]
+                            resolved = dict(item, razlicice=razlicice, stevilo_razlicic=len(razlicice))
+                        else:
+                            resolved = dict(item, url=neposredni[0]["url"], razlicice=neposredni[:10], stevilo_razlicic=len(neposredni[:10]))
+                        if neposredni[0].get("podnapisi") and not resolved.get("podnapisi"):
+                            resolved["podnapisi"] = list(neposredni[0]["podnapisi"])
+                        if neposredni[0].get("glave") and not resolved.get("glave"):
+                            resolved["glave"] = dict(neposredni[0]["glave"])
+                        self._dynamic_items[item_id] = resolved
+                        return resolved
+                    if drugi_http:
+                        return dict(item, razlicice=drugi_http, stevilo_razlicic=len(drugi_http))
+                elif korak == usenet_pravila.KORAK_USENET_CAKAJ:
+                    # Pripravljen je bil preverjen v prvem koraku: tu TorBox izdajo prenese (prenos Usenet je hiter -
+                    # izmerjeno na TV 2,2 GB v 36 s), najvec dva poskusa do 15 GB.
+                    resolved = self._razresi_usenet(item_id, item, tip, ident, [], samo_takoj=False)
                     if resolved:
                         return resolved
-            # Neposrednega toka ni: torrent, ce ga ta racunalnik zna prenasati (kot Android: neposredni imajo prednost).
-            if torrenti and aktivna:
-                # Naloga 131: ni povezave in ni pripravljenega torrenta - prek debrida (s cakanjem samo, ce ga uporabnik
-                # dovoli). Ob napaki NIKOLI tiho na neposreden torrent (razkril bi IP racunalnika) - povemo zakaj.
-                return self._razresi_debrid(item_id, item, torrenti[0], []) if pripravi_torrent else dict(item, torrent=True)
+                elif korak == usenet_pravila.KORAK_DEBRID_CAKAJ and torrenti and aktivna:
+                    # Naloga 131: ni povezave in ni pripravljenega torrenta - prek debrida (s cakanjem samo, ce ga
+                    # uporabnik dovoli). Ob napaki NIKOLI tiho na neposreden torrent (razkril bi IP racunalnika).
+                    return self._razresi_debrid(item_id, item, torrenti[0], []) if pripravi_torrent else dict(item, torrent=True)
             if torrenti and os_torrent_tok.podprto():
                 return self._razresi_torrent(item, torrenti) if pripravi_torrent else dict(item, torrent=True)
             # Brez predvajljivega toka ni strani in ni seznama povezav: kratko obvestilo, vsebina izgine s seznama.

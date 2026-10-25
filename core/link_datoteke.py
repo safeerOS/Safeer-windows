@@ -1166,7 +1166,7 @@ class Datoteke:
         # prostora, to pove in naprava vprasa naslednjega v Linku.
         # Pretakanje torrenta je delo omrezja in diska, ne procesorja: racunalnik ga zmore tudi med prevajanjem
         # (tablica 1. 10. 2026: med gradnjo aplikacije je dobila "preobremenjen" in filma ni bilo).
-        # Kar je racunalnik prenesel za naprave in tega 48 ur nihce ni predvajal, odstranimo (lastnik, 3. 10. 2026:
+        # Kar je racunalnik prenesel za naprave in tega 12 ur nihce ni predvajal, odstranimo (lastnik, 3. 10. 2026:
         # "ce uporabnik torrenta ne uporablja vec, ga naprava samodejno odstrani"). Film, ki ga pravkar hocejo, ostane.
         pot_rabe = pot_rabe or _pot_rabe_za(torrenti)
         zabelezi_rabo(m["hash"], pot_rabe)
@@ -1297,7 +1297,7 @@ class Datoteke:
 
     def obdrzi_prenos(self, tid: int, obdrzi: bool, torrenti=None, pot_rabe: Optional[str] = None,
                       id_naprave: str = "") -> bool:
-        """`magnet.keep`: prenos, ki ga uporabnik hoce obdrzati, ne potece po 48 urah in ne gre ob pomanjkanju prostora
+        """`magnet.keep`: prenos, ki ga uporabnik hoce obdrzati, ne potece po 12 urah in ne gre ob pomanjkanju prostora
         (odstrani ga samo uporabnik). Zasebnega sme oznaciti le naprava, ki ga je prosila."""
         if int(tid) < 0:
             if self.gledanje is None or self.obdrzi_gledanje is None:
@@ -1513,8 +1513,9 @@ def zmogljivost_za_tok(mapa: str, potrebno: int) -> str:
     return prosta_zmogljivost(mapa, potrebno, procesor=False)
 
 
-# Samodejno ciscenje prenosov za naprave: po toliko casu brez predvajanja torrent in njegove datoteke izginejo.
-RABA_VELJA_S = 48 * 3600
+# Samodejno ciscenje prenosov za naprave: po toliko casu brez predvajanja torrent in njegove datoteke izginejo
+# (lastnik 25. 10. 2026: 12 ur po zadnjem predvajanju na vseh napravah - prej 48 ur).
+RABA_VELJA_S = 12 * 3600
 # Ob pomanjkanju prostora odstranimo tudi mlajse, a ne tistih, ki jih je kdo predvajal v zadnjih urah (film se tece).
 RABA_V_TEKU_S = 6 * 3600
 _RABA_ZAKLEP = threading.Lock()
@@ -1677,7 +1678,7 @@ def zazeni_ciscenje(razmik_s: float = 3 * 3600, zamik_s: float = 180) -> None:
                 odstranjeni = pocisti_neuporabljene(t)
                 if odstranjeni:
                     from core import os_stabilnost
-                    os_stabilnost.zapisi("safeer-control", f"prenosi za naprave: samodejno odstranjenih {len(odstranjeni)} (48 h brez predvajanja)")
+                    os_stabilnost.zapisi("safeer-control", f"prenosi za naprave: samodejno odstranjenih {len(odstranjeni)} (12 h brez predvajanja)")
                 if not tekel and t.tece():
                     t.ustavi()
             except Exception:  # noqa: BLE001

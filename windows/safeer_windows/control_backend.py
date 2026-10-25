@@ -1371,7 +1371,7 @@ class SafeerControlBackend:
             p.povezi()
             self.povezava = p
             if self.tok_torrenta_na_voljo():
-                # Prenosi za naprave, ki jih 48 ur nihce ni predvajal, se odstranijo sami (kot na Linuxu).
+                # Prenosi za naprave, ki jih 12 ur nihce ni predvajal, se odstranijo sami (kot na Linuxu).
                 try:
                     from core import link_datoteke
                     link_datoteke.zazeni_ciscenje()
@@ -1929,7 +1929,7 @@ class SafeerControlBackend:
         """magnet.stream / magnet.list / magnet.remove: racunalnik prenasa torrent, naprava dobi samo tok.
 
         Isto vedenje kot Linux Control (core/link_daljinec.py): film, ki je na disku ze v celoti, gre takoj z
-        diska; prenosi, ki jih 48 ur nihce ni predvajal, se odstranijo sami; ob pomanjkanju prostora, pomnilnika
+        diska; prenosi, ki jih 12 ur nihce ni predvajal, se odstranijo sami; ob pomanjkanju prostora, pomnilnika
         ali baterije racunalnik pove razlog in naprava vprasa naslednjega v Linku."""
         from core import os_torrent
         d = self._datoteke_torrenta()
@@ -1950,7 +1950,7 @@ class SafeerControlBackend:
             return ({"ok": True, "message": "Odstranjeno z računalnika"} if ok
                     else {"ok": False, "message": "Tega prenosa ni mogoče odstraniti", "code": "ni_prenosa"})
         if akcija == "magnet.keep":
-            # »Obdrži«: prenos ne potece po 48 urah (odstrani ga samo uporabnik).
+            # »Obdrži«: prenos ne potece po 12 urah (odstrani ga samo uporabnik).
             tid, drzi = params.get("id"), params.get("keep")
             if not isinstance(tid, int) or isinstance(tid, bool) or not isinstance(drzi, bool):
                 return {"ok": False, "message": "Manjka prenos", "code": "ni_prenosa"}
