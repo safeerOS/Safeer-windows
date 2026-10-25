@@ -1641,8 +1641,12 @@ class SafeerControlBackend:
                     raven=params.get("level"),
                 )
                 # Prava glasnost racunalnika (agent: »tišje na računalniku«); navidezna stevilka sledi pravi.
-                from safeer_windows import glasnost_win
-                prava = glasnost_win.nastavi(str(params.get("direction") or ""), params.get("level"))
+                # Naprava, ki gleda nas navidezni zaslon, spreminja samo svojo (navidezno) glasnost - uporabnika za
+                # racunalnikom ne utisa (enako kot pri tipkah in open_url).
+                prava = None
+                if not self._gleda_navidezni(posiljatelj):
+                    from safeer_windows import glasnost_win
+                    prava = glasnost_win.nastavi(str(params.get("direction") or ""), params.get("level"))
                 if prava is not None:
                     podatki = prava
                     self.navidezni_zaslon.glasnost, self.navidezni_zaslon.utisano = prava["level"], prava["muted"]

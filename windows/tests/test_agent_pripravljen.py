@@ -100,6 +100,20 @@ class AgentPripravljen(unittest.TestCase):
             self.b._na_sporocilo(ukaz("volume", {"level": 60}))
         self.assertEqual(self._odgovor()["data"]["level"], 60)
 
+    def test_gledalec_navideznega_zaslona_ne_utisa_racunalnika(self):
+        # Pregled 25. 10. 2026: naprava na navideznem zaslonu spremeni samo svojo glasnost, ne prave.
+        from unittest import mock
+        from safeer_windows import glasnost_win
+        nz = self.b.navidezni_zaslon
+        nz._tece, nz._posiljatelj_seje = True, "tv-1"
+        try:
+            with mock.patch.object(glasnost_win, "nastavi", return_value={"level": 0, "muted": True}) as n:
+                self.b._na_sporocilo(ukaz("volume", {"level": 20}, "tv-1"))
+        finally:
+            nz._tece = False
+        n.assert_not_called()
+        self.assertEqual(self._odgovor()["data"]["level"], 20)
+
 
 if __name__ == "__main__":
     unittest.main()
