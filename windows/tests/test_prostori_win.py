@@ -124,8 +124,12 @@ class Vmesnik(unittest.TestCase):
         self.assertEqual(set(po), set(JEZIKI))
         for j in JEZIKI:
             self.assertFalse(rabljeni - set(po[j]), j)
-            self.assertIn("Ctrl+Win+Tab", po[j]["prostoriNamig"])
+            self.assertIn("Strg+Win+Tab" if j == "de" else "Ctrl+Win+Tab", po[j]["prostoriNamig"])
             self.assertNotIn("Super+Tab", json.dumps(po[j], ensure_ascii=False))
+        # Lastnik, 25. 10. 2026 (09:01): uporabniško ime je »Zasloni« (identifikatorji v kodi ostanejo »prostori«).
+        imena = {"sl": "Zasloni", "en": "Screens", "de": "Bildschirme", "es": "Pantallas", "fr": "Écrans", "it": "Schermi"}
+        self.assertEqual({j: po[j]["prostori"] for j in JEZIKI}, {j: imena[j] for j in JEZIKI})
+        self.assertNotIn('"Prostori"', beri("windows", "safeer_windows", "qml", "Namizje.qml"))
 
     def test_okno_safeer_os(self):
         html = beri("assets", "os", "index.html")
@@ -145,7 +149,7 @@ class Vmesnik(unittest.TestCase):
         self.assertIn('if (vrsta === "prostori") prostori.odpri(', qml)
         from safeer_windows import namizje_qml
         b = namizje_qml.besedila_prostorov(beri("assets", "os", "besedila.js"), "de")
-        self.assertEqual(b["prostori"], "Bereiche")
+        self.assertEqual(b["prostori"], "Bildschirme")
         self.assertEqual(namizje_qml.besedila_prostorov("", "sl"), {})
 
     def test_bliznjica_ni_win_tab(self):

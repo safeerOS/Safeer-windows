@@ -271,14 +271,14 @@ Item {
         Behavior on color { ColorAnimation { duration: 150 } }
         Text { x: 10; anchors.verticalCenter: parent.verticalCenter; text: "⧉"; color: koren.paleta.poudarek; font.pixelSize: 13 }
         Text { id: prostoriNapis; x: 28; anchors.verticalCenter: parent.verticalCenter; color: koren.paleta.besedilo; font.pixelSize: 12
-               text: koren.prostoriBesedila.prostori || "Prostori" }
+               text: koren.prostoriBesedila.prostori || "Zasloni" }
         MouseArea { id: mpg; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: prostori.odpri(0)
                     ToolTip.visible: containsMouse; ToolTip.delay: 500
                     ToolTip.text: koren.bliznjice.prostori === false
                                   ? String(koren.prostoriBesedila.prostoriNamig || "").replace(/\s*\([^()]*\)\s*$/, "")
                                   : (koren.prostoriBesedila.prostoriNamig || "") }
         Accessible.role: Accessible.Button
-        Accessible.name: koren.prostoriBesedila.prostori || "Prostori"
+        Accessible.name: koren.prostoriBesedila.prostori || "Zasloni"
     }
     }
 
