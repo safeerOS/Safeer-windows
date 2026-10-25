@@ -619,6 +619,19 @@ class VgradniPredvajalnikGlave(QWebEngineUrlRequestInterceptor):
             pass
 
 
+def dovoljena_navigacija_vmesnika(url_str: str, vrata: Any) -> bool:
+    """Glavni okvir okna Safeer OS (glavno okno in okna razdelkov) sme naloziti samo lokalni vmesnik
+    http://127.0.0.1:<vrata streznika vmesnika>/os/... (pregled 25. 10. 2026: prej tudi vsak lokalni port, file: in
+    vsak naslov z »assets/os« - tudi https://tuja.stran/assets/os)."""
+    try:
+        vrata = int(vrata or 0)
+        u = urllib.parse.urlsplit(str(url_str or ""))
+        return (vrata > 0 and u.scheme == "http" and u.hostname == "127.0.0.1" and u.port == vrata
+                and not u.username and not u.password and u.path.startswith("/os/"))
+    except (TypeError, ValueError):
+        return False
+
+
 class SafeerOsPage(QWebEnginePage):
     def __init__(self, profile: QWebEngineProfile, window: "SafeerOsWindow"):
         super().__init__(profile, window)
@@ -633,9 +646,10 @@ class SafeerOsPage(QWebEnginePage):
         # (npr. top-navigation iz oglasnih skript) so blokirani.
         if is_main_frame:
             url_str = url.toString() if hasattr(url, "toString") else str(url)
-            if (url_str.startswith("file:") or url_str.startswith("qrc:")
-                    or "assets/os" in url_str
-                    or url_str.startswith("http://127.0.0.1:")):
+            okno = self.window_ref
+            vrata = getattr(okno, "_asset_server_port", None) or getattr(getattr(okno, "os_okno", None),
+                                                                         "_asset_server_port", None)
+            if dovoljena_navigacija_vmesnika(url_str, vrata):
                 return True
             print(f"[SafeerOS] Blokirana zunanja navigacija glavnega okna na: {url_str}")
             return False

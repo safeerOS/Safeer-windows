@@ -19,6 +19,10 @@ from typing import Any, Optional, Tuple
 
 #: Razdelki, ki se z namizja odprejo v svojem oknu (isti nabor kot os.js RAZDELEK).
 RAZDELKI_V_OKNU = ("nastavitve", "naprave", "zapiski", "sporocila")
+#: Skrito okno razdelka se po tem casu zavrze (spomin procesa strani); ob naslednjem odprtju se nalozi znova (S7).
+ZAVRZI_PO_S = 120
+#: Okna, ki se ne zavrzejo (nezapisan zapisek mora ostati) - samo zamrznejo.
+NE_ZAVRZI = ("zapiski",)
 #: Podstrani Nastavitev (ploscici Omrezje in Zvok, vodnik ob prvem zagonu): pokazejo se v oknu Nastavitve.
 PODSTRANI = {"omrezje": "nastavitve", "zvok": "nastavitve", "vodnik": "nastavitve"}
 NASLOVI = {
@@ -57,9 +61,9 @@ def naslov_okna(ime: str, jezik: str) -> str:
 
 
 try:  # Qt je na Windows vedno; v preizkusih brez QtWebEngine se modul uvozi tudi brez nje (ciste funkcije zgoraj).
-    from PySide6.QtCore import QUrl, Qt
+    from PySide6.QtCore import QTimer, QUrl, Qt
     from PySide6.QtGui import QColor
-    from PySide6.QtWebEngineCore import QWebEngineScript
+    from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineScript
     from PySide6.QtWebEngineWidgets import QWebEngineView
     from PySide6.QtWidgets import QApplication, QMainWindow
     _QT = True
@@ -97,6 +101,11 @@ class OknoRazdelka(QMainWindow):  # type: ignore[misc]
         skripta.setRunsOnSubFrames(False)
         self.page_obj.scripts().insert(skripta)
         self.page_obj.loadFinished.connect(self._nalozena)
+        # Skrito okno (S7): stran zamrzne (brez JS casovnikov in izrisa), po ZAVRZI_PO_S se zavrze.
+        self._zavrzi = QTimer(self)
+        self._zavrzi.setSingleShot(True)
+        self._zavrzi.setInterval(ZAVRZI_PO_S * 1000)
+        self._zavrzi.timeout.connect(lambda: self._v_stanje("zavrzena"))
         self.view.setPage(self.page_obj)
         self.setCentralWidget(self.view)
         g = QApplication.primaryScreen().availableGeometry()
@@ -157,7 +166,36 @@ class OknoRazdelka(QMainWindow):  # type: ignore[misc]
             return
         self.page_obj.runJavaScript("window.safeerOsPojdi && window.safeerOsPojdi(%s);" % json.dumps(cilj))
 
+    def _v_stanje(self, stanje: str) -> None:
+        """»aktivna«, »zamrznjena« (samo skrito okno) ali »zavrzena« (spomin strani sproscen, ob prikazu se nalozi)."""
+        try:
+            Lc = QWebEnginePage.LifecycleState
+            if stanje == "aktivna":
+                self._zavrzi.stop()
+                if self.page_obj.lifecycleState() != Lc.Active:
+                    if self.page_obj.lifecycleState() == Lc.Discarded:
+                        self._nalozeno = False      # stran se nalozi znova - cilj pocaka na loadFinished
+                    self.page_obj.setLifecycleState(Lc.Active)
+                return
+            if self.isVisible():
+                return
+            if stanje == "zamrznjena" and self.page_obj.lifecycleState() == Lc.Active:
+                self.page_obj.setLifecycleState(Lc.Frozen)
+            elif stanje == "zavrzena" and self.ime not in NE_ZAVRZI:
+                self.page_obj.setLifecycleState(Lc.Discarded)
+                print(f"[SafeerOS {self.ime}] skrito okno zavrzeno (spomin sproscen)", flush=True)
+        except Exception as e:  # noqa: BLE001
+            print(f"[SafeerOS {self.ime}] stanje strani {stanje}: {e}", flush=True)
+
+    def hideEvent(self, dogodek) -> None:  # noqa: N802 - Qt
+        super().hideEvent(dogodek)
+        if getattr(self, "_koncaj", False):
+            return
+        QTimer.singleShot(1000, lambda: self._v_stanje("zamrznjena"))
+        self._zavrzi.start()
+
     def pokazi(self, cilj: str = "") -> None:
+        self._v_stanje("aktivna")
         if self.isMinimized():
             self.showNormal()
         else:
