@@ -1020,7 +1020,7 @@ body.vrstica-skrita.nacin-splet .rocaj-vrstice { display: block; }
 .pano-zadetek:hover { border-color:var(--poudarek, #4c8dff); }
 .pano-zadetek small { display:block; opacity:.7; font-size:11px; margin-bottom:2px; }
 .pano-zadetek span { display:block; font-size:12px; line-height:1.3; }
-.mehurcek.zadetek { outline:2px solid var(--poudarek, #4c8dff); }
+.mehurcek.zadetek-iskanja { outline:2px solid var(--zelena); outline-offset:2px; }
 
 /* Seznami predvajanja (uvoz z YouTuba ali Spotifyja) v Medijskem centru. */
 .media-seznami { margin: 14px 0 4px; }

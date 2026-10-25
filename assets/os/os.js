@@ -3629,7 +3629,8 @@
       (seznam || []).forEach(function (s) {
         var m = el("div", "mehurcek " + (s.smer === "ven" ? "ven" : "noter"));
         m.textContent = s.besedilo || ""; m.appendChild(el("time", "", ubezi(kratekCas(s.cas)))); cilj.appendChild(m);
-        if (S.sporocilaOznaciId && s.id === S.sporocilaOznaciId) { m.classList.add("zadetek"); oznacen = m; }
+        // zadetek-iskanja, ne zadetek: .zadetek je vrstica iskalnika (flex, ozadje) in je mehurcek razlezla (kot Linux).
+        if (S.sporocilaOznaciId && s.id === S.sporocilaOznaciId) { m.classList.add("zadetek-iskanja"); oznacen = m; }
       }); cilj.scrollTop = cilj.scrollHeight;
       if (oznacen) { oznacen.scrollIntoView({ block: "center" }); S.sporocilaOznaciId = null; }
       if (S.sporocilaOseba) narisiPano(S.sporocilaOseba, pogovor, seznam || []);
