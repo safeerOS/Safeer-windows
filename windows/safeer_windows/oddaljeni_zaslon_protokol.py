@@ -13,6 +13,11 @@ NAJVECJI_OKVIR = 8 * 1024 * 1024
 #: `screen.start` caka 30 s; stirje poskusi po 4 s se izidejo z rezervo.
 NAJVEC_KANDIDATOV = 4
 CAS_KANDIDATA_S = 4.0
+#: Kaj zna ta gledalec (`caps` v `screen.start`). "handoff": program, odprt od tu na locenem zaslonu racunalnika,
+#: se je namesto tam odprl na njegovem namizju (program ene same instance, npr. Claude ali brskalnik, je bil tam ze
+#: odprt) - racunalnik to pove z obvestilom {"konec": "na_namizju"}, gledalec preklopi na namizje racunalnika,
+#: ta pa okno programa postavi v ospredje. Gledalcu brez te zmoznosti racunalnik isto sejo konca z "ni_okna".
+ZMOZNOSTI = ("handoff",)
 
 
 class ZavrnjenaSeja(RuntimeError):
@@ -73,6 +78,37 @@ def kandidati_naslovov(naslov: str, hosts=None) -> list:
         if h and h not in izid and _naslov_naprave(h):
             izid.append(h)
     return izid[:NAJVEC_KANDIDATOV]
+
+
+def parametri_zacetka(zaslon: str, predano: bool = False) -> dict:
+    """Parametri ukaza `screen.start`: "desktop" (namizje naprave) ali "apps" (locen zaslon, kjer tecejo programi,
+    odprti od tu) in kaj gledalec zna. `predano`: seja po preklopu na namizje (obvestilo "na_namizju") - racunalnik
+    okno programa postavi v ospredje (core/link_daljinec.py, `handoff`)."""
+    parametri = {"quality": "najvisja", "screen": zaslon if zaslon in ("desktop", "apps") else "desktop",
+                 "caps": list(ZMOZNOSTI)}
+    if predano:
+        parametri["handoff"] = True
+    return parametri
+
+
+def obvestilo_naprave(obvestilo) -> tuple:
+    """Obvestilo naprave med sejo (okvir OKVIR_OBVESTILO) v (vrsta, razlog, program, sporocilo):
+      ("konec", razlog, ...)  - naprava je sejo koncala: "ni_okna", "zaprto", "na_namizju" ... (core/link_zaslon.py);
+      ("program", "caka" | "odprt", ...) - program na locenem zaslonu se se odpira / se je odprl;
+      ("", "", "", "") - nic, kar bi gledalec moral pokazati.
+    `program` je ime programa (`name`), `sporocilo` stavek naprave (`sporocilo`), ce ga je poslala."""
+    if not isinstance(obvestilo, dict):
+        return ("", "", "", "")
+    ime = obvestilo.get("name")
+    ime = " ".join(ime.split())[:80] if isinstance(ime, str) else ""
+    sporocilo = obvestilo.get("sporocilo")
+    sporocilo = sporocilo.strip()[:300] if isinstance(sporocilo, str) else ""
+    konec = obvestilo.get("konec")
+    if konec:
+        return ("konec", str(konec)[:64], ime, sporocilo)
+    if obvestilo.get("program") in ("caka", "odprt"):
+        return ("program", obvestilo["program"], ime, "")
+    return ("", "", "", "")
 
 
 def razcleni_odgovor(odgovor: dict, naprava: Optional[dict] = None) -> Seja:
@@ -149,7 +185,8 @@ def preslikaj_tipko_ime(ime: str, besedilo: str = "", dol: bool = True,
     return None
 
 
-__all__ = ["CAS_KANDIDATA_S", "MODIFIKATORJI", "NAJVEC_KANDIDATOV", "je_igra", "kandidati_naslovov",
+__all__ = ["CAS_KANDIDATA_S", "MODIFIKATORJI", "NAJVEC_KANDIDATOV", "ZMOZNOSTI", "je_igra", "kandidati_naslovov",
+           "obvestilo_naprave", "parametri_zacetka",
            "NAJVECJI_OKVIR", "OKVIR_OBVESTILO", "OKVIR_SLIKA",
            "OKVIR_ZVOK", "POSEBNE_TIPKE", "RazclenjevalnikOkvirjev", "Seja",
            "ZavrnjenaSeja", "preslikaj_tipko_ime", "razcleni_odgovor"]

@@ -17,6 +17,7 @@ from .oddaljeni_zaslon_povezava import NiDosegljiva, PovezavaGledalca, Prekinjen
 from .oddaljeni_zaslon_protokol import (
     OKVIR_OBVESTILO, OKVIR_SLIKA,
     RazclenjevalnikOkvirjev, Seja, ZavrnjenaSeja, preslikaj_tipko_ime,
+    obvestilo_naprave, parametri_zacetka,
     ima_naslov,
     je_igra,
     razcleni_odgovor,
@@ -43,42 +44,71 @@ _BESEDILA = {
            "koncala": "Naprava je končala povezavo.",
            "ni_doma": "{ime} zdaj ni dosegljiv neposredno. Slika zaslona deluje samo v istem omrežju (doma), "
                       "prek Global Linka ne.",
-           "ni_dosegljiv": "{ime} ni dosegljiv. Preveri, ali sta obe napravi v istem omrežju."},
+           "ni_dosegljiv": "{ime} ni dosegljiv. Preveri, ali sta obe napravi v istem omrežju.",
+           "odpiram": "Odpiram {program} ...", "odpiram_brez": "Odpiram program ...",
+           "na_namizju": "{program} je že odprt na namizju računalnika – prikazujem namizje ...",
+           "na_namizju_brez": "Program je že odprt na namizju računalnika – prikazujem namizje ...",
+           "ni_okna": "Program se na računalniku ni odprl.", "zaprto": "Program na računalniku je zaprt."},
     "en": {"naslov": "Remote screen – {ime}", "pripravljam": "Preparing the connection ...", "znova": "Reconnect",
            "cel": "Full screen", "okno": "Window", "dovoljenje": "Asking the device for permission ...",
            "povezujem": "Connecting ...", "povezano": "Connected", "prekinjeno": "The connection was interrupted.",
            "koncala": "The device ended the connection.",
            "ni_doma": "{ime} cannot be reached directly right now. Screen viewing works only on the same network "
                       "(at home), not over Global Link.",
-           "ni_dosegljiv": "{ime} cannot be reached. Check that both devices are on the same network."},
+           "ni_dosegljiv": "{ime} cannot be reached. Check that both devices are on the same network.",
+           "odpiram": "Opening {program} ...", "odpiram_brez": "Opening the program ...",
+           "na_namizju": "{program} is already open on the computer's desktop – showing the desktop ...",
+           "na_namizju_brez": "The program is already open on the computer's desktop – showing the desktop ...",
+           "ni_okna": "The program did not open on the computer.", "zaprto": "The program on the computer was closed."},
     "de": {"naslov": "Entfernter Bildschirm – {ime}", "pripravljam": "Verbindung wird vorbereitet ...", "znova": "Neu verbinden",
            "cel": "Vollbild", "okno": "Fenster", "dovoljenje": "Gerät wird um Erlaubnis gebeten ...",
            "povezujem": "Verbinde ...", "povezano": "Verbunden", "prekinjeno": "Die Verbindung wurde unterbrochen.",
            "koncala": "Das Gerät hat die Verbindung beendet.",
            "ni_doma": "{ime} ist gerade nicht direkt erreichbar. Die Bildschirmansicht funktioniert nur im selben "
                       "Netzwerk (zu Hause), nicht über Global Link.",
-           "ni_dosegljiv": "{ime} ist nicht erreichbar. Prüfe, ob beide Geräte im selben Netzwerk sind."},
+           "ni_dosegljiv": "{ime} ist nicht erreichbar. Prüfe, ob beide Geräte im selben Netzwerk sind.",
+           "odpiram": "{program} wird geöffnet ...", "odpiram_brez": "Das Programm wird geöffnet ...",
+           "na_namizju": "{program} ist auf dem Desktop des Computers bereits geöffnet – der Desktop wird "
+                         "angezeigt ...",
+           "na_namizju_brez": "Das Programm ist auf dem Desktop des Computers bereits geöffnet – der Desktop wird "
+                              "angezeigt ...",
+           "ni_okna": "Das Programm hat sich auf dem Computer nicht geöffnet.",
+           "zaprto": "Das Programm auf dem Computer wurde geschlossen."},
     "es": {"naslov": "Pantalla remota – {ime}", "pripravljam": "Preparando la conexión ...", "znova": "Reconectar",
            "cel": "Pantalla completa", "okno": "Ventana", "dovoljenje": "Pidiendo permiso al dispositivo ...",
            "povezujem": "Conectando ...", "povezano": "Conectado", "prekinjeno": "La conexión se interrumpió.",
            "koncala": "El dispositivo terminó la conexión.",
            "ni_doma": "{ime} no está accesible directamente en este momento. La vista de pantalla solo funciona en "
                       "la misma red (en casa), no a través de Global Link.",
-           "ni_dosegljiv": "{ime} no está accesible. Comprueba que ambos dispositivos estén en la misma red."},
+           "ni_dosegljiv": "{ime} no está accesible. Comprueba que ambos dispositivos estén en la misma red.",
+           "odpiram": "Abriendo {program} ...", "odpiram_brez": "Abriendo el programa ...",
+           "na_namizju": "{program} ya está abierto en el escritorio del ordenador: mostrando el escritorio ...",
+           "na_namizju_brez": "El programa ya está abierto en el escritorio del ordenador: mostrando el escritorio ...",
+           "ni_okna": "El programa no se abrió en el ordenador.", "zaprto": "El programa del ordenador se ha cerrado."},
     "fr": {"naslov": "Écran distant – {ime}", "pripravljam": "Préparation de la connexion ...", "znova": "Reconnecter",
            "cel": "Plein écran", "okno": "Fenêtre", "dovoljenje": "Demande d’autorisation à l’appareil ...",
            "povezujem": "Connexion ...", "povezano": "Connecté", "prekinjeno": "La connexion a été interrompue.",
            "koncala": "L’appareil a mis fin à la connexion.",
            "ni_doma": "{ime} n’est pas joignable directement pour le moment. L’affichage de l’écran ne fonctionne "
                       "que sur le même réseau (à la maison), pas via Global Link.",
-           "ni_dosegljiv": "{ime} est injoignable. Vérifiez que les deux appareils sont sur le même réseau."},
+           "ni_dosegljiv": "{ime} est injoignable. Vérifiez que les deux appareils sont sur le même réseau.",
+           "odpiram": "Ouverture de {program} ...", "odpiram_brez": "Ouverture du programme ...",
+           "na_namizju": "{program} est déjà ouvert sur le bureau de l’ordinateur – affichage du bureau ...",
+           "na_namizju_brez": "Le programme est déjà ouvert sur le bureau de l’ordinateur – affichage du bureau ...",
+           "ni_okna": "Le programme ne s’est pas ouvert sur l’ordinateur.",
+           "zaprto": "Le programme sur l’ordinateur a été fermé."},
     "it": {"naslov": "Schermo remoto – {ime}", "pripravljam": "Preparazione della connessione ...", "znova": "Riconnetti",
            "cel": "Schermo intero", "okno": "Finestra", "dovoljenje": "Richiesta di autorizzazione al dispositivo ...",
            "povezujem": "Connessione ...", "povezano": "Connesso", "prekinjeno": "La connessione si è interrotta.",
            "koncala": "Il dispositivo ha chiuso la connessione.",
            "ni_doma": "{ime} al momento non è raggiungibile direttamente. La visualizzazione dello schermo funziona "
                       "solo sulla stessa rete (a casa), non tramite Global Link.",
-           "ni_dosegljiv": "{ime} non è raggiungibile. Controlla che entrambi i dispositivi siano sulla stessa rete."},
+           "ni_dosegljiv": "{ime} non è raggiungibile. Controlla che entrambi i dispositivi siano sulla stessa rete.",
+           "odpiram": "Apertura di {program} ...", "odpiram_brez": "Apertura del programma ...",
+           "na_namizju": "{program} è già aperto sul desktop del computer – mostro il desktop ...",
+           "na_namizju_brez": "Il programma è già aperto sul desktop del computer – mostro il desktop ...",
+           "ni_okna": "Il programma non si è aperto sul computer.",
+           "zaprto": "Il programma sul computer è stato chiuso."},
 }
 _JEZIK = "sl"
 
@@ -92,6 +122,22 @@ def nastavi_jezik(jezik: str) -> None:
 def _b(kljuc: str, **zamenjave) -> str:
     besedilo = _BESEDILA.get(_JEZIK, _BESEDILA["en"]).get(kljuc) or _BESEDILA["en"][kljuc]
     return besedilo.format(**zamenjave) if zamenjave else besedilo
+
+
+def besedilo_obvestila(vrsta: str, razlog: str, program: str = "", sporocilo: str = "") -> str:
+    """Obvestilo naprave (oddaljeni_zaslon_protokol.obvestilo_naprave) kot stavek v jeziku uporabnika.
+
+    Prej je okno pokazalo golo oznako naprave (»ni_okna«), ki uporabniku ne pove nicesar."""
+    if vrsta == "program":
+        if razlog == "caka":
+            return _b("odpiram", program=program) if program else _b("odpiram_brez")
+        return _b("povezano")
+    if razlog == "na_namizju":
+        return _b("na_namizju", program=program) if program else _b("na_namizju_brez")
+    if razlog in ("ni_okna", "zaprto"):
+        return _b(razlog)
+    # Neznan razlog: stavek naprave, ce ga je poslala (starejsi ali novejsi racunalnik), sicer splosno »koncala«.
+    return sporocilo or _b("koncala")
 
 
 
@@ -121,6 +167,8 @@ class _TokSignali(QObject):
     slika = Signal(QImage)
     stanje = Signal(str, str)
     mere = Signal(int, int)
+    #: Program, odprt od tu, je na namizju racunalnika (obvestilo "na_namizju"): ime programa ali prazno.
+    predaja = Signal(str)
 
 
 class _DekodirnaNit(threading.Thread):
@@ -175,9 +223,18 @@ class _DekodirnaNit(threading.Thread):
                 if not self._tece.is_set():
                     break
                 if vrsta == OKVIR_OBVESTILO:
-                    obvestilo = json.loads(telo.decode("utf-8"))
-                    if obvestilo.get("konec"):
-                        raise ConnectionError(str(obvestilo["konec"]))
+                    vrsta_ob, razlog, program, sporocilo = obvestilo_naprave(json.loads(telo.decode("utf-8")))
+                    if vrsta_ob == "konec" and razlog == "na_namizju":
+                        # Program ene same instance (npr. Claude) je bil ze odprt na namizju racunalnika in se na
+                        # locenem zaslonu ni odprl: okno preklopi na namizje (kot televizor), napake ne pokaze.
+                        self._tece.clear()
+                        self.signali.predaja.emit(program)
+                        return
+                    if vrsta_ob == "konec":
+                        raise ConnectionError(besedilo_obvestila(vrsta_ob, razlog, program, sporocilo))
+                    if vrsta_ob == "program":
+                        self.signali.stanje.emit("caka" if razlog == "caka" else "tece",
+                                                 besedilo_obvestila(vrsta_ob, razlog, program))
                 elif vrsta == OKVIR_SLIKA:
                     for paket in dekoder.parse(telo):
                         for okvir in dekoder.decode(paket):
@@ -300,6 +357,9 @@ class OddaljeniZaslon(QWidget):
         self.naprava = naprava or self._poisci_napravo()
         self._nit: Optional[_DekodirnaNit] = None
         self._zapiram = False
+        #: Okno je ze preklopilo na namizje (obvestilo "na_namizju"): seja prosi racunalnik, naj okno programa
+        #: postavi v ospredje, drugega preklopa pa ni.
+        self._predano = False
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self.setWindowTitle(_b("naslov", ime=self.ime))
         self.resize(1280, 760)
@@ -325,12 +385,14 @@ class OddaljeniZaslon(QWidget):
         self.signali.slika.connect(self.slika.nastavi_sliko)
         self.signali.mere.connect(self.slika.nastavi_mere)
         self.signali.stanje.connect(self._spremeni_stanje)
+        self.signali.predaja.connect(self._na_namizju)
         QTimer.singleShot(0, self.povezi)
 
     def _poisci_napravo(self) -> dict:
         return next((n for n in self.backend.naprave if n.get("id") == self.id_naprave), {})
 
-    def povezi(self) -> None:
+    def povezi(self) -> bool:
+        """Zacne sejo; False, kadar je ne moremo (naprava brez naslova - sporocilo je ze na zaslonu)."""
         if self._nit is not None:
             self._nit.ustavi()
         self.znova.hide()
@@ -340,13 +402,14 @@ class OddaljeniZaslon(QWidget):
             # Slika gre neposredno z naprave. Brez njenega naslova (dosegljiva je samo prek Global Linka) je ne
             # prosimo: naprava bi zaman odprla vrata in cakala na nas.
             self._spremeni_stanje("napaka", _b("ni_doma", ime=self.ime))
-            return
+            return False
         self.stanje.setText(_b("dovoljenje"))
+        # Kaj zna ta gledalec (handoff); po preklopu na namizje se prosnja, naj racunalnik pokaze okno programa.
+        parametri = parametri_zacetka(self.zaslon_cilj, self._predano)
 
         def zahteva() -> None:
             try:
-                odgovor = self.backend.ukaz_pocakaj(
-                    self.id_naprave, "screen.start", {"quality": "najvisja", "screen": self.zaslon_cilj}, cas=15.0)
+                odgovor = self.backend.ukaz_pocakaj(self.id_naprave, "screen.start", parametri, cas=15.0)
                 seja = razcleni_odgovor(odgovor, naprava)
                 self._igra = je_igra(odgovor)
                 if self._zapiram:
@@ -360,6 +423,18 @@ class OddaljeniZaslon(QWidget):
                 if not self._zapiram:
                     self.signali.stanje.emit("napaka", str(exc))
         threading.Thread(target=zahteva, name="safeer-screen-start", daemon=True).start()
+        return True
+
+    def _na_namizju(self, program: str) -> None:
+        """Program, odprt od tu, se je odprl na namizju racunalnika in ne na locenem zaslonu (program ene same
+        instance, npr. Claude ali brskalnik, je bil tam ze odprt). Kot televizor preklopimo na namizje racunalnika,
+        ta pa okno programa postavi v ospredje (`handoff` v screen.start). Prej je okno pokazalo »ni_okna«."""
+        if self._zapiram or self._predano:
+            return
+        self._predano = True
+        self.zaslon_cilj = "desktop"
+        if self.povezi():
+            self.stanje.setText(besedilo_obvestila("konec", "na_namizju", program))
 
     def _poslji(self, dogodek: dict) -> None:
         if self._nit is not None:
