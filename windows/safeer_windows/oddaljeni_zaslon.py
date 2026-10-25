@@ -10,7 +10,7 @@ import time
 from typing import Optional
 
 from PySide6.QtCore import QObject, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QImage, QKeyEvent, QMouseEvent, QPainter, QWheelEvent
+from PySide6.QtGui import QColor, QCursor, QImage, QKeyEvent, QMouseEvent, QPainter, QPixmap, QWheelEvent
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtWidgets import (QApplication, QHBoxLayout, QLabel, QPushButton, QSizePolicy,
                                QVBoxLayout, QWidget)
@@ -171,6 +171,8 @@ class _TokSignali(QObject):
     stanje = Signal(str, str)
     mere = Signal(int, int)
     obvestilo = Signal(dict)
+    #: Glava toka (mere, kodek, »kazalec«: izvor kazalca ne rise v sliko, »profil« za vrstico).
+    glava = Signal(dict)
     #: Program, odprt od tu, je na namizju racunalnika (obvestilo "na_namizju"): ime programa ali prazno.
     predaja = Signal(str)
 
@@ -229,6 +231,10 @@ class _DekodirnaNit(threading.Thread):
         # Pretvorba (in pomanjsevanje Lanczos) tece v svoji niti: swscale sprosti GIL, dekoder medtem dekodira naprej.
         self._okvir = None
         self._pogoj = threading.Condition()
+        #: En preoblikovalnik (SwsContext s filtrom Lanczos) za vso sejo. frame.reformat() ga za vsako sliko zgradi na
+        #: novo: izmerjeno na testnem PC 25. 10. 2026 (1920x1080 -> 1424x801, PyAV 18.1, FFmpeg 8.1) 28,9 ms na sliko,
+        #: s skupnim 3,8 ms. V lastnikovi seji (10:33) je bil zato prikaz 21,5 slike/s pri 59,9 dekodiranih.
+        self._preoblikovalnik = None
 
     def ustavi(self) -> None:
         self._tece.clear()
@@ -259,11 +265,16 @@ class _DekodirnaNit(threading.Thread):
                 self.prikaz_prost.clear()
             zacetek = time.perf_counter()
             cilj = self.cilj
+            if self._preoblikovalnik is None:
+                from av.video.reformatter import VideoReformatter
+                self._preoblikovalnik = VideoReformatter()
+            r = self._preoblikovalnik
             if cilj and tuple(cilj) != (okvir.width, okvir.height):
-                bgra = okvir.reformat(width=int(cilj[0]), height=int(cilj[1]), format="bgra",
-                                      interpolation=prikaz.POMANJSEVANJE)
+                bgra = r.reformat(okvir, width=int(cilj[0]), height=int(cilj[1]), format="bgra",
+                                  interpolation=prikaz.POMANJSEVANJE)
             else:
-                bgra = okvir.reformat(format="bgra")
+                # Brezizgubni tok (gbrp) gre v BGRA brez barvne pretvorbe - pikselsko enako izvoru.
+                bgra = r.reformat(okvir, format="bgra")
             # Brez numpy (ni ga na vseh racunalnikih): surova ravnina BGRA iz PyAV.
             ravnina = bgra.planes[0]
             slika = QImage(bytes(ravnina), bgra.width, bgra.height,
@@ -303,13 +314,16 @@ class _DekodirnaNit(threading.Thread):
             if sirina <= 0 or visina <= 0:
                 raise ValueError("Naprava je poslala neveljavne mere slike.")
             self.signali.mere.emit(sirina, visina)
+            self.signali.glava.emit(dict(self.glava))
             self.signali.stanje.emit("tece", _b("povezano"))
 
             import av
             kodek = "hevc" if str(glava.get("kodek") or "").lower() in ("hevc", "h265") else "h264"
             dekoder = av.CodecContext.create(kodek, "r")
             try:
-                dekoder.thread_type = "AUTO"
+                # Samo rezine: AUTO vklopi se niti po slikah, ki pri 4 nitih dodajo do 3 slike zakasnitve (50 ms pri
+                # 60 slikah/s); izvor kodira z rezinami (zerolatency) - nacrt zaslon-ostrina-kazalec.md 5.2.
+                dekoder.thread_type = "SLICE"
             except Exception:
                 pass
             threading.Thread(target=self._pretvarjaj, name="safeer-oddaljeni-zaslon-pretvorba", daemon=True).start()
@@ -439,6 +453,26 @@ class _Slika(QOpenGLWidget):
         self.kazalec_v_sliki = False
         self.setCursor(getattr(Qt.CursorShape, oblika, Qt.CursorShape.ArrowCursor))
 
+    def kazalec_kot_podatek(self) -> None:
+        """Glava toka »kazalec«: izvor kazalca ne rise v sliko, posilja ga kot podatek - lokalni kazalec je edini
+        (puscica, dokler izvor ne pove oblike)."""
+        if self.kazalec_v_sliki:
+            self.kazalec_v_sliki = False
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+
+    def nastavi_kazalec_sliko(self, png: bytes, hx: int, hy: int) -> bool:
+        """Tocna slika kazalca izvora (Linux XFixes). Slika je v pikah izvora: pri 1:1 je pika izvora pika zaslona,
+        zato dobi pixmap merilo zaslona (pri 125/150 % je Qt sicer ne bi pustil v izvorni velikosti)."""
+        slika = QImage.fromData(png, "PNG")
+        if slika.isNull() or slika.width() > 256 or slika.height() > 256:
+            return False
+        d = self.dpr()
+        pix = QPixmap.fromImage(slika)
+        pix.setDevicePixelRatio(d)
+        self.kazalec_v_sliki = False
+        self.setCursor(QCursor(pix, int(round(hx / d)), int(round(hy / d))))
+        return True
+
     def _sporoci_velikost(self) -> None:
         if self._ob_velikosti is not None:
             self._ob_velikosti(self.velikost_za_dekoder())
@@ -544,6 +578,9 @@ class OddaljeniZaslon(QWidget):
         #: postavi v ospredje, drugega preklopa pa ni.
         self._predano = False
         self._zacel = False
+        #: Glava toka izvora: profil (pot, kodek, navidezno namizje) za vrstico; zadnja oblika kazalca (ime, viden).
+        self._profil: Optional[dict] = None
+        self._kazalec: Optional[tuple] = None
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self.setWindowTitle(_b("naslov", ime=self.ime))
         self.resize(1280, 760)
@@ -584,7 +621,11 @@ class OddaljeniZaslon(QWidget):
         self.signali.mere.connect(self.slika.nastavi_mere)
         self.signali.stanje.connect(self._spremeni_stanje)
         self.signali.obvestilo.connect(self._obvestilo)
+        self.signali.glava.connect(self._glava)
         self.signali.predaja.connect(self._na_namizju)
+        # Nacin »1:1« si zapomnimo (nacrt 5.3): uporabnik, ki ga je izbral, ga dobi tudi ob naslednjem odprtju.
+        if self._shranjen_nacin() == "1:1":
+            self.en_na_en.setChecked(True)
         self._ura = QTimer(self)
         self._ura.setInterval(1000)
         self._ura.timeout.connect(self._osvezi_podatke)
@@ -683,16 +724,51 @@ class OddaljeniZaslon(QWidget):
         if self._nit is not None:
             self._nit.cilj = velikost
 
+    def _shranjen_nacin(self) -> str:
+        nastavitve = getattr(self.backend, "nastavitve", None)
+        return str(nastavitve.get("gledalec_nacin") or "") if isinstance(nastavitve, dict) else ""
+
+    def _shrani_nacin(self, nacin: str) -> None:
+        nastavitve = getattr(self.backend, "nastavitve", None)
+        if not isinstance(nastavitve, dict) or nastavitve.get("gledalec_nacin") == nacin:
+            return
+        nastavitve["gledalec_nacin"] = nacin
+        shrani = getattr(self.backend, "shrani_nastavitve", None)
+        if callable(shrani):
+            try:
+                shrani()
+            except Exception:  # noqa: BLE001 - izbira ostane za to sejo
+                pass
+
     def _preklopi_1_1(self, vklop: bool) -> None:
+        self._shrani_nacin("1:1" if vklop else "prilagodi")
         self.slika.nastavi_nacin("1:1" if vklop else "prilagodi")
         self.en_na_en.setText(prikaz.besedilo(_JEZIK, "prilagodi" if vklop else "en_na_en"))
         self.en_na_en.setToolTip(prikaz.besedilo(_JEZIK, "prilagodi_namig" if vklop else "en_na_en_namig"))
         self._osvezi_podatke()
 
+    def _glava(self, glava: dict) -> None:
+        profil = glava.get("profil") if isinstance(glava, dict) else None
+        self._profil = profil if isinstance(profil, dict) else None
+        self._kazalec = None
+        if isinstance(glava, dict) and glava.get("kazalec"):
+            self.slika.kazalec_kot_podatek()
+
     def _obvestilo(self, obvestilo: dict) -> None:
+        """Oblika kazalca izvora. Linux poslje polozaj vsakih 8 ms, sliko pa samo ob menjavi oblike: dokler se ime in
+        vidnost ne spremenita, ostane tocna slika (in setCursor ne tece 125-krat na sekundo)."""
         oblika = prikaz.oblika_kazalca(obvestilo)
-        if oblika:
-            self.slika.nastavi_kazalec(oblika)
+        if not oblika:
+            return
+        stanje = (str(obvestilo.get("oblika") or ""), obvestilo.get("viden") is not False)
+        slika = prikaz.slika_kazalca(obvestilo)
+        if slika is not None and self.slika.nastavi_kazalec_sliko(*slika):
+            self._kazalec = stanje
+            return
+        if self._kazalec == stanje:
+            return
+        self._kazalec = stanje
+        self.slika.nastavi_kazalec(oblika)
 
     def _osvezi_podatke(self) -> None:
         st = self._stevci()
@@ -702,7 +778,8 @@ class OddaljeniZaslon(QWidget):
         zamik = st.rtt[-1] if st.rtt else None
         self.podatki.setText(prikaz.vrstica_podatkov(
             _JEZIK, self._naslov, False, self._omrezje, self.slika._mere,
-            self.slika.velikost_za_dekoder() or self.slika._mere, fps, mbps, zamik, self.slika.nacin))
+            self.slika.velikost_za_dekoder() or self.slika._mere, fps, mbps, zamik, self.slika.nacin,
+            profil=self._profil, dpi=int(round(96 * self.slika.dpr()))))
 
     def _poslji(self, dogodek: dict) -> None:
         if self._nit is not None:

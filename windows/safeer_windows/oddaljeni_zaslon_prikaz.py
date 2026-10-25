@@ -12,12 +12,14 @@ Pravila (ciste funkcije, preizkusi v windows/tests/test_oddaljeni_zaslon_ostrina
   swscale, ne v risanju), nikoli ne poveca; nacin »1:1« pokaze izvorne pike in sliko premika za misko;
 - izvoru povemo velikost platna in gostoto (view), omrezje (net) in kaj znamo (caps): loceni zaslon naredi natanko
   te velikosti, da pomanjsevanja sploh ni;
-- en kazalec: dokler izvor kazalec rise v sliko (Linux), je lokalni nad sliko skrit; ko izvor poslje obliko
-  kazalca (Windows od 1.0.49), slike kazalca ni in lokalni kazalec dobi to obliko.
+- en kazalec: dokler izvor kazalec rise v sliko (Linux do 0.4.90), je lokalni nad sliko skrit; ko izvor poslje
+  obliko kazalca (Windows od 1.0.49, Linux z zmoznostjo »kazalec« - core/link_kazalec.py), slike kazalca ni in lokalni
+  kazalec dobi to obliko ali tocno sliko kazalca izvora.
 """
 
 from __future__ import annotations
 
+import base64
 import ctypes
 import ipaddress
 import math
@@ -26,9 +28,14 @@ import struct
 import sys
 from typing import Dict, Optional, Sequence, Tuple
 
-#: Kar gledalec Windows zna (screen.start »caps«): ping v toku (meritve zamika, core/link_zaslon_meritve.py) in
-#: dolga skupina slik (kljucne slike vsako sekundo ne potrebuje - dekodira vse enote).
-ZMOZNOSTI = ("rtt", "gop")
+#: Kar gledalec Windows zna (screen.start »caps«; nacrt nacrti/zaslon-ostrina-kazalec.md, vir Linux delo-133):
+#: ping v toku (meritve zamika, core/link_zaslon_meritve.py), dolga skupina slik (kljucne slike vsako sekundo ne
+#: potrebuje), kazalec kot podatek (izvor ga ne rise v sliko - en kazalec), izvorna locljivost (pomanjsamo sami,
+#: kakovostno), brezizgubno (H.264 RGB 4:4:4 qp 0 na zicnem LAN - PyAV ga dekodira) in profil v glavi toka (vrstica).
+#: Starejsi izvor neznane zmoznosti prezre.
+ZMOZNOSTI = ("rtt", "gop", "kazalec", "izvorna", "brezizgubno", "profil")
+#: Najvecja slika kazalca z izvora (PNG; Linux link_kazalec do 128x128 px).
+NAJVEC_SLIKE_KAZALCA_B = 64 * 1024
 #: Kodeki, ki jih dekoder gledalca (PyAV) zna; izvor izbere prvega, ki ga zmore.
 KODEKI = ("h264",)
 #: Vrsta naprave v »view« (izvor po njej izbere merilo locenega zaslona; televizor ostane pri 1).
@@ -49,27 +56,33 @@ OBLIKE_KAZALCA = {
 }
 
 BESEDILA = {
-    "sl": {"lan": "LAN", "internet": "internet", "neposredno": "neposredno", "posrednik": "prek posrednika",
+    "sl": {"lan": "LAN", "brezizgubno": "brezizgubno", "navidezno": "navidezno namizje",
+           "internet": "internet", "neposredno": "neposredno", "posrednik": "prek posrednika",
            "pomanjsano": "pomanjšano na {w}×{h}", "zamik": "zamik {ms} ms", "en_na_en": "1:1",
            "prilagodi": "Prilagodi", "en_na_en_namig": "Izvorne pike 1:1 (slika sledi miški)",
            "prilagodi_namig": "Cela slika v oknu", "kabel": "kabel", "wifi": "Wi-Fi"},
-    "en": {"lan": "LAN", "internet": "internet", "neposredno": "direct", "posrednik": "via relay",
+    "en": {"lan": "LAN", "brezizgubno": "lossless", "navidezno": "virtual desktop",
+           "internet": "internet", "neposredno": "direct", "posrednik": "via relay",
            "pomanjsano": "scaled to {w}×{h}", "zamik": "latency {ms} ms", "en_na_en": "1:1",
            "prilagodi": "Fit", "en_na_en_namig": "Native pixels 1:1 (the image follows the mouse)",
            "prilagodi_namig": "Whole image in the window", "kabel": "cable", "wifi": "Wi-Fi"},
-    "de": {"lan": "LAN", "internet": "Internet", "neposredno": "direkt", "posrednik": "über Relay",
+    "de": {"lan": "LAN", "brezizgubno": "verlustfrei", "navidezno": "virtueller Desktop",
+           "internet": "Internet", "neposredno": "direkt", "posrednik": "über Relay",
            "pomanjsano": "verkleinert auf {w}×{h}", "zamik": "Latenz {ms} ms", "en_na_en": "1:1",
            "prilagodi": "Einpassen", "en_na_en_namig": "Originalpixel 1:1 (das Bild folgt der Maus)",
            "prilagodi_namig": "Ganzes Bild im Fenster", "kabel": "Kabel", "wifi": "WLAN"},
-    "es": {"lan": "LAN", "internet": "internet", "neposredno": "directa", "posrednik": "mediante relé",
+    "es": {"lan": "LAN", "brezizgubno": "sin pérdidas", "navidezno": "escritorio virtual",
+           "internet": "internet", "neposredno": "directa", "posrednik": "mediante relé",
            "pomanjsano": "reducido a {w}×{h}", "zamik": "latencia {ms} ms", "en_na_en": "1:1",
            "prilagodi": "Ajustar", "en_na_en_namig": "Píxeles originales 1:1 (la imagen sigue al ratón)",
            "prilagodi_namig": "Imagen completa en la ventana", "kabel": "cable", "wifi": "Wi-Fi"},
-    "fr": {"lan": "LAN", "internet": "internet", "neposredno": "directe", "posrednik": "via relais",
+    "fr": {"lan": "LAN", "brezizgubno": "sans perte", "navidezno": "bureau virtuel",
+           "internet": "internet", "neposredno": "directe", "posrednik": "via relais",
            "pomanjsano": "réduit à {w}×{h}", "zamik": "latence {ms} ms", "en_na_en": "1:1",
            "prilagodi": "Ajuster", "en_na_en_namig": "Pixels d’origine 1:1 (l’image suit la souris)",
            "prilagodi_namig": "Image entière dans la fenêtre", "kabel": "câble", "wifi": "Wi-Fi"},
-    "it": {"lan": "LAN", "internet": "internet", "neposredno": "diretta", "posrednik": "tramite relay",
+    "it": {"lan": "LAN", "brezizgubno": "senza perdita", "navidezno": "desktop virtuale",
+           "internet": "internet", "neposredno": "diretta", "posrednik": "tramite relay",
            "pomanjsano": "ridotto a {w}×{h}", "zamik": "latenza {ms} ms", "en_na_en": "1:1",
            "prilagodi": "Adatta", "en_na_en_namig": "Pixel originali 1:1 (l’immagine segue il mouse)",
            "prilagodi_namig": "Immagine intera nella finestra", "kabel": "cavo", "wifi": "Wi-Fi"},
@@ -161,6 +174,28 @@ def oblika_kazalca(obvestilo: dict) -> Optional[str]:
     return OBLIKE_KAZALCA.get(str(obvestilo.get("oblika") or ""), "ArrowCursor")
 
 
+def slika_kazalca(obvestilo: dict) -> Optional[Tuple[bytes, int, int]]:
+    """Tocna slika kazalca izvora iz obvestila ({"slika": "data:image/png;base64,...", "vroca": [hx, hy]}) ->
+    (png, hx, hy) ali None: brez slike, ni PNG, prevelika ali kazalec skrit (core/link_kazalec.py na Linuxu)."""
+    if not isinstance(obvestilo, dict) or obvestilo.get("viden") is False:
+        return None
+    s = obvestilo.get("slika")
+    predpona = "data:image/png;base64,"
+    if not isinstance(s, str) or not s.startswith(predpona) or len(s) > NAJVEC_SLIKE_KAZALCA_B * 4 // 3 + 64:
+        return None
+    try:
+        png = base64.b64decode(s[len(predpona):], validate=True)
+    except ValueError:
+        return None
+    if not png.startswith(b"\x89PNG\r\n\x1a\n") or len(png) > NAJVEC_SLIKE_KAZALCA_B:
+        return None
+    hx = hy = 0
+    v = obvestilo.get("vroca")
+    if isinstance(v, (list, tuple)) and len(v) == 2 and all(isinstance(x, int) and not isinstance(x, bool) for x in v):
+        hx, hy = (max(0, min(255, int(x))) for x in v)
+    return png, hx, hy
+
+
 # ------------------------------------------------------------------ vrstica s podatki
 def je_lan(naslov: str) -> bool:
     try:
@@ -183,8 +218,12 @@ def hitrost_povezave(bps: int) -> str:
 
 def vrstica_podatkov(jezik: str, naslov: str, prek_posrednika: bool, omrezje: Dict, izvor: Tuple[int, int],
                      slika: Tuple[int, int], fps: float, mbps: float = 0.0, zamik_ms: Optional[float] = None,
-                     nacin: str = "prilagodi") -> str:
-    """»LAN · kabel 1 Gb/s · neposredno · 1920×1080 · 60 fps« (+ pomanjsano / 1:1, Mb/s, zamik)."""
+                     nacin: str = "prilagodi", profil: Optional[dict] = None, dpi: int = 0) -> str:
+    """»LAN · kabel 1 Gb/s · neposredno · 1920×1080 · 60 fps« (+ pomanjsano / 1:1, Mb/s, zamik). `profil` je glava
+    toka izvora (core/link_zaslon_profil.izberi na Linuxu): pot prek sredisca, brezizgubno / 4:4:4, navidezno
+    namizje."""
+    profil = profil if isinstance(profil, dict) else {}
+    prek_posrednika = prek_posrednika or profil.get("pot") == "sredisce"
     deli = [besedilo(jezik, "lan") if je_lan(naslov) else besedilo(jezik, "internet")]
     hitrost = hitrost_povezave(int((omrezje or {}).get("hitrost_bps") or 0))
     vrsta = (omrezje or {}).get("vrsta") or ""
@@ -192,6 +231,8 @@ def vrstica_podatkov(jezik: str, naslov: str, prek_posrednika: bool, omrezje: Di
     if hitrost or medij:
         deli.append(" ".join(x for x in (medij, hitrost) if x))
     deli.append(besedilo(jezik, "posrednik") if prek_posrednika else besedilo(jezik, "neposredno"))
+    if profil.get("zaslon") == "navidezno":
+        deli.append(besedilo(jezik, "navidezno"))
     if izvor[0] and izvor[1]:
         mere = "%d×%d" % (izvor[0], izvor[1])
         if nacin == "1:1" or tuple(slika) == tuple(izvor):
@@ -199,8 +240,15 @@ def vrstica_podatkov(jezik: str, naslov: str, prek_posrednika: bool, omrezje: Di
         deli.append(mere)
         if nacin != "1:1" and tuple(slika) != tuple(izvor) and slika[0] and slika[1]:
             deli.append(besedilo(jezik, "pomanjsano", w=slika[0], h=slika[1]))
+    if profil.get("zaslon") == "navidezno" and dpi:
+        deli.append("%d DPI" % int(dpi))
     if fps:
         deli.append("%d fps" % int(round(fps)))
+    kodek = str(profil.get("kodek") or "")
+    if kodek == "h264rgb":
+        deli.append(besedilo(jezik, "brezizgubno"))
+    elif kodek == "hevc444":
+        deli.append("4:4:4")
     if mbps:
         deli.append(("%.1f" % mbps).replace(".", ",") + " Mb/s" if mbps < 10 else "%d Mb/s" % int(round(mbps)))
     if zamik_ms is not None:

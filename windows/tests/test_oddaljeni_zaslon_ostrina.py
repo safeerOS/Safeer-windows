@@ -57,7 +57,7 @@ class ZahtevaSeje(unittest.TestCase):
         z = p.zahteva_seje("najvisja", "desktop", (1440, 795), 1.0, "ethernet")
         self.assertEqual(z["quality"], "najvisja")
         self.assertEqual(z["net"], "ethernet")
-        self.assertEqual(z["caps"], ["handoff", "rtt", "gop"])       # handoff: ni-okna (c44f1c0)
+        self.assertEqual(z["caps"], ["handoff", "rtt", "gop", "kazalec", "izvorna", "brezizgubno", "profil"])
         self.assertEqual(z["codecs"], ["h264"])
         self.assertEqual(z["screen"], "desktop")
         self.assertNotIn("handoff", z)
