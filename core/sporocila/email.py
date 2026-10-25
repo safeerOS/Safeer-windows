@@ -31,6 +31,31 @@ class NapakaPrijave(RuntimeError):
     """Streznik je zavrnil uporabnisko ime ali geslo."""
 
 
+# Presledki, ki jih prinese kopiranje s spletne strani ali telefona (nedeljivi, ozki ...), in nevidni znaki.
+_TUJI_PRESLEDKI = re.compile(r"[\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]")
+_NEVIDNI = re.compile(r"[\u200b-\u200d\u2060\ufeff]")
+
+
+def ocisti_geslo(geslo: str, brez_presledkov: bool = False) -> str:
+    """Geslo, kot ga uporabnik prilepi: brez nevidnih znakov, z navadnimi presledki, brez presledkov na robu.
+    brez_presledkov: gesla za aplikacije (Gmail, Yahoo, iCloud) so crke v skupinah - presledki niso del gesla."""
+    g = _TUJI_PRESLEDKI.sub(" ", _NEVIDNI.sub("", str(geslo or ""))).strip()
+    return re.sub(r"\s+", "", g) if brez_presledkov else g
+
+
+def _ascii(*nizi: str) -> bool:
+    try:
+        for n in nizi:
+            n.encode("ascii")
+        return True
+    except UnicodeEncodeError:
+        return False
+
+
+def _plain_utf8(uporabnik: str, geslo: str) -> bytes:
+    return b"\0" + uporabnik.encode("utf-8") + b"\0" + geslo.encode("utf-8")
+
+
 def _glava(vrednost) -> str:
     try:
         return str(make_header(decode_header(str(vrednost or ""))))
@@ -143,7 +168,13 @@ class EmailAdapter(Adapter):
         imap = imaplib.IMAP4_SSL(self.imap_streznik, self.imap_vrata,
                                  ssl_context=ssl.create_default_context(), timeout=CASOVNA_OMEJITEV)
         try:
-            imap.login(self.uporabnik, self._skrivnost())
+            geslo = self._skrivnost()
+            if _ascii(self.uporabnik, geslo):
+                imap.login(self.uporabnik, geslo)
+            else:
+                # imaplib.login poslje samo ASCII (sicer UnicodeEncodeError, ki je bil prikazan kot »streznika ni mogoce
+                # doseci«); AUTHENTICATE PLAIN (RFC 4616) nosi UTF-8.
+                imap.authenticate("PLAIN", lambda _izziv: _plain_utf8(self.uporabnik, geslo))
         except imaplib.IMAP4.error as e:
             try:
                 imap.logout()
@@ -249,7 +280,16 @@ class EmailAdapter(Adapter):
             smtp.starttls(context=kontekst)
         try:
             try:
-                smtp.login(self.uporabnik, self._skrivnost())
+                geslo = self._skrivnost()
+                if _ascii(self.uporabnik, geslo):
+                    smtp.login(self.uporabnik, geslo)
+                else:
+                    # smtplib kodira prijavo kot ASCII: AUTH PLAIN z UTF-8 posljemo sami.
+                    import base64
+                    smtp.ehlo_or_helo_if_needed()
+                    koda, odg = smtp.docmd("AUTH", "PLAIN " + base64.b64encode(_plain_utf8(self.uporabnik, geslo)).decode("ascii"))
+                    if koda != 235:
+                        raise smtplib.SMTPAuthenticationError(koda, odg)
             except smtplib.SMTPAuthenticationError as e:
                 raise NapakaPrijave("Prijava ni uspela") from e
             smtp.send_message(msg)
