@@ -626,6 +626,10 @@ ZAGON_OPAZUJ_S = 0.1
 ZAGON_POTRDI_S = 0.05
 #: Oznaka zagona: v ukazni vrstici lupine, ki program zazene, in v okolju vsega njegovega rodu.
 ZAGON_SPREMENLJIVKA = "SAFEER_ZAGON"
+#: Rod zagona je koncal, okna programa na namizju pa (se) ni: program ene same instance ali storitev D-Bus okno
+#: odpre sele za hip po koncu zaganjalnika (X ga preslika z zamikom). Toliko casa po koncu rodu se gledamo na
+#: namizje, preden recemo »koncal brez okna« - sicer naprava dobi »ni okna« za program, ki se je odprl.
+ZAGON_OKNO_POCAKAJ_S = 3.0
 
 
 def zivi_zagon(zeton: str, proc: str = "/proc") -> bool:
@@ -1091,14 +1095,17 @@ class DrugiZaslon:
         z = self._zagon
         if not z or not z.get("zeton"):
             return ""
-        if not z.get("videl") and time.monotonic() - z["cas"] < ZAGON_NAJMANJ_S:
-            return ""
-        if zivi_zagon(z["zeton"]):
-            z["videl"] = True
-            return ""
-        time.sleep(ZAGON_POTRDI_S)
-        if zivi_zagon(z["zeton"]):
-            return ""
+        if "konec_od" not in z:
+            if not z.get("videl") and time.monotonic() - z["cas"] < ZAGON_NAJMANJ_S:
+                return ""
+            if zivi_zagon(z["zeton"]):
+                z["videl"] = True
+                return ""
+            time.sleep(ZAGON_POTRDI_S)
+            if zivi_zagon(z["zeton"]):
+                return ""
+            # Konec rodu je dokoncen (proces z oznako se ne vrne): /proc odslej ne beremo vec, gledamo le se okna.
+            z["konec_od"] = time.monotonic()
         okna = _okna_namizja()
         if okna:
             pidi = set()
@@ -1114,6 +1121,10 @@ class DrugiZaslon:
             if okno:
                 z["okno"] = okno
                 return "na_namizju"
+        # Namizje vidimo (X), okna programa pa se ni: se ZAGON_OKNO_POCAKAJ_S po koncu rodu gledamo, ali se pokaze.
+        # Kadar namizja ne vidimo (Wayland, ni wmctrl), cakanje nima smisla.
+        if okna is not None and time.monotonic() - z["konec_od"] < ZAGON_OKNO_POCAKAJ_S:
+            return ""
         return "koncan"
 
     def opis_zagona(self) -> dict:
@@ -1209,7 +1220,12 @@ class DrugiZaslon:
         skupina = gop if gop > 0 else max(1, fps)
         u = ["wf-recorder", "-o", IZHOD] + (["-D"] if z["no_damage"] else []) + \
             (["-r", str(max(1, fps))] if z["framerate"] else []) + ["-m", "hevc" if hevc else "h264", "-f", "/dev/stdout"]
-        if gpu:
+        if kodek == "h264rgb":
+            # Zicni LAN (core/link_zaslon_profil): brezizgubno H.264 RGB na procesorju - pikselsko enako navideznemu
+            # namizju, brez pretvorbe v YUV (lastnik 25. 10. 2026: navidezno namizje ne sme zmanjsati kakovosti).
+            parametri = ["preset=ultrafast", "tune=zerolatency", "qp=0", "bf=0", "g=%d" % (gop if gop > 0 else fps * 10)]
+            u += ["-c", "libx264rgb", "-x", "bgr0"]
+        elif gpu:
             parametri = ["rc_mode=CQP", "qp=%d" % qp, "profile=%s" % ("main" if hevc else "high"), "bf=0",
                          "g=%d" % skupina]
             u += ["-c", "hevc_vaapi" if hevc else "h264_vaapi", "-d", gpu]

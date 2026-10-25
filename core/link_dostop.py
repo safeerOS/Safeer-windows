@@ -77,7 +77,7 @@ _DEJANJA = {
         "video.transcode", "video.status", "video.stream", "video.stream_stop", "video.stream_status",
         "avail.get", "host.info",
     },
-    ZASLON: {"screen.start", "screen.stop", "screen.status", "key", "scroll", "screenshot", "search.query",
+    ZASLON: {"screen.start", "screen.stop", "screen.status", "screen.thumb", "key", "scroll", "screenshot", "search.query",
              "volume", "restart", "clear_cache", "status"},
 }
 

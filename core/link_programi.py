@@ -18,6 +18,7 @@ from __future__ import annotations
 import base64
 import configparser
 import os
+import re
 import shlex
 import shutil
 import signal
@@ -129,6 +130,12 @@ def _vrednost(vnos: configparser.SectionProxy, kljuc: str) -> str:
     return vnos.get(kljuc, "") or ""
 
 
+def _je_nastavitev_okolja(beseda: str) -> bool:
+    """`IME=vrednost` pred ukazom v vnosu (`env BAMF_DESKTOP_FILE_HINT=/var/lib/snapd/.../x_x.desktop /snap/bin/x`)
+    ni ime programa. Po imenu datoteke tega ne vidimo: `=` je pred zadnjo posevnico, ostane `x_x.desktop`."""
+    return re.match(r"[A-Za-z_][A-Za-z0-9_]*=", str(beseda or "")) is not None
+
+
 def razredi_okna(ime_vnosa: str, razred: str, ukaz: List[str]) -> List[str]:
     """Imena, po katerih prepoznamo okno programa na namizju (razred okna X): StartupWMClass iz vnosa, ime vnosa
     brez `.desktop` in ime izvrsljive datoteke. Z malimi crkami, brez ponovitev."""
@@ -136,7 +143,8 @@ def razredi_okna(ime_vnosa: str, razred: str, ukaz: List[str]) -> List[str]:
                  else str(ime_vnosa or "")]
     for del_ in ukaz or []:
         osnova = os.path.basename(str(del_))
-        if osnova.startswith("-") or "=" in osnova or osnova in Programi._LUPINE or osnova in ("flatpak", "snap", "run"):
+        if osnova.startswith("-") or "=" in osnova or _je_nastavitev_okolja(del_) or osnova in Programi._LUPINE \
+                or osnova in ("flatpak", "snap", "run"):
             continue
         kandidati.append(osnova)
         break
@@ -385,7 +393,8 @@ class Programi:
         if not prek_vsebnika:
             for del_ in deli:
                 osnova = os.path.basename(del_)
-                if osnova.startswith("-") or osnova in self._LUPINE:
+                # `env X=1 program`: nastavitev okolja ni program (prej je bil vzorec `X=1` in procesa ni nasel).
+                if osnova.startswith("-") or osnova in self._LUPINE or _je_nastavitev_okolja(del_):
                     continue
                 vzorci.append(osnova)
                 break
