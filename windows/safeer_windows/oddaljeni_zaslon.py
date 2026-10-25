@@ -524,7 +524,15 @@ class OddaljeniZaslon(QWidget):
         self._ura = QTimer(self)
         self._ura.setInterval(1000)
         self._ura.timeout.connect(self._osvezi_podatke)
-        QTimer.singleShot(0, self.povezi)
+        self._prvic_prikazano = False
+
+    def showEvent(self, dogodek) -> None:  # noqa: N802 - Qt
+        super().showEvent(dogodek)
+        if not self._prvic_prikazano:
+            # Seja se zacne, ko ima okno koncno velikost (showMaximized): izvor dobi pravo velikost platna (view) in
+            # loceni zaslon naredi natanko te velikosti. Prej je sla zahteva ze pred postavitvijo okna (1280x724).
+            self._prvic_prikazano = True
+            QTimer.singleShot(250, self.povezi)
 
     def _stevci(self) -> Optional[_Stevci]:
         return self._nit.stevci if self._nit is not None else None
