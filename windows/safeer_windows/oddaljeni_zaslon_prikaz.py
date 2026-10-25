@@ -36,6 +36,30 @@ from typing import Dict, Optional, Sequence, Tuple
 ZMOZNOSTI = ("rtt", "gop", "kazalec", "izvorna", "brezizgubno", "profil")
 #: Najvecja slika kazalca z izvora (PNG; Linux link_kazalec do 128x128 px).
 NAJVEC_SLIKE_KAZALCA_B = 64 * 1024
+#: Najvecja stranica slike, ki jo gledalec sprejme iz glave toka (8K). Naprava, ki bi poslala vec, bi v nacinu 1:1
+#: zahtevala desetine GB pomnilnika (pregled Grok W11, 25. 10. 2026).
+NAJVECJA_MERA = 8192
+#: Najvecja stranica slike kazalca (Linux XFixes: do 256).
+NAJVECJI_KAZALEC = 256
+
+
+def veljavne_mere(sirina, visina) -> bool:
+    """Mere slike iz glave toka: cela stevila 1..NAJVECJA_MERA."""
+    try:
+        w, h = int(sirina), int(visina)
+    except (TypeError, ValueError):
+        return False
+    return 0 < w <= NAJVECJA_MERA and 0 < h <= NAJVECJA_MERA
+
+
+def cilj_pretvorbe(cilj, sirina: int, visina: int):
+    """Velikost, v katero pretvorimo dekodirano sliko: nikoli vecja od nje (glava je lahko lagala - W11)."""
+    if not cilj:
+        return None
+    cw, ch = int(cilj[0]), int(cilj[1])
+    if cw <= 0 or ch <= 0 or cw > sirina or ch > visina or (cw, ch) == (sirina, visina):
+        return None
+    return cw, ch
 #: Kodeki, ki jih dekoder gledalca (PyAV) zna; izvor izbere prvega, ki ga zmore.
 KODEKI = ("h264",)
 #: Vrsta naprave v »view« (izvor po njej izbere merilo locenega zaslona; televizor ostane pri 1).
@@ -188,6 +212,12 @@ def slika_kazalca(obvestilo: dict) -> Optional[Tuple[bytes, int, int]]:
     except ValueError:
         return None
     if not png.startswith(b"\x89PNG\r\n\x1a\n") or len(png) > NAJVEC_SLIKE_KAZALCA_B:
+        return None
+    # Mere iz glave IHDR PRED dekodiranjem: 64 KiB PNG se razsiri v desetine MB (Grok W12).
+    if len(png) < 24 or png[12:16] != b"IHDR":
+        return None
+    w, h = struct.unpack(">II", png[16:24])
+    if not (0 < w <= NAJVECJI_KAZALEC and 0 < h <= NAJVECJI_KAZALEC):
         return None
     hx = hy = 0
     v = obvestilo.get("vroca")

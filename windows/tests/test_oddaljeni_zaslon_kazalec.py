@@ -309,3 +309,40 @@ def test_brezizgubno_pikselsko_enako_izvoru():
             if (c.red(), c.green(), c.blue()) != tuple(izvor[i:i + 3]):
                 razlike += 1
     assert razlike == 0
+
+
+# ------------------------------------------------------------------ pregled Grok 7 (W11-W13)
+def test_w11_mere_iz_glave_omejene():
+    assert p.veljavne_mere(1920, 1080) and p.veljavne_mere(7680, 4320)
+    for w, h in ((100000, 100000), (0, 1080), (1920, -1), ("x", 2), (None, None), (8193, 10)):
+        assert not p.veljavne_mere(w, h), (w, h)
+    # Pretvorba nikoli ne poveca nad dekodirano sliko, tudi ce je glava (nacin 1:1) obljubila vec.
+    assert p.cilj_pretvorbe((100000, 100000), 1920, 1080) is None
+    assert p.cilj_pretvorbe((1920, 1080), 1920, 1080) is None
+    assert p.cilj_pretvorbe((960, 540), 1920, 1080) == (960, 540)
+    assert p.cilj_pretvorbe(None, 1920, 1080) is None
+
+
+def test_w12_png_kazalca_po_glavi_pred_dekodiranjem():
+    import struct
+    import zlib
+
+    def png(w, h):
+        ihdr = struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0)
+        kos = lambda t, d: struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d))  # noqa: E731
+        return b"\x89PNG\r\n\x1a\n" + kos(b"IHDR", ihdr) + kos(b"IDAT", zlib.compress(b"\0" * 64)) + kos(b"IEND", b"")
+    for w, h in ((16000, 4000), (257, 10), (0, 10)):
+        ob = {"viden": True, "slika": "data:image/png;base64," + base64.b64encode(png(w, h)).decode()}
+        assert p.slika_kazalca(ob) is None, (w, h)
+    ob = {"viden": True, "slika": "data:image/png;base64," + base64.b64encode(_png(32, 32)).decode()}
+    assert p.slika_kazalca(ob) is not None
+
+
+def test_w13_besedilo_naprave_ni_html(monkeypatch):
+    okno = _okno(monkeypatch)
+    try:
+        assert okno.stanje.textFormat() == Qt.TextFormat.PlainText
+        assert okno.podatki.textFormat() == Qt.TextFormat.PlainText
+    finally:
+        okno.close()
+

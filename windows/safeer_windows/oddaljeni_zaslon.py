@@ -264,12 +264,13 @@ class _DekodirnaNit(threading.Thread):
                 okvir, self._okvir = self._okvir, None
                 self.prikaz_prost.clear()
             zacetek = time.perf_counter()
-            cilj = self.cilj
+            # Nikoli vec od dekodirane slike: mere v glavi so od naprave (Grok W11).
+            cilj = prikaz.cilj_pretvorbe(self.cilj, okvir.width, okvir.height)
             if self._preoblikovalnik is None:
                 from av.video.reformatter import VideoReformatter
                 self._preoblikovalnik = VideoReformatter()
             r = self._preoblikovalnik
-            if cilj and tuple(cilj) != (okvir.width, okvir.height):
+            if cilj:
                 bgra = r.reformat(okvir, width=int(cilj[0]), height=int(cilj[1]), format="bgra",
                                   interpolation=prikaz.POMANJSEVANJE)
             else:
@@ -310,9 +311,10 @@ class _DekodirnaNit(threading.Thread):
             self.signali.stanje.emit("povezujem", _b("povezujem"))
             glava = self._povezava.povezi()
             self.glava = glava if isinstance(glava, dict) else {}
-            sirina, visina = int(glava.get("w") or 0), int(glava.get("h") or 0)
-            if sirina <= 0 or visina <= 0:
+            sirina, visina = glava.get("w") or 0, glava.get("h") or 0
+            if not prikaz.veljavne_mere(sirina, visina):
                 raise ValueError("Naprava je poslala neveljavne mere slike.")
+            sirina, visina = int(sirina), int(visina)
             self.signali.mere.emit(sirina, visina)
             self.signali.glava.emit(dict(self.glava))
             self.signali.stanje.emit("tece", _b("povezano"))
@@ -591,6 +593,10 @@ class OddaljeniZaslon(QWidget):
         self.stanje = QLabel(_b("pripravljam"))
         self.stanje.setStyleSheet("color:#d8e2f0;padding:0 8px")
         self.podatki = QLabel("")
+        # Ime in sporocilo naprave sta navadno besedilo, ne HTML (Grok W13: sicer bi naprava lahko oblikovala
+        # zavajajoce »sporocilo Safeer« ali nalozila lokalno sliko).
+        for oznaka in (self.stanje, self.podatki):
+            oznaka.setTextFormat(Qt.TextFormat.PlainText)
         self.podatki.setStyleSheet("color:#9fb0c8;padding:0 8px")
         self.znova = QPushButton(_b("znova"))
         self.znova.clicked.connect(self.povezi)
