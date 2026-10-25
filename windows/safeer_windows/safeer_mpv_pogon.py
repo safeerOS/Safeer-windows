@@ -173,8 +173,8 @@ def _pripravi_pot() -> None:
         # Prototipi na Namizju samo za razvoj: v paketu bi nepopolna priloga sicer nalozila DLL z Namizja
         # (podtaknjena libmpv-2.dll; pomocnik, naloga 13, 25. 10. 2026).
         dom = os.environ.get("USERPROFILE", "")
-        kandidati += [os.path.join(dom, "Desktop", "vendor", "safeer-r1"), os.path.join(dom, "Desktop", "vendor", "mpv"),
-                      os.path.join(dom, "Desktop", "libmpv")]
+        kandidati += [os.path.join(dom, "Desktop", "vendor", "safeer-r1"),
+                      os.path.join(dom, "Desktop", "vendor", "mpv"), os.path.join(dom, "Desktop", "libmpv")]
     for d in kandidati:
         if d and os.path.isfile(os.path.join(d, "libmpv-2.dll")):
             STANJE["mapa"] = d

@@ -123,6 +123,11 @@ jobs:
         # Equivalent of readelf on Linux (owner, 21 Oct 2026). Missing protection without a written exception in
         # windows/tools/pe_izjeme.json stops the build; third-party exceptions are measured and give a reason.
         run: python windows/tools/pe_utrjenost.py build/windows/dist windows/SafeerOS.exe windows/SafeerControl.exe windows/SafeerMediaWebView.exe --preveri --porocilo build/windows/out/pe-utrjenost.json
+      - name: Build SafeerPredvajalnik.exe (standalone player, same engine as the Media center)
+        # Prototip pomocnika (naloga 13, 25. 10. 2026): libmpv iz fetch_libmpv, novejsi MSVC runtime v vsem paketu.
+        run: python -m PyInstaller --noconfirm --clean windows/SafeerPredvajalnik.spec --distpath build/predvajalnik/dist --workpath build/predvajalnik/work
+      - name: PE hardening of the standalone player
+        run: python windows/tools/pe_utrjenost.py build/predvajalnik/dist --preveri --porocilo build/windows/out/pe-predvajalnik.json
       - name: Smoke test built executable
         run: python windows/build_windows.py smoke-frozen --online --report build/windows/out/smoke-frozen.json
       - name: Load the QML desktop in the frozen SafeerOS.exe
@@ -145,6 +150,12 @@ jobs:
             build/windows/out/*.exe
             build/windows/out/*.zip
             build/windows/out/SHA256SUMS
+          if-no-files-found: error
+      - name: Upload standalone player (test build, not attached to releases)
+        uses: actions/upload-artifact@v7
+        with:
+          name: safeer-predvajalnik-windows-${{ steps.version.outputs.version }}
+          path: build/predvajalnik/dist/SafeerPredvajalnik
           if-no-files-found: error
       - name: Upload test reports
         if: always()

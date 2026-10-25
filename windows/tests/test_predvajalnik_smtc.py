@@ -35,7 +35,8 @@ class Smtc(unittest.TestCase):
         """Naloga 13 (pomocnik): okno zaprto pred koncem uvoza winrt - _po_uvozu ne naredi nicesar (prej
         AttributeError in sesutje procesa)."""
         s = smtc.SafeerSmtc.__new__(smtc.SafeerSmtc)
-        s.pogon, s.aktiven, s._zadnji_p, s._zaprto, s._priprava = LazenPogon(), False, {"stanje": "predvaja"}, False, None
+        s.pogon, s.aktiven, s._zadnji_p = LazenPogon(), False, {"stanje": "predvaja"}
+        s._zaprto, s._priprava = False, None
         zagnan = []
         s._zazeni = lambda: zagnan.append(1)
         s.zapri()

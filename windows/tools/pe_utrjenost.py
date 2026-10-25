@@ -105,6 +105,7 @@ OBVEZNO_VSEM = ("ASLR", "DEP", "HEVA")
 #: Nase datoteke: poleg tega se CFG, /GS in CET (lastnik, 21. 10. 2026: »ce imamo te ranljivosti, nismo zares Safeer«).
 OBVEZNO_NASIM = ("CFG", "GS", "CET")
 NASE = ("safeerbrowser.exe", "safeeros.exe", "safeercontrol.exe", "safeermediawebview.exe", "safeer-drm.exe",
+        "safeerpredvajalnik.exe",
         # libmpv gradimo sami (safeerOS/milutv-libmpv): zanj velja isto kot za nase programe.
         "libmpv-2.dll")
 

@@ -67,6 +67,10 @@ class DatotekeVRepozitoriju(unittest.TestCase):
     def test_korak_v_ci(self):
         ci = (KOREN / ".github" / "workflows" / "windows-package.yml").read_text(encoding="utf-8")
         self.assertIn("windows/tools/pe_utrjenost.py build/windows/dist", ci)
+        # Samostojni predvajalnik (naloga 13) se zgradi in preveri v CI.
+        self.assertIn("windows/SafeerPredvajalnik.spec", ci)
+        self.assertIn("pe_utrjenost.py build/predvajalnik/dist --preveri", ci)
+        self.assertTrue(IZJEME["safeerpredvajalnik.exe"].get("rok"))
         self.assertIn("--preveri", ci)
 
 

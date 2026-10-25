@@ -177,6 +177,13 @@
     "CET"
    ],
    "razlog": "odstranjevalnik Inno Setup 6 (32-bit, uradna gradnja; ASLR in DEP ima). Izmerjeno 25. 10. 2026 v namestitvi 1.0.51"
+  },
+  "safeerpredvajalnik.exe": {
+   "dovoli": [
+    "CET"
+   ],
+   "rok": "2026-12-31",
+   "razlog": "zagonski program PyInstaller (uradni bootloader) brez /CETCOMPAT, kot safeerbrowser.exe; CFG in /GS ima. Rok 31. 12. 2026: lasten bootloader z /CETCOMPAT ali zaganjalnik Go"
   }
  }
 }
