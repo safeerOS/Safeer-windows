@@ -664,6 +664,8 @@ class TestOsWindows(unittest.TestCase):
                 ], "mapa": "media:video", "deli": True}}
 
             backend.ukaz_pocakaj = odgovor
+            # Naprava je v ozjem krogu (datoteke drugih naprav samo tam - test_datoteke_naprave_krog.py).
+            backend.v_ozjem_krogu = lambda _id: True
             apps = backend.programi_naprave("phone-1")
             self.assertEqual(apps["programi"][0]["id"], "app.test")
             self.assertEqual(apps["programi"][0]["ime"], "Test")
@@ -697,6 +699,7 @@ class TestOsWindows(unittest.TestCase):
                 return {"ok": False}
 
             backend.ukaz_pocakaj = mock_ukaz
+            backend.v_ozjem_krogu = lambda _id: True     # naprava v ozjem krogu (test_datoteke_naprave_krog.py)
 
             res = backend.datoteke_naprave("pc-2", "")
             self.assertTrue(res["ok"])

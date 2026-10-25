@@ -146,7 +146,6 @@ class NalaganjeQml(unittest.TestCase):
     def test_namizje_brez_napak(self):
         try:
             from PySide6.QtCore import QObject, Signal, Slot, QUrl
-            from PySide6.QtGui import QGuiApplication
             from PySide6.QtQuick import QQuickView
         except ImportError:
             self.skipTest("brez QtQuick")
@@ -164,7 +163,8 @@ class NalaganjeQml(unittest.TestCase):
             @Slot(str, result=str)
             def datotekaUrl(self, p):
                 return ""
-        app = QGuiApplication.instance() or QGuiApplication([])
+        from PySide6.QtWidgets import QApplication
+        app = QApplication.instance() or QApplication([])     # QApplication: drugi preizkusi rabijo pripomocke
         v = QQuickView()
         most = Most()
         v.rootContext().setContextProperty("Most", most)
@@ -172,7 +172,7 @@ class NalaganjeQml(unittest.TestCase):
         napake = [e.toString() for e in v.errors()]
         self.assertEqual(napake, [])
         self.assertIsNotNone(v.rootObject())
-        del app
+        self.assertIsNotNone(app)
 
 
 if __name__ == "__main__":
