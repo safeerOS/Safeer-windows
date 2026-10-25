@@ -1147,11 +1147,14 @@ class SafeerOsWindow(QMainWindow):
         """Zaslon telefona ali tablice (share.screen start) v svojem oknu z misko in tipkovnico (okno_zaslona.py,
         lastnik 25. 10. 2026) - prej zavihek Spleta brez vnosa. Ce okna ni mogoce odpreti, ostane stari zavihek."""
         naprava, ime_programa, cas = getattr(self, "_odpri_tukaj_zadnji", ("", "", 0.0))
-        if naprava != str(podatki.get("naprava") or "") or time.monotonic() - cas > 120:
+        # Fokus samo, ce je deljenje sprozil uporabnik tega racunalnika (Odpri tukaj ali Prostori v zadnjih 120 s);
+        # sicer se okno pokaze brez aktiviranja in ne vzame tipk (pregled S1).
+        nase = naprava == str(podatki.get("naprava") or "") and time.monotonic() - cas <= 120
+        if not nase:
             ime_programa = ""                       # deljenje ni prislo iz nasega »Odpri tukaj« (ali je staro)
         try:
             from . import okno_zaslona
-            if okno_zaslona.odpri(self, podatki, ime_programa, _jezik_oken()) is not None:
+            if okno_zaslona.odpri(self, podatki, ime_programa, _jezik_oken(), aktiviraj=nase) is not None:
                 return
         except Exception as e:  # noqa: BLE001
             print(f"[SafeerOS] Okno zaslona: {e}", flush=True)

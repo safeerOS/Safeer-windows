@@ -439,7 +439,8 @@ class SprejemZaslona(_Osnova):
         telo.update(tovor)
         return {"type": "share.screen", "sender": "n-tel", "sender_name": "Telefon", "payload": telo}
 
-    def _prejmi(self, sporocilo, najdeno=PRI_TELEFONU, ob_iskanju=None, sredisce=((SOSED_NASLOV, "odtis-telefona"), "")):
+    def _prejmi(self, sporocilo, najdeno=PRI_TELEFONU, ob_iskanju=None, sredisce=((SOSED_NASLOV, "odtis-telefona"), ""),
+                ozji=True):
         self.iskano = None
 
         def najdi(sredisca, pot):
@@ -449,9 +450,16 @@ class SprejemZaslona(_Osnova):
             return najdeno
         with mock.patch.object(CB.link_deljenje, "gledalec_pri_srediscih", side_effect=najdi), \
                 mock.patch.object(self.b, "_sredisce_naprave", return_value=sredisce) as sredisce_naprave, \
-                mock.patch.object(CB.threading, "Thread", _TakojNit):
+                mock.patch.object(CB.threading, "Thread", _TakojNit), \
+                mock.patch.object(self.b, "v_ozjem_krogu", return_value=ozji):
             self.b._prejmi_deljenje("share.screen", sporocilo)
         return sredisce_naprave
+
+    def test_zaslon_samo_iz_ozjega_kroga(self):
+        """Pregled 25. 10. 2026, S1: deljeni zaslon (okno z vnosom miske in tipkovnice) samo z naprave v ozjem krogu."""
+        self._prejmi(self._sporocilo(), ozji=False)
+        self.assertEqual(self._zasloni(), [])
+        self.assertIsNone(self.iskano)
 
     def _zasloni(self):
         return [p for v, p in self.dogodki if v == "zaslon"]

@@ -1581,6 +1581,11 @@ class SafeerControlBackend:
         pot = str(telo.get("path") or "")
         if not pot.startswith("/") or not self.hub_url():
             return
+        if not self.v_ozjem_krogu(posiljatelj):
+            # Zaslon samo z naprave v ozjem krogu (pravilo lastnika 17. 10. 2026; pregled 25. 10. 2026, S1): drugace bi
+            # okno z vnosom odprla katerakoli naprava v Linku.
+            print("[ControlBackend] Deljeni zaslon zavrnjen: naprava ni v ozjem krogu.")
+            return
         self._gledani_zaslon_id = id_deljenja
         self.gledani_zaslon = posiljatelj           # vnos iz okna gledalca gre samo tej napravi
 
@@ -2099,6 +2104,18 @@ class SafeerControlBackend:
             "target": cilj,
             "payload": {"action": dejanje, "params": parametri if isinstance(parametri, dict) else {}},
         }))
+
+    def poslji_konec_gledanja(self, id_naprave: str) -> bool:
+        """Takoj (brez cakanja na odgovor) napravi pove, naj neha deliti zaslon - ob izhodu Safeer OS, preden se Link
+        ustavi (pregled N10)."""
+        povezava = self.povezava
+        if not id_naprave or povezava is None or not getattr(povezava, "tece", False):
+            return False
+        if self.gledani_zaslon == id_naprave:
+            self.gledani_zaslon = ""
+            self._gledani_zaslon_id = ""
+        return bool(povezava.poslji({"id": "konec-" + secrets.token_urlsafe(6), "type": "control.command",
+                                     "target": id_naprave, "payload": {"action": "apps.close", "params": {"stream": True}}}))
 
     def koncaj_gledanje(self, id_naprave: str = "") -> None:
         """Uporabnik je zaprl okno z zaslonom naprave: naprava naj neha deliti zaslon (`apps.close` s `stream: true`;

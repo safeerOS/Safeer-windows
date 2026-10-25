@@ -47,6 +47,23 @@ POT_WS = "/cast/ws"
 POT_DATOTEKE = "/cast/d/"
 #: Slicica deljene datoteke prek Huba (kot Linux in Android: /cast/thumb/<id>) - isti zeton in pravila kot datoteka.
 POT_SLICICE = "/cast/thumb/"
+#: Zavrnjena slicica (neveljaven zeton) steje kot sovrazen dogodek najvec enkrat na vir na toliko sekund.
+ROK_SLICIC_S = 10.0
+_zavrnjene_slicice: Dict[str, float] = {}
+_zavrnjene_slicice_kljuc = threading.Lock()
+
+
+def _steje_zavrnjeno_slicico(vir: str, zdaj: Optional[float] = None) -> bool:
+    """Ali zavrnjena zahteva /cast/thumb/ tega vira steje za obrambo (prva v ROK_SLICIC_S da, ostale ne)."""
+    zdaj = time.monotonic() if zdaj is None else zdaj
+    with _zavrnjene_slicice_kljuc:
+        if zdaj - _zavrnjene_slicice.get(vir, -1e9) < ROK_SLICIC_S:
+            return False
+        _zavrnjene_slicice[vir] = zdaj
+        if len(_zavrnjene_slicice) > 1024:
+            for k in sorted(_zavrnjene_slicice, key=_zavrnjene_slicice.get)[:512]:
+                _zavrnjene_slicice.pop(k, None)
+        return True
 #: Deljenje med napravami (core/link_hub_deljenje.py): besedilo, oddaja datoteke in njen prevzem.
 POT_BESEDILO = "/cast/share/text"
 #: Ime, ki ga napravi da uporabnik (zivi v krogu zaupanja, vidijo ga vse naprave).
@@ -2025,7 +2042,9 @@ class _Obravnava(http.server.BaseHTTPRequestHandler):
         z = (self.headers.get("X-Safeer-Token") or "").strip()
         if z and streznik.zeton_velja(z):
             self._zaupaj()
-        else:
+        elif not pot.startswith(POT_SLICICE) or _steje_zavrnjeno_slicico(self._vir()):
+            # Mreza slicic z zastarelim zetonom naredi desetine zahtev hkrati: za /cast/thumb/ steje en dogodek na vir
+            # na ROK_SLICIC_S, sicer bi vir (in z njim ves Link) zaprli za 10 minut (pregled 25. 10. 2026, S3).
             self._sovrazno("brez_zaupanja")
         from urllib.parse import unquote
         from core import link_datoteke

@@ -91,10 +91,13 @@ _SKRIPTA = r"""
   function slika() { return document.getElementById("zaslon"); }
   // Stran s sredisca ima na sliki svoje poslusalce (dotik poslje sama): dogodek ustavimo v fazi zajema, da gre en klik
   // na napravo enkrat - po Safeer Linku, z odgovorom (npr. »Safeer Vnos ni vklopljen«), ki ga okno pokaze.
-  var zacetek = null, cas = 0, tipkano = "", casovnik = null, kolo = 0;
+  // Tipke gredo napravi sele po prvem kliku uporabnika v okno (pregled 25. 10. 2026, S1): okno, ki se je odprlo samo
+  // (deljenje z naprave), ne sme prestreci tipk, ki jih je uporabnik tipkal drugam.
+  var zacetek = null, cas = 0, tipkano = "", casovnik = null, kolo = 0, kliknjeno = false;
   document.addEventListener("mousedown", function (e) {
     var img = slika();
     if (!e.isTrusted || !img || e.button !== 0) return;
+    kliknjeno = true;
     zacetek = delez(img, e.clientX, e.clientY); cas = Date.now();
     e.preventDefault(); e.stopPropagation();
   }, true);
@@ -141,15 +144,18 @@ _SKRIPTA = r"""
                Backspace: "backspace", Delete: "delete", Escape: "back", BrowserBack: "back", Home: "home"};
   function izprazni() { clearTimeout(casovnik); if (tipkano) poslji("input.text", {text: tipkano}); tipkano = ""; }
   document.addEventListener("keydown", function (e) {
-    if (!e.isTrusted || !slika()) return;                    // samo na strani z zaslonom naprave
+    if (!e.isTrusted || !slika() || !kliknjeno) return;      // samo na strani z zaslonom, po prvem kliku
     if (e.key === "F11") return;                              // celozaslonsko okno (racunalnik)
-    if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === "v" || e.key === "V")) {
+    // AltGr (@ € { } [ ] \ | ~ na slovenski tipkovnici): Chromium na Windows javi ctrlKey in altKey hkrati (S2).
+    var altgr = !!(e.getModifierState && e.getModifierState("AltGraph"));
+    var ctrl = (e.ctrlKey || e.metaKey) && !altgr, alt = e.altKey && !altgr;
+    if (ctrl && !alt && (e.key === "v" || e.key === "V")) {
       izprazni(); poslji("odlozisce.prilepi", {}); e.preventDefault(); return;
     }
-    if (TIPKE[e.key] && !e.ctrlKey && !e.altKey && !e.metaKey) {
+    if (TIPKE[e.key] && !ctrl && !alt) {
       izprazni(); poslji("input.key", {key: TIPKE[e.key]}); e.preventDefault(); return;
     }
-    if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    if (e.key.length === 1 && !ctrl && !alt) {
       tipkano += e.key; e.preventDefault();
       clearTimeout(casovnik);
       casovnik = setTimeout(izprazni, 250);

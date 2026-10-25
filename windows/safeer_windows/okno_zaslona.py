@@ -247,8 +247,11 @@ class OknoZaslona(QWidget):  # type: ignore[misc]
         u = QUrl(url)
         return bool(self._izvor) and "%s://%s:%d" % (u.scheme(), u.host(), u.port(443)) == self._izvor
 
-    def pokazi_deljenje(self, url: str, odtis: str, naprava: str, ime_naprave: str, ime_programa: str = "") -> None:
-        """Zacetek deljenja (share.screen start): stran gledalca v tem oknu. Kljuca iz naslova ne zapisemo nikamor."""
+    def pokazi_deljenje(self, url: str, odtis: str, naprava: str, ime_naprave: str, ime_programa: str = "",
+                        aktiviraj: bool = True) -> None:
+        """Zacetek deljenja (share.screen start): stran gledalca v tem oknu. Kljuca iz naslova ne zapisemo nikamor.
+        `aktiviraj`: deljenje je sprozil uporabnik tega racunalnika (Odpri tukaj, Prostori) - okno dobi fokus. Sicer se
+        pokaze brez aktiviranja in ne vzame tipk, ki jih uporabnik ravno tipka drugam (pregled S1)."""
         u = QUrl(url)
         self._izvor = "%s://%s:%d" % (u.scheme(), u.host(), u.port(443))
         self.odtis = str(odtis or "").replace(":", "").lower()
@@ -262,10 +265,15 @@ class OknoZaslona(QWidget):  # type: ignore[misc]
             s, v = min(520, g.width()), min(int(g.height() * 0.9), 980)
             self.setGeometry(g.x() + (g.width() - s) // 2, g.y() + (g.height() - v) // 2, s, v)
         self.stran.load(u)
-        self.show()
-        self.raise_()
-        self.activateWindow()
-        self.pogled.setFocus()
+        if aktiviraj:
+            self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, False)
+            self.show()
+            self.raise_()
+            self.activateWindow()
+            self.pogled.setFocus()
+        elif not self.isVisible():
+            self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+            self.show()
 
     def koncano_na_napravi(self) -> None:
         """Naprava je deljenje koncala: zadnje slike ne pustimo na zaslonu; napravi ne posiljamo nicesar."""
@@ -282,7 +290,10 @@ class OknoZaslona(QWidget):  # type: ignore[misc]
     def closeEvent(self, e) -> None:  # noqa: N802
         if not self._zapiram and self.naprava:
             try:
-                self.cb.koncaj_gledanje(self.naprava)       # uporabnik je zaprl okno: naprava naj neha deliti
+                if getattr(self.os_okno, "_koncujem", False):
+                    self.cb.poslji_konec_gledanja(self.naprava)  # izhod: takoj, preden se Link ustavi (N10)
+                else:
+                    self.cb.koncaj_gledanje(self.naprava)    # uporabnik je zaprl okno: naprava naj neha deliti
             except Exception as napaka:  # noqa: BLE001
                 print(f"[SafeerOS zaslon] konec gledanja: {napaka}", flush=True)
         self.naprava = ""
@@ -399,7 +410,8 @@ class OknoZaslona(QWidget):  # type: ignore[misc]
             self.windowHandle().startSystemResize(robovi)
 
 
-def odpri(os_okno, podatki: dict, ime_programa: str = "", jezik: str = "sl") -> Optional["OknoZaslona"]:
+def odpri(os_okno, podatki: dict, ime_programa: str = "", jezik: str = "sl",
+          aktiviraj: bool = True) -> Optional["OknoZaslona"]:
     """share.screen start -> okno zaslona (eno samo; novo deljenje ga zamenja). None brez Qt WebEngine."""
     if not _QT:
         return None
@@ -416,5 +428,5 @@ def odpri(os_okno, podatki: dict, ime_programa: str = "", jezik: str = "sl") -> 
     okno = getattr(os_okno, "okno_zaslona", None)
     if okno is None:
         okno = os_okno.okno_zaslona = OknoZaslona(os_okno, cb, jezik)
-    okno.pokazi_deljenje(url, str(podatki.get("odtis") or ""), naprava, ime, ime_programa)
+    okno.pokazi_deljenje(url, str(podatki.get("odtis") or ""), naprava, ime, ime_programa, aktiviraj=aktiviraj)
     return okno

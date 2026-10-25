@@ -66,6 +66,10 @@ class Preveri(unittest.TestCase):
         self.assertNotIn("__KORAKI__", js)
         self.assertGreaterEqual(js.count("e.isTrusted"), 5)                 # samo dogodki uporabnika
         self.assertIn('"odlozisce.prilepi"', js)
+        # Pregled S1/S2: tipke gredo napravi sele po prvem kliku v okno; AltGr (Ctrl+Alt na Windows) ni bliznjica.
+        self.assertIn("!kliknjeno) return;", js)
+        self.assertIn('getModifierState("AltGraph")', js)
+        self.assertIn("&& !altgr", js)
 
     def test_most_z_zetonom(self):
         js = okno_zaslona.poslji_js("Z123")
@@ -83,7 +87,11 @@ class Preveri(unittest.TestCase):
     def test_os_app_odpre_okno(self):
         app = (KOREN / "windows" / "safeer_windows" / "os_app.py").read_text(encoding="utf-8")
         self.assertIn("self._odpri_okno_zaslona(p)", app)
-        self.assertIn("okno_zaslona.odpri(self, podatki, ime_programa, _jezik_oken())", app)
+        self.assertIn("okno_zaslona.odpri(self, podatki, ime_programa, _jezik_oken(), aktiviraj=nase)", app)
+        # Pregled S1: fokus samo, ce je zaslon odprl uporabnik (Odpri tukaj / Prostori v zadnjih 120 s).
+        self.assertIn("time.monotonic() - cas <= 120", app)
+        okno = (KOREN / "windows" / "safeer_windows" / "okno_zaslona.py").read_text(encoding="utf-8")
+        self.assertIn("WA_ShowWithoutActivating", okno)
         cb = (KOREN / "windows" / "safeer_windows" / "control_backend.py").read_text(encoding="utf-8")
         self.assertIn("def poslji_vnos(self, dejanje: str, parametri: dict) -> bool:", cb)
         self.assertIn('if ref.startswith("vnos-"):', cb)

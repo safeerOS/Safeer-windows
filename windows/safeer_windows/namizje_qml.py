@@ -447,7 +447,7 @@ def naprave_za_izbiro(cb) -> list:
     (Safeer OS in njegov Control, id »…-control«); za programe in datoteke si zapomnimo id, ki to zna."""
     programi = {n["id"] for n in cb.naprave_s_programi()}
     # Datoteke samo naprav v ozjem krogu zaupanja (core/link_dostop; kot Linux): drugih za brskanje ne pokazemo.
-    datoteke = {n["id"] for n in cb.naprave_s_datotekami() if n.get("ozji", True)}
+    datoteke = {n["id"] for n in cb.naprave_s_datotekami() if n.get("ozji", False)}   # »ne vem« ni »da« (N5)
     po_kljucu: dict = {}
     for n in cb.vse_naprave():
         id_n = str(n.get("id") or "")
