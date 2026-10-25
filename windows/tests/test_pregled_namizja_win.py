@@ -318,7 +318,9 @@ class Paket(unittest.TestCase):
         import build_windows as b
         self.assertIn(("windows/safeer_windows/qml", "safeer_windows/qml"), b.SHARED_DATA)
         for modul in ("QtQml", "QtQuick", "QtQuick.Controls.Basic", "QtQuick.Templates", "QtQuick.Layouts",
-                      "QtQuick.Effects", "QtQuick.Dialogs", "Qt.labs.folderlistmodel"):
+                      "QtQuick.Effects", "QtQuick.Dialogs", "Qt.labs.folderlistmodel",
+                      # Uvozi jih prevedeni QML sloga Basic (TextField), qmldir ne (CI 40204237696, 25. 10. 2026).
+                      "QtQuick.Controls.Basic.impl", "QtQuick.Shapes"):
             self.assertIn(modul, b.QML_KORENI)
         self.assertEqual(b.qmldir_odvisnosti("module QtQuick.Controls.Basic\nimport QtQuick.Controls.impl auto\n"
                                              "depends QtQuick.Templates\noptional import QtQuick.Controls.Fusion\n"),

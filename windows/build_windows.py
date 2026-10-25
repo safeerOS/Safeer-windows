@@ -63,8 +63,11 @@ SHARED_DATA = [
 #: Moduli QML, ki jih namizje Safeer OS uvozi (windows/safeer_windows/qml/*.qml) - koreni; prune_bundle obdrzi te in
 #: vse, od cesar so odvisni (vrstice »import« in »depends« v njihovih qmldir), vse drugo v PySide6/qml (Qt3D, Charts,
 #: Multimedia, Quick3D, WebEngine, sloge Fusion/Material/Universal/Imagine/FluentWinUI3/Windows ...) odstrani.
-QML_KORENI = ("QtQml", "QtQuick", "QtQuick.Window", "QtQuick.Controls.Basic", "QtQuick.Controls.impl", "QtQuick.Templates",
-              "QtQuick.Layouts", "QtQuick.Effects", "QtQuick.Dialogs", "QtQuick.Dialogs.quickimpl", "Qt.labs.folderlistmodel")
+#: QtQuick.Controls.Basic.impl in QtQuick.Shapes: prevedeni QML Basic (Qt6QuickControls2Basic.dll, Qt 6.11.2) ju uvozi,
+#: qmldir ju ne navaja - brez njiju »Type TextField unavailable« v zamrznjenem SafeerOS.exe (CI 40204237696, 25. 10.).
+QML_KORENI = ("QtQml", "QtQuick", "QtQuick.Window", "QtQuick.Controls.Basic", "QtQuick.Controls.Basic.impl",
+              "QtQuick.Controls.impl", "QtQuick.Templates", "QtQuick.Shapes", "QtQuick.Layouts", "QtQuick.Effects",
+              "QtQuick.Dialogs", "QtQuick.Dialogs.quickimpl", "Qt.labs.folderlistmodel")
 
 
 def version() -> str:
