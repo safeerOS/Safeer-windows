@@ -3734,6 +3734,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     # Safeer Link: povezovanje se zacne ob zagonu programa, v svoji niti. Prej ga je sprozila sele nalozena zacetna
     # stran; pri zagonu v ozadju je teklo tukaj, v glavni niti, in do konca zadrzalo zanko dogodkov.
     window.control_backend.povezi_ob_zagonu(vedno=bool(args.ozadje and not magnet))
+    # Ozji krog (lastnik, 25. 10. 2026 10:49): izbire iz prejsnjih razlicic tudi v core/link_dostop - v ozadju, branje
+    # in zapis dostop.json ne zadrzita zagona.
+    threading.Thread(target=window.control_backend.uskladi_ozji_krog_ob_zagonu, name="safeer-ozji-krog",
+                     daemon=True).start()
     # Namizje Safeer OS (po vzoru Linuxa): vklop/izklop se zapomni; ob vklopu glavno okno caka v ozadju.
     if args.namizje or args.brez_namizja:
         window.nastavi_namizje(bool(args.namizje))

@@ -44,6 +44,10 @@ DEJANJA_MEDIJ = ["media"]
 #: (core/link_predvajanje.py, isti protokol kot Linux in Predaja.kt na Androidu). Samo naprava s pravico do
 #: datotek (profil polno ali izbrano) - datoteka gre le iz deljenih map, play.stop je samo premor.
 DEJANJA_PREDAJA = ["play.state", "play.stop", "play.offer"]
+#: Profili dostopa naprave do tega racunalnika (izbira v Safeer Linku / Controlu). »brez« = umik iz ozjega kroga.
+PROFILI_DOSTOPA = ("polno", "izbrano", "zaslon", "brez")
+#: Profil -> zmoznosti v core/link_dostop (d datoteke, p programi, v predvajalnik, z zaslon in upravljanje).
+OZJI_KROG_PO_PROFILU = {"polno": ("d", "p", "v", "z"), "izbrano": ("d",), "zaslon": ("z",), "brez": ()}
 #: Seznami predvajanja so enaki na vseh uporabnikovih napravah v Linku (core/seznami_sink.py, SeznamiSink.kt na
 #: Androidu): druga naprava v Linku prebere sezname Medijskega centra (samo branje, brez posebne pravice).
 DEJANJA_SEZNAMI = ["lists.get"]
@@ -433,14 +437,15 @@ class SafeerControlBackend:
         return ids
 
     def dovoljenje_za(self, id_naprave: str) -> str:
-        """Vrne profil dostopa naprave: polno, izbrano, zaslon ali vprasaj. Velja za fizicno napravo:
-        izbira za eno identiteto telefona velja tudi za drugo (sicer bi isti telefon vprasal dvakrat)."""
+        """Vrne profil dostopa naprave: polno, izbrano, zaslon, brez ali vprasaj. Velja za fizicno napravo:
+        izbira za eno identiteto telefona velja tudi za drugo (sicer bi isti telefon vprasal dvakrat).
+        »brez« = uporabnik jo je umaknil iz ozjega kroga (pomaga samo pri povezavi, ne vprasamo znova)."""
         dovoljenja = self.nastavitve.get("dovoljenja_naprav") or {}
         profil = str(dovoljenja.get(str(id_naprave or "")) or "")
-        if profil in ("polno", "izbrano", "zaslon"):
+        if profil in PROFILI_DOSTOPA:
             return profil
         izbrani = [str(dovoljenja.get(s) or "") for s in self.sorodniki(id_naprave)]
-        for kandidat in ("polno", "izbrano", "zaslon"):
+        for kandidat in PROFILI_DOSTOPA:
             if kandidat in izbrani:
                 return kandidat
         if profil == "vprasaj":
@@ -465,8 +470,11 @@ class SafeerControlBackend:
                 pass
 
     def nastavi_dovoljenje(self, id_naprave: str, profil: str) -> bool:
+        """Ena privolitev (lastnik, 25. 10. 2026 10:49): »Vse« = ozji krog - upravljanje tega racunalnika in vnos
+        (SendInput) brez dodatnega stikala, zapisano tudi v core/link_dostop (zasloni, datoteke in Zasloni naprav).
+        Manj pravic ali »brez« (umik iz ozjega kroga) takoj preklice zetone datotek in koncanje seje zaslona."""
         id_naprave, profil = str(id_naprave or "").strip(), str(profil or "").strip().lower()
-        if not id_naprave or profil not in ("polno", "izbrano", "zaslon"):
+        if not id_naprave or profil not in PROFILI_DOSTOPA:
             return False
         dovoljenja = dict(self.nastavitve.get("dovoljenja_naprav") or {})
         prej = self.dovoljenje_za(id_naprave)
@@ -476,10 +484,17 @@ class SafeerControlBackend:
             dovoljenja[s] = profil
         self.nastavitve["dovoljenja_naprav"] = dovoljenja
         ok = self.shrani_nastavitve()
+        if ok:
+            self._uskladi_ozji_krog(sorodniki, profil)
         if ok and profil != prej and profil != "polno":
             # Manj pravic kot prej: stari zetoni ne smejo veljati se do 12 h (pregled 29. 9. 2026, tocka 12).
             for s in sorodniki:
                 self._preklici_zetone(s)
+                # Seja zaslona te naprave (upravljanje) se konca takoj, ne sele ob naslednjem screen.start.
+                try:
+                    self.navidezni_zaslon.ustavi_sejo(posiljatelj=s)
+                except Exception:  # noqa: BLE001
+                    pass
         if ok:
             for s in sorodniki:
                 self._opozorjena_dovoljenja.discard(s)
@@ -487,21 +502,52 @@ class SafeerControlBackend:
             self._oddaj_dogodek("stanje", self.stanje_linka())
         return ok
 
+    @staticmethod
+    def _uskladi_ozji_krog(sorodniki: List[str], profil: str) -> None:
+        """Profil Controla -> zmoznosti v core/link_dostop (ozji krog), da ena izbira velja povsod na tem racunalniku.
+        Prej Windows link_dostop ni pisal: nova naprava z »Vse« ni bila v ozjem krogu (njen zaslon in datoteke tu
+        niso bili vidni), naprava iz starega kroga pa je ostala v njem tudi po »Samo ogled zaslona«."""
+        try:
+            from core import link_dostop
+            for s in sorodniki:
+                if link_dostop.zmoznosti(s) != set(OZJI_KROG_PO_PROFILU.get(profil, ())):
+                    link_dostop.nastavi(s, OZJI_KROG_PO_PROFILU.get(profil, ()))
+        except Exception as e:  # noqa: BLE001 - profil Controla velja tudi brez zapisa (zapis ni berljiv)
+            print(f"[ControlBackend] Ozji krog: zapisa dostopa ni mogoce uskladiti ({type(e).__name__})")
+
+    def uskladi_ozji_krog_ob_zagonu(self) -> None:
+        """Enkrat ob zagonu: izbire iz prejsnjih razlicic (samo v nastavitvah Controla) gredo v core/link_dostop."""
+        dovoljenja = dict(self.nastavitve.get("dovoljenja_naprav") or {})
+        for id_n, profil in dovoljenja.items():
+            if profil in PROFILI_DOSTOPA:
+                self._uskladi_ozji_krog([str(id_n)], str(profil))
+
     def _dejanje_dovoljeno(self, id_naprave: str, akcija: str) -> bool:
         if akcija == "status" or akcija in DEJANJA_SEZNAMI:
             # Seznami predvajanja so na vseh napravah v Linku enaki (Android jih da vsaki napravi v Linku); branje
             # seznamov ne odpre datotek, zaslona ali upravljanja, zato tihe uskladitve ne ustavlja vprasanje o pravicah.
             return True
         profil = self.dovoljenje_za(id_naprave)
+        if profil in ("polno", "izbrano", "zaslon") and self._umaknjena_iz_kroga(id_naprave):
+            # Naprava je umaknjena iz kroga zaupanja (core/link_krog, tudi z druge moje naprave): nic vec.
+            return akcija in DEJANJA_SOLIDARNOST
         if profil == "polno":
             return True
-        if profil in ("izbrano", "zaslon") and akcija in DEJANJA_SOLIDARNOST:
+        if profil in ("izbrano", "zaslon", "brez") and akcija in DEJANJA_SOLIDARNOST:
             return True
         if profil == "izbrano":
             return akcija.startswith("files.") or akcija in DEJANJA_PREDAJA
         if profil == "zaslon":
             return akcija in ("screenshot", "screen.capture", "screen.start", "screen.stop", "screen.status")
         return False
+
+    @staticmethod
+    def _umaknjena_iz_kroga(id_naprave: str) -> bool:
+        try:
+            from core import link_krog
+            return bool(link_krog.je_umaknjen(str(id_naprave or "")))
+        except Exception:  # noqa: BLE001
+            return False
 
     def _gleda_navidezni(self, posiljatelj: str) -> bool:
         """Ali [posiljatelj] zdaj gleda navidezni zaslon tega racunalnika (screen.start)."""
@@ -1424,7 +1470,7 @@ class SafeerControlBackend:
                     fizicna = str(d.get("device") or "") or self._osnova_id(id_n)
                     podedovano = ""
                     for drug_id, drug_profil in dovoljenja.items():
-                        if drug_id != id_n and drug_profil in ("polno", "izbrano", "zaslon") and (
+                        if drug_id != id_n and drug_profil in PROFILI_DOSTOPA and (
                                 self._osnova_id(drug_id) == fizicna or any(
                                     str(e.get("id") or "") == drug_id and str(e.get("device") or "") == fizicna
                                     for e in (sporocilo.get("devices") or []))):
@@ -1632,14 +1678,19 @@ class SafeerControlBackend:
 
         try:
             if not self._dejanje_dovoljeno(posiljatelj, akcija):
+                profil_n = self.dovoljenje_za(posiljatelj)
+                umaknjena = profil_n == "brez" or self._umaknjena_iz_kroga(posiljatelj)
                 izid = {
                     "ok": False,
-                    "message": "Na tem računalniku najprej izberi pravice za to napravo.",
-                    "code": "dovoljenje_potrebno",
-                    "data": {"permission": self.dovoljenje_za(posiljatelj)},
+                    "message": ("Ta računalnik te naprave nima v ožjem krogu." if umaknjena
+                                else "Na tem računalniku najprej izberi pravice za to napravo."),
+                    "code": "ni_v_ozjem_krogu" if umaknjena else "dovoljenje_potrebno",
+                    "data": {"permission": profil_n},
                 }
                 ime_n = next((str(n.get("ime") or "") for n in self.naprave if n.get("id") == posiljatelj), "")
-                self._oddaj_dogodek("dovoljenjeZahtevano", {"id": posiljatelj, "ime": ime_n or posiljatelj})
+                if izid["data"]["permission"] == "vprasaj":
+                    # Umaknjene (»brez«) ne sprasujemo znova: uporabnik se je ze odlocil.
+                    self._oddaj_dogodek("dovoljenjeZahtevano", {"id": posiljatelj, "ime": ime_n or posiljatelj})
 
             elif akcija == "status":
                 stanje_naprave = dict(self.navidezni_zaslon.stanje_naprave())
@@ -1790,7 +1841,9 @@ class SafeerControlBackend:
 
             elif akcija == "screen.start":
                 kakovost = str(params.get("quality") or "najvisja")
-                seja = dict(self.navidezni_zaslon.zacni_sejo(posiljatelj, kakovost=kakovost))
+                # Upravljanje (vnos) samo z ozjim krogom (»Vse«); »Samo ogled zaslona« dobi sliko brez vnosa.
+                seja = dict(self.navidezni_zaslon.zacni_sejo(
+                    posiljatelj, kakovost=kakovost, vnos=self.dovoljenje_za(posiljatelj) == "polno"))
                 # Nasi naslovi: gledalec jih poskusi poleg naslova iz seznama naprav (docs/LINK-MESH.md, pravilo 8).
                 seja["hosts"] = self._lastni_naslovi()
                 izid = {"ok": True, "message": "Navidezni zaslon se deli", "data": seja}

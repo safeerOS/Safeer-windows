@@ -148,6 +148,9 @@ class NavidezniZaslon:
         self.vrata = 0
         self._tece = False
         self._posiljatelj_seje = ""
+        #: Ali sme naprava, ki gleda, tudi upravljati (miska, tipkovnica - SendInput). Profil »Samo ogled zaslona«
+        #: (control_backend) sejo da brez vnosa: prej je naprava s tem profilom lahko upravljala racunalnik.
+        self._vnos_dovoljen = True
         self._seja_nit: Optional[threading.Thread] = None
         #: Stevec sej: nit seje ob koncu pospravi samo, ce je njena seja se tekoca.
         self._seja_st = 0
@@ -640,9 +643,11 @@ class NavidezniZaslon:
         )
 
     # ------------------------------------------------------------------ Pretočna seja (Screen Stream)
-    def zacni_sejo(self, posiljatelj: str, kakovost: str = PRIVZETA_KAKOVOST) -> dict:
-        """Začne visoko kakovosten pretočni strežnik za navidezni ločeni zaslon (skladno s core/link_zaslon.py)."""
+    def zacni_sejo(self, posiljatelj: str, kakovost: str = PRIVZETA_KAKOVOST, vnos: bool = True) -> dict:
+        """Začne visoko kakovosten pretočni strežnik za navidezni ločeni zaslon (skladno s core/link_zaslon.py).
+        `vnos=False`: naprava sme samo gledati - vnos iz seje se zavrze (glava »vnos«: false)."""
         with self._kljuc:
+            self._vnos_dovoljen = bool(vnos)
             # Zaslon gleda ena naprava. Ce ga zahteva druga, ga dobi ona (uporabnik ga je ravno odprl), prejsnja pa
             # izve, zakaj se je koncal, in se NE poveze znova. Prej sta se dve napravi izmenjevali vsako sekundo:
             # stara se je ponovno povezala in vrgla novo ven (izmerjeno 9. 10. 2026: tablica in WP28).
@@ -764,7 +769,7 @@ class NavidezniZaslon:
                 # Zvok racunalnika (WASAPI loopback), ce ga lahko zajamemo; sicer slika brez zvoka kot prej.
                 "zvok": ({"hz": zajem_zaslona.ZVOK_HZ, "kanali": zajem_zaslona.ZVOK_KANALI, "oblika": "s16le"}
                          if zvok else None),
-                "vnos": True, "plosek": False,
+                "vnos": bool(self._vnos_dovoljen), "plosek": False,
                 # Vsak okvir slike je cela slika (en paket kodirnika): sprejemnik jo sme takoj dati dekoderju,
                 # ne da caka na zacetek naslednje (Android ZaslonOdjemalec, od Safeer OS 0.5.75).
                 "au": True,
@@ -874,6 +879,8 @@ class NavidezniZaslon:
                     vrstica, ostanek = ostanek.split(b"\n", 1)
                     if not vrstica:
                         continue
+                    if not self._vnos_dovoljen:
+                        continue                 # samo ogled: vnos naprave ne seze do miske in tipkovnice
                     try:
                         dogodek = json.loads(vrstica.decode("utf-8", "replace"))
                         # Pravi zaslon: dogodek gre na pravo misko/tipkovnico; ce ga ne pozna, ga

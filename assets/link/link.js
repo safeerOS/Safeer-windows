@@ -1574,12 +1574,15 @@
       dovoljenjaIzberi: "Izberi pravice za novo napravo {ime}",
       izbraneMapeNaslov: "Mape za omejeni dostop",
       pravicaPolno: "Poln dostop",
-      pravicaPolnoOpis: "Vsi diski, datoteke, aplikacije in upravljanje zaslona",
+      pravicaPolnoOpis: "Upravljanje z miško in tipkovnico, vsi diski, datoteke in aplikacije (ožji krog)",
       pravicaIzbrano: "Izbrane datoteke",
       pravicaIzbranoOpis: "Samo spodaj izbrane mape; brez programov in upravljanja",
       pravicaZaslon: "Samo zaslon",
-      pravicaZaslonOpis: "Naprava sme videti deljeni zaslon, ne pa datotek ali programov",
-      pravicaVprasaj: "Pravice še niso izbrane"
+      pravicaZaslonOpis: "Naprava sme zaslon samo gledati – brez upravljanja, datotek in programov",
+      pravicaBrez: "Brez dostopa",
+      pravicaBrezOpis: "Umik iz ožjega kroga: upravljanje, datoteke in zaslon se takoj prekinejo",
+      pravicaVprasaj: "Pravice še niso izbrane",
+      omejitveWindows: "Upravljanje na daljavo ne seže v okna, odprta kot skrbnik, v potrditve Nadzora uporabniškega računa (UAC) in na zaklenjen zaslon – te potrdi uporabnik za tem računalnikom."
     },
     en: {
       mapeNaslov: "Access to this computer",
@@ -1588,12 +1591,83 @@
       dovoljenjaIzberi: "Choose permissions for the new device {ime}",
       izbraneMapeNaslov: "Folders for limited access",
       pravicaPolno: "Full access",
-      pravicaPolnoOpis: "All drives, files, applications and screen control",
+      pravicaPolnoOpis: "Mouse and keyboard control, all drives, files and applications (inner circle)",
       pravicaIzbrano: "Selected files",
       pravicaIzbranoOpis: "Only the folders selected below; no apps or remote control",
       pravicaZaslon: "Screen only",
-      pravicaZaslonOpis: "May view the shared screen, but not files or applications",
-      pravicaVprasaj: "Permissions have not been chosen"
+      pravicaZaslonOpis: "May only view the screen – no control, files or applications",
+      pravicaBrez: "No access",
+      pravicaBrezOpis: "Remove from the inner circle: control, files and screen stop immediately",
+      pravicaVprasaj: "Permissions have not been chosen",
+      omejitveWindows: "Remote control cannot reach windows opened as administrator, User Account Control (UAC) prompts or the lock screen – the person at this computer confirms those."
+    },
+    de: {
+      mapeNaslov: "Zugriff auf diesen Computer",
+      mapeOpis: "Wähle für jedes verbundene Gerät, wie viel dieses Computers es nutzen darf. Du kannst es jederzeit ändern.",
+      dovoljenjaPrazno: "Verbinde ein anderes Gerät und lege dann hier seine Rechte fest.",
+      dovoljenjaIzberi: "Rechte für das neue Gerät {ime} wählen",
+      izbraneMapeNaslov: "Ordner für eingeschränkten Zugriff",
+      pravicaPolno: "Voller Zugriff",
+      pravicaPolnoOpis: "Steuerung mit Maus und Tastatur, alle Laufwerke, Dateien und Anwendungen (engerer Kreis)",
+      pravicaIzbrano: "Ausgewählte Dateien",
+      pravicaIzbranoOpis: "Nur die unten ausgewählten Ordner; keine Programme und keine Steuerung",
+      pravicaZaslon: "Nur Bildschirm",
+      pravicaZaslonOpis: "Darf den Bildschirm nur ansehen – keine Steuerung, Dateien oder Programme",
+      pravicaBrez: "Kein Zugriff",
+      pravicaBrezOpis: "Aus dem engeren Kreis entfernen: Steuerung, Dateien und Bildschirm enden sofort",
+      pravicaVprasaj: "Rechte noch nicht gewählt",
+      omejitveWindows: "Die Fernsteuerung erreicht keine als Administrator geöffneten Fenster, keine Abfragen der Benutzerkontensteuerung (UAC) und nicht den Sperrbildschirm – diese bestätigt die Person an diesem Computer."
+    },
+    es: {
+      mapeNaslov: "Acceso a este ordenador",
+      mapeOpis: "Elige para cada dispositivo conectado cuánto de este ordenador puede usar. Puedes cambiarlo en cualquier momento.",
+      dovoljenjaPrazno: "Conecta otro dispositivo y luego elige aquí sus permisos.",
+      dovoljenjaIzberi: "Elige los permisos del nuevo dispositivo {ime}",
+      izbraneMapeNaslov: "Carpetas para acceso limitado",
+      pravicaPolno: "Acceso completo",
+      pravicaPolnoOpis: "Control con ratón y teclado, todas las unidades, archivos y aplicaciones (círculo cercano)",
+      pravicaIzbrano: "Archivos seleccionados",
+      pravicaIzbranoOpis: "Solo las carpetas seleccionadas abajo; sin programas ni control",
+      pravicaZaslon: "Solo pantalla",
+      pravicaZaslonOpis: "Solo puede ver la pantalla: sin control, archivos ni programas",
+      pravicaBrez: "Sin acceso",
+      pravicaBrezOpis: "Quitar del círculo cercano: el control, los archivos y la pantalla se detienen al instante",
+      pravicaVprasaj: "Aún no se han elegido permisos",
+      omejitveWindows: "El control remoto no llega a las ventanas abiertas como administrador, a los avisos del Control de cuentas de usuario (UAC) ni a la pantalla de bloqueo: los confirma la persona que está frente a este ordenador."
+    },
+    fr: {
+      mapeNaslov: "Accès à cet ordinateur",
+      mapeOpis: "Choisissez pour chaque appareil connecté ce qu’il peut utiliser de cet ordinateur. Vous pouvez le modifier à tout moment.",
+      dovoljenjaPrazno: "Connectez un autre appareil, puis choisissez ici ses autorisations.",
+      dovoljenjaIzberi: "Choisir les autorisations du nouvel appareil {ime}",
+      izbraneMapeNaslov: "Dossiers pour l’accès limité",
+      pravicaPolno: "Accès complet",
+      pravicaPolnoOpis: "Contrôle à la souris et au clavier, tous les disques, fichiers et applications (cercle proche)",
+      pravicaIzbrano: "Fichiers sélectionnés",
+      pravicaIzbranoOpis: "Uniquement les dossiers choisis ci-dessous ; ni programmes ni contrôle",
+      pravicaZaslon: "Écran uniquement",
+      pravicaZaslonOpis: "Peut seulement voir l’écran : ni contrôle, ni fichiers, ni programmes",
+      pravicaBrez: "Aucun accès",
+      pravicaBrezOpis: "Retirer du cercle proche : le contrôle, les fichiers et l’écran s’arrêtent immédiatement",
+      pravicaVprasaj: "Autorisations pas encore choisies",
+      omejitveWindows: "Le contrôle à distance n’atteint pas les fenêtres ouvertes en tant qu’administrateur, les demandes du Contrôle de compte d’utilisateur (UAC) ni l’écran de verrouillage : c’est la personne devant cet ordinateur qui les confirme."
+    },
+    it: {
+      mapeNaslov: "Accesso a questo computer",
+      mapeOpis: "Scegli per ogni dispositivo collegato quanto di questo computer può usare. Puoi cambiarlo in qualsiasi momento.",
+      dovoljenjaPrazno: "Collega un altro dispositivo, poi scegli qui i suoi permessi.",
+      dovoljenjaIzberi: "Scegli i permessi del nuovo dispositivo {ime}",
+      izbraneMapeNaslov: "Cartelle per l’accesso limitato",
+      pravicaPolno: "Accesso completo",
+      pravicaPolnoOpis: "Controllo con mouse e tastiera, tutti i dischi, file e applicazioni (cerchia ristretta)",
+      pravicaIzbrano: "File selezionati",
+      pravicaIzbranoOpis: "Solo le cartelle selezionate qui sotto; niente programmi né controllo",
+      pravicaZaslon: "Solo schermo",
+      pravicaZaslonOpis: "Può solo vedere lo schermo: niente controllo, file o programmi",
+      pravicaBrez: "Nessun accesso",
+      pravicaBrezOpis: "Rimuovi dalla cerchia ristretta: controllo, file e schermo si interrompono subito",
+      pravicaVprasaj: "Permessi non ancora scelti",
+      omejitveWindows: "Il controllo remoto non raggiunge le finestre aperte come amministratore, le richieste di Controllo dell’account utente (UAC) né la schermata di blocco: le conferma la persona davanti a questo computer."
     }
   };
   for (var _jd in BESEDILA_DOVOLJENJA) {
@@ -2204,7 +2278,7 @@
       // Ime in profil skupine: identiteta z vec zmoznostmi (zaslon) ima lepse ime; profil je tisti, ki ga je uporabnik ze izbral.
       var glavni = sk.clani.slice().sort(function (a, b) { return ((b.zmoznosti || []).length) - ((a.zmoznosti || []).length); })[0];
       var profil = "vprasaj";
-      ["polno", "izbrano", "zaslon"].some(function (p) {
+      ["polno", "izbrano", "zaslon", "brez"].some(function (p) {
         return sk.clani.some(function (n) { if ((stanje.dovoljenja || {})[n.id] === p) { profil = p; return true; } return false; });
       });
       var kartica = document.createElement("article");
@@ -2216,7 +2290,7 @@
       kartica.appendChild(glava);
       var izbire = document.createElement("div");
       izbire.className = "dovoljenje-izbire";
-      [["polno", "pravicaPolno", "pravicaPolnoOpis"], ["izbrano", "pravicaIzbrano", "pravicaIzbranoOpis"], ["zaslon", "pravicaZaslon", "pravicaZaslonOpis"]].forEach(function (p) {
+      [["polno", "pravicaPolno", "pravicaPolnoOpis"], ["izbrano", "pravicaIzbrano", "pravicaIzbranoOpis"], ["zaslon", "pravicaZaslon", "pravicaZaslonOpis"], ["brez", "pravicaBrez", "pravicaBrezOpis"]].forEach(function (p) {
         var gumb = document.createElement("button");
         gumb.className = profil === p[0] ? "izbran" : "";
         gumb.innerHTML = "<b>" + ubezi(t(p[1])) + "</b><small>" + ubezi(t(p[2])) + "</small>";
