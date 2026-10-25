@@ -8,27 +8,61 @@ nezavarovan HTTP zato dovolimo samo za naslove v zasebnem omrezju, drugod ostane
 from __future__ import annotations
 
 import base64
+import concurrent.futures
+import threading
+import time
 import hashlib
 import ipaddress
 import json
+import platform
 import re
 import secrets
 import socket
 import unicodedata
+import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
+from typing import Optional
 
 
 #: Vrste osebnih streznikov, ki jih zna Medijski center.
 PONUDNIKI = ("jellyfin", "emby", "navidrome", "plex", "kodi", "tvheadend", "azuracast", "funkwhale", "dlna", "stremio")
 
 
+#: Glave s poverilnico (Jellyfin/Emby, Plex, Basic za Kodi/TVHeadend, Bearer, piskotki).
+_POVERILNICE = frozenset({"authorization", "proxy-authorization", "cookie", "x-emby-token", "x-mediabrowser-token",
+                          "x-emby-authorization", "x-plex-token"})
+
+
+def _streznik(deli: urllib.parse.SplitResult) -> tuple:
+    privzeta = {"http": 80, "https": 443}.get(deli.scheme, 0)
+    try:
+        vrata = deli.port or privzeta
+    except ValueError:
+        vrata = -1
+    return (deli.hostname or "").lower(), vrata
+
+
 class _HTTPSOnlyRedirect(urllib.request.HTTPRedirectHandler):
+    """Preusmeritev samo na dovoljen naslov, nikoli s https na http. Poverilnice gredo samo na isti streznik (ali isti
+    gostitelj ob prehodu s http na https): urllib bi jih sicer poslal tudi novemu gostitelju - npr. prijavni strani
+    pred Jellyfinom ali odprti preusmeritvi (neodvisni pregled, 19. 10. 2026)."""
+
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         if not dovoljen_naslov(newurl):
             raise ValueError("Strežnik je ponudil nezavarovano preusmeritev.")
-        return super().redirect_request(req, fp, code, msg, headers, newurl)
+        star, nov = urllib.parse.urlsplit(req.full_url), urllib.parse.urlsplit(newurl)
+        if star.scheme == "https" and nov.scheme != "https":
+            raise ValueError("Strežnik je preusmeril s HTTPS na nezavarovan HTTP.")
+        nova = super().redirect_request(req, fp, code, msg, headers, newurl)
+        isti = _streznik(star) == _streznik(nov) or (star.scheme == "http" and nov.scheme == "https"
+                                                     and _streznik(star)[0] == _streznik(nov)[0])
+        if nova is not None and not isti:
+            for glave in (nova.headers, nova.unredirected_hdrs):
+                for ime in [k for k in glave if k.lower() in _POVERILNICE]:
+                    del glave[ime]
+        return nova
 
 
 def _url(base: str, path: str, params: dict | None = None) -> str:
@@ -53,6 +87,8 @@ def je_domace_omrezje(host: str) -> bool:
             naslovi = [ipaddress.ip_address(info[4][0]) for info in socket.getaddrinfo(host, None)[:4]]
         except OSError:
             return False
+    # ::ffff:8.8.8.8 je javni IPv4; Python pred 3.12.4 ga steje za zasebnega (CVE-2024-4032).
+    naslovi = [getattr(a, "ipv4_mapped", None) or a for a in naslovi]
     return bool(naslovi) and all(a.is_private or a.is_loopback or a.is_link_local for a in naslovi)
 
 
@@ -61,7 +97,8 @@ def dovoljen_naslov(url: str) -> bool:
     return deli.scheme == "https" or (deli.scheme == "http" and je_domace_omrezje(deli.hostname or ""))
 
 
-def _request(url: str, headers: dict | None = None, body: dict | None = None, raw: bytes | None = None) -> bytes:
+def _request(url: str, headers: dict | None = None, body: dict | None = None, raw: bytes | None = None,
+             timeout: float = 10) -> bytes:
     if not dovoljen_naslov(url):
         raise ValueError("Osebni medijski strežniki zunaj domačega omrežja zahtevajo HTTPS.")
     data = raw if raw is not None else (json.dumps(body).encode() if body is not None else None)
@@ -70,32 +107,107 @@ def _request(url: str, headers: dict | None = None, body: dict | None = None, ra
                                              "User-Agent": "SafeerOS/1.0", **(headers or {})},
                                     method="POST" if data is not None else "GET")
     opener = urllib.request.build_opener(_HTTPSOnlyRedirect())
-    with opener.open(request, timeout=10) as response:
+    with opener.open(request, timeout=timeout) as response:
         if response.status != 200:
             raise OSError("HTTP %d" % response.status)
         return response.read(5 * 1024 * 1024 + 1)
 
 
-def tok_odgovarja(url: str, glave: dict | None = None, rok: float = 4.0) -> bool:
-    """Ali streznik toka na zahtevo prvih bajtov odgovori z vsebino. Mrtva povezava (potekla, izbrisana, zavrnjena:
-    4xx/5xx), stran HTML namesto posnetka in neodziven streznik ne stejejo. Telesa ne beremo."""
+_IZVIRNI_REQUEST = _request
+
+
+def _request_z_rokom(url: str, rok: float) -> bytes:
+    """Zahteva s krajsim rokom. Preizkusi zamenjajo `_request` z nadomestkom brez argumenta `timeout`."""
+    if _request is _IZVIRNI_REQUEST:
+        return _request(url, timeout=rok)
+    return _request(url)
+
+
+def tok_stanje(url: str, glave: dict | None = None, rok: float = 4.0) -> tuple[bool, int, int]:
+    """(odgovarja, HTTP koda, Retry-After v s) za zahtevo prvih dveh bajtov (Range 0-1) z glavami, ki jih tok zahteva.
+    Mrtva povezava (potekla, izbrisana, zavrnjena: 4xx/5xx), stran HTML namesto posnetka in neodziven streznik ne
+    stejejo. 429 z Retry-After pomeni »zivo, a pocakaj« (odgovarja=True). Telesa ne beremo.
+    Meritev 15. 10. 2026: streznik toka je na isti podpisani naslov z glavami dodatka petkrat v 70 s odgovoril 206 -
+    ena sonda pred predvajanjem naslova ne porabi; brez glave Referer pa vedno 429 (zato predvajalnik dobi glave)."""
     if not dovoljen_naslov(url):
-        return False
+        return False, 0, 0
     zahteva = urllib.request.Request(url, headers={"User-Agent": "SafeerOS/1.0", "Accept": "*/*", "Range": "bytes=0-1",
                                                    **{str(k): str(v) for k, v in (glave or {}).items()}})
     try:
         with urllib.request.build_opener(_HTTPSOnlyRedirect()).open(zahteva, timeout=rok) as odgovor:
             vrsta = str(odgovor.headers.get("Content-Type") or "").lower()
-            return odgovor.status in (200, 206) and not vrsta.startswith("text/html")
-    except Exception:  # noqa: BLE001 - vsaka napaka pomeni "ne odgovarja"
-        return False
+            return odgovor.status in (200, 206) and not vrsta.startswith("text/html"), int(odgovor.status), 0
+    except urllib.error.HTTPError as napaka:
+        cakaj = str(napaka.headers.get("Retry-After") or "").strip() if napaka.headers else ""
+        sekund = min(int(cakaj), 600) if cakaj.isdigit() else 0
+        return napaka.code == 429 and sekund > 0, int(napaka.code), sekund
+    except Exception:  # noqa: BLE001 - vsaka druga napaka pomeni "ne odgovarja"
+        return False, 0, 0
+
+
+def tok_odgovarja(url: str, glave: dict | None = None, rok: float = 4.0) -> bool:
+    """Ali streznik toka na zahtevo prvih bajtov odgovori z vsebino (glej tok_stanje)."""
+    return tok_stanje(url, glave, rok)[0]
+
+
+# ---------------------------------------------------------------------------------- Jellyfin in Emby
+# Jellyfin 12 (7. 9. 2026) ima stare nacine prijave privzeto izklopljene (EnableLegacyAuthorization: glavi X-Emby-Token
+# in X-MediaBrowser-Token, parameter `api_key`, shema »Emby«) in nima vec /Users/{id}/Items. Vedno deluje glava
+# `Authorization: MediaBrowser … Token="…"` in parameter `ApiKey` (Jellyfin 10.8+, preverjeno v izvorni kodi
+# AuthorizationContext.cs 15. 10. 2026). Emby (zaprta koda) ostane pri `X-Emby-Token` in `api_key`.
+
+
+def _id_racunalnika() -> bytes:
+    """Stalen id tega racunalnika ali b"": Linux /etc/machine-id, Windows MachineGuid (register HKLM, kljuc
+    SOFTWARE/Microsoft/Cryptography - isti id, kot ga Windows da namestitvi)."""
+    if platform.system() == "Windows":
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Cryptography") as kljuc:
+                return str(winreg.QueryValueEx(kljuc, "MachineGuid")[0]).strip().encode("ascii", "ignore")[:64]
+        except (ImportError, OSError):
+            return b""
+    try:
+        with open("/etc/machine-id", "rb") as f:
+            return f.read(64).strip()
+    except OSError:
+        return b""
+
+
+def _id_naprave_mediabrowser() -> str:
+    """Stalen DeviceId te namestitve. Jellyfin ob prijavi z istim DeviceId odjavi prejsnjo sejo, zato vse naprave
+    s Safeerjem ne smejo imeti istega (prej "safeer-os", na Windows do 25. 10. 2026 vedno). Iz id-ja racunalnika
+    (_id_racunalnika) prek SHA-256: id racunalnika ne gre ven."""
+    mid = _id_racunalnika()
+    return "safeer-" + hashlib.sha256(b"safeer-mediabrowser:" + mid).hexdigest()[:16] if mid else "safeer-os"
+
+
+def _glava_mediabrowser(zeton: str = "") -> str:
+    def cisto(v: str) -> str:
+        return str(v).replace('"', "").replace(",", " ")
+    deli = ['Client="Safeer OS"', 'Device="%s"' % cisto(platform.system() or "Linux"),
+            'DeviceId="%s"' % _id_naprave_mediabrowser(), 'Version="1.0"']
+    if zeton:
+        deli.append('Token="%s"' % cisto(zeton))
+    return "MediaBrowser " + ", ".join(deli)
+
+
+def _glave_mediabrowser(kind: str, zeton: str) -> dict:
+    glave = {"Authorization": _glava_mediabrowser(zeton)}
+    if kind == "emby":
+        glave["X-Emby-Token"] = zeton
+    return glave
+
+
+def parameter_zetona(kind: str) -> str:
+    """Ime parametra z zetonom v naslovu toka in slike (GStreamer in WebKit glav ne dodata)."""
+    return "api_key" if kind == "emby" else "ApiKey"
 
 
 def authenticate(kind: str, base: str, username: str, secret: str) -> dict:
     if kind in ("jellyfin", "emby"):
-        auth = 'MediaBrowser Client="Safeer OS", Device="Windows", DeviceId="safeer-os", Version="1.0"'
         data = json.loads(_request(_url(base, "/Users/AuthenticateByName"),
-                                  {"Authorization": auth, "Content-Type": "application/json"},
+                                  {"Authorization": _glava_mediabrowser(), "Content-Type": "application/json"},
                                   {"Username": username, "Pw": secret}))
         token = data.get("AccessToken")
         user_id = (data.get("User") or {}).get("Id")
@@ -122,7 +234,7 @@ def authenticate(kind: str, base: str, username: str, secret: str) -> dict:
         _dlna_opis(base)
         return {"token": ""}
     if kind == "stremio":
-        stremio_manifest(base)
+        stremio_manifest(base, sveze=True)
         return {"token": ""}
     raise ValueError("Nepodprta vrsta strežnika.")
 
@@ -364,35 +476,131 @@ def _dlna_items(base: str, server: dict) -> list[dict]:
     return rezultat
 
 
-def _jellyfin_items(base: str, server: dict, token: str) -> list[dict]:
-    user_id = server.get("user_id", "")
-    raw = json.loads(_request(_url(base, "/Users/%s/Items" % urllib.parse.quote(user_id, safe=""), {
-        "Recursive": "true", "IncludeItemTypes": "Movie,Episode,Audio", "Limit": 1000,
-        "Fields": "Overview,RunTimeTicks,ProductionYear,Album,AlbumArtist,Artists",
-    }), {"X-Emby-Token": token}))
-    result = []
-    for row in raw.get("Items", []):
-        typ = row.get("Type")
-        media_kind = "glasba" if typ == "Audio" else "serija" if typ == "Episode" else "film"
-        ident = str(row.get("Id") or "")
-        if not ident:
-            continue
-        image = _url(base, "/Items/%s/Images/Primary" % ident, {"maxHeight": 240, "api_key": token})
-        stream = _url(base, "/%s/%s/stream" % ("Audio" if typ == "Audio" else "Videos", ident),
-                      {"static": "true", "api_key": token})
-        ticks = int(row.get("RunTimeTicks") or 0)
-        result.append({"id": "server:%s:%s" % (server["id"], ident), "naslov": row.get("Name", ""),
-                       "vrsta": media_kind, "url": stream, "slika": image,
-                       "izvajalec": row.get("AlbumArtist") or ", ".join(row.get("Artists") or []),
-                       "album": row.get("Album") or "", "leto": int(row.get("ProductionYear") or 0),
-                       "opis": str(row.get("Overview") or "")[:500], "trajanje": ticks // 10_000_000,
-                       "vir": server["ime"], "skupina": row.get("Album") or row.get("AlbumArtist") or ""})
+def ponudnikovi_idji(row: dict) -> dict:
+    """ProviderIds vnosa Jellyfin/Emby (Imdb, Tmdb, Tvdb - velike in male crke) -> {"imdb_id", "tmdb_id", "tvdb_id"}.
+    Po njih Safeer isti naslov s strežnika in iz dodatka Stremio (tt..., tmdb:...) pokaze enkrat (os_media.merge_duplicates)."""
+    ids = row.get("ProviderIds") if isinstance(row.get("ProviderIds"), dict) else {}
+    po_imenu = {str(k).lower(): str(v or "").strip() for k, v in ids.items()}
+    izid = {}
+    imdb = po_imenu.get("imdb", "").lower()
+    if re.fullmatch(r"tt\d{5,12}", imdb):
+        izid["imdb_id"] = imdb
+    for kljuc, polje in (("tmdb", "tmdb_id"), ("tvdb", "tvdb_id")):
+        v = po_imenu.get(kljuc, "")
+        if re.fullmatch(r"\d{1,10}", v) and int(v) > 0:
+            izid[polje] = int(v)
+    return izid
+
+
+def _jellyfin_vrstica(base: str, server: dict, token: str, kind: str, row: dict, serije: dict) -> Optional[dict]:
+    typ = str(row.get("Type") or "")
+    ident = str(row.get("Id") or "")
+    if not ident or row.get("IsFolder"):
+        return None
+    zvok = typ == "Audio" or str(row.get("MediaType") or "") == "Audio"
+    media_kind = ("glasba" if zvok else "serija" if typ == "Episode" else "film" if typ == "Movie" else "video")
+    kljuc = parameter_zetona(kind)
+    image = _url(base, "/Items/%s/Images/Primary" % ident, {"maxHeight": 240, kljuc: token})
+    stream = _url(base, "/%s/%s/stream" % ("Audio" if zvok else "Videos", ident), {"static": "true", kljuc: token})
+    ticks = int(row.get("RunTimeTicks") or 0)
+    vrstica = {"id": "server:%s:%s" % (server["id"], ident), "naslov": row.get("Name", ""),
+               "vrsta": media_kind, "url": stream, "slika": image,
+               "izvajalec": row.get("AlbumArtist") or ", ".join(row.get("Artists") or []),
+               "album": row.get("Album") or "", "leto": int(row.get("ProductionYear") or 0),
+               "opis": str(row.get("Overview") or "")[:500], "trajanje": ticks // 10_000_000,
+               "vir": server["ime"], "skupina": row.get("Album") or row.get("AlbumArtist") or ""}
+    if typ == "Episode":
+        # Epizoda nosi id-je SERIJE ter sezono in epizodo - tako kot epizode iz dodatkov Stremio (tt...:S:E).
+        # Brez stevilke epizode je ne povezemo s serijo (lahko bi se zdruzila s kartico cele serije).
+        sezona, epizoda = row.get("ParentIndexNumber"), row.get("IndexNumber")
+        ime_serije = str(row.get("SeriesName") or "").strip()
+        if isinstance(epizoda, int) and epizoda > 0:
+            vrstica.update(serije.get(str(row.get("SeriesId") or ""), {}))
+            vrstica["sezona"] = int(sezona) if isinstance(sezona, int) and sezona >= 0 else 1
+            vrstica["epizoda"] = int(epizoda)
+        if ime_serije:
+            vrstica["naslov"] = ime_serije + (" – " + str(row.get("Name")) if row.get("Name") else "")
+            vrstica["skupina"] = ime_serije
+    else:
+        vrstica.update(ponudnikovi_idji(row))
+    return vrstica
+
+
+def _jellyfin_serije(base: str, glave: dict, user_id: str, serije_id: list, kind: str) -> dict:
+    """Id-ji serij (ProviderIds) za epizode v knjiznici - ena zahteva za do 200 serij."""
+    if not serije_id:
+        return {}
+    parametri = {"Ids": ",".join(serije_id[:200]), "Fields": "ProviderIds", "Limit": 200}
+    try:
+        if kind == "emby":
+            pot = _url(base, "/Users/%s/Items" % urllib.parse.quote(user_id, safe=""), parametri)
+        else:
+            pot = _url(base, "/Items", dict(parametri, userId=user_id))
+        surovo = json.loads(_request(pot, glave))
+    except Exception:  # noqa: BLE001 - brez id-jev serij epizode ostanejo, kot so bile
+        return {}
+    return {str(s.get("Id")): ponudnikovi_idji(s) for s in surovo.get("Items", []) if isinstance(s, dict) and s.get("Id")}
+
+
+def _jellyfin_kanali(base: str, server: dict, token: str, glave: dict, user_id: str) -> list[dict]:
+    """Vsebina kanalov iz vticnikov Jellyfina (kategorija Channels): /Channels in /Channels/{id}/Items. Oddaljeni
+    posnetki kanala gredo prek strežnika (Videos/{id}/stream?static=true - VideosController jih posreduje)."""
+    try:
+        kanali = json.loads(_request(_url(base, "/Channels", {"userId": user_id, "limit": 20}), glave)).get("Items") or []
+    except Exception:  # noqa: BLE001 - strežnik brez kanalov ali starejsi brez te poti
+        return []
+    kanali = [k for k in kanali[:10] if isinstance(k, dict) and re.fullmatch(r"[0-9a-fA-F-]{32,36}", str(k.get("Id") or ""))]
+
+    def vsebina(kanal: dict) -> list:
+        # Vticnik kanala vsebino pogosto bere s spleta sele ob zahtevi: kanale beremo hkrati, en pocasen ne zadrzi drugih.
+        try:
+            odgovor = json.loads(_request(_url(base, "/Channels/%s/Items" % kanal["Id"],
+                                               {"userId": user_id, "limit": 200, "fields": "ProviderIds,Overview"}), glave))
+        except Exception:  # noqa: BLE001
+            return []
+        vrstice = []
+        for row in (odgovor.get("Items") or [])[:200]:
+            v = _jellyfin_vrstica(base, server, token, "jellyfin", row, {}) if isinstance(row, dict) else None
+            if v:
+                v["skupina"] = str(kanal.get("Name") or v["skupina"])
+                vrstice.append(v)
+        return vrstice
+    if not kanali:
+        return []
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=min(4, len(kanali))) as bazen:
+        return [v for vrstice in bazen.map(vsebina, kanali) for v in vrstice]
+
+
+def _jellyfin_items(base: str, server: dict, token: str, kind: str = "jellyfin") -> list[dict]:
+    user_id = str(server.get("user_id", ""))
+    parametri = {"Recursive": "true", "IncludeItemTypes": "Movie,Episode,Audio", "Limit": 1000,
+                 "Fields": "Overview,RunTimeTicks,ProductionYear,Album,AlbumArtist,Artists,ProviderIds"}
+    glave = _glave_mediabrowser(kind, token)
+    stara_pot = _url(base, "/Users/%s/Items" % urllib.parse.quote(user_id, safe=""), parametri)
+    if kind == "emby":
+        raw = json.loads(_request(stara_pot, glave))
+    else:
+        # /Items?userId= je v Jellyfinu od 10.9, /Users/{id}/Items je 12 odstranil: starejsi strezniki vrnejo 404.
+        try:
+            raw = json.loads(_request(_url(base, "/Items", dict(parametri, userId=user_id)), glave))
+        except urllib.error.HTTPError as napaka:
+            if napaka.code != 404:
+                raise
+            raw = json.loads(_request(stara_pot, glave))
+    vrstice = [r for r in raw.get("Items", []) if isinstance(r, dict)]
+    serije_id = list(dict.fromkeys(str(r.get("SeriesId")) for r in vrstice if r.get("Type") == "Episode" and r.get("SeriesId")))
+    serije = _jellyfin_serije(base, glave, user_id, serije_id, kind)
+    result = [v for v in (_jellyfin_vrstica(base, server, token, kind, r, serije) for r in vrstice) if v]
+    if kind == "jellyfin":
+        znani = {v["id"] for v in result}
+        result.extend(v for v in _jellyfin_kanali(base, server, token, glave, user_id) if v["id"] not in znani)
     return result
 
 
 def _navidrome_items(base: str, server: dict, secret: str, query: str) -> list[dict]:
     salt = secrets.token_hex(8)
-    token = hashlib.md5((secret + salt).encode()).hexdigest()
+    token = hashlib.md5((secret + salt).encode(), usedforsecurity=False).hexdigest()
     common = {"u": server.get("uporabnik", ""), "t": token, "s": salt,
               "v": "1.16.1", "c": "SafeerOS", "f": "json"}
     if query:
@@ -449,7 +657,7 @@ def _plex_items(base: str, server: dict, token: str) -> list[dict]:
 
 def catalog(kind: str, base: str, server: dict, secret: str, query: str = "") -> list[dict]:
     if kind in ("jellyfin", "emby"):
-        rows = _jellyfin_items(base, server, secret)
+        rows = _jellyfin_items(base, server, secret, kind)
     elif kind == "navidrome":
         rows = _navidrome_items(base, server, secret, query)
     elif kind == "plex":
@@ -479,6 +687,62 @@ def catalog(kind: str, base: str, server: dict, secret: str, query: str = "") ->
     return rows
 
 
+# ------------------------------------------------------------------- prijava ob predvajanju (ne v shranjenih naslovih)
+
+#: Predpona id-ja vnosa streznika -> ali id nosi id streznika (npr. "navidrome:<streznik>:<skladba>").
+_PREDPONE_STREZNIKA = ("server", "navidrome", "plex", "kodi", "tvh", "funkwhale", "dlna", "azura")
+
+
+def streznik_iz_id(ident: object) -> str:
+    """Id osebnega streznika iz id-ja njegovega vnosa ("" za vse drugo)."""
+    deli = str(ident or "").split(":", 2)
+    return deli[1] if len(deli) == 3 and deli[0] in _PREDPONE_STREZNIKA and deli[1].startswith("streznik-") else ""
+
+
+def _izvor(url: str) -> tuple:
+    try:
+        d = urllib.parse.urlsplit(str(url or ""))
+        return (d.scheme.lower(), d.netloc.rpartition("@")[2].lower())
+    except ValueError:
+        return ("", "")
+
+
+def je_naslov_streznika(url: str, server: dict) -> bool:
+    """Ali naslov kaze na ta streznik (isti protokol, gostitelj in vrata)."""
+    izvor = _izvor(url)
+    return bool(izvor[1]) and izvor == _izvor(str(server.get("url") or ""))
+
+
+def s_prijavo(url: str, server: dict, secret: str) -> str:
+    """Naslov, shranjen brez prijave (core/viri_sink.py, brez_prijave), z novo prijavo tega streznika - ob
+    predvajanju in prikazu na tej napravi. Prijavo doda le naslovu na tem strezniku, drugim nikoli."""
+    url = str(url or "")
+    if not url.startswith(("http://", "https://")) or not je_naslov_streznika(url, server):
+        return url
+    from core import viri_sink
+    cist = viri_sink.brez_prijave(url)
+    kind = str(server.get("ponudnik") or "")
+    uporabnik = str(server.get("uporabnik") or "")
+    if kind in ("kodi", "tvheadend"):
+        return _z_uporabnikom(cist, uporabnik, secret)
+    if not secret:
+        return cist
+    d = urllib.parse.urlsplit(cist)
+    if kind in ("jellyfin", "emby"):
+        dodatek = {parameter_zetona(kind): secret}
+    elif kind == "navidrome" and viri_sink.je_subsonic(d.path):
+        sol = secrets.token_hex(8)
+        dodatek = {"u": uporabnik, "t": hashlib.md5((secret + sol).encode(), usedforsecurity=False).hexdigest(), "s": sol}
+    elif kind == "plex":
+        dodatek = {"X-Plex-Token": secret}
+    elif kind == "funkwhale":
+        dodatek = {"token": secret}
+    else:
+        return cist
+    poizvedba = "&".join(x for x in (d.query, urllib.parse.urlencode(dodatek)) if x)
+    return urllib.parse.urlunsplit((d.scheme, d.netloc, d.path, poizvedba, d.fragment))
+
+
 # ------------------------------------------------------------------------------ Stremio dodatki
 
 #: Stremio vrste -> vrste Medijskega centra.
@@ -504,6 +768,74 @@ def stremio_vrsta(tip: str) -> str:
     return "video"
 
 
+_GLASBENO_IME = re.compile(r"(^|[^a-z])(music|musik|musica|musique|muzika|glasba|glasbeni|songs?|concerts?|koncerti?|"
+                           r"last[ .]?fm|vevo|karaoke|soundcloud|videospoti?)([^a-z]|$)")
+
+
+def glasbeno_ime(ime: str) -> bool:
+    """Ime dodatka ali kataloga pove, da je vsebina glasba (»Flix-Music«, »Top Music«, »Koncerti«) - enako kot
+    OsPravila.glasbenoIme na Androidu."""
+    t = "".join(c for c in unicodedata.normalize("NFD", str(ime or "").lower()) if not unicodedata.combining(c))
+    return bool(_GLASBENO_IME.search(t))
+
+
+def stremio_vrsta_kataloga(tip: str, ime_dodatka: str = "", ime_kataloga: str = "") -> str:
+    """Razred kataloga: po tipu, razen kadar ime dodatka ali kataloga pove, da je glasba - glasbeni dodatek, ki se
+    oglasa kot filmi ali drug video (npr. skladbe kot »movie«), sodi pod Glasbo, ne med filme (Stremio.razredKataloga
+    na Androidu; lastnik, 11. 10. 2026: skladbe z isto naslovnico albuma so bile med filmi videti kot podvojene)."""
+    vrsta = stremio_vrsta(tip)
+    if vrsta in ("film", "serija", "video") and (glasbeno_ime(ime_dodatka) or glasbeno_ime(ime_kataloga)):
+        return "glasba"
+    return vrsta
+
+
+_GLASBENI_ID = ("lfm:", "lastfm:", "spotify:", "deezer:", "dz:", "ytm:", "yt_music", "ytmusic:", "soundcloud:", "sc:",
+                "music:", "track:", "song:", "album:", "artist:", "jamendo:", "audius:", "tidal:", "applemusic:")
+
+
+def stremio_metas_glasbeni(metas: list) -> bool:
+    """Katalog je glasba po VSEBINI, ne le po imenu (lastnik, 11. 10. 2026): vecina vnosov ima glasben id (Last.fm,
+    Spotify, Deezer, YouTube Music ...) ali izvajalca (artist). Filmi z zvrstjo »Music« niso glasba."""
+    vzorec = [m for m in (metas or [])[:30] if isinstance(m, dict)]
+    if len(vzorec) < 3:
+        return False
+    glasbenih = sum(1 for m in vzorec
+                    if str(m.get("id") or "").lower().startswith(_GLASBENI_ID) or isinstance(m.get("artist"), str) and m.get("artist"))
+    return glasbenih * 10 >= len(vzorec) * 6
+
+
+def stremio_toki_imdb(manifest: dict) -> bool:
+    """Dodatek da tokove za filme ali serije po id-jih IMDb (tt...): tak dodatek potrebuje katalog naslovov (Cinemeta),
+    sam pa ga nima nujno (npr. dodatki, ki dajo samo tokove)."""
+    if not isinstance(manifest, dict):
+        return False
+    tipi = {str(t) for t in (manifest.get("types") or [])}
+    predpone = manifest.get("idPrefixes")
+    for r in manifest.get("resources") or []:
+        if r == "stream" or (isinstance(r, dict) and r.get("name") == "stream"):
+            rt = {str(t) for t in ((r.get("types") if isinstance(r, dict) else None) or tipi)}
+            rp = (r.get("idPrefixes") if isinstance(r, dict) else None) or predpone
+            if rt & {"movie", "series"} and (not rp or any(str(p).startswith("tt") for p in rp)):
+                return True
+    return False
+
+
+CINEMETA = "https://v3-cinemeta.strem.io/manifest.json"
+
+
+def _stremio_izvajalec(meta: dict) -> str:
+    """Izvajalec glasbenega vnosa: artist/author, prvi igralec ali reziser (kot Stremio.kt na Androidu)."""
+    for k in ("artist", "author"):
+        v = meta.get(k)
+        if isinstance(v, str) and v.strip():
+            return v.strip()[:120]
+    for k in ("cast", "director"):
+        v = meta.get(k)
+        if isinstance(v, list) and v and isinstance(v[0], str) and v[0].strip():
+            return v[0].strip()[:120]
+    return ""
+
+
 def _stremio_ujema(ime: str, iskano: str) -> bool:
     """Vse iskane besede so v imenu (brez razlikovanja velikih crk in naglasov: "sport" najde "Šport TV")."""
     def cisto(t: str) -> str:
@@ -520,18 +852,64 @@ def ujema_iskanje(item: dict, iskano: str) -> bool:
 
 
 def _stremio_koren(url: str) -> str:
-    """Naslov dodatka brez /manifest.json (uporabnik pogosto prilepi celoten naslov manifesta)."""
+    """Naslov dodatka brez /manifest.json in brez /configure (uporabnik pogosto prilepi celoten naslov manifesta ali
+    naslov strani z nastavitvami dodatka; manifest je vedno v korenu, kot na Androidu - MedijskiViri.preveriDodatek)."""
     url = url.strip()
     if url.startswith("stremio://"):
         url = "https://" + url[len("stremio://"):]
-    return re.sub(r"/manifest\.json$", "", url.rstrip("/"))
+    url = re.sub(r"/manifest\.json$", "", url.rstrip("/"))
+    return re.sub(r"/configure$", "", url)
 
 
-def stremio_manifest(url: str) -> dict:
+def stremio_naslov_dodatka(url: str) -> str:
+    """Povezava »Install« (stremio://...), naslov manifesta ali korena -> https://.../manifest.json; "" ce to ne more
+    biti dodatek: samo https (http samo v domacem omrezju), z gostiteljem, brez prijavnih podatkov in parametrov."""
+    url = str(url or "").strip()[:1024]
+    if not url or any(c.isspace() for c in url):
+        return ""
+    if url.startswith("stremio://"):
+        url = "https://" + url[len("stremio://"):]
+    try:
+        d = urllib.parse.urlsplit(url)
+        gostitelj = d.hostname or ""
+    except ValueError:
+        return ""
+    if not gostitelj or d.username or d.password or d.query or d.fragment:
+        return ""
+    if not (d.scheme == "https" or (d.scheme == "http" and je_domace_omrezje(gostitelj))):
+        return ""
+    return _stremio_koren(url) + "/manifest.json"
+
+
+#: Manifesti dodatkov Stremio v pomnilniku (koren -> (cas, manifest)): manifest se redko spremeni, pocasen streznik
+#: dodatka pa je pri vsakem iskanju dodal vec sekund (izmerjeno 5,5 s na testnem PC, 17. 10. 2026).
+_MANIFESTI: dict[str, tuple[float, dict]] = {}
+_MANIFESTI_ZAKLEP = threading.Lock()
+MANIFEST_VELJA_S = 30 * 60
+#: Najvec toliko manifestov v pomnilniku (dolgotrajen proces; dodatki, ki jih uporabnik odstrani, ne ostanejo).
+MANIFESTOV_NAJVEC = 200
+#: Katalogi enega dodatka se nalagajo hkrati, vsak z rokom: en pocasen katalog ne zadrzi drugih (prej zaporedno,
+#: 8 katalogov x do 10 s - iskanje »dune« je trajalo 76 s).
+KATALOG_ROK_S = 6.0
+KATALOGI_HKRATI = 4
+
+
+def stremio_manifest(url: str, sveze: bool = False) -> dict:
+    """Manifest dodatka. `sveze=True` (dodajanje vira, preverba): vedno s streznika, sicer iz pomnilnika, dokler velja."""
     koren = _stremio_koren(url)
+    zdaj = time.monotonic()
+    if not sveze:
+        with _MANIFESTI_ZAKLEP:
+            znan = _MANIFESTI.get(koren)
+        if znan and zdaj - znan[0] < MANIFEST_VELJA_S:
+            return znan[1]
     m = json.loads(_request(koren + "/manifest.json"))
     if not isinstance(m, dict) or not m.get("id"):
         raise ValueError("To ni Stremio dodatek (manifest.json).")
+    with _MANIFESTI_ZAKLEP:
+        if len(_MANIFESTI) >= MANIFESTOV_NAJVEC and koren not in _MANIFESTI:
+            _MANIFESTI.clear()
+        _MANIFESTI[koren] = (zdaj, m)
     return m
 
 
@@ -539,7 +917,31 @@ def stremio_je_zaseben(manifest: dict) -> bool:
     """Zaseben dodatek: v manifestu se sam oznaci z `behaviorHints.adult`. Kar pride iz njega, ostane na napravi -
     naslova in plakata ne povemo drugim napravam in ga ni na polici »Na tvojih napravah« (kot v Safeer OS za Android)."""
     namigi = manifest.get("behaviorHints") if isinstance(manifest, dict) else None
-    return bool(isinstance(namigi, dict) and namigi.get("adult"))
+    if isinstance(namigi, dict) and namigi.get("adult"):
+        return True
+    if not isinstance(manifest, dict):
+        return False
+    # Vsi dodatki za odrasle se ne oznacijo sami (JAV Nexus, preizkus 17. 10. 2026: »adult films ... 18+«, brez
+    # behaviorHints.adult) - zato tudi ime, opis in imena katalogov. Raje enkrat prevec v Zasebno kot na Domov.
+    besedila = [manifest.get("name"), manifest.get("description"), manifest.get("id")]
+    besedila += [c.get("name") for c in (manifest.get("catalogs") or []) if isinstance(c, dict)]
+    return any(je_besedilo_za_odrasle(b) for b in besedila)
+
+
+#: Oznake vsebine za odrasle v imenu ali opisu dodatka (ne v naslovih filmov - »Sex Education« ni dodatek za odrasle).
+_ZA_ODRASLE = re.compile(
+    r"(?<![a-z0-9])(18\+|xxx|porn\w*|nsfw|hentai|jav|erotic\w*|erotik\w*|adults?[ -]only|"
+    r"adult (?:films?|movies?|videos?|content|entertainment|stream\w*))(?![a-z0-9])", re.I)
+
+
+def je_besedilo_za_odrasle(besedilo) -> bool:
+    return bool(besedilo) and bool(_ZA_ODRASLE.search(str(besedilo)))
+
+
+def stremio_idji(mid: str) -> dict:
+    """TMDB in TVDB id iz id-ja dodatka (»tmdb:603«, »tvdb:81189«), da se naslov zdruzi z istim s strežnika."""
+    m = re.fullmatch(r"(tmdb|tvdb):(\d{1,10})", str(mid or "").strip().lower())
+    return {m.group(1) + "_id": int(m.group(2))} if m and int(m.group(2)) > 0 else {}
 
 
 def _stremio_items(base: str, server: dict, query: str) -> list[dict]:
@@ -547,11 +949,12 @@ def _stremio_items(base: str, server: dict, query: str) -> list[dict]:
     koren = _stremio_koren(base)
     manifest = stremio_manifest(koren)
     rezultat = []
+    naloge = []
     for katalog in (manifest.get("catalogs") or [])[:8]:
         tip, ident = str(katalog.get("type") or ""), str(katalog.get("id") or "")
         if not tip or not ident:
             continue
-        vrsta = stremio_vrsta(tip)
+        vrsta = stremio_vrsta_kataloga(tip, manifest.get("name") or "", katalog.get("name") or "")
         dodatno = [e.get("name") for e in (katalog.get("extra") or []) if isinstance(e, dict)] + list(katalog.get("extraSupported") or [])
         obvezen = any(isinstance(e, dict) and e.get("isRequired") for e in (katalog.get("extra") or []))
         # Katalog kanalov, postaj ali glasbe brez lastnega iskanja (vecina dodatkov TV v zivo) preiscemo sami po imenu.
@@ -564,13 +967,28 @@ def _stremio_items(base: str, server: dict, query: str) -> list[dict]:
             if obvezen:
                 continue
             pot = "/catalog/%s/%s.json" % (tip, urllib.parse.quote(ident, safe=""))
+        naloge.append((katalog, tip, vrsta, iscem_sam, pot))
+
+    def nalozi(naloga):
         try:
-            metas = json.loads(_request(koren + pot)).get("metas") or []
-        except Exception:
-            continue
+            odgovor = json.loads(_request_z_rokom(koren + naloga[4], KATALOG_ROK_S))
+            return (odgovor.get("metas") if isinstance(odgovor, dict) else None) or []
+        except Exception:  # noqa: BLE001 - nedosegljiv ali pokvarjen katalog preskocimo
+            return []
+
+    if len(naloge) > 1:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=KATALOGI_HKRATI) as izvajalec:
+            vsi_metas = list(izvajalec.map(nalozi, naloge))
+    else:
+        vsi_metas = [nalozi(n) for n in naloge]
+    for (katalog, tip, vrsta, iscem_sam, _pot), metas in zip(naloge, vsi_metas):
         if iscem_sam:
             metas = [m for m in metas if isinstance(m, dict) and _stremio_ujema(m.get("name", ""), query)]
+        if vrsta in ("film", "serija", "video") and stremio_metas_glasbeni(metas):
+            vrsta = "glasba"
         for meta in metas[:100]:
+            if not isinstance(meta, dict):
+                continue
             mid = str(meta.get("id") or "")
             if not mid:
                 continue
@@ -580,8 +998,11 @@ def _stremio_items(base: str, server: dict, query: str) -> list[dict]:
                              "opis": str(meta.get("description") or "")[:500], "leto": int(str(meta.get("releaseInfo") or "0")[:4] or 0)
                              if str(meta.get("releaseInfo") or "")[:4].isdigit() else 0,
                              "imdb_id": mid if mid.startswith("tt") else "", "vir": server["ime"],
+                             **stremio_idji(mid),
                              "stremio": {"koren": koren, "tip": tip, "id": mid},
                              "skupina": katalog.get("name") or manifest.get("name") or ""})
+            if vrsta == "glasba":
+                rezultat[-1]["izvajalec"] = _stremio_izvajalec(meta)
     return rezultat
 
 
@@ -802,7 +1223,7 @@ def stremio_preveri(base: str) -> str:
     medijskem centru ne bi deloval; dodatek s samimi torrenti deluje na racunalniku, ki zna prenasati torrente.
     """
     koren = _stremio_koren(base)
-    manifest = stremio_manifest(koren)
+    manifest = stremio_manifest(koren, sveze=True)
     viri = [r if isinstance(r, str) else str((r or {}).get("name") or "") for r in (manifest.get("resources") or [])]
     if "stream" not in viri:
         return ("Ta dodatek ponuja samo seznam naslovov brez predvajalnih povezav, "
