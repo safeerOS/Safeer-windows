@@ -1,0 +1,1488 @@
+{
+ "opis": "Skupni preizkusni primeri protokola dodatkov Safeer v1 (docs/DODATKI-PROTOKOL.md). Ista datoteka je v repozitorijih Android-tv, Safeer-linux in Safeer-windows; preverjata jo Android (tests/DodatkiProtokolPrimeriTest.kt, ista koda kot aplikacija) in Python (sdk/python/safeer_addon_test.py). Shared test vectors of the Safeer add-on protocol v1 - the same file in every Safeer repository. Format of 'povzetek': see the tests.",
+ "verzija_protokola": 1,
+ "razsiritev": [
+  {
+   "ime": "primer iz dokumenta protokola",
+   "manifest": {
+    "id": "org.example.lists",
+    "version": "1.2.0",
+    "name": "Example Lists",
+    "resources": [
+     "catalog",
+     "meta",
+     "stream"
+    ],
+    "types": [
+     "movie",
+     "series"
+    ],
+    "catalogs": [],
+    "safeer": {
+     "protocol": 1,
+     "actions": [
+      {
+       "id": "add-to-list",
+       "on": [
+        "movie",
+        "series"
+       ],
+       "icon": "plus",
+       "label": {
+        "en": "Add to my list",
+        "sl": "Dodaj na moj seznam"
+       },
+       "confirm": false
+      }
+     ],
+     "enrich": [
+      "movie",
+      "series"
+     ],
+     "folders": [
+      {
+       "id": "my-account",
+       "icon": "folder",
+       "name": {
+        "en": "My account",
+        "sl": "Moj račun"
+       }
+      }
+     ],
+     "settings": [
+      {
+       "key": "api_key",
+       "type": "secret",
+       "required": true,
+       "label": {
+        "en": "API key",
+        "sl": "Ključ API"
+       }
+      },
+      {
+       "key": "quality",
+       "type": "choice",
+       "options": [
+        "auto",
+        "1080p",
+        "720p"
+       ],
+       "default": "auto",
+       "label": {
+        "en": "Quality",
+        "sl": "Kakovost"
+       }
+      },
+      {
+       "key": "only_cached",
+       "type": "toggle",
+       "default": false,
+       "label": {
+        "en": "Only instant",
+        "sl": "Samo takoj"
+       }
+      }
+     ],
+     "changelog": {
+      "1.2.0": {
+       "en": "Folders",
+       "sl": "Mape"
+      }
+     }
+    }
+   },
+   "povzetek": "p=1;new=0;a=add-to-list[movie,series]plus/0/Dodaj na moj seznam;e=movie,series;f=my-account/folder/My account;s=api_key/secret/1//|quality/choice/0/auto/auto,1080p,720p|only_cached/toggle/0/false/;c=1.2.0;w=0"
+  },
+  {
+   "ime": "navaden dodatek Stremio",
+   "manifest": {
+    "id": "x",
+    "version": "1",
+    "name": "X",
+    "resources": [
+     "stream"
+    ],
+    "types": [
+     "movie"
+    ]
+   },
+   "povzetek": "none"
+  },
+  {
+   "ime": "safeer ni objekt",
+   "manifest": {
+    "id": "x",
+    "safeer": "1"
+   },
+   "povzetek": "none"
+  },
+  {
+   "ime": "brez protocol",
+   "manifest": {
+    "id": "x",
+    "version": "1.0.0",
+    "name": "X",
+    "resources": [
+     "stream"
+    ],
+    "types": [
+     "movie"
+    ],
+    "safeer": {
+     "actions": []
+    }
+   },
+   "povzetek": "p=0;new=0;a=;e=;f=;s=;c=;w=1"
+  },
+  {
+   "ime": "protocol kot niz",
+   "manifest": {
+    "id": "x",
+    "version": "1.0.0",
+    "name": "X",
+    "resources": [
+     "stream"
+    ],
+    "types": [
+     "movie"
+    ],
+    "safeer": {
+     "protocol": "1"
+    }
+   },
+   "povzetek": "p=0;new=0;a=;e=;f=;s=;c=;w=1"
+  },
+  {
+   "ime": "protocol 0",
+   "manifest": {
+    "id": "x",
+    "version": "1.0.0",
+    "name": "X",
+    "resources": [
+     "stream"
+    ],
+    "types": [
+     "movie"
+    ],
+    "safeer": {
+     "protocol": 0
+    }
+   },
+   "povzetek": "p=0;new=0;a=;e=;f=;s=;c=;w=1"
+  },
+  {
+   "ime": "novejsi protocol",
+   "manifest": {
+    "id": "x",
+    "version": "1.0.0",
+    "name": "X",
+    "resources": [
+     "stream"
+    ],
+    "types": [
+     "movie"
+    ],
+    "safeer": {
+     "protocol": 2,
+     "actions": [
+      {
+       "id": "a",
+       "on": [
+        "movie"
+       ],
+       "label": "A"
+      }
+     ]
+    }
+   },
+   "povzetek": "p=2;new=1;a=;e=;f=;s=;c=;w=1"
+  },
+  {
+   "ime": "protocol 1.7 je 1",
+   "manifest": {
+    "id": "x",
+    "version": "1.0.0",
+    "name": "X",
+    "resources": [
+     "stream"
+    ],
+    "types": [
+     "movie"
+    ],
+    "safeer": {
+     "protocol": 1.7
+    }
+   },
+   "povzetek": "p=1;new=0;a=;e=;f=;s=;c=;w=0"
+  },
+  {
+   "ime": "neveljavni vnosi odpadejo posamicno",
+   "manifest": {
+    "id": "x",
+    "version": "1.0.0",
+    "name": "X",
+    "resources": [
+     "stream"
+    ],
+    "types": [
+     "movie"
+    ],
+    "safeer": {
+     "protocol": 1,
+     "actions": [
+      {
+       "id": "Add!",
+       "on": [
+        "movie"
+       ],
+       "label": "A"
+      },
+      {
+       "id": "books",
+       "on": [
+        "book"
+       ],
+       "label": "B"
+      },
+      {
+       "id": "nolabel",
+       "on": [
+        "movie"
+       ]
+      },
+      {
+       "id": "rocket",
+       "on": [
+        "Movie ",
+        "tv"
+       ],
+       "icon": "rocket",
+       "label": "R",
+       "confirm": true
+      },
+      {
+       "id": "rocket",
+       "on": [
+        "movie"
+       ],
+       "label": "Second copy"
+      },
+      {
+       "id": "num-icon",
+       "on": [
+        "movie"
+       ],
+       "icon": 5,
+       "label": "N"
+      },
+      {
+       "id": "no-icon",
+       "on": [
+        "radio"
+       ],
+       "label": "NI",
+       "confirm": "yes"
+      }
+     ],
+     "enrich": [
+      "Movie ",
+      "book",
+      "series"
+     ],
+     "folders": [
+      {
+       "id": "Bad Id",
+       "name": "x"
+      },
+      {
+       "id": "noname"
+      },
+      {
+       "id": "f-num",
+       "icon": 7,
+       "name": "Num"
+      },
+      {
+       "id": "f-bad",
+       "icon": "zzz",
+       "name": {
+        "fr": "Dossier"
+       }
+      }
+     ],
+     "settings": [
+      {
+       "key": "Api-Key",
+       "type": "text",
+       "label": "x"
+      },
+      {
+       "key": "count",
+       "type": "number",
+       "label": "x"
+      },
+      {
+       "key": "nolabel",
+       "type": "text"
+      },
+      {
+       "key": "pick",
+       "type": "choice",
+       "options": [],
+       "label": "x"
+      },
+      {
+       "key": "token",
+       "type": "secret",
+       "default": "abc",
+       "label": "x"
+      },
+      {
+       "key": "flag",
+       "type": "secret",
+       "default": false,
+       "label": "x"
+      },
+      {
+       "key": "mode",
+       "type": "Choice",
+       "options": [
+        "a",
+        " a ",
+        "",
+        "b",
+        "a"
+       ],
+       "default": "zzz",
+       "label": "Mode",
+       "required": "yes"
+      },
+      {
+       "key": "on",
+       "type": "toggle",
+       "default": true,
+       "label": "On",
+       "required": true
+      },
+      {
+       "key": "n",
+       "type": "text",
+       "default": 5,
+       "label": "N"
+      },
+      {
+       "key": "n",
+       "type": "text",
+       "default": "dup",
+       "label": "N2"
+      }
+     ],
+     "changelog": {
+      " 1.0.0 ": "First",
+      "1.0.0-very-long-version-key": {
+       "en": "Long"
+      },
+      "2.0.0": 5,
+      "3.0.0": {
+       "en": ""
+      }
+     }
+    }
+   },
+   "povzetek": "p=1;new=0;a=rocket[movie,tv]info/1/R|num-icon[movie]info/0/N|no-icon[radio]info/0/NI;e=movie,series;f=f-num/folder/Num|f-bad/info/Dossier;s=mode/choice/0/a/a,b|on/toggle/1/true/|n/text/0/5/;c=1.0.0,1.0.0-very-long-vers;w=13"
+  },
+  {
+   "ime": "meje stevila",
+   "manifest": {
+    "id": "x",
+    "version": "1.0.0",
+    "name": "X",
+    "resources": [
+     "stream"
+    ],
+    "types": [
+     "movie"
+    ],
+    "safeer": {
+     "protocol": 1,
+     "actions": [
+      {
+       "id": "a0",
+       "on": [
+        "movie"
+       ],
+       "label": "A0"
+      },
+      {
+       "id": "a1",
+       "on": [
+        "movie"
+       ],
+       "label": "A1"
+      },
+      {
+       "id": "a2",
+       "on": [
+        "movie"
+       ],
+       "label": "A2"
+      },
+      {
+       "id": "a3",
+       "on": [
+        "movie"
+       ],
+       "label": "A3"
+      },
+      {
+       "id": "a4",
+       "on": [
+        "movie"
+       ],
+       "label": "A4"
+      },
+      {
+       "id": "a5",
+       "on": [
+        "movie"
+       ],
+       "label": "A5"
+      },
+      {
+       "id": "a6",
+       "on": [
+        "movie"
+       ],
+       "label": "A6"
+      },
+      {
+       "id": "a7",
+       "on": [
+        "movie"
+       ],
+       "label": "A7"
+      },
+      {
+       "id": "a8",
+       "on": [
+        "movie"
+       ],
+       "label": "A8"
+      },
+      {
+       "id": "a9",
+       "on": [
+        "movie"
+       ],
+       "label": "A9"
+      }
+     ],
+     "folders": [
+      {
+       "id": "f0",
+       "name": "F0"
+      },
+      {
+       "id": "f1",
+       "name": "F1"
+      },
+      {
+       "id": "f2",
+       "name": "F2"
+      },
+      {
+       "id": "f3",
+       "name": "F3"
+      },
+      {
+       "id": "f4",
+       "name": "F4"
+      }
+     ],
+     "settings": [
+      {
+       "key": "c",
+       "type": "choice",
+       "options": [
+        "o0",
+        "o1",
+        "o2",
+        "o3",
+        "o4",
+        "o5",
+        "o6",
+        "o7",
+        "o8",
+        "o9",
+        "o10",
+        "o11",
+        "o12",
+        "o13",
+        "o14",
+        "o15",
+        "o16",
+        "o17",
+        "o18",
+        "o19",
+        "o20",
+        "o21",
+        "o22",
+        "o23",
+        "o24"
+       ],
+       "label": "C"
+      },
+      {
+       "key": "s0",
+       "type": "text",
+       "label": "S0"
+      },
+      {
+       "key": "s1",
+       "type": "text",
+       "label": "S1"
+      },
+      {
+       "key": "s2",
+       "type": "text",
+       "label": "S2"
+      },
+      {
+       "key": "s3",
+       "type": "text",
+       "label": "S3"
+      },
+      {
+       "key": "s4",
+       "type": "text",
+       "label": "S4"
+      },
+      {
+       "key": "s5",
+       "type": "text",
+       "label": "S5"
+      },
+      {
+       "key": "s6",
+       "type": "text",
+       "label": "S6"
+      },
+      {
+       "key": "s7",
+       "type": "text",
+       "label": "S7"
+      },
+      {
+       "key": "s8",
+       "type": "text",
+       "label": "S8"
+      },
+      {
+       "key": "s9",
+       "type": "text",
+       "label": "S9"
+      },
+      {
+       "key": "s10",
+       "type": "text",
+       "label": "S10"
+      },
+      {
+       "key": "s11",
+       "type": "text",
+       "label": "S11"
+      },
+      {
+       "key": "s12",
+       "type": "text",
+       "label": "S12"
+      },
+      {
+       "key": "s13",
+       "type": "text",
+       "label": "S13"
+      },
+      {
+       "key": "s14",
+       "type": "text",
+       "label": "S14"
+      },
+      {
+       "key": "s15",
+       "type": "text",
+       "label": "S15"
+      },
+      {
+       "key": "s16",
+       "type": "text",
+       "label": "S16"
+      },
+      {
+       "key": "s17",
+       "type": "text",
+       "label": "S17"
+      },
+      {
+       "key": "s18",
+       "type": "text",
+       "label": "S18"
+      },
+      {
+       "key": "s19",
+       "type": "text",
+       "label": "S19"
+      },
+      {
+       "key": "s20",
+       "type": "text",
+       "label": "S20"
+      }
+     ]
+    }
+   },
+   "povzetek": "p=1;new=0;a=a0[movie]info/0/A0|a1[movie]info/0/A1|a2[movie]info/0/A2|a3[movie]info/0/A3|a4[movie]info/0/A4|a5[movie]info/0/A5|a6[movie]info/0/A6|a7[movie]info/0/A7;e=;f=f0/folder/F0|f1/folder/F1|f2/folder/F2|f3/folder/F3;s=c/choice/0/o0/o0,o1,o2,o3,o4,o5,o6,o7,o8,o9,o10,o11,o12,o13,o14,o15,o16,o17,o18,o19|s0/text/0//|s1/text/0//|s2/text/0//|s3/text/0//|s4/text/0//|s5/text/0//|s6/text/0//|s7/text/0//|s8/text/0//|s9/text/0//|s10/text/0//|s11/text/0//|s12/text/0//|s13/text/0//|s14/text/0//|s15/text/0//|s16/text/0//|s17/text/0//|s18/text/0//;c=;w=3"
+  },
+  {
+   "ime": "besedila",
+   "manifest": {
+    "id": "x",
+    "version": "1.0.0",
+    "name": "X",
+    "resources": [
+     "stream"
+    ],
+    "types": [
+     "movie"
+    ],
+    "safeer": {
+     "protocol": 1,
+     "actions": [
+      {
+       "id": "t1",
+       "on": [
+        "movie"
+       ],
+       "label": "  Add\tto \n list  "
+      },
+      {
+       "id": "t2",
+       "on": [
+        "movie"
+       ],
+       "label": {
+        "SL": "Slovensko",
+        "en": "English"
+       }
+      },
+      {
+       "id": "t3",
+       "on": [
+        "movie"
+       ],
+       "label": {
+        "de": "Deutsch"
+       }
+      },
+      {
+       "id": "t4",
+       "on": [
+        "movie"
+       ],
+       "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+      },
+      {
+       "id": "t5",
+       "on": [
+        "movie"
+       ],
+       "label": {
+        "en": "   ",
+        "sl": 5
+       }
+      }
+     ]
+    }
+   },
+   "povzetek": "p=1;new=0;a=t1[movie]info/0/Addto list|t2[movie]info/0/Slovensko|t3[movie]info/0/Deutsch|t4[movie]info/0/LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL;e=;f=;s=;c=;w=1"
+  }
+ ],
+ "glava": [
+  {
+   "ime": "https: vse nastavitve",
+   "manifest": {
+    "id": "org.example.lists",
+    "version": "1.2.0",
+    "name": "Example Lists",
+    "resources": [
+     "catalog",
+     "meta",
+     "stream"
+    ],
+    "types": [
+     "movie",
+     "series"
+    ],
+    "catalogs": [],
+    "safeer": {
+     "protocol": 1,
+     "actions": [
+      {
+       "id": "add-to-list",
+       "on": [
+        "movie",
+        "series"
+       ],
+       "icon": "plus",
+       "label": {
+        "en": "Add to my list",
+        "sl": "Dodaj na moj seznam"
+       },
+       "confirm": false
+      }
+     ],
+     "enrich": [
+      "movie",
+      "series"
+     ],
+     "folders": [
+      {
+       "id": "my-account",
+       "icon": "folder",
+       "name": {
+        "en": "My account",
+        "sl": "Moj račun"
+       }
+      }
+     ],
+     "settings": [
+      {
+       "key": "api_key",
+       "type": "secret",
+       "required": true,
+       "label": {
+        "en": "API key",
+        "sl": "Ključ API"
+       }
+      },
+      {
+       "key": "quality",
+       "type": "choice",
+       "options": [
+        "auto",
+        "1080p",
+        "720p"
+       ],
+       "default": "auto",
+       "label": {
+        "en": "Quality",
+        "sl": "Kakovost"
+       }
+      },
+      {
+       "key": "only_cached",
+       "type": "toggle",
+       "default": false,
+       "label": {
+        "en": "Only instant",
+        "sl": "Samo takoj"
+       }
+      }
+     ],
+     "changelog": {
+      "1.2.0": {
+       "en": "Folders",
+       "sl": "Mape"
+      }
+     }
+    }
+   },
+   "url": "https://a.example/safeer/action/x/movie/1.json",
+   "vrednosti": {
+    "api_key": "k1",
+    "quality": "720p"
+   },
+   "json": "{\"api_key\":\"k1\",\"quality\":\"720p\",\"only_cached\":false}"
+  },
+  {
+   "ime": "http na krajevni naslov: brez skrivnosti",
+   "manifest": {
+    "id": "org.example.lists",
+    "version": "1.2.0",
+    "name": "Example Lists",
+    "resources": [
+     "catalog",
+     "meta",
+     "stream"
+    ],
+    "types": [
+     "movie",
+     "series"
+    ],
+    "catalogs": [],
+    "safeer": {
+     "protocol": 1,
+     "actions": [
+      {
+       "id": "add-to-list",
+       "on": [
+        "movie",
+        "series"
+       ],
+       "icon": "plus",
+       "label": {
+        "en": "Add to my list",
+        "sl": "Dodaj na moj seznam"
+       },
+       "confirm": false
+      }
+     ],
+     "enrich": [
+      "movie",
+      "series"
+     ],
+     "folders": [
+      {
+       "id": "my-account",
+       "icon": "folder",
+       "name": {
+        "en": "My account",
+        "sl": "Moj račun"
+       }
+      }
+     ],
+     "settings": [
+      {
+       "key": "api_key",
+       "type": "secret",
+       "required": true,
+       "label": {
+        "en": "API key",
+        "sl": "Ključ API"
+       }
+      },
+      {
+       "key": "quality",
+       "type": "choice",
+       "options": [
+        "auto",
+        "1080p",
+        "720p"
+       ],
+       "default": "auto",
+       "label": {
+        "en": "Quality",
+        "sl": "Kakovost"
+       }
+      },
+      {
+       "key": "only_cached",
+       "type": "toggle",
+       "default": false,
+       "label": {
+        "en": "Only instant",
+        "sl": "Samo takoj"
+       }
+      }
+     ],
+     "changelog": {
+      "1.2.0": {
+       "en": "Folders",
+       "sl": "Mape"
+      }
+     }
+    }
+   },
+   "url": "http://192.168.1.5:7000/safeer/action/x/movie/1.json",
+   "vrednosti": {
+    "api_key": "k1",
+    "quality": "720p",
+    "only_cached": "true"
+   },
+   "json": "{\"quality\":\"720p\",\"only_cached\":true}"
+  },
+  {
+   "ime": "privzete vrednosti, neznan kljuc odpade",
+   "manifest": {
+    "id": "org.example.lists",
+    "version": "1.2.0",
+    "name": "Example Lists",
+    "resources": [
+     "catalog",
+     "meta",
+     "stream"
+    ],
+    "types": [
+     "movie",
+     "series"
+    ],
+    "catalogs": [],
+    "safeer": {
+     "protocol": 1,
+     "actions": [
+      {
+       "id": "add-to-list",
+       "on": [
+        "movie",
+        "series"
+       ],
+       "icon": "plus",
+       "label": {
+        "en": "Add to my list",
+        "sl": "Dodaj na moj seznam"
+       },
+       "confirm": false
+      }
+     ],
+     "enrich": [
+      "movie",
+      "series"
+     ],
+     "folders": [
+      {
+       "id": "my-account",
+       "icon": "folder",
+       "name": {
+        "en": "My account",
+        "sl": "Moj račun"
+       }
+      }
+     ],
+     "settings": [
+      {
+       "key": "api_key",
+       "type": "secret",
+       "required": true,
+       "label": {
+        "en": "API key",
+        "sl": "Ključ API"
+       }
+      },
+      {
+       "key": "quality",
+       "type": "choice",
+       "options": [
+        "auto",
+        "1080p",
+        "720p"
+       ],
+       "default": "auto",
+       "label": {
+        "en": "Quality",
+        "sl": "Kakovost"
+       }
+      },
+      {
+       "key": "only_cached",
+       "type": "toggle",
+       "default": false,
+       "label": {
+        "en": "Only instant",
+        "sl": "Samo takoj"
+       }
+      }
+     ],
+     "changelog": {
+      "1.2.0": {
+       "en": "Folders",
+       "sl": "Mape"
+      }
+     }
+    }
+   },
+   "url": "https://a.example/x",
+   "vrednosti": {
+    "unknown": "zzz"
+   },
+   "json": "{\"quality\":\"auto\",\"only_cached\":false}"
+  },
+  {
+   "ime": "ubezni znaki",
+   "manifest": {
+    "id": "org.example.lists",
+    "version": "1.2.0",
+    "name": "Example Lists",
+    "resources": [
+     "catalog",
+     "meta",
+     "stream"
+    ],
+    "types": [
+     "movie",
+     "series"
+    ],
+    "catalogs": [],
+    "safeer": {
+     "protocol": 1,
+     "actions": [
+      {
+       "id": "add-to-list",
+       "on": [
+        "movie",
+        "series"
+       ],
+       "icon": "plus",
+       "label": {
+        "en": "Add to my list",
+        "sl": "Dodaj na moj seznam"
+       },
+       "confirm": false
+      }
+     ],
+     "enrich": [
+      "movie",
+      "series"
+     ],
+     "folders": [
+      {
+       "id": "my-account",
+       "icon": "folder",
+       "name": {
+        "en": "My account",
+        "sl": "Moj račun"
+       }
+      }
+     ],
+     "settings": [
+      {
+       "key": "api_key",
+       "type": "secret",
+       "required": true,
+       "label": {
+        "en": "API key",
+        "sl": "Ključ API"
+       }
+      },
+      {
+       "key": "quality",
+       "type": "choice",
+       "options": [
+        "auto",
+        "1080p",
+        "720p"
+       ],
+       "default": "auto",
+       "label": {
+        "en": "Quality",
+        "sl": "Kakovost"
+       }
+      },
+      {
+       "key": "only_cached",
+       "type": "toggle",
+       "default": false,
+       "label": {
+        "en": "Only instant",
+        "sl": "Samo takoj"
+       }
+      }
+     ],
+     "changelog": {
+      "1.2.0": {
+       "en": "Folders",
+       "sl": "Mape"
+      }
+     }
+    }
+   },
+   "url": "https://a.example/x",
+   "vrednosti": {
+    "api_key": "a\"b\\c\nd\te\u0001fč",
+    "quality": "",
+    "only_cached": "yes"
+   },
+   "json": "{\"api_key\":\"a\\\"b\\\\c\\nd\\te\\u0001fč\",\"only_cached\":false}"
+  }
+ ],
+ "sme_poslati": [
+  {
+   "url": "https://a.example/x",
+   "razvojni": false,
+   "pricakovano": true
+  },
+  {
+   "url": "HTTPS://A.EXAMPLE/x",
+   "razvojni": false,
+   "pricakovano": true
+  },
+  {
+   "url": "http://a.example/x",
+   "razvojni": true,
+   "pricakovano": false
+  },
+  {
+   "url": "http://192.168.1.20:7000/x",
+   "razvojni": true,
+   "pricakovano": true
+  },
+  {
+   "url": "http://192.168.1.20:7000/x",
+   "razvojni": false,
+   "pricakovano": false
+  },
+  {
+   "url": "http://localhost:7000/manifest.json",
+   "razvojni": true,
+   "pricakovano": true
+  },
+  {
+   "url": "http://[::1]:7000/x",
+   "razvojni": true,
+   "pricakovano": true
+  },
+  {
+   "url": "http://172.20.1.1/x",
+   "razvojni": true,
+   "pricakovano": true
+  },
+  {
+   "url": "http://172.32.1.1/x",
+   "razvojni": true,
+   "pricakovano": false
+  },
+  {
+   "url": "http://printer.local/x",
+   "razvojni": true,
+   "pricakovano": true
+  },
+  {
+   "url": "ftp://a.example/x",
+   "razvojni": true,
+   "pricakovano": false
+  },
+  {
+   "url": "not a url",
+   "razvojni": true,
+   "pricakovano": false
+  },
+  {
+   "url": "https:///x",
+   "razvojni": false,
+   "pricakovano": false
+  }
+ ],
+ "krajevni": [
+  {
+   "gostitelj": "localhost",
+   "pricakovano": true
+  },
+  {
+   "gostitelj": "LOCALHOST",
+   "pricakovano": true
+  },
+  {
+   "gostitelj": "::1",
+   "pricakovano": true
+  },
+  {
+   "gostitelj": "[::1]",
+   "pricakovano": true
+  },
+  {
+   "gostitelj": "nas.local",
+   "pricakovano": true
+  },
+  {
+   "gostitelj": "127.0.0.1",
+   "pricakovano": true
+  },
+  {
+   "gostitelj": "10.1.2.3",
+   "pricakovano": true
+  },
+  {
+   "gostitelj": "192.168.1.1",
+   "pricakovano": true
+  },
+  {
+   "gostitelj": "172.16.0.1",
+   "pricakovano": true
+  },
+  {
+   "gostitelj": "172.31.255.255",
+   "pricakovano": true
+  },
+  {
+   "gostitelj": "172.15.0.1",
+   "pricakovano": false
+  },
+  {
+   "gostitelj": "8.8.8.8",
+   "pricakovano": false
+  },
+  {
+   "gostitelj": "example.com",
+   "pricakovano": false
+  },
+  {
+   "gostitelj": "1.2.3",
+   "pricakovano": false
+  },
+  {
+   "gostitelj": "1.2.3.4.5",
+   "pricakovano": false
+  },
+  {
+   "gostitelj": "10.99999999999.0.0",
+   "pricakovano": false
+  }
+ ],
+ "naslovi": [
+  {
+   "vrsta": "dejanje",
+   "osnova": "https://a.example/",
+   "dejanje": "add-to-list",
+   "tip": "movie",
+   "id": "tt0111161",
+   "pricakovano": "https://a.example/safeer/action/add-to-list/movie/tt0111161.json"
+  },
+  {
+   "vrsta": "dejanje",
+   "osnova": "https://a.example/x",
+   "dejanje": "add",
+   "tip": "series",
+   "id": "tt1:1:2",
+   "pricakovano": "https://a.example/x/safeer/action/add/series/tt1%3A1%3A2.json"
+  },
+  {
+   "vrsta": "dopolni",
+   "osnova": "https://a.example/x",
+   "tip": "series",
+   "id": "kitsu:1 2",
+   "pricakovano": "https://a.example/x/safeer/enrich/series/kitsu%3A1%202.json"
+  },
+  {
+   "vrsta": "mapa",
+   "osnova": "https://a.example",
+   "mapa": "my-list",
+   "pot": "",
+   "pricakovano": "https://a.example/safeer/folder/my-list.json"
+  },
+  {
+   "vrsta": "mapa",
+   "osnova": "https://a.example",
+   "mapa": "my-list",
+   "pot": "a b/../c/./ /d é",
+   "pricakovano": "https://a.example/safeer/folder/my-list/a%20b/c/d%20%C3%A9.json"
+  },
+  {
+   "vrsta": "mapa",
+   "osnova": "https://a.example",
+   "mapa": "m",
+   "pot": "~x*_.-/q&r=s",
+   "pricakovano": "https://a.example/safeer/folder/m/%7Ex*_.-/q%26r%3Ds.json"
+  }
+ ],
+ "mapa": [
+  {
+   "odgovor": {
+    "items": [
+     {
+      "kind": "folder",
+      "path": " all ",
+      "name": "All"
+     },
+     {
+      "kind": "folder",
+      "name": "No path"
+     },
+     {
+      "kind": "meta",
+      "type": "Movie",
+      "id": " tt1 ",
+      "name": "Film",
+      "poster": "https://img.example/p.jpg"
+     },
+     {
+      "kind": "meta",
+      "type": "movie",
+      "id": "tt2",
+      "name": "Plain http poster",
+      "poster": "http://img.example/p.jpg"
+     },
+     {
+      "kind": "meta",
+      "type": "movie",
+      "id": "tt3"
+     },
+     {
+      "kind": " MEta ",
+      "type": "tv",
+      "id": "ch1",
+      "name": "Channel\n 1"
+     },
+     {
+      "kind": "video",
+      "id": "v1",
+      "name": "V"
+     }
+    ],
+    "next": " page2 "
+   },
+   "povzetek": "folder/all///All/|meta//movie/tt1/Film/https://img.example/p.jpg|meta//movie/tt2/Plain http poster/|meta//tv/ch1/Channel 1/;next=page2"
+  },
+  {
+   "odgovor": {
+    "items": "none"
+   },
+   "povzetek": ";next="
+  },
+  {
+   "odgovor": [
+    1,
+    2
+   ],
+   "povzetek": "none"
+  }
+ ],
+ "dejanje": [
+  {
+   "odgovor": {
+    "ok": true,
+    "message": {
+     "en": "Added",
+     "sl": "Dodano"
+    },
+    "refresh": true
+   },
+   "povzetek": "ok=1;msg=Dodano;refresh=1"
+  },
+  {
+   "odgovor": {},
+   "povzetek": "ok=1;msg=;refresh=0"
+  },
+  {
+   "odgovor": {
+    "ok": false,
+    "message": "Nope"
+   },
+   "povzetek": "ok=0;msg=Nope;refresh=0"
+  },
+  {
+   "odgovor": {
+    "ok": "false",
+    "refresh": "true"
+   },
+   "povzetek": "ok=1;msg=;refresh=0"
+  },
+  {
+   "odgovor": [],
+   "povzetek": "none"
+  }
+ ],
+ "spremembe": {
+  "manifest": {
+   "id": "org.example.lists",
+   "version": "1.2.0",
+   "name": "Example Lists",
+   "resources": [
+    "catalog",
+    "meta",
+    "stream"
+   ],
+   "types": [
+    "movie",
+    "series"
+   ],
+   "catalogs": [],
+   "safeer": {
+    "protocol": 1,
+    "actions": [
+     {
+      "id": "add-to-list",
+      "on": [
+       "movie",
+       "series"
+      ],
+      "icon": "plus",
+      "label": {
+       "en": "Add to my list",
+       "sl": "Dodaj na moj seznam"
+      },
+      "confirm": false
+     }
+    ],
+    "enrich": [
+     "movie",
+     "series"
+    ],
+    "folders": [
+     {
+      "id": "my-account",
+      "icon": "folder",
+      "name": {
+       "en": "My account",
+       "sl": "Moj račun"
+      }
+     }
+    ],
+    "settings": [
+     {
+      "key": "api_key",
+      "type": "secret",
+      "required": true,
+      "label": {
+       "en": "API key",
+       "sl": "Ključ API"
+      }
+     },
+     {
+      "key": "quality",
+      "type": "choice",
+      "options": [
+       "auto",
+       "1080p",
+       "720p"
+      ],
+      "default": "auto",
+      "label": {
+       "en": "Quality",
+       "sl": "Kakovost"
+      }
+     },
+     {
+      "key": "only_cached",
+      "type": "toggle",
+      "default": false,
+      "label": {
+       "en": "Only instant",
+       "sl": "Samo takoj"
+      }
+     }
+    ],
+    "changelog": {
+     "1.2.0": {
+      "en": "Folders",
+      "sl": "Mape"
+     }
+    }
+   }
+  },
+  "primeri": [
+   {
+    "prejsnja": null,
+    "zdaj": "1.2.0",
+    "pricakovano": null
+   },
+   {
+    "prejsnja": "1.1.0",
+    "zdaj": "1.2.0",
+    "pricakovano": "Folders"
+   },
+   {
+    "prejsnja": "1.2.0",
+    "zdaj": "1.2.0",
+    "pricakovano": null
+   },
+   {
+    "prejsnja": "1.1.0",
+    "zdaj": "1.3.0",
+    "pricakovano": null
+   },
+   {
+    "prejsnja": " ",
+    "zdaj": "1.2.0",
+    "pricakovano": null
+   }
+  ]
+ }
+}

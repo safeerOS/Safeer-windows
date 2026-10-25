@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://safeer.si/schemas/dodatki-protokol-v1.schema.json",
+  "title": "Safeer Add-on Protocol v1 - manifest extension (the \"safeer\" key)",
+  "type": "object",
+  "required": ["protocol"],
+  "properties": {
+    "protocol": { "type": "integer", "minimum": 1 },
+    "actions": {
+      "type": "array", "maxItems": 8,
+      "items": {
+        "type": "object", "required": ["id", "on", "label"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9-]{1,40}$" },
+          "on": { "type": "array", "minItems": 1, "items": { "enum": ["movie", "series", "episode", "tv", "channel", "radio", "music"] } },
+          "icon": { "type": "string" },
+          "label": { "$ref": "#/$defs/text" },
+          "confirm": { "type": "boolean" }
+        }
+      }
+    },
+    "enrich": { "type": "array", "items": { "enum": ["movie", "series", "episode", "tv", "channel", "radio", "music"] } },
+    "folders": {
+      "type": "array", "maxItems": 4,
+      "items": {
+        "type": "object", "required": ["id", "name"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9-]{1,40}$" },
+          "icon": { "type": "string" },
+          "name": { "$ref": "#/$defs/text" }
+        }
+      }
+    },
+    "settings": {
+      "type": "array", "maxItems": 20,
+      "items": {
+        "type": "object", "required": ["key", "type", "label"],
+        "properties": {
+          "key": { "type": "string", "pattern": "^[a-z0-9_]{1,40}$" },
+          "type": { "enum": ["text", "secret", "toggle", "choice"] },
+          "required": { "type": "boolean" },
+          "options": { "type": "array", "maxItems": 20, "items": { "type": "string", "maxLength": 80 } },
+          "default": {},
+          "label": { "$ref": "#/$defs/text" }
+        }
+      }
+    },
+    "changelog": { "type": "object", "additionalProperties": { "$ref": "#/$defs/text" } }
+  },
+  "$defs": {
+    "text": {
+      "oneOf": [
+        { "type": "string" },
+        { "type": "object", "minProperties": 1, "additionalProperties": { "type": "string" } }
+      ]
+    }
+  }
+}
