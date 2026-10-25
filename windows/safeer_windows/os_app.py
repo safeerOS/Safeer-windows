@@ -3699,10 +3699,15 @@ def main(argv: Optional[List[str]] = None) -> int:
                         help="Magnet z naprave v krogu (Safeer Control): prebere in predvaja se sam")
     parser.add_argument("--preveri-qml", type=str, default="", metavar="POROCILO",
                         help=argparse.SUPPRESS)   # CI: nalozi Namizje.qml v zamrznjenem paketu in koncaj (0/1)
+    parser.add_argument("--preveri-kodek", type=str, default="", metavar="POROCILO",
+                        help=argparse.SUPPRESS)   # CI: zajem zaslona v H.264 in dekodiranje (PyAV, Pillow) v paketu
     args = parser.parse_args(argv)
     if args.preveri_qml:
         from . import namizje_qml
         return namizje_qml.preveri_nalaganje(args.preveri_qml)
+    if args.preveri_kodek:
+        from . import preveri_kodek
+        return 0 if preveri_kodek.preveri(args.preveri_kodek)["ok"] else 1
     magnet = ""
     if args.magnet or args.magnet_naprava:
         # Magnet iz registra (klik v brskalniku) ali z druge naprave: samo veljavna BitTorrent povezava.

@@ -6,6 +6,8 @@ Commands (run from any directory):
   smoke-source    run the end-to-end smoke test from the Python sources
   pyinstaller     build build/windows/dist/SafeerBrowser/SafeerBrowser.exe
   smoke-frozen    run the smoke test against the built executable
+  qml-frozen      load the QML desktop in the built SafeerOS.exe
+  kodek-frozen    screen capture to H.264 and decode (PyAV, Pillow) in the built SafeerOS.exe
   package         portable ZIP + Inno Setup installer + SHA256SUMS in build/windows/out
   install-test    silent install, registry check, launch smoke, silent uninstall
 """
@@ -169,7 +171,7 @@ def pyinstaller() -> None:
         "--hidden-import", "cryptography.hazmat.primitives.asymmetric.ed25519",
         "--hidden-import", "cryptography.exceptions",
         "--exclude-module", "tkinter",
-        "--exclude-module", "PIL",  # only used by the build and CI screenshots
+        "--exclude-module", "PIL",  # brskalnik ga ne rabi; SafeerOS.exe ga ima (gradnja spodaj) v istem _internal
     ]
     for name in shared_imports():
         command += ["--hidden-import", name]
@@ -199,7 +201,8 @@ def pyinstaller() -> None:
             "--distpath", DIST, "--workpath", os.path.join(BUILD, "work_os"), "--specpath", BUILD,
             "--paths", WINDOWS,
             "--exclude-module", "tkinter",
-            "--exclude-module", "PIL",
+            # Pillow ostane (25. 10. 2026): rabijo ga zajem zaslona (zajem_zaslona, »Deli z«), slicice datotek in
+            # Link; prej je bil tu izpuscen in deljenje zaslona v uradnem paketu ni delalo (kodek-frozen v CI).
         ]
         for name in shared_imports():
             command_os += ["--hidden-import", name]
@@ -524,6 +527,25 @@ def qml_frozen(args) -> None:
         raise SystemExit(f"Namizje.qml se v zamrznjenem SafeerOS.exe ne nalozi (izhod {completed.returncode})")
 
 
+def kodek_frozen(args) -> None:
+    """PyAV in Pillow v zamrznjenem SafeerOS.exe: zajem zaslona v H.264 (deljenje) in dekodiranje (gledalec).
+    Do 25. 10. 2026 ju v paketu ni bilo, preizkusi iz izvora pa tega niso videli (preveri_kodek.py)."""
+    exe = args.exe or os.path.join(APP_DIR, "SafeerOS.exe")
+    report = os.path.abspath(args.report)
+    os.makedirs(os.path.dirname(report), exist_ok=True)
+    if os.path.exists(report):
+        os.remove(report)
+    print("+", exe, "--preveri-kodek", report, flush=True)
+    completed = subprocess.run([exe, "--preveri-kodek", report], timeout=180)
+    data = {}
+    if os.path.exists(report):
+        with open(report, encoding="utf-8") as handle:
+            data = json.load(handle)
+    print(json.dumps(data, ensure_ascii=False, indent=2))
+    if completed.returncode != 0 or not data.get("ok"):
+        raise SystemExit(f"Zajem ali dekodiranje slike v SafeerOS.exe ne dela (izhod {completed.returncode})")
+
+
 def find_iscc() -> str:
     candidates = [shutil.which("iscc"), shutil.which("ISCC"),
                   os.path.join(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"), "Inno Setup 6", "ISCC.exe"),
@@ -628,6 +650,9 @@ def main() -> None:
     qml_parser = sub.add_parser("qml-frozen")
     qml_parser.add_argument("--report", default=os.path.join(OUT, "qml-frozen.json"))
     qml_parser.add_argument("--exe")
+    kodek_parser = sub.add_parser("kodek-frozen")
+    kodek_parser.add_argument("--report", default=os.path.join(OUT, "kodek-frozen.json"))
+    kodek_parser.add_argument("--exe")
     sub.add_parser("install-test")
     args = parser.parse_args()
     if args.command == "fetch-libmpv":
@@ -645,6 +670,8 @@ def main() -> None:
         smoke_frozen(args)
     elif args.command == "qml-frozen":
         qml_frozen(args)
+    elif args.command == "kodek-frozen":
+        kodek_frozen(args)
     elif args.command == "install-test":
         install_test(args)
 

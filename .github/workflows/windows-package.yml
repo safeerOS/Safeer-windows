@@ -133,6 +133,10 @@ jobs:
         run: python windows/build_windows.py smoke-frozen --online --report build/windows/out/smoke-frozen.json
       - name: Load the QML desktop in the frozen SafeerOS.exe
         run: python windows/build_windows.py qml-frozen --report build/windows/out/qml-frozen.json
+      - name: Screen capture to H.264 and decode in the frozen SafeerOS.exe (PyAV, Pillow)
+        # Do 25. 10. 2026 PyAV in Pillow v paketu nista bila (deljenje zaslona in gledalec nista delala), preizkusi iz
+        # izvora pa tega niso videli. Isti razred kot seja zaslona (zajem_zaslona.H264Zajem) in dekoder gledalca.
+        run: python windows/build_windows.py kodek-frozen --report build/windows/out/kodek-frozen.json
       - name: Ensure Inno Setup 6
         run: |
           if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup --no-progress -y }
