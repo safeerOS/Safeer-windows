@@ -149,7 +149,11 @@ class ScriptTests(unittest.TestCase):
             self.assertNotIn("safeer-hookshot-inserts", names)   # recept za eno stran je odstranjen (CONTRIBUTING)
             self.assertIn("safeer-youtube-adblock", names)
             for spec in policy.script_specs(store):
-                self.assertNotIn("messageHandlers", spec["source"])
+                # Edini ostanek mostu WebKit je zavarovan stevec locenega sveta (Linux, core/adblock.py); na Windows
+                # ga ni, zato isti klic gre v __safeerPost (skupna koda z Linuxom, krog 2).
+                vir = spec["source"].replace("window.webkit && window.webkit.messageHandlers;", "") \
+                    .replace("window.webkit.messageHandlers.safeer_stevec.postMessage(", "")
+                self.assertNotIn("messageHandlers", vir)
             store.set("adblock_enabled", False)
             reduced = [spec["name"] for spec in policy.script_specs(store)]
             self.assertIn("safeer-youtube-keep-watching", reduced)

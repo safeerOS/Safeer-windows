@@ -1,13 +1,42 @@
 #!/usr/bin/env python3
 """
 Safeer Browser Ad-Blocker & Cyber Shield for Linux Mint
-Complete YouTube ad patch, JSON/XHR strip, fast-forward ad stripper,
-ambient blur removal, background audio engine, and abuse.ch botnet shield.
+Complete YouTube ad patch, JSON/XHR strip, mute-only fallback for ads that slip through,
+ambient blur removal, background audio engine, and the signed threat shield.
 """
 
 import urllib.parse
 
-YOUTUBE_ADBLOCK_SCRIPT = r"""
+#: Dogodek DOM, s katerim skripti glavnega sveta (YOUTUBE_ADBLOCK_SCRIPT, ADGUARD_PROTECTION_SCRIPT - spreminjata JS
+#: strani, zato tecejo v glavnem svetu) javita stevilo odstranjenih oglasov. Most STEVEC_MOST je samo v locenem svetu
+#: (stran ga ne doseze); njun neposredni klic mostu se je zato vedno izgubil (19. 10. 2026). Bere ga STEVEC_RELE_SCRIPT.
+STEVEC_DOGODEK = "safeer-stevec"
+#: Dogodek lahko ponaredi tudi stran - to sprejmemo (gre samo za prikaz stevca), a rele vzame samo celo stevilo
+#: 1..STEVEC_NA_DOGODEK in najvec STEVEC_NA_STRAN na nalaganje strani v enem okvirju.
+STEVEC_NA_DOGODEK = 50
+STEVEC_NA_STRAN = 500
+
+# javiStevec(n) za skripte glavnega sveta. dispatchEvent in CustomEvent zajame ob vstavitvi (START, pred skriptami
+# strani), da ju stran ne more zamenjati in nasega javljanja prestreci.
+# Most platforme: na Windows skripte tecejo v ovoju windows/safeer_windows/policy.py (wrap_script), ki ima svoj most
+# __safeerPost (konzola z zetonom) - tam stevilo gre naravnost vanj, ker releja v locenem svetu ni. Zajet ob vstavitvi.
+_JAVI_STEVEC_JS = """
+    var javiStevec = (function() {
+        var oddaj = null, Dogodek = null, dok = null;
+        var mostWindows = typeof __safeerPost === 'function' ? __safeerPost : null;
+        try { oddaj = EventTarget.prototype.dispatchEvent; Dogodek = window.CustomEvent; dok = document; } catch(_) {}
+        return function(n) {
+            n = Math.min(Math.floor(Number(n)), %d);
+            if (!(n >= 1)) return;
+            if (mostWindows) { try { mostWindows({ action: 'increment_ads', count: n }); } catch(_) {} return; }
+            if (!oddaj || !Dogodek) return;
+            try { oddaj.call(dok, new Dogodek('%s', { detail: n })); } catch(_) {}
+        };
+    })();
+""" % (STEVEC_NA_DOGODEK, STEVEC_DOGODEK)
+_JAVI_STEVEC_MESTO = "    /*@javiStevec@*/\n"
+
+YOUTUBE_ADBLOCK_SCRIPT = """
 /* 🛡️ Safeer Linux Mint - YouTube Zero-Ad & Performance Engine */
 (function() {
     var h = location.hostname.toLowerCase();
@@ -15,6 +44,7 @@ YOUTUBE_ADBLOCK_SCRIPT = r"""
     if (window._safeer_linux_yt_active) return;
     if (window !== window.top && location.pathname.indexOf('/embed/') === -1) return;
     window._safeer_linux_yt_active = true;
+    /*@javiStevec@*/
 
     // Keep reserved ad slots collapsed even when YouTube inserts them later.
     function installAdCss() {
@@ -36,6 +66,9 @@ YOUTUBE_ADBLOCK_SCRIPT = r"""
             'ytd-banner-promo-renderer',
             'ytd-player-legacy-desktop-watch-ads-renderer',
             '#player-ads',
+            'ytd-enforcement-message-view-model',
+            'tp-yt-paper-dialog:has(ytd-enforcement-message-view-model)',
+            '.ytp-ad-module .ytp-ad-player-overlay-layout',
             'ytd-rich-shelf-renderer[is-playables]',
             'ytd-rich-section-renderer:has(ytd-rich-shelf-renderer[is-playables])',
             'ytd-game-card-renderer',
@@ -67,7 +100,7 @@ YOUTUBE_ADBLOCK_SCRIPT = r"""
     // watch document assigns JavaScript objects directly, without JSON.parse.
     var nativeParse = JSON.parse;
     var nativeStringify = JSON.stringify;
-    var stats = window._safeerAdStats = {cleanedResponses:0, removedFields:0, skipClicks:0, idlePrompts:0};
+    var stats = window._safeerAdStats = {cleanedResponses:0, removedFields:0, idlePrompts:0};
     // playerAds includes autoplay configuration; heartbeat and integrity fields
     // belong to the media protocol. Preserve them and remove only ad slots.
     var adKeys = ['adPlacements', 'adSlots'];
@@ -175,7 +208,7 @@ YOUTUBE_ADBLOCK_SCRIPT = r"""
             var url = new URL(value, location.href);
             var host = url.hostname;
             if (!(host === 'youtube.com' || host.endsWith('.youtube.com') || host === 'youtubei.googleapis.com')) return false;
-            return /^\/youtubei\/v[0-9]+\/(player|next|reel\/player)(?:\/|$)/.test(url.pathname);
+            return /^\\/youtubei\\/v[0-9]+\\/(player|next|reel\\/player)(?:\\/|$)/.test(url.pathname);
         } catch (_) { return false; }
     }
     if (window.fetch) {
@@ -229,38 +262,101 @@ YOUTUBE_ADBLOCK_SCRIPT = r"""
         });
     }
     function cleanGlobals() { cleanPlayerData(window.ytInitialPlayerResponse); }
+
+    // Shorts: ad entries in the reel sequence (uBlock Origin / AdGuard, Oct 2026: reelWatchEndpoint.adClientParams.isAd).
+    function withoutShortsAds(data) {
+        try {
+            if (data && Array.isArray(data.entries) && location.pathname.indexOf('/shorts/') === 0) {
+                var before = data.entries.length;
+                data.entries = data.entries.filter(function(entry) {
+                    var p = entry && entry.command && entry.command.reelWatchEndpoint && entry.command.reelWatchEndpoint.adClientParams;
+                    return !(p && p.isAd);
+                });
+                stats.removedFields += before - data.entries.length;
+            }
+        } catch (_) {}
+        return data;
+    }
+    var playerParse = JSON.parse;
+    JSON.parse = function() {
+        var data = playerParse.apply(this, arguments);
+        return typeof arguments[0] === 'string' && arguments[0].indexOf('reelWatchEndpoint') !== -1 ? withoutShortsAds(data) : data;
+    };
+
+    // Anti-adblock: YouTube's abnormality check runs as a promise continuation (AdGuard and uBlock Origin quick fixes,
+    // Oct 2026). Only that callback is replaced; every other continuation runs unchanged.
+    try {
+        var nativeThen = Promise.prototype.then;
+        Promise.prototype.then = function(onFulfilled) {
+            try {
+                if (typeof onFulfilled === 'function' && Function.prototype.toString.call(onFulfilled).indexOf('onAbnormalityDetected') !== -1) {
+                    arguments[0] = function() {};
+                }
+            } catch (_) {}
+            return nativeThen.apply(this, arguments);
+        };
+    } catch (_) {}
+
+    // The 17 s wait YouTube starts before an ad-blocker check (adjust-setTimeout '[native code]' 17000 0.001).
+    try {
+        var nativeSetTimeout = window.setTimeout;
+        window.setTimeout = function(fn, delay) {
+            try {
+                if (Number(delay) === 17000 && typeof fn === 'function' && Function.prototype.toString.call(fn).indexOf('[native code]') !== -1) {
+                    arguments[1] = 17;
+                }
+            } catch (_) {}
+            return nativeSetTimeout.apply(this, arguments);
+        };
+    } catch (_) {}
+
+    // YouTube fetches through a clean about:blank iframe to bypass page hooks: give it our fetch.
+    try {
+        var nativeAppendChild = Node.prototype.appendChild;
+        Node.prototype.appendChild = function(child) {
+            var result = nativeAppendChild.apply(this, arguments);
+            try {
+                if (child && child.tagName === 'IFRAME' && (!child.src || child.src === 'about:blank') && child.contentWindow) {
+                    child.contentWindow.fetch = window.fetch;
+                    child.contentWindow.Request = window.Request;
+                    child.contentWindow.JSON.parse = JSON.parse;
+                }
+            } catch (_) {}
+            return result;
+        };
+    } catch (_) {}
     document.addEventListener('DOMContentLoaded', cleanGlobals);
 
-    // 4. Safe YouTube Ad Fast-Forward & Skip Engine
-    function clickSkip() {
-        var selectors = [
-            '.ytp-skip-ad-button',
-            '.ytp-ad-skip-button',
-            '.ytp-ad-skip-button-modern',
-            '.ytp-skip-ad-button-container button',
-            'button.ytp-ad-skip-button-modern',
-            '.ytp-ad-overlay-close-button',
-            '.ytp-ad-skip-button-slot button'
-        ];
-        for (var i = 0; i < selectors.length; i++) {
-            var btn = document.querySelector(selectors[i]);
-            if (btn && btn.offsetParent !== null && !btn.disabled) {
-                btn.click();
-                stats.skipClicks++;
-                return true;
-            }
+    // 4. Safe YouTube ad fallback: an ad that slipped through the blocking above is only muted (owner, 18 Oct 2026:
+    // ads that cannot be blocked are muted, never skipped, fast-forwarded or seeked). The user's mute state comes back.
+    function isAdActive() {
+        var p = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
+        if (p && (p.classList.contains('ad-showing') || p.classList.contains('ad-interrupting'))) return true;
+        // Server-side stitched ad (SSAP): the player says so in its stats (uBlock Origin quick fixes, Oct 2026).
+        try {
+            var info = p && typeof p.getStatsForNerds === 'function' ? p.getStatsForNerds() : null;
+            if (info && typeof info.debug_info === 'string' && info.debug_info.indexOf('SSAP, AD') === 0) return true;
+        } catch (_) {}
+        return false;
+    }
+
+    function muteAd() {
+        var v = document.querySelector('#movie_player video, .html5-video-player video, video.video-stream');
+        if (!v) return false;
+        if (isAdActive()) {
+            if (!v._safeerAd) { v._safeerAd = { muted: v.muted }; }
+            try { v.muted = true; } catch (_) {}
+            return true;
+        }
+        if (v._safeerAd) {
+            try { v.muted = v._safeerAd.muted; } catch (_) {}
+            v._safeerAd = null;
         }
         return false;
     }
 
-    function isAdActive() {
-        var p = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
-        if (p && (p.classList.contains('ad-showing') || p.classList.contains('ad-interrupting'))) return true;
-        return false;
-    }
-
     function superviseYouTube() {
-        if (isAdActive()) clickSkip();
+        muteAd();
 
         var adOverlays = document.querySelectorAll(
             '.ytp-ad-overlay-container, #player-ads, ytd-promoted-sparkles-web-renderer, ' +
@@ -270,9 +366,7 @@ YOUTUBE_ADBLOCK_SCRIPT = r"""
         for (var o = 0; o < adOverlays.length; o++) {
             try { adOverlays[o].remove(); removedOverlays++; } catch(e) {}
         }
-        if (removedOverlays > 0 && window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.safeer) {
-            try { window.webkit.messageHandlers.safeer.postMessage({ action: 'increment_ads', count: removedOverlays }); } catch(_) {}
-        }
+        if (removedOverlays > 0) javiStevec(removedOverlays);
 
         var dismissBtns = document.querySelectorAll(
             'tp-yt-paper-dialog #dismiss-button, ytd-enforcement-message-view-model #dismiss-button, ' +
@@ -307,13 +401,11 @@ YOUTUBE_ADBLOCK_SCRIPT = r"""
     function watchPlayerClass() {
         var p = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
         if (!p || p._safeerAdMo) return;
-        p._safeerAdMo = new MutationObserver(function() {
-            if (isAdActive()) clickSkip();
-        });
+        p._safeerAdMo = new MutationObserver(function() { muteAd(); });
         p._safeerAdMo.observe(p, { attributes: true, attributeFilter: ['class'] });
     }
 
-    // Adaptive supervision: observer for skip, slow poll only as fallback
+    // Adaptive supervision: observer for the ad state, slow poll only as fallback
     var _ytSupervisorTimer = null;
     function scheduleSupervision(intervalMs) {
         if (_ytSupervisorTimer) clearTimeout(_ytSupervisorTimer);
@@ -348,7 +440,7 @@ YOUTUBE_ADBLOCK_SCRIPT = r"""
         document.addEventListener(evt, function(e) { e.stopImmediatePropagation(); }, true);
     });
 })();
-"""
+""".replace(_JAVI_STEVEC_MESTO, _JAVI_STEVEC_JS)
 
 
 # Shared pacing for the periodic page scripts below. A scan runs when the page is visible, in an idle
@@ -356,7 +448,18 @@ YOUTUBE_ADBLOCK_SCRIPT = r"""
 # often, a light page at the base interval). DOM changes pull the next run forward once per base
 # interval. The background-tab optimizer marks hidden tabs, so they get no scans at all.
 PAGE_TASK_SCHEDULER_JS = """
-if (!window.__safeerSchedule) {
+if (!window.__safeerSchedule) (function () {
+    // Nase skripte uporabljajo izvirne casovnike brskalnika, zajete ob vstavitvi (pred skriptami strani). Stran, ki
+    // setTimeout zamenja s svojim (JetStream Kotlin-compose: polyfill vrze napako za vsak rok razen svojih), sicer
+    // dobi nase klice v svojo zanko - Wasm je dobil izjemo in test je obstal (preizkus 17. 10. 2026).
+    var setTimeout = window.setTimeout.bind(window), clearTimeout = window.clearTimeout.bind(window);
+    var requestIdleCallback = window.requestIdleCallback ? window.requestIdleCallback.bind(window) : null;
+    if (!window.__safeerCasovniki) {
+        try {
+            Object.defineProperty(window, '__safeerCasovniki', { value: Object.freeze({ setTimeout: setTimeout,
+                clearTimeout: clearTimeout, setInterval: window.setInterval.bind(window) }) });
+        } catch (e) {}
+    }
     window.__safeerSchedule = function (fn, baseMs, maxMs) {
         var interval = baseMs, timer = null, mutationSeen = false;
         var now = function () { return (window.performance && performance.now) ? performance.now() : Date.now(); };
@@ -365,7 +468,7 @@ if (!window.__safeerSchedule) {
             if (timer !== null) return;
             timer = setTimeout(function () {
                 timer = null;
-                if (window.requestIdleCallback) requestIdleCallback(run, { timeout: 2000 }); else run();
+                if (requestIdleCallback) requestIdleCallback(run, { timeout: 2000 }); else run();
             }, ms);
         }
         function run() {
@@ -392,16 +495,18 @@ if (!window.__safeerSchedule) {
         });
         arm(baseMs);
     };
-}
+})();
 """
 
 ADGUARD_PROTECTION_SCRIPT = PAGE_TASK_SCHEDULER_JS + """
 /* 🛡️ Safeer Linux Mint - AdGuard Advanced Protection & Anti-Adblock Defuser Engine */
 (function() {
+    var setTimeout = (window.__safeerCasovniki || window).setTimeout;     // izvirni, ne zamenjan s strani
     var host = location.hostname.toLowerCase();
     if (host === 'youtube.com' || host.endsWith('.youtube.com')) return;
     if (window._adguard_safeer_active) return;
     window._adguard_safeer_active = true;
+    /*@javiStevec@*/
 
     // 1. Defuse Anti-Adblock checks & variables
     try {
@@ -513,9 +618,7 @@ ADGUARD_PROTECTION_SCRIPT = PAGE_TASK_SCHEDULER_JS + """
         var w = defuseAntiAdblockWalls() || 0;
         var c = cleanAdguardCosmetics() || 0;
         var total = w + c;
-        if (total > 0 && window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.safeer) {
-            try { window.webkit.messageHandlers.safeer.postMessage({ action: 'increment_ads', count: total }); } catch(_) {}
-        }
+        if (total > 0) javiStevec(total);
     }
 
     if (document.readyState === 'loading') {
@@ -526,7 +629,7 @@ ADGUARD_PROTECTION_SCRIPT = PAGE_TASK_SCHEDULER_JS + """
     window.addEventListener('load', runAdguardProtection);
     window.__safeerSchedule(runAdguardProtection, 2500);
 })();
-"""
+""".replace(_JAVI_STEVEC_MESTO, _JAVI_STEVEC_JS)
 
 # Splosna zascita pred zaznavanjem blokatorja (enaka za vse strani; vir: Android-tv/assets/protiadblock.js)
 PROTI_ADBLOCK_SCRIPT = r"""
@@ -542,6 +645,8 @@ PROTI_ADBLOCK_SCRIPT = r"""
  */
 (function () {
     'use strict';
+    // Izvirni casovnik (zajet ob zacetku dokumenta): stran ga lahko kasneje zamenja s svojim (PAGE_TASK_SCHEDULER_JS).
+    var setTimeout = window.setTimeout.bind(window);
     try { var gost = String(location.hostname || '').toLowerCase();
           if (gost.indexOf('youtube') !== -1) return; } catch (_) {}
     if (window.__safeerProtiAdblock) return;
@@ -827,8 +932,14 @@ GENERIC_COSMETIC_SCRIPT = PAGE_TASK_SCHEDULER_JS + """
             if (!ads[i].children.length && !(ads[i].textContent || '').trim()) continue;
             try { ads[i].remove(); count++; } catch(e) {}
         }
-        if (count > 0 && window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.safeer) {
-            try { window.webkit.messageHandlers.safeer.postMessage({ action: 'increment_ads', count: count }); } catch(_) {}
+        // Linux: most safeer_stevec v locenem svetu; Windows: __safeerPost iz ovoja skript (policy.py wrap_script).
+        // Pogoj ni zapisan kot »window.webkit && ... .safeer«, ker ovoj Windows tak niz zamenja (adapt_linux_script).
+        if (count > 0) {
+            var mh = window.webkit && window.webkit.messageHandlers;
+            try {
+                if (mh && mh.safeer_stevec) window.webkit.messageHandlers.safeer_stevec.postMessage({ action: 'increment_ads', count: count });
+                else if (typeof __safeerPost === 'function') __safeerPost({ action: 'increment_ads', count: count });
+            } catch(_) {}
         }
     }
 
@@ -1059,8 +1170,8 @@ def strip_tracking_parameters(url: str) -> str:
         return url
 
 
-ABUSE_CH_BLOCKED_DOMAINS = {
-    # 1. abuse.ch Feodo Tracker (Botnet C2 strežniki - Dridex, Emotet, QakBot, TrickBot)
+ZASILNI_VZORCI_ZLONAMERNIH_DOMEN = {
+    # 1. Vzorci imen, kot jih uporabljajo nadzorni strezniki botnetov (Dridex, Emotet, QakBot)
     "c2-tracker.net",
     "botnet-master.org",
     "dridex-panel.cc",
@@ -1087,7 +1198,7 @@ ABUSE_CH_BLOCKED_DOMAINS = {
     "formbook-panel.cc",
     "xworm-controller.top",
     "lumma-stealer-delivery.top",
-    # 2. abuse.ch URLhaus & ThreatFox (Zlonamerna koda / Malware distribution & IOC)
+    # 2. Vzorci imen za razdeljevanje zlonamerne kode
     "malware-drop.com",
     "payload-delivery.cc",
     "evil-apk-download.net",
@@ -1142,7 +1253,7 @@ AD_TRACKER_DOMAINS = {
     "1xbet.mobi",
     "1xbet-partner.com",
     "vulkanvegas-play.top",
-    "parimatch-aff.com"
+    "parimatch-aff.com",
     # Video oglasi in sledilci (seznam iz m6-adblock, MIT, Frederic Guiose).
     "stickyadstv.com",
     "videoplaza.tv",
@@ -1160,6 +1271,20 @@ AD_TRACKER_DOMAINS = {
 }
 
 
+def ascii_gostitelj(host: str) -> str:
+    """Ime gostitelja v obliki, v kateri so zapisani seznami: male crke, brez koncne pike, IDNA ("xn--").
+
+    Seznami imajo unicode imena zapisana kot xn--; brez tega "bаnka.si" (cirilicni "а") ne bi
+    ujel vnosa v seznamu. Ime, ki ga ni mogoce zapisati, ostane, kot je (ne ujema se z nicemer)."""
+    h = str(host or "").strip().lower().rstrip(".")
+    if h.isascii():
+        return h
+    try:
+        return h.encode("idna").decode("ascii")
+    except UnicodeError:
+        return h
+
+
 class ReverseDomainTrie:
     """High-performance O(k) reverse-label domain tree for sub-microsecond threat lookups."""
 
@@ -1173,6 +1298,7 @@ class ReverseDomainTrie:
         is_suffix = cleaned.startswith(".")
         if is_suffix:
             cleaned = cleaned[1:]
+        cleaned = ascii_gostitelj(cleaned)
         labels = [l for l in cleaned.split(".") if l]
         node = self.root
         for label in reversed(labels):
@@ -1185,7 +1311,7 @@ class ReverseDomainTrie:
     def is_blocked(self, host: str) -> bool:
         if not host:
             return False
-        labels = [l for l in host.lower().split(".") if l]
+        labels = [l for l in ascii_gostitelj(host).split(".") if l]
         node = self.root
         for label in reversed(labels):
             node = node.get(label)
@@ -1196,8 +1322,12 @@ class ReverseDomainTrie:
         return False
 
 
+#: Staro ime istega seznama (do 25. 10. 2026; uporablja ga windows/safeer_windows/smoke.py). To niso seznami abuse.ch -
+#: pravi seznami groznj so v podpisanem paketu (core/threat_intel.py).
+ABUSE_CH_BLOCKED_DOMAINS = ZASILNI_VZORCI_ZLONAMERNIH_DOMEN
+
 _threat_trie = ReverseDomainTrie()
-for _domain in ABUSE_CH_BLOCKED_DOMAINS:
+for _domain in ZASILNI_VZORCI_ZLONAMERNIH_DOMEN:
     _threat_trie.insert(_domain)
 
 
@@ -1216,7 +1346,7 @@ def _url_host(url: str) -> str:
     except Exception:
         host = url.lower().strip()
 
-    return host
+    return ascii_gostitelj(host)
 
 
 _ad_trie = ReverseDomainTrie()
@@ -1389,6 +1519,47 @@ FAKE_BANK_TEXTS = {
                   "typing its official address or use its official app. Your bank never calls you to ask for a code or PIN and "
                   "never asks you to install remote-access software (AnyDesk, TeamViewer).",
     },
+    "de": {
+        "page": "Dies ist keine echte Online-Bank, obwohl sie sich als {bank} ausgibt. Die echte Seite der Bank ist {domain}.",
+        "host": "Diese Adresse ahmt {bank} nach. Die echte Seite der Bank ist {domain}.",
+        "local": "Eine aus einem Anhang oder Download geöffnete Datei gibt sich als {bank} aus. Die echte Seite der Bank ist {domain}.",
+        "lure": "Die Seite verlangt Kartendaten unter dem Vorwand \u201e{detail}\u201c. Polizei, Finanzamt und Paketdienste "
+                "kassieren Bußgelder oder Porto nie über solche Seiten.",
+        "advice": "Gib hier weder Benutzernamen, Passwort, SMS-Code, Steuernummer, PIN noch Kartendaten ein. Öffne deine Bank immer, "
+                  "indem du ihre offizielle Adresse eintippst, oder nutze ihre offizielle App. Deine Bank ruft dich nie an, um einen "
+                  "Code oder eine PIN zu verlangen, und verlangt nie die Installation von Fernwartungsprogrammen (AnyDesk, TeamViewer).",
+    },
+    "es": {
+        "page": "Esta no es una banca en línea real, aunque se presenta como {bank}. La web real del banco es {domain}.",
+        "host": "Esta dirección imita a {bank}. La web real del banco es {domain}.",
+        "local": "Un archivo abierto desde un adjunto o una descarga se hace pasar por {bank}. La web real del banco es {domain}.",
+        "lure": "La página pide los datos de la tarjeta con el pretexto de \u00ab{detail}\u00bb. La policía, Hacienda y las empresas "
+                "de mensajería nunca cobran multas ni envíos a través de páginas así.",
+        "advice": "No escribas aquí tu usuario, contraseña, código SMS, NIF, PIN ni datos de la tarjeta. Entra siempre en tu banco "
+                  "escribiendo su dirección oficial o usa su app oficial. Tu banco nunca te llama para pedirte un código o el PIN "
+                  "y nunca te pide instalar programas de acceso remoto (AnyDesk, TeamViewer).",
+    },
+    "fr": {
+        "page": "Ce n\u2019est pas une vraie banque en ligne, bien qu\u2019elle se présente comme {bank}. Le vrai site de la banque est {domain}.",
+        "host": "Cette adresse imite {bank}. Le vrai site de la banque est {domain}.",
+        "local": "Un fichier ouvert depuis une pièce jointe ou un téléchargement se fait passer pour {bank}. Le vrai site de la banque est {domain}.",
+        "lure": "La page demande les données de ta carte sous prétexte de \u00ab {detail} \u00bb. La police, les impôts et les services "
+                "de livraison n\u2019encaissent jamais d\u2019amendes ni de frais de port via ce genre de pages.",
+        "advice": "N\u2019indique ici ni identifiant, ni mot de passe, ni code SMS, ni numéro fiscal, ni code PIN, ni données de carte. "
+                  "Ouvre toujours ta banque en tapant son adresse officielle ou utilise son application officielle. Ta banque ne "
+                  "t\u2019appelle jamais pour demander un code ou le PIN et ne demande jamais d\u2019installer un logiciel d\u2019accès "
+                  "à distance (AnyDesk, TeamViewer).",
+    },
+    "it": {
+        "page": "Questa non è una vera banca online, anche se si presenta come {bank}. Il sito vero della banca è {domain}.",
+        "host": "Questo indirizzo imita {bank}. Il sito vero della banca è {domain}.",
+        "local": "Un file aperto da un allegato o da un download si spaccia per {bank}. Il sito vero della banca è {domain}.",
+        "lure": "La pagina chiede i dati della carta con il pretesto di \u00ab{detail}\u00bb. Polizia, Agenzia delle Entrate e corrieri "
+                "non riscuotono mai multe o spese di spedizione tramite pagine del genere.",
+        "advice": "Non inserire qui nome utente, password, codice SMS, codice fiscale, PIN o dati della carta. Apri sempre la tua banca "
+                  "digitando il suo indirizzo ufficiale o usa la sua app ufficiale. La tua banca non ti chiama mai per chiedere un "
+                  "codice o il PIN e non chiede mai di installare programmi di accesso remoto (AnyDesk, TeamViewer).",
+    },
 }
 
 
@@ -1447,10 +1618,15 @@ def is_ad_domain(url: str) -> bool:
 
 
 FORCE_DARK_MODE_CSS = """
-/* 🌙 Safeer Browser - Smart Universal Dark Mode Engine */
+/* Safeer Browser - forced dark mode. The filter inverts everything the page paints, including the root element's
+   background and the view's base colour under it (measured on WebKitGTK 2.52.6). The page therefore keeps its OWN
+   background and colour scheme: a light page comes out dark with light text; a page without a background takes the
+   view's white base (core/ozadje_strani.py) and comes out dark as well. Do not give the root element a background or
+   a colour scheme here: a forced background made pages unreadable whenever their own text colour did not match it
+   (tests/test_prisilni_temni_nacin.py). This text is also placed inside a JavaScript template literal
+   (inject_dark_mode_js): no backticks, no dollar-brace, no backslashes. */
 html {
     filter: invert(90%) hue-rotate(180deg) contrast(92%) !important;
-    background-color: #121212 !important;
 }
 /* Re-invert media elements so photos, videos, and icons maintain true natural colors */
 img, video, canvas, svg, picture, iframe, [style*="background-image"], [role="img"] {
@@ -1725,3 +1901,45 @@ YOUTUBE_KEEP_WATCHING_SCRIPT = r"""
 
 # Push Square, Nintendo Life, Pure Xbox, Time Extension: hide empty ad inserts and the
 # "Please disable adblock or subscribe" placeholder (EasyList: ##.insert, ##.insert-label, ##.item-insert).
+# Rokovalnik in loceni svet za stevec scita: kozmeticna skripta (cist DOM) tece v tem svetu in sem posilja koliko
+# oglasov je skrila; stran v glavnem svetu tega rokovalnika ne doseze, zato stevca ne more napihniti (pregled 8. 10. 2026).
+STEVEC_MOST = "safeer_stevec"
+STEVEC_SVET = "safeer-zascita"
+
+#: Rele v svetu STEVEC_SVET (vsi okvirji, ob zacetku dokumenta): stetje skript glavnega sveta (dogodek STEVEC_DOGODEK)
+#: poslje v most. Dogodek lahko sprozi tudi stran, zato samo celo stevilo 1..STEVEC_NA_DOGODEK in skupaj najvec
+#: STEVEC_NA_STRAN na nalaganje v tem okvirju (skripta se ob vsakem nalaganju vstavi znova); ostalo zavrze.
+STEVEC_RELE_SCRIPT = """
+(function() {
+    if (window.__safeerReleStevca) return;
+    window.__safeerReleStevca = true;
+    var most = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.%(most)s;
+    if (!most) return;
+    var ostane = %(na_stran)d;
+    document.addEventListener('%(dogodek)s', function(e) {
+        var n = e ? e.detail : null;
+        if (!Number.isInteger(n) || n < 1 || n > %(na_dogodek)d || ostane <= 0) return;
+        n = Math.min(n, ostane);
+        ostane -= n;
+        try { most.postMessage({ action: 'increment_ads', count: n }); } catch(_) {}
+    }, true);
+})();
+""" % {"most": STEVEC_MOST, "na_stran": STEVEC_NA_STRAN, "dogodek": STEVEC_DOGODEK, "na_dogodek": STEVEC_NA_DOGODEK}
+
+
+def preveri_stevec(vrednost) -> "Optional[dict]":
+    """Sporocilo stevca scita: samo increment_ads/increment_threats, stevilo omejeno na 0..100. Sicer None."""
+    if not isinstance(vrednost, dict):
+        return None
+    dejanje = vrednost.get("action")
+    if dejanje not in ("increment_ads", "increment_threats"):
+        return None
+    try:
+        stevilo = max(0, min(int(vrednost.get("count", 1)), 100))
+    except (TypeError, ValueError):
+        return None
+    return {"action": dejanje, "count": stevilo} if stevilo else None
+
+
+# Spotify v Safeer DRM: pravila oglasov so od 18. 10. 2026 v seznamu Scita (core/scit_pravila.py, del »spotify«), ki se
+# posodablja kot podpisan seznam brez nove izdaje programa.
