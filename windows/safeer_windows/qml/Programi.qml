@@ -42,7 +42,7 @@ Steklo {
         }
         // Program naprave se odpre TUKAJ (naprava ga zazene in pretaka sliko), kot v Safeer OS.
         koren.obvesti(koren.t("odpiramZ", { ime: p.ime, naprava: imeNaprave }))
-        koren.klic("odpriTukaj", [naprava, p.id], function (r) {
+        koren.klic("odpriTukaj", [naprava, p.id, p.ime || ""], function (r) {
             if (!(r === true || (r && r.ok))) koren.obvesti(r && r.koda === "ni_locenega_zaslona" ? koren.t("niLocenega") : ((r && r.message) || koren.t("niUspelo")))
         })
     }

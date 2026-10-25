@@ -1092,6 +1092,20 @@ class SafeerOsWindow(QMainWindow):
             okno.deleteLater()
             self.namizje = None
 
+    def _odpri_okno_zaslona(self, podatki: dict) -> None:
+        """Zaslon telefona ali tablice (share.screen start) v svojem oknu z misko in tipkovnico (okno_zaslona.py,
+        lastnik 25. 10. 2026) - prej zavihek Spleta brez vnosa. Ce okna ni mogoce odpreti, ostane stari zavihek."""
+        naprava, ime_programa, cas = getattr(self, "_odpri_tukaj_zadnji", ("", "", 0.0))
+        if naprava != str(podatki.get("naprava") or "") or time.monotonic() - cas > 120:
+            ime_programa = ""                       # deljenje ni prislo iz nasega »Odpri tukaj« (ali je staro)
+        try:
+            from . import okno_zaslona
+            if okno_zaslona.odpri(self, podatki, ime_programa, _jezik_oken()) is not None:
+                return
+        except Exception as e:  # noqa: BLE001
+            print(f"[SafeerOS] Okno zaslona: {e}", flush=True)
+        self.gledalec_zaslona.odpri(str(podatki.get("url") or ""))
+
     def odpri_razdelek_namizja(self, razdelek: str) -> None:
         """Razdelek z namizja (desni klik -> Nastavitve sistema, Safeer Link ...). Nastavitve, Safeer Link, Zapiski in
         Sporocila se odprejo v svojem oknu (okno_razdelka.py - kot na Linuxu), ne v celem glavnem oknu z vrstico, ki
@@ -2296,10 +2310,13 @@ class SafeerOsWindow(QMainWindow):
                     for _g in list(getattr(self.browser_app, "_wv_gostitelji", {}).values()):
                         _g.nastavi()
                 self.poslji_dogodek("zaslonZNaprave", {"od": podatki.get("od"), "dejanje": "start"})
-                self.dispatcher.dispatch(lambda: self.gledalec_zaslona.odpri(url))
+                self.dispatcher.dispatch(lambda p=dict(podatki): self._odpri_okno_zaslona(p))
             elif podatki.get("dejanje") == "stop":
-                # Naprava je deljenje koncala: zadnje slike ne pustimo na zaslonu - zavihek gledalca se zapre in
-                # Safeer OS se vrne tja, kjer je bil uporabnik pred deljenjem.
+                # Naprava je deljenje koncala: zadnje slike ne pustimo na zaslonu - okno zaslona (ali zavihek gledalca)
+                # se zapre in Safeer OS se vrne tja, kjer je bil uporabnik pred deljenjem.
+                okno = getattr(self, "okno_zaslona", None)
+                if okno is not None:
+                    self.dispatcher.dispatch(okno.koncano_na_napravi)
                 self.dispatcher.dispatch(self.gledalec_zaslona.zapri)
                 self.poslji_dogodek("zaslonZNaprave", {"od": podatki.get("od"), "dejanje": "stop"})
         if vrsta == "dovoljenjeZahtevano" and isinstance(podatki, dict):
@@ -2927,6 +2944,8 @@ class SafeerOsWindow(QMainWindow):
         if metoda in ("odpriTukaj", "odpriDatotekoTukaj"):
             id_n = str(a[0]) if a else ""
             app = str(a[1]) if len(a) > 1 else ""
+            # Ime programa za naslov okna z zaslonom naprave (okno_zaslona.py): »Kamera · Samsung«.
+            self._odpri_tukaj_zadnji = (id_n, str(a[2])[:80] if len(a) > 2 and isinstance(a[2], str) else "", time.monotonic())
             izid = (self.control_backend.odpri_tukaj(id_n, app) if metoda == "odpriTukaj"
                     else self.control_backend.odpri_datoteko_tukaj(id_n, app))
             # Racunalnik (Linux/Windows) program samo zazene; sliko prinesemo mi - odpremo njegov oddaljeni
@@ -3422,6 +3441,11 @@ class SafeerOsWindow(QMainWindow):
         try:
             for okno in list((getattr(self, "okna_razdelkov", None) or {}).values()):
                 okno.zapri_zares()
+        except Exception:
+            pass
+        try:
+            if getattr(self, "okno_zaslona", None) is not None:
+                self.okno_zaslona.close()       # naprava izve, da njenega zaslona ne gledamo vec (apps.close)
         except Exception:
             pass
         try:

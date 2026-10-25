@@ -577,7 +577,7 @@
   function odpriTukaj(p) {
     var n = S.naprave.find(function (x) { return x.id === p.naprava; }) || { ime: "" };
     obvesti(t("potrdiNaNapravi", { ime: p.ime, naprava: n.ime }));
-    klic("odpriTukaj", [p.naprava, p.id]).then(function (r) {
+    klic("odpriTukaj", [p.naprava, p.id, p.ime || ""]).then(function (r) {
       if (!r || !r.ok) { obvesti(r && r.message ? r.message : t("niUspelo")); return; }
       if (!r.tu) obvesti(t("napravaNePretaka", { ime: p.ime, naprava: n.ime }));
       zabeleziNedavno({ vrsta: "program", id: p.id, ime: p.ime, ikona: p.ikona, naprava: p.naprava, ime_naprave: n.ime });

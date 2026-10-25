@@ -126,6 +126,7 @@
     "core/uvoz_seznama.py"
   ],
   "samo_windows": [
+    "core/gledalec_vnos.py",
     "core/link_continuity.py",
     "core/link_handoff.py",
     "core/link_media_sync.py",

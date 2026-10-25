@@ -461,7 +461,7 @@ class SprejemZaslona(_Osnova):
         sredisce_naprave.assert_called_once_with("n-tel")
         self.assertEqual(self.iskano, ([(HUB, ODTIS), (SOSED_NASLOV, "odtis-telefona")], self.POT))
         self.assertEqual(self._zasloni(), [{"od": "Telefon", "dejanje": "start", "url": self.PRI_TELEFONU[0],
-                                            "odtis": "odtis-telefona", "id": "abc"}])
+                                            "odtis": "odtis-telefona", "id": "abc", "naprava": "n-tel"}])
 
     def test_posiljatelj_brez_svojega_sredisca(self):
         self._prejmi(self._sporocilo(), najdeno=("https://127.0.0.1:45678" + self.POT, ODTIS), sredisce=(None, ""))
@@ -485,7 +485,8 @@ class SprejemZaslona(_Osnova):
         self._prejmi(self._sporocilo("stop", id_="drugo"))
         self.assertEqual([z["dejanje"] for z in self._zasloni()], ["start"])
         self._prejmi(self._sporocilo("stop"))
-        self.assertEqual(self._zasloni()[-1], {"od": "Telefon", "dejanje": "stop", "url": "", "odtis": "", "id": "abc"})
+        self.assertEqual(self._zasloni()[-1], {"od": "Telefon", "dejanje": "stop", "url": "", "odtis": "", "id": "abc",
+                                               "naprava": "n-tel"})
         self.assertEqual(self.b._gledani_zaslon_id, "")
 
     def test_konec_brez_gledanja_se_vseeno_odda(self):

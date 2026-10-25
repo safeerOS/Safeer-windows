@@ -198,6 +198,10 @@ class SafeerControlBackend:
         self._deljenje_zaslona: Optional[link_deljenje.DeljenjeZaslona] = None
         #: Deljenje zaslona druge naprave, ki ga gledamo ali ga pravkar odpiramo (share.screen start -> stop).
         self._gledani_zaslon_id = ""
+        #: Naprava, katere zaslon gledamo (okno_zaslona.py): vnos iz okna gre samo njej (kot Linux core/safeer_link).
+        self.gledani_zaslon = ""
+        #: Odgovor naprave na vnos iz okna gledalca (npr. »Safeer Vnos ni vklopljen«) -> okno; None = nihce ne posluša.
+        self.ob_odzivu_vnosa: Optional[Callable[[dict], None]] = None
         self._opozorjena_dovoljenja: set[str] = set()
         self._lokalni_hub: Optional[link_hub_streznik.HubStreznik] = None
 
@@ -1445,6 +1449,23 @@ class SafeerControlBackend:
                         "message": str(sporocilo.get("error") or sporocilo.get("message") or "Ukaz je bil zavrnjen."),
                     }
                     event.set()
+            if ref.startswith("vnos-"):
+                # Odgovor na vnos iz okna gledalca: gre samo oknu (stran Linka ga ne potrebuje).
+                if vrsta == "control.result" and self.ob_odzivu_vnosa is not None:
+                    try:
+                        self.ob_odzivu_vnosa({"ok": bool(telo.get("ok")),
+                                              "koda": str(telo.get("code") or sporocilo.get("error_code") or ""),
+                                              "sporocilo": str(telo.get("message") or sporocilo.get("error") or "")})
+                    except Exception:  # noqa: BLE001
+                        pass
+                elif vrsta == "control.ack" and str(sporocilo.get("status") or "") not in ("", "accepted") \
+                        and self.ob_odzivu_vnosa is not None:
+                    try:
+                        self.ob_odzivu_vnosa({"ok": False, "koda": str(sporocilo.get("error_code") or "zavrnjeno"),
+                                              "sporocilo": str(sporocilo.get("error") or "")})
+                    except Exception:  # noqa: BLE001
+                        pass
+                return
             odziv_podatki = dict(telo)
             odziv_podatki["ref"] = ref
             odziv_podatki["ref_id"] = ref
@@ -1538,12 +1559,16 @@ class SafeerControlBackend:
                 return          # konec nekega drugega deljenja: gledalca ne zapiramo
             if dejanje == "stop":
                 self._gledani_zaslon_id = ""
-            self._oddaj_dogodek("zaslon", {"od": od, "dejanje": dejanje, "url": "", "odtis": "", "id": id_deljenja})
+                if not id_deljenja or not posiljatelj or posiljatelj == self.gledani_zaslon:
+                    self.gledani_zaslon = ""
+            self._oddaj_dogodek("zaslon", {"od": od, "dejanje": dejanje, "url": "", "odtis": "", "id": id_deljenja,
+                                           "naprava": posiljatelj})
             return
         pot = str(telo.get("path") or "")
         if not pot.startswith("/") or not self.hub_url():
             return
         self._gledani_zaslon_id = id_deljenja
+        self.gledani_zaslon = posiljatelj           # vnos iz okna gledalca gre samo tej napravi
 
         def _najdi() -> None:
             sredisca = [(self.hub_url(), self.hub_fp())]
@@ -1556,7 +1581,8 @@ class SafeerControlBackend:
                 return
             if self._gledani_zaslon_id != id_deljenja:
                 return          # deljenje se je med iskanjem koncalo (ali se je zacelo drugo)
-            self._oddaj_dogodek("zaslon", {"od": od, "dejanje": "start", "url": url, "odtis": odtis, "id": id_deljenja})
+            self._oddaj_dogodek("zaslon", {"od": od, "dejanje": "start", "url": url, "odtis": odtis, "id": id_deljenja,
+                                           "naprava": posiljatelj})
 
         threading.Thread(target=_najdi, name="SafeerScreenView", daemon=True).start()
 
@@ -2045,6 +2071,32 @@ class SafeerControlBackend:
         if res is None:
             return {"ok": False, "message": "Naprava ni odgovorila.", "koda": "cas"}
         return res if isinstance(res, dict) else {"ok": True, "data": res}
+
+    def poslji_vnos(self, dejanje: str, parametri: dict) -> bool:
+        """Dotik, poteg, tipka, kolesce ali besedilo iz okna gledalca napravi, katere zaslon gledamo (ukazi input.* -
+        Safeer Vnos na telefonu ali tablici). Odgovor pride v ob_odzivu_vnosa. Kot Linux core/safeer_link.poslji_vnos."""
+        cilj = self.gledani_zaslon
+        povezava = self.povezava
+        if not cilj or povezava is None or not getattr(povezava, "tece", False) or not str(dejanje).startswith("input."):
+            return False
+        return bool(povezava.poslji({
+            "id": "vnos-%d-%s" % (int(time.time() * 1000), secrets.token_urlsafe(4)),
+            "type": "control.command",
+            "target": cilj,
+            "payload": {"action": dejanje, "params": parametri if isinstance(parametri, dict) else {}},
+        }))
+
+    def koncaj_gledanje(self, id_naprave: str = "") -> None:
+        """Uporabnik je zaprl okno z zaslonom naprave: naprava naj neha deliti zaslon (`apps.close` s `stream: true`;
+        aplikacijo, odprto z »Odpri tukaj«, umakne sama). Kot Linux safeer_control._konec_gledanja; v svoji niti."""
+        cilj = str(id_naprave or self.gledani_zaslon or "")
+        if self.gledani_zaslon == cilj:
+            self.gledani_zaslon = ""
+            self._gledani_zaslon_id = ""
+        if not cilj:
+            return
+        threading.Thread(target=lambda: self.ukaz_pocakaj(cilj, "apps.close", {"stream": True}, cas=5.0),
+                         name="safeer-konec-gledanja", daemon=True).start()
 
     def vse_naprave(self) -> List[dict]:
         """Seznam naprav za Safeer OS stran Naprave."""
