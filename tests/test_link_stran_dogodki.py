@@ -273,10 +273,11 @@ class KarticeDovoljenj(unittest.TestCase):
         self.assertNotIn("Safeer OS (Tablica)", d["vsebina"], "kartica nosi ime identitete z vec zmoznostmi")
         self.assertTrue(s[0]["opombaDovoljenja"]["skrit"])
 
-    def test_vsaka_kartica_ima_tri_profile(self):
+    def test_vsaka_kartica_ima_stiri_profile(self):
+        """Poln dostop (ozji krog), izbrane datoteke, samo zaslon in brez dostopa (umik iz ozjega kroga)."""
         s = _stran([["naprave", [self.DVOJNA[2]]]])
         vsebina = s[0]["dovoljenjaNaprav"]["vsebina"]
-        self.assertEqual(vsebina.count("<small>"), 3, vsebina)
+        self.assertEqual(vsebina.count("<small>"), 4, vsebina)
 
     def test_brez_naprav_ni_kartic_je_pa_navodilo(self):
         s = _stran([["naprave", []]])

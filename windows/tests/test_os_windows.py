@@ -1364,9 +1364,12 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
         js = (koren / "assets" / "link" / "link.js").read_text(encoding="utf-8")
         self.assertIn('id="dovoljenjaNaprav"', html)
         self.assertIn('pravicaPolno: "Poln dostop"', js)
-        self.assertIn("Vsi diski, datoteke, aplikacije in upravljanje zaslona", js)
+        # Ena privolitev (lastnik, 25. 10. 2026 10:49): poln dostop = ozji krog z upravljanjem in vnosom.
+        self.assertIn("Upravljanje z miško in tipkovnico, vsi diski, datoteke in aplikacije (ožji krog)", js)
         self.assertIn('pravicaIzbrano: "Izbrane datoteke"', js)
         self.assertIn('pravicaZaslon: "Samo zaslon"', js)
+        self.assertIn('pravicaBrez: "Brez dostopa"', js)                 # umik iz ozjega kroga
+        self.assertIn('id="opombaOmejitveWindows"', html)                # okna skrbnika, UAC, zaklenjen zaslon
 
     def test_domaci_in_media_vmesnik_izrazata_vizijo_safeer_os(self):
         koren = Path(__file__).resolve().parent.parent.parent

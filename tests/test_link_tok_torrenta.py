@@ -361,24 +361,24 @@ class SamodejnoCiscenje(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.mapa, ignore_errors=True)
 
-    def test_po_48_urah_brez_predvajanja(self):
+    def test_po_12_urah_brez_predvajanja(self):
         t = _Prenosi([self.a, self.b, self.c])
-        link_datoteke.zabelezi_rabo(self.a, self.pot, self.ura - 49 * 3600)
-        link_datoteke.zabelezi_rabo(self.b, self.pot, self.ura - 47 * 3600)
+        link_datoteke.zabelezi_rabo(self.a, self.pot, self.ura - 13 * 3600)
+        link_datoteke.zabelezi_rabo(self.b, self.pot, self.ura - 11 * 3600)
         # c je iz casa pred to razlicico (brez zapisa): rok mu tece od prvega pregleda, ne izgine takoj.
         self.assertEqual(link_datoteke.pocisti_neuporabljene(t, self.pot, self.ura), [self.a])
         self.assertEqual(t.odstranjeni, [(1, True)])       # z datotekami
         self.assertEqual(link_datoteke.pocisti_neuporabljene(t, self.pot, self.ura + 2 * 3600), [self.b])
-        self.assertEqual(link_datoteke.pocisti_neuporabljene(t, self.pot, self.ura + 47 * 3600), [])
-        self.assertEqual(link_datoteke.pocisti_neuporabljene(t, self.pot, self.ura + 49 * 3600), [self.c])
+        self.assertEqual(link_datoteke.pocisti_neuporabljene(t, self.pot, self.ura + 11 * 3600), [])
+        self.assertEqual(link_datoteke.pocisti_neuporabljene(t, self.pot, self.ura + 13 * 3600), [self.c])
         self.assertEqual(t.vsi, [])
 
     def test_ponovno_predvajanje_podaljsa_rok(self):
         t = _Prenosi([self.a])
-        link_datoteke.zabelezi_rabo(self.a, self.pot, self.ura - 47 * 3600)
+        link_datoteke.zabelezi_rabo(self.a, self.pot, self.ura - 11 * 3600)
         link_datoteke.zabelezi_rabo(self.a, self.pot, self.ura)            # naslednji vecer nadaljuje film
-        self.assertEqual(link_datoteke.pocisti_neuporabljene(t, self.pot, self.ura + 47 * 3600), [])
-        self.assertEqual(link_datoteke.pocisti_neuporabljene(t, self.pot, self.ura + 49 * 3600), [self.a])
+        self.assertEqual(link_datoteke.pocisti_neuporabljene(t, self.pot, self.ura + 11 * 3600), [])
+        self.assertEqual(link_datoteke.pocisti_neuporabljene(t, self.pot, self.ura + 13 * 3600), [self.a])
 
     def test_uporabnikovih_datotek_in_ugasnjenega_rqbita_se_ne_dotika(self):
         t = _Prenosi([self.a, self.b], lastni=[self.a])
@@ -391,8 +391,8 @@ class SamodejnoCiscenje(unittest.TestCase):
 
     def test_ob_pomanjkanju_prostora_najstarejsi_prvi(self):
         t = _Prenosi([self.a, self.b, self.c])
-        link_datoteke.zabelezi_rabo(self.a, self.pot, self.ura - 20 * 3600)
-        link_datoteke.zabelezi_rabo(self.b, self.pot, self.ura - 30 * 3600)
+        link_datoteke.zabelezi_rabo(self.a, self.pot, self.ura - 8 * 3600)
+        link_datoteke.zabelezi_rabo(self.b, self.pot, self.ura - 10 * 3600)
         link_datoteke.zabelezi_rabo(self.c, self.pot, self.ura - 1 * 3600)      # ta se predvaja: ostane
         prosto = {"n": 0}
 

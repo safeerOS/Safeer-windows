@@ -541,6 +541,13 @@ class SafeerControlBackend:
             return akcija in ("screenshot", "screen.capture", "screen.start", "screen.stop", "screen.status")
         return False
 
+    def _sme_upravljati(self, id_naprave: str) -> bool:
+        """Vnos v seji zaslona (miska, tipkovnica) samo ozji krog (»Vse«); ob napaki ne - »ne vem« ni »da«."""
+        try:
+            return self.dovoljenje_za(id_naprave) == "polno" and not self._umaknjena_iz_kroga(id_naprave)
+        except Exception:  # noqa: BLE001
+            return False
+
     @staticmethod
     def _umaknjena_iz_kroga(id_naprave: str) -> bool:
         try:
@@ -1842,8 +1849,8 @@ class SafeerControlBackend:
             elif akcija == "screen.start":
                 kakovost = str(params.get("quality") or "najvisja")
                 # Upravljanje (vnos) samo z ozjim krogom (»Vse«); »Samo ogled zaslona« dobi sliko brez vnosa.
-                seja = dict(self.navidezni_zaslon.zacni_sejo(
-                    posiljatelj, kakovost=kakovost, vnos=self.dovoljenje_za(posiljatelj) == "polno"))
+                seja = dict(self.navidezni_zaslon.zacni_sejo(posiljatelj, kakovost=kakovost,
+                                                             vnos=self._sme_upravljati(posiljatelj)))
                 # Nasi naslovi: gledalec jih poskusi poleg naslova iz seznama naprav (docs/LINK-MESH.md, pravilo 8).
                 seja["hosts"] = self._lastni_naslovi()
                 izid = {"ok": True, "message": "Navidezni zaslon se deli", "data": seja}

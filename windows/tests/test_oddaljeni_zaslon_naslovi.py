@@ -81,7 +81,7 @@ class Odgovor(unittest.TestCase):
 
 
 class _Zaslon:
-    def zacni_sejo(self, posiljatelj, kakovost="najvisja"):
+    def zacni_sejo(self, posiljatelj, kakovost="najvisja", vnos=True):
         return {"port": 40123, "fp": ODTIS, "token": "zeton-zeton-zeton", "v": 2, "width": 1920, "height": 1080}
 
 
