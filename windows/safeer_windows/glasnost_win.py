@@ -48,7 +48,10 @@ def _z_glasnostjo(delo, vmesnik: str = ""):
     if not _WIN:
         return None
     ole = ctypes.windll.ole32
-    ole.CoInitializeEx(None, 0)          # vecnitno; ce je nit ze inicializirana drugace, COM vseeno deluje
+    ole.CoInitializeEx.restype = _HR
+    # Vecnitno. S_OK (0) ali S_FALSE (1) = ta klic steje in ga sprostimo s CoUninitialize; RPC_E_CHANGED_MODE
+    # (nit je ze inicializirana drugace) COM vseeno deluje, sprostiti pa ga ne smemo.
+    inicializiran = ole.CoInitializeEx(None, 0) in (0, 1)
     enum, naprava, glasnost = ctypes.c_void_p(), ctypes.c_void_p(), ctypes.c_void_p()
     try:
         clsid, iid = _GUID(_CLSID_ENUM), _GUID(_IID_ENUM)
@@ -69,6 +72,8 @@ def _z_glasnostjo(delo, vmesnik: str = ""):
     finally:
         for o in (glasnost, naprava, enum):
             _sprosti(o)
+        if inicializiran:
+            ole.CoUninitialize()
 
 
 def _beri(g) -> dict:
