@@ -269,7 +269,11 @@ def test_brezizgubno_pikselsko_enako_izvoru():
     if okvir.planes[0].line_size != w * 3:
         pytest.skip("poravnava vrstic")
     okvir.planes[0].update(bytes(izvor))
-    paketi = [bytes(x) for x in tok.encode(okvir.reformat(format="bgr0"))] + [bytes(x) for x in tok.encode(None)]
+    # Vec enakih slik: razclenjevalnik zadnjo enoto zadrzi do naslednje (en sam paket bi ostal v njem).
+    paketi = []
+    for _ in range(4):
+        paketi += [bytes(x) for x in tok.encode(okvir.reformat(format="bgr0"))]
+    paketi += [bytes(x) for x in tok.encode(None)]
     kontejner.close()
     nit = oz._DekodirnaNit(Seja("192.168.0.50", 4567, ODTIS, "enkraten"), oz._TokSignali(), "Prenosnik")
     slike = []
