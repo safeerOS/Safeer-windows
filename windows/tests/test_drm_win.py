@@ -145,3 +145,54 @@ def test_ponudba_samo_ce_webview2_sistema_nima():
     assert tek(["com.widevine.alpha", "com.microsoft.playready"]) == ["com.apple.fps.1_0"]
     assert tek([]) == ["com.widevine.alpha", "com.microsoft.playready", "com.apple.fps.1_0"]
 
+
+_NODE_ZETON = r"""
+const ujeto = [], ukradeno = [];
+globalThis.location = { href: "https://napad.example/" };
+globalThis.window = globalThis; window.top = window;
+console.log = (x) => ujeto.push(String(x));          // most Safeer (BridgeScript) je nalozen pred skripto
+new Function(require("fs").readFileSync(0, "utf8"))();
+// Stran po nalaganju: zamenja console.log in JSON.stringify ter doda nastavljalnik »t« na Object.prototype.
+console.log = (x) => ukradeno.push(String(x));
+const json = JSON.stringify; JSON.stringify = (o) => { ukradeno.push(json(o)); return json(o); };
+Object.defineProperty(Object.prototype, "t", { set(v) { ukradeno.push("t=" + v); }, configurable: true });
+setTimeout(() => console.error(JSON.parse(json({ ujeto, ukradeno })) && json({ ujeto, ukradeno })), 30);
+"""
+
+
+@pytest.mark.skipif(not shutil.which("node"), reason="brez node")
+def test_zeton_mostu_ne_uide_strani():
+    """Pregled Grok W8: stran, ki po nalaganju zamenja console.log, JSON.stringify ali doda nastavljalnik »t«, zetona
+    mostu ne dobi; sporocilo z zetonom gre se vedno v most Safeer."""
+    import json
+    vir = policy.wrap_script("setTimeout(function () { __safeerPost({action: 'drm_zahteva', sistem: 'x'}); }, 5);",
+                             None, None)
+    r = subprocess.run(["node", "-e", _NODE_ZETON], input=vir, capture_output=True, text=True, timeout=20)
+    assert r.returncode == 0, r.stderr
+    izid = json.loads(r.stderr.strip().splitlines()[-1])
+    assert izid["ukradeno"] == []
+    assert len(izid["ujeto"]) == 1 and policy.STEVEC_ZETON in izid["ujeto"][0]
+    sporocilo = policy.parse_bridge_message(izid["ujeto"][0][len(policy.BRIDGE_PREFIX):]) or \
+        json.loads(izid["ujeto"][0][len(policy.BRIDGE_PREFIX):])
+    assert sporocilo["action"] == "drm_zahteva" and policy.zeton_veljaven(sporocilo)
+
+
+def test_zaprta_ponudba_velja_za_gostitelja_v_zavihku():
+    """Grok W8: zaprte ponudbe stran ne prikaze znova z drugo poizvedbo istega gostitelja."""
+    lastnosti = {}
+    stran = object()
+    trenutni = ["https://napad.example/video?x=1"]
+    pogled = types.SimpleNamespace(page=lambda: stran, property=lambda k: lastnosti.get(k),
+                                   setProperty=lambda k, v: lastnosti.__setitem__(k, v),
+                                   url=lambda: types.SimpleNamespace(toString=lambda: trenutni[0]))
+    okno = types.SimpleNamespace(views=lambda: [pogled], _osvezi_video_vrstico=lambda: None,
+                                 _brez_sidra=browser.BrowserWindow._brez_sidra,
+                                 _gostitelj=browser.BrowserWindow._gostitelj)
+    lastnosti["safeer_drm_zaprto"] = "napad.example"
+    trenutni[0] = "https://napad.example/video?x=2"
+    browser.BrowserWindow.drm_ponudi(okno, stran, "com.widevine.alpha")
+    assert not lastnosti.get("safeer_drm")
+    trenutni[0] = "https://druga.example/film"
+    browser.BrowserWindow.drm_ponudi(okno, stran, "com.widevine.alpha")
+    assert lastnosti.get("safeer_drm") == "https://druga.example/film"
+

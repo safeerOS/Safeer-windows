@@ -508,8 +508,12 @@ def adapt_linux_script(source: str) -> str:
 def wrap_script(source: str, include: Optional[Iterable[str]], exclude: Optional[Iterable[str]], top_frame_only: bool = False) -> str:
     include_rx = json.dumps([pattern_to_regex(p) for p in (include or [])])
     exclude_rx = json.dumps([pattern_to_regex(p) for p in (exclude or [])])
+    # Pregled Grok W8 (25. 10. 2026): stran ne sme dobiti zetona. console.log in JSON.stringify vzamemo ob nastanku
+    # dokumenta (pred skriptami strani - kasnejsa zamenjava jih ne vidi), zeton pa dodamo v NIZ, ne v predmet
+    # (nastavljalnik »t« na Object.prototype bi ga sicer prebral).
     prelude = (
         "(function () {\n"
+        "var __safeerLog = console.log, __safeerJson = JSON.stringify;\n"
         "var __safeerUrl = String(location.href);\n"
         "function __safeerMatches(list) { for (var i = 0; i < list.length; i++) { "
         "if (new RegExp(list[i], 'i').test(__safeerUrl)) return true; } return false; }\n"
@@ -517,7 +521,10 @@ def wrap_script(source: str, include: Optional[Iterable[str]], exclude: Optional
         "if (__safeerInclude.length && !__safeerMatches(__safeerInclude)) return;\n"
         "if (__safeerMatches(__safeerExclude)) return;\n"
         + ("if (window.top !== window) return;\n" if top_frame_only else "")
-        + "function __safeerPost(message) { try { message.t = '" + STEVEC_ZETON + "'; console.log('" + BRIDGE_PREFIX + "' + JSON.stringify(message)); } catch (e) {} }\n"
+        + "function __safeerPost(message) { try { var s = __safeerJson(message);"
+        " if (typeof s !== 'string' || s.charAt(s.length - 1) !== '}') return;"
+        " s = s.slice(0, -1) + (s.length > 2 ? ',' : '') + '\"t\":\"" + STEVEC_ZETON + "\"}';"
+        " __safeerLog.call(console, '" + BRIDGE_PREFIX + "' + s); } catch (e) {} }\n"
     )
     return prelude + adapt_linux_script(source) + "\n})();\n"
 

@@ -1260,6 +1260,13 @@ class BrowserWindow(QMainWindow):
     def _brez_sidra(url: str) -> str:
         return url.split("#", 1)[0]
 
+    @staticmethod
+    def _gostitelj(url: str) -> str:
+        try:
+            return (urllib.parse.urlsplit(str(url or "")).hostname or "").lower()
+        except ValueError:
+            return ""
+
     def oznaci_nepodprt_video(self, page, napaka: bool = False) -> None:
         """Stran (ali njen okvir) je javila video v zapisu, ki ga pogon nima: zapomnimo si jo za ta zavihek."""
         view = next((v for v in self.views() if v.page() is page), None)
@@ -1284,7 +1291,8 @@ class BrowserWindow(QMainWindow):
         if view is None:
             return
         url = view.url().toString()
-        if not url.startswith("https://") or view.property("safeer_drm_zaprto") == self._brez_sidra(url):
+        # Zaprto ponudbo za gostitelja v tem zavihku stran ne prikaze znova z novo poizvedbo (Grok W8).
+        if not url.startswith("https://") or view.property("safeer_drm_zaprto") == self._gostitelj(url):
             return
         view.setProperty("safeer_drm", self._brez_sidra(url))
         self._osvezi_video_vrstico()
@@ -1344,7 +1352,7 @@ class BrowserWindow(QMainWindow):
     def _zapri_video_vrstico(self) -> None:
         view = self.current_view()
         if self._je_drm_ponudba(view):
-            view.setProperty("safeer_drm_zaprto", self._brez_sidra(view.url().toString()))
+            view.setProperty("safeer_drm_zaprto", self._gostitelj(view.url().toString()))
             view.setProperty("safeer_drm", "")
         if view is not None:
             view.setProperty("safeer_video_zaprto", self._brez_sidra(view.url().toString()))
