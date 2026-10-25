@@ -310,7 +310,10 @@ class SafeerOs(unittest.TestCase):
 
     def test_dogodek_zaslon_odpre_in_zapre_gledalca(self):
         vir = inspect.getsource(os_app.SafeerOsWindow._na_dogodek_linka)
-        self.assertIn("self.gledalec_zaslona.odpri(url)", vir)
+        # Zaslon naprave odpre svoje okno z vnosom (okno_zaslona.py, 25. 10. 2026); zavihek Spleta ostane rezerva.
+        self.assertIn("self._odpri_okno_zaslona(p)", vir)
+        self.assertIn("self.gledalec_zaslona.odpri(", inspect.getsource(os_app.SafeerOsWindow._odpri_okno_zaslona))
+        self.assertIn("okno.koncano_na_napravi", vir)
         self.assertIn("self.dispatcher.dispatch(self.gledalec_zaslona.zapri)", vir)
         self.assertNotIn("_odpri_notranji_splet(url)", vir, "gledalec ne zamenja vec strani v uporabnikovem zavihku")
         self.assertNotIn("about:blank", vir)
