@@ -417,6 +417,9 @@ class _SafeerAssetHandler(BaseHTTPRequestHandler):
         url_path = urllib.parse.urlsplit(self.path).path
         # Varnostna omejitev: samo relativne poti znotraj assets_root
         rel = url_path.lstrip("/")
+        if rel == "ozadje-namizja":
+            self._poslji_ozadje()
+            return
         # Prepreči path traversal
         target = Path(self.assets_root) / rel
         try:
@@ -464,6 +467,36 @@ class _SafeerAssetHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-cache")
         self.send_header("Permissions-Policy", "autoplay=(self), fullscreen=(self), picture-in-picture=(self)")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _poslji_ozadje(self) -> None:
+        """Ozadje namizja (isto kot namizje Safeer OS) za okno Safeer OS pod temno tancico - kot na Linuxu.
+        Samo ta ena datoteka (izbrano ozadje Safeer, ozadje Windows ali lastna slika), nic drugega z diska."""
+        try:
+            podatki = _ozadje_za_splet()
+        except Exception:  # noqa: BLE001 - brez ozadja okno ostane temno, kot prej
+            podatki = None
+        if not podatki:
+            self.send_error(404)
+            return
+        _vrsta, data = podatki
+        # Samo slika (JPEG, PNG, BMP, WebP) po vsebini - ozadje Windows (TranscodedWallpaper) nima koncnice.
+        if data[:3] == b"\xff\xd8\xff":
+            vrsta = "image/jpeg"
+        elif data[:4] == b"\x89PNG":
+            vrsta = "image/png"
+        elif data[:2] == b"BM":
+            vrsta = "image/bmp"
+        elif data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+            vrsta = "image/webp"
+        else:
+            self.send_error(415)
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", vrsta)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-cache")
         self.end_headers()
         self.wfile.write(data)
 
@@ -2445,7 +2478,8 @@ class SafeerOsWindow(QMainWindow):
                 "jezik": _nastavi_jezik_oken(_jezik_vmesnika(shramba)),
                 "ime": os.environ.get("USERNAME", "Uporabnik"),
                 "racunalnik": platform.node(),
-                "ozadje": "",
+                # Okno Safeer OS ima ozadje namizja pod temno tancico (kot na Linuxu); ?v= ob vsakem zagonu nova slika.
+                "ozadje": "/ozadje-namizja?v=%d" % int(time.time()),
                 "razpolozljivo": os_backend_win.razpolozljive_nastavitve(),
                 "mape": os_backend_win.uporabniske_mape(),
                 "celozaslonsko": self.isFullScreen(),

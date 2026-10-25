@@ -2488,7 +2488,7 @@
   // ------------------------------------------------------------------ teme (videz)
   // Pet najbolj razsirjenih shem (Catppuccin, Tokyo Night, Gruvbox, Nord, Dracula - vse MIT) + privzeta Safeer.
   var TEME = [
-    { id: "safeer", ime: "Safeer", opis: "temaSafeer", barve: ["#090d15", "#111924", "#54d6a5", "#f0f4f3"] },
+    { id: "safeer", ime: "Safeer", opis: "temaSafeer", barve: ["#0b1424", "#101a2b", "#8ac7ff", "#eaf2ff"] },
     { id: "catppuccin", ime: "Catppuccin Mocha", opis: "catppuccin.com", barve: ["#1e1e2e", "#313244", "#94e2d5", "#cdd6f4"] },
     { id: "tokyonight", ime: "Tokyo Night", opis: "tokyonight (enkia)", barve: ["#1a1b26", "#24283b", "#73daca", "#c0caf5"] },
     { id: "gruvbox", ime: "Gruvbox Dark", opis: "gruvbox (morhetz)", barve: ["#282828", "#3c3836", "#8ec07c", "#ebdbb2"] },
@@ -2889,7 +2889,8 @@
     if (!debridStanje) {
       if (debridNalagam) return;
       debridNalagam = true;
-      klic("mediaDebrid", []).then(function (s) { debridStanje = s; debridNalagam = false; narisiDebrid(true); })
+      // Brez stanja (null) ne klicemo znova v neskoncnost - to je zamrznilo stran; pokazemo prazen izbor (»Dodaj«).
+      klic("mediaDebrid", []).then(function (s) { debridStanje = s && typeof s === "object" ? s : { storitve: [] }; debridNalagam = false; narisiDebrid(true); })
         .catch(function () { debridNalagam = false; });
       return;
     }

@@ -35,13 +35,15 @@ Item {
     }
     property string jezik: "sl"
     // Tema sistema (Nastavitve Safeer OS) in videz namizja (Prilagodi namizje) - en videz z vmesnikom, Spletom in Controlom.
-    property var paleta: ({ poudarek: "#54d6a5", poudarekTemna: "#06231a", besedilo: "#f0f4f3", medlo: "#b0bdc4",
-                            vnos: "#111b27", karticaRgb: [0.067, 0.098, 0.141], poudarekRgb: [0.329, 0.839, 0.647] })
+    // Privzeto = barve namizja Safeer OS na Linuxu (tokens.css); prava paleta pride iz tema.py (os.css).
+    property var paleta: ({ poudarek: "#8ac7ff", poudarekTemna: "#0b1424", besedilo: "#eaf2ff", medlo: "#afbed4",
+                            vnos: "#121d2d", fokus: "#9dceff", ok: "#7fe0b6",
+                            karticaRgb: [0.0627, 0.102, 0.1686], poudarekRgb: [0.5412, 0.7804, 1.0] })
     property real zameglitev: 1.0
     property real prosojnost: 0.55
     property var videz: ({})
-    function plosca(a) { var c = paleta.karticaRgb || [0.067, 0.098, 0.141]; return Qt.rgba(c[0], c[1], c[2], a) }
-    function poudarekA(a) { var c = paleta.poudarekRgb || [0.329, 0.839, 0.647]; return Qt.rgba(c[0], c[1], c[2], a) }
+    function plosca(a) { var c = paleta.karticaRgb || [0.0627, 0.102, 0.1686]; return Qt.rgba(c[0], c[1], c[2], a) }
+    function poudarekA(a) { var c = paleta.poudarekRgb || [0.5412, 0.7804, 1.0]; return Qt.rgba(c[0], c[1], c[2], a) }
     function uporabiVidez(v) {
         if (!v) return
         koren.videz = v

@@ -49,9 +49,11 @@ def _hex(c) -> str:
     return "#%02x%02x%02x" % c[:3]
 
 
-PRIVZETO = {"ozadje": "#090d15", "kartica": "rgba(17, 25, 36, .78)", "rob": "rgba(120, 140, 160, .22)",
-            "besedilo": "#f0f4f3", "medlo": "#b0bdc4", "zelena": "#54d6a5", "zelena-temna": "#06231a",
-            "vnos": "#111b27", "rdeca": "#ff6b6b", "kartica-poudarek": "rgba(27, 42, 51, .92)"}
+# Rezerva, ce os.css ni berljiv: iste barve kot :root v os.css (namizje Safeer OS na Linuxu, tokens.css).
+PRIVZETO = {"ozadje": "#0b1424", "kartica": "rgba(16, 26, 43, .80)", "rob": "rgba(211, 229, 255, .23)",
+            "besedilo": "#eaf2ff", "medlo": "#afbed4", "zelena": "#8ac7ff", "zelena-temna": "#0b1424",
+            "vnos": "#121d2d", "rdeca": "#ff6b6b", "kartica-poudarek": "rgba(24, 38, 62, .92)",
+            "fokus": "#9dceff", "ok": "#7fe0b6"}
 
 
 def paleta(ime: Optional[str] = None) -> Dict[str, object]:
@@ -73,6 +75,7 @@ def paleta(ime: Optional[str] = None) -> Dict[str, object]:
         "ozadje": _hex(barva("ozadje")), "vnos": _hex(barva("vnos")), "besedilo": _hex(barva("besedilo")),
         "medlo": _hex(barva("medlo")), "poudarek": _hex(poud), "poudarekTemna": _hex(barva("zelena-temna")),
         "rdeca": _hex(barva("rdeca")), "kartica": _hex(kartica), "karticaPoudarek": _hex(barva("kartica-poudarek")),
+        "fokus": _hex(barva("fokus")), "ok": _hex(barva("ok")),
         # komponente za QML Qt.rgba (0..1) in za CSS rgba()
         "karticaRgb": [round(x / 255, 4) for x in kartica[:3]], "poudarekRgb": [round(x / 255, 4) for x in poud[:3]],
         "rob": "rgba(%d,%d,%d,%.2f)" % rob, "robRgba": [round(x / 255, 4) for x in rob[:3]] + [rob[3]],
