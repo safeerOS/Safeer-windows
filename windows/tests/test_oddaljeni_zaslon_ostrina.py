@@ -57,11 +57,15 @@ class ZahtevaSeje(unittest.TestCase):
         z = p.zahteva_seje("najvisja", "desktop", (1440, 795), 1.0, "ethernet")
         self.assertEqual(z["quality"], "najvisja")
         self.assertEqual(z["net"], "ethernet")
-        self.assertIn("rtt", z["caps"])
+        self.assertEqual(z["caps"], ["handoff", "rtt", "gop"])       # handoff: ni-okna (c44f1c0)
         self.assertEqual(z["codecs"], ["h264"])
+        self.assertEqual(z["screen"], "desktop")
+        self.assertNotIn("handoff", z)
+        self.assertTrue(p.zahteva_seje("najvisja", "desktop", (1440, 795), 1.0, predano=True)["handoff"])
         self.assertNotIn("net", p.zahteva_seje("najvisja", "apps", (1440, 795), 1.0))
         izvor = (KOREN / "windows" / "safeer_windows" / "oddaljeni_zaslon.py").read_text(encoding="utf-8")
         self.assertIn('prikaz.zahteva_seje("najvisja", self.zaslon_cilj, platno, dpr,', izvor)
+        self.assertIn("predano=predano)", izvor)
 
     def test_vmesnik_omrezja(self):
         self.assertEqual(ctypes.sizeof(p._VrsticaVmesnika), 1352)          # MIB_IF_ROW2
@@ -117,11 +121,12 @@ class Vrstica(unittest.TestCase):
 
 
 def _qt():
+    # QApplication (ne QGuiApplication): drugi preizkusi v istem procesu ustvarjajo okna QWidget.
     try:
-        from PySide6.QtGui import QGuiApplication
+        from PySide6.QtWidgets import QApplication
     except ImportError:
         raise unittest.SkipTest("PySide6 ni na voljo")
-    return QGuiApplication.instance() or QGuiApplication([])
+    return QApplication.instance() or QApplication([])
 
 
 class PikselskoTocno(unittest.TestCase):

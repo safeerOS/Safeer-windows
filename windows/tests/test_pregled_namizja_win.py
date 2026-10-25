@@ -147,11 +147,12 @@ class Slicice(unittest.TestCase):
 
     def test_slika_qt(self):
         try:
-            from PySide6.QtGui import QColor, QGuiApplication, QImage
+            from PySide6.QtGui import QColor, QImage
+            from PySide6.QtWidgets import QApplication
         except ImportError:
             self.skipTest("PySide6 ni na voljo")
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-        _app = QGuiApplication.instance() or QGuiApplication([])
+        _app = QApplication.instance() or QApplication([])
         with tempfile.TemporaryDirectory() as mapa:
             pot = os.path.join(mapa, "a.png")
             slika = QImage(1600, 900, QImage.Format.Format_RGB32)

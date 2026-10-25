@@ -135,10 +135,16 @@ def pogled_za_izvor(platno: Tuple[int, int], dpr: float) -> dict:
             "touch": False, "kind": VRSTA_POGLEDA}
 
 
-def zahteva_seje(kakovost: str, zaslon: str, platno: Tuple[int, int], dpr: float, omrezje: str = "") -> dict:
-    """Parametri screen.start gledalca Windows (starejsi izvor neznana polja prezre)."""
-    z = {"quality": kakovost, "screen": zaslon, "view": pogled_za_izvor(platno, dpr),
-         "caps": list(ZMOZNOSTI), "codecs": list(KODEKI)}
+def zahteva_seje(kakovost: str, zaslon: str, platno: Tuple[int, int], dpr: float, omrezje: str = "",
+                 predano: bool = False) -> dict:
+    """Parametri screen.start gledalca Windows (starejsi izvor neznana polja prezre): osnova iz
+    oddaljeni_zaslon_protokol.parametri_zacetka (zaslon, handoff) + platno, kodeki, omrezje in ping."""
+    from .oddaljeni_zaslon_protokol import parametri_zacetka
+    z = parametri_zacetka(zaslon, predano)
+    z["quality"] = kakovost
+    z["caps"] = list(dict.fromkeys(list(z.get("caps") or []) + list(ZMOZNOSTI)))
+    z["view"] = pogled_za_izvor(platno, dpr)
+    z["codecs"] = list(KODEKI)
     if omrezje:
         z["net"] = omrezje
     return z

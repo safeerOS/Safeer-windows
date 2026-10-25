@@ -4,6 +4,8 @@ import pytest
 from safeer_windows.oddaljeni_zaslon_protokol import (
     RazclenjevalnikOkvirjev,
     ZavrnjenaSeja,
+    obvestilo_naprave,
+    parametri_zacetka,
     preslikaj_tipko_ime,
     razcleni_odgovor,
 )
@@ -88,3 +90,23 @@ def test_ima_naslov_samo_z_resnicnim_naslovom():
     assert ima_naslov({"address": "192.168.0.135"})
     for brez in (None, {}, {"naslov": ""}, {"naslov": "   "}, {"naslov": None}):
         assert not ima_naslov(brez), brez
+
+
+def test_screen_start_pove_da_gledalec_zna_preklop_na_namizje():
+    """Brez `caps: ["handoff"]` racunalnik programa, ki je ze odprt na njegovem namizju, ne javi (»ni okna«)."""
+    assert parametri_zacetka("apps") == {"quality": "najvisja", "screen": "apps", "caps": ["handoff"]}
+    assert parametri_zacetka("desktop", predano=True) == {"quality": "najvisja", "screen": "desktop",
+                                                          "caps": ["handoff"], "handoff": True}
+    assert parametri_zacetka("karkoli")["screen"] == "desktop"
+
+
+def test_obvestila_naprave():
+    assert obvestilo_naprave({"konec": "na_namizju", "name": "  Claude\n"}) == ("konec", "na_namizju", "Claude", "")
+    assert obvestilo_naprave({"konec": "ni_okna"}) == ("konec", "ni_okna", "", "")
+    assert obvestilo_naprave({"konec": "prevzeto", "sporocilo": " Druga naprava. "}) == \
+        ("konec", "prevzeto", "", "Druga naprava.")
+    assert obvestilo_naprave({"program": "caka", "name": "GIMP"}) == ("program", "caka", "GIMP", "")
+    assert obvestilo_naprave({"program": "odprt"}) == ("program", "odprt", "", "")
+    for nic in ({"program": "x"}, {}, [], None, {"konec": ""}, {"name": 5, "konec": None}):
+        assert obvestilo_naprave(nic) == ("", "", "", ""), nic
+    assert obvestilo_naprave({"konec": "x" * 500, "name": 7})[1:3] == ("x" * 64, "")
