@@ -21,11 +21,15 @@ class Odlocitev(unittest.TestCase):
     def test_nas_program_brez_cfg_ustavi_gradnjo(self):
         napake, _ = pe.odlocitev("SafeerNovo.exe", dict(POPOLNO, CFG=False), False, IZJEME)
         self.assertEqual(napake, ["CFG"])                           # tuja: CFG brez izjeme
-        napake, izjeme = pe.odlocitev("SafeerBrowser.exe", dict(POPOLNO, CFG=False), False, IZJEME)
-        self.assertEqual(napake, ["CFG"])                           # nas: izjema dovoli samo CET
-        napake, izjeme = pe.odlocitev("SafeerBrowser.exe", dict(POPOLNO, CET=False), False, IZJEME)
-        self.assertEqual((napake, izjeme[0]["manjka"]), ([], ["CET"]))
-        self.assertTrue(izjeme[0]["razlog"])
+        koda = IZJEME["safeerbrowser.exe"]["sha256_kode"]["safeerbrowser.exe"][0]
+        napake, izjeme = pe.odlocitev("SafeerBrowser.exe", dict(POPOLNO, CFG=False), False, IZJEME, sha_kode=koda)
+        self.assertEqual(napake, ["CFG"])                           # izjema (zagonski program) dovoli samo CET
+        napake, izjeme = pe.odlocitev("SafeerBrowser.exe", dict(POPOLNO, CET=False), False, IZJEME, sha_kode=koda)
+        self.assertEqual((napake, izjeme[0]["manjka"], izjeme[0]["rok"]), ([], ["CET"], ""))   # tuja: brez roka
+        self.assertTrue(izjeme[0]["razlog"].startswith("Tuja datoteka"))
+        # Druga koda kot runw.exe iz PyInstaller (podtaknjen ali spremenjen zagonski program): gradnja pade.
+        napake, _ = pe.odlocitev("SafeerBrowser.exe", dict(POPOLNO, CET=False), False, IZJEME, sha_kode="ab" * 32)
+        self.assertIn("ab" * 32, napake[-1])
 
     def test_aslr_dep_heva_nikoli_izjema(self):
         for z in ("ASLR", "DEP", "HEVA"):
@@ -38,12 +42,18 @@ class Odlocitev(unittest.TestCase):
 
     def test_tuje_z_izjemo_in_potjo(self):
         izid = dict(POPOLNO, CFG=False, GS=False, CET=False)
+        izjeme = {"*/av.libs/*.dll": {"dovoli": ["CFG", "GS", "CET"], "tuja": True, "razlog": "Tuja datoteka: PyAV",
+                                      "sha256": {"avcodec-62-abc.dll": ["12" * 32]}}}
         pot = "SafeerBrowser/_internal/av.libs/avcodec-62-abc.dll"
-        napake, izjeme = pe.odlocitev("avcodec-62-abc.dll", izid, False, IZJEME, pot)
-        self.assertEqual(napake, [])
-        self.assertIn("MinGW", izjeme[0]["razlog"])
-        napake, _ = pe.odlocitev("avcodec-62-abc.dll", izid, False, IZJEME, pot.replace("av.libs", "drugje"))
+        napake, upor = pe.odlocitev("avcodec-62-abc.dll", izid, False, izjeme, pot, sha="12" * 32)
+        self.assertEqual((napake, upor[0]["rok"]), ([], ""))
+        napake, _ = pe.odlocitev("avcodec-62-abc.dll", izid, False, izjeme, pot.replace("av.libs", "drugje"),
+                                 sha="12" * 32)
         self.assertEqual(sorted(napake), ["CET", "CFG", "GS"])     # zunaj av.libs ni izjeme
+        # Tuja izjema brez pripete vsote ali z napacno vsoto ne velja (odlocitev lastnika 25. 10. 2026).
+        brez = {"*/av.libs/*.dll": dict(izjeme["*/av.libs/*.dll"], sha256={})}
+        self.assertTrue(pe.odlocitev("avcodec-62-abc.dll", izid, False, brez, pot, sha="12" * 32)[0])
+        self.assertTrue(pe.odlocitev("avcodec-62-abc.dll", izid, False, izjeme, pot, sha="34" * 32)[0])
 
     def test_go_razlog(self):
         napake, izjeme = pe.odlocitev("SafeerOS.exe", dict(POPOLNO, CFG=False, GS=False, CET=False), True, IZJEME)
@@ -70,7 +80,7 @@ class DatotekeVRepozitoriju(unittest.TestCase):
         # Samostojni predvajalnik (naloga 13) se zgradi in preveri v CI.
         self.assertIn("windows/SafeerPredvajalnik.spec", ci)
         self.assertIn("pe_utrjenost.py build/predvajalnik/dist --preveri", ci)
-        self.assertTrue(IZJEME["safeerpredvajalnik.exe"].get("rok"))
+        self.assertTrue(IZJEME["safeerpredvajalnik.exe"].get("sha256_kode"))   # zagonski program PyInstaller: tuj
         self.assertIn("--preveri", ci)
 
 
@@ -109,11 +119,12 @@ class PripetaIzjema(unittest.TestCase):
 
     def test_vsota_datoteke_samo_ko_jo_izjema_rabi(self):
         klici = []
-        pe.odlocitev("Qt6Core.dll", dict(POPOLNO, CET=False), False, IZJEME, "x/Qt6Core.dll",
-                     sha=lambda: klici.append(1) or "")
-        pe.odlocitev("avcodec-61.dll", POPOLNO, False, IZJEME, "x/PySide6/avcodec-61.dll",
-                     sha=lambda: klici.append(1) or "")
-        self.assertEqual(klici, [])                                # brez pripete izjeme ali brez manjkajoce zascite
+        pe.odlocitev("Qt6Core.dll", POPOLNO, False, IZJEME, "x/Qt6Core.dll", sha=lambda: klici.append(1) or "")
+        self.assertEqual(klici, [])                                # vse zascite: brez izjeme in brez vsote
+        napake, _ = pe.odlocitev("Qt6Core.dll", dict(POPOLNO, CET=False), False, IZJEME, "x/Qt6Core.dll",
+                                 sha=lambda: klici.append(1) or "")
+        self.assertEqual(klici, [1])                               # tuja izjema: vsota se preveri vedno
+        self.assertTrue(napake)                                    # neznana vsota (nepripeta datoteka): napaka
 
 
 
@@ -150,9 +161,11 @@ class PregledGrok(unittest.TestCase):
         # Lastna razsiritev safeer_*.pyd ne gre skozi pod splosno izjemo *.pyd (W17).
         napake, _ = pe.odlocitev("safeer_x.pyd", dict(POPOLNO, CFG=False), False, IZJEME)
         self.assertIn("CFG", napake)
-        # Vse izjeme za nase programe v pe_izjeme.json imajo rok.
-        for ime in ("safeerbrowser.exe", "safeeros.exe", "safeercontrol.exe", "safeermediawebview.exe"):
-            self.assertTrue(IZJEME[ime].get("rok"), ime)
+        # Rok imajo samo izjeme za to, kar gradimo sami; zagonski program PyInstaller je tuj (pripet po kodi).
+        for ime in ("safeermediawebview.exe", "libmpv-2.dll", "libegl.dll", "libglesv2.dll"):
+            self.assertTrue(IZJEME[ime].get("rok") and not IZJEME[ime].get("tuja"), ime)
+        for ime in ("safeerbrowser.exe", "safeeros.exe", "safeercontrol.exe", "safeerpredvajalnik.exe"):
+            self.assertTrue(IZJEME[ime].get("tuja") and IZJEME[ime].get("sha256_kode") and not IZJEME[ime].get("rok"))
 
     def test_w15_go_samo_v_odsekih(self):
         import tempfile
@@ -181,8 +194,72 @@ class PregledGrok(unittest.TestCase):
 
     def test_w17_izjema_brez_razloga(self):
         self.assertEqual(pe.napake_izjem(IZJEME), [])
+        # Odlocitev lastnika 25. 10.: tuja izjema ima vsoto in nima roka, nasa ima rok.
+        self.assertTrue(pe.napake_izjem({"x.dll": {"dovoli": ["CFG"], "razlog": "r", "tuja": True}}))
+        self.assertTrue(pe.napake_izjem({"x.dll": {"dovoli": ["CFG"], "razlog": "r", "tuja": True, "rok": "2027-01-01",
+                                                   "sha256": {"x.dll": ["00" * 32]}}}))
+        self.assertTrue(pe.napake_izjem({"x.dll": {"dovoli": ["CFG"], "razlog": "r"}}))
+        self.assertEqual(pe.napake_izjem({"x.dll": {"dovoli": ["CFG"], "razlog": "r", "tuja": True,
+                                                    "sha256": {"x.dll": ["00" * 32]}}}), [])
+        for v, e in IZJEME.items():
+            if e.get("tuja"):
+                self.assertTrue(e["razlog"].startswith("Tuja datoteka"), v)
         self.assertTrue(pe.napake_izjem({"x.dll": {"dovoli": ["CFG"], "razlog": " "}}))
         self.assertTrue(pe.napake_izjem({"x.dll": {"razlog": "zakaj"}}))
+
+
+
+class TujeDatoteke(unittest.TestCase):
+    """Odlocitev lastnika (25. 10. 2026 17:29): tuja datoteka - trajna izjema brez roka in brez opozorila, pripeta s
+    SHA-256; zagonski program PyInstaller pripet po kodi (vsota cele datoteke je v vsaki gradnji druga)."""
+
+    def test_koda_ne_glede_na_prekrivek_in_vire(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as mapa:
+            a, b, c = (os.path.join(mapa, x) for x in ("a.exe", "b.exe", "c.exe"))
+            with open(a, "wb") as f:
+                f.write(_pe_koda(b"\x90" * 16))
+            with open(b, "wb") as f:
+                f.write(_pe_koda(b"\x90" * 16) + b"arhiv modulov PyInstaller")
+            with open(c, "wb") as f:
+                f.write(_pe_koda(b"\xcc" * 16))
+            self.assertEqual(pe.sha256_kode(a), pe.sha256_kode(b))
+            self.assertNotEqual(pe.sha256_kode(a), pe.sha256_kode(c))
+            self.assertNotEqual(pe.sha256(a), pe.sha256(b))
+
+    def test_pripni(self):
+        import copy
+        import tempfile
+        izjeme = {"*.dll": {"dovoli": ["CFG", "GS", "CET"], "tuja": True, "razlog": "Tuja datoteka: x", "sha256": {}}}
+        with tempfile.TemporaryDirectory() as mapa:
+            pot = os.path.join(mapa, "tuja.dll")
+            with open(pot, "wb") as f:
+                f.write(_pe_koda(b"\x90" * 16))
+            self.assertTrue(pe.preveri([mapa], izjeme)[1])                    # brez vsote: napaka
+            kopija = copy.deepcopy(izjeme)
+            self.assertEqual(pe.pripni([mapa], kopija), 1)
+            self.assertEqual(kopija["*.dll"]["sha256"]["tuja.dll"], [pe.sha256(pot)])
+            porocilo, napak = pe.preveri([mapa], kopija)
+            self.assertEqual(napak, 0, porocilo)
+            self.assertEqual(pe.pripni([mapa], kopija), 0)                    # ze pripeta
+
+
+def _pe_koda(koda):
+    """PE32+ z enim odsekom kode (0x200-0x400)."""
+    import struct
+    p = bytearray(0x400)
+    p[0:2] = b"MZ"
+    struct.pack_into("<I", p, 0x3C, 0x40)
+    p[0x40:0x44] = b"PE\0\0"
+    struct.pack_into("<HHH", p, 0x44, 0x8664, 1, 0)
+    struct.pack_into("<H", p, 0x40 + 20, 0xF0)
+    struct.pack_into("<H", p, 0x40 + 24, 0x20B)
+    struct.pack_into("<H", p, 0x40 + 24 + 70, 0x0160)                       # HEVA, ASLR, DEP
+    odsek = 0x40 + 24 + 0xF0
+    struct.pack_into("<IIII", p, odsek + 8, 0x200, 0x1000, 0x200, 0x200)
+    struct.pack_into("<I", p, odsek + 36, 0x60000020)                      # koda, izvrsljivo, berljivo
+    p[0x200:0x200 + len(koda)] = koda
+    return bytes(p)
 
 
 if __name__ == "__main__":

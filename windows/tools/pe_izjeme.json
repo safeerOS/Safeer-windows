@@ -1,5 +1,5 @@
 {
- "opis": "Izjeme preverbe utrjenosti PE (windows/tools/pe_utrjenost.py). Izmerjeno 25. 10. 2026 na namescenem paketu 1.0.51 (testni PC, 111 datotek). Vsaka izjema ima razlog; nova datoteka brez zascite in brez izjeme ustavi gradnjo. ASLR, DEP in HEVA (64-bit) niso nikoli izjema. Tuje knjiznice, ki jih ne gradimo in nimajo CFG/CET (FFmpeg v PySide6, OpenBLAS v numpy), imajo izjemo pripeto na razlicico in SHA-256 (koordinator 25. 10. 2026: ne tiho).",
+ "opis": "Izjeme preverbe utrjenosti PE (windows/tools/pe_utrjenost.py). Odlocitev lastnika 25. 10. 2026 17:29: »Tuje datoteke brez najnovejsih zascit niso nasa skrb, mi skrbimo za svoje.« Tuja datoteka (\"tuja\": true) ima trajno izjemo brez roka in brez opozorila, a je PRIPETA s SHA-256 (\"sha256\" cele datoteke ali \"sha256_kode\" kode): nova razlicica ali podtaknjena datoteka ustavi gradnjo, dokler je kdo ne pregleda in vsot ne doda (pe_utrjenost.py PAKET --pripni). Kar gradimo SAMI ima izjemo samo z rokom; po roku gradnja pade. ASLR, DEP in HEVA (64-bit) niso nikoli izjema.",
  "izjeme": {
   "libmpv-2.dll": {
    "dovoli": [
@@ -21,7 +21,8 @@
    "sha256": {
     "libegl.dll": "c3859bd94b2d7edfc23c620dab1154513d181d494cfe92ce01924331100a96e8"
    },
-   "razlog": "ANGLE (OpenGL ES na Direct3D za izris libmpv): CFG in /GS ima, CETCOMPAT ne (izmerjeno 25. 10. 2026). Pripeto na SHA-256: nova razlicica ustavi gradnjo"
+   "razlog": "ANGLE (OpenGL ES na Direct3D za izris libmpv) gradimo SAMI v safeerOS/milutv-libmpv (vcpkg, tek GitHub Actions; izdaja »Lastna gradnja libmpv za Safeer«): CFG in /GS ima, CETCOMPAT ne (izmerjeno 25. 10. 2026). Rok 31. 12. 2026: /CETCOMPAT v tripletu vcpkg; po roku gradnja pade",
+   "rok": "2026-12-31"
   },
   "libglesv2.dll": {
    "dovoli": [
@@ -31,7 +32,8 @@
    "sha256": {
     "libglesv2.dll": "bb9914f0e2dfb31103599c81c334b8d91974052316cc001802d1ccd3f5c36537"
    },
-   "razlog": "ANGLE (OpenGL ES na Direct3D za izris libmpv): CFG in /GS ima, CETCOMPAT ne (izmerjeno 25. 10. 2026). Pripeto na SHA-256: nova razlicica ustavi gradnjo"
+   "razlog": "ANGLE (OpenGL ES na Direct3D za izris libmpv) gradimo SAMI v safeerOS/milutv-libmpv (vcpkg, tek GitHub Actions; izdaja »Lastna gradnja libmpv za Safeer«): CFG in /GS ima, CETCOMPAT ne (izmerjeno 25. 10. 2026). Rok 31. 12. 2026: /CETCOMPAT v tripletu vcpkg; po roku gradnja pade",
+   "rok": "2026-12-31"
   },
   "*/numpy.libs/libscipy_openblas64_*.dll": {
    "dovoli": [
@@ -43,43 +45,282 @@
    "sha256": {
     "libscipy_openblas64_-ed4f167a5330424524f45258e7ca2c8d.dll": "ed4f167a5330424524f45258e7ca2c8d7f03c0cba1f30ee4985553ac1f88ecf8"
    },
-   "razlog": "OpenBLAS iz kolesa numpy (MinGW/gfortran: brez /guard:cf, /GS in /CETCOMPAT). numpy rabita dxcam (zajem zaslona DXGI, ~2 ms na sliko namesto ~34 ms z GDI) in soundcard (zvok racunalnika pri deljenju zaslona); numpy.linalg ga nalozi ob uvozu numpy, zato ga brez numpy ne moremo izpustiti. Izmerjeno v CI 25. 10. 2026. Pripeto na SHA-256: nova razlicica ustavi gradnjo, dokler je ne pregledamo"
-  },
-  "*/av.libs/*.dll": {
-   "dovoli": [
-    "CFG",
-    "GS",
-    "CET"
-   ],
-   "razlog": "PyAV (dekoder gledalca): FFmpeg in knjiznice iz kolesa PyAV, zgrajene z MinGW-w64 (GCC) - brez /guard:cf, /GS (varovalo MSVC) in /CETCOMPAT. Izmerjeno 25. 10. 2026 (PyAV 18.1). Nadgradnja: lastna gradnja FFmpeg s clang-cl /guard:cf /CETCOMPAT"
+   "razlog": "Tuja datoteka (odlocitev lastnika 25. 10. 2026: tuje datoteke niso nasa skrb, mi skrbimo za svoje): OpenBLAS iz kolesa numpy (MinGW/gfortran: brez /guard:cf, /GS in /CETCOMPAT). numpy rabita dxcam (zajem zaslona DXGI, ~2 ms na sliko namesto ~34 ms z GDI) in soundcard (zvok racunalnika pri deljenju zaslona); numpy.linalg ga nalozi ob uvozu numpy, zato ga brez numpy ne moremo izpustiti. Izmerjeno v CI 25. 10. 2026. Pripeto na SHA-256: nova razlicica ustavi gradnjo, dokler je ne pregledamo",
+   "tuja": true
   },
   "*.pyd": {
    "dovoli": [
     "CFG",
     "CET"
    ],
-   "razlog": "razsiritve Python (CPython, PySide6, cryptography, cffi, PyAV): uradne gradnje brez /guard:cf in /CETCOMPAT; /GS imajo. Izmerjeno 25. 10. 2026 (28 + 65 datotek)"
+   "razlog": "Tuja datoteka (odlocitev lastnika 25. 10. 2026: tuje datoteke niso nasa skrb, mi skrbimo za svoje): razsiritve Python (CPython, PySide6, cryptography, cffi, PyAV): uradne gradnje brez /guard:cf in /CETCOMPAT; /GS imajo. Izmerjeno 25. 10. 2026 (28 + 65 datotek)",
+   "tuja": true,
+   "sha256": {
+    "_asyncio.pyd": [
+     "c77de90cad749087a0c5dc5e19d78d24f6ef44e7e5ac19b8420cfc0cea62395d"
+    ],
+    "_bz2.pyd": [
+     "65f610646d10d5babea080e060d244b546ec52c54012e5e937dc72dcc2e2e7bc"
+    ],
+    "_cffi_backend.cp312-win_amd64.pyd": [
+     "9af5e4f68a41f26b726f2e9424f9d58a4f5666189f6a48be95f406b257102aec"
+    ],
+    "_ctypes.pyd": [
+     "0e56107a891100535f2da79d85a5ae65ff1227b4765bd108f8593ac1a1110d81"
+    ],
+    "_decimal.pyd": [
+     "aeacfead2befcc0768063a037bb64bd32109ae09cb144e5f571b04dd7965db9d"
+    ],
+    "_elementtree.pyd": [
+     "5009a9a53c03ef8387443b5cf6ce08e5c3a79727466a0b931c5bbca915bf89ca"
+    ],
+    "_hashlib.pyd": [
+     "03d233dbace599168eaffec823de6ed7beec8c2a4ebfe9b8a3d8e042a59af3ba"
+    ],
+    "_lzma.pyd": [
+     "e3deecc1f59a3b811c608861decd84de1e8df8bafd5e2b39188861318c5a38cf"
+    ],
+    "_multiprocessing.pyd": [
+     "2c636df7059cb0dd7e978dd735c7c5c8ddb09cf94754cf9e232296b96c5c545a"
+    ],
+    "_overlapped.pyd": [
+     "662126ff80c3a1b4cedf74074029c12ae4743e6d3b37376e39ac70aacb7d4d3c"
+    ],
+    "_queue.pyd": [
+     "48e76e0ad63f6932b4a77b5819f41c1e7595636ca8d9e824f0943a14b8bb5035"
+    ],
+    "_socket.pyd": [
+     "3efa4636cf9e350856f6927d67a4c2564bf9bd2758a00bbf17d3aece5b60016d"
+    ],
+    "_sqlite3.pyd": [
+     "64b51df2805c58b023a875e8ae3be7ac7f61ef664f32ca6c90f6315da47ef0bc"
+    ],
+    "_ssl.pyd": [
+     "0bc527d2dbc50009f43b2ed5d5982c4f63f4b647647ffa9eda612dcda80f6040"
+    ],
+    "_uuid.pyd": [
+     "acce4f281d7ffb2dec0997527faf25b1df62ad7bd3032c568ddcf65c90edc867"
+    ],
+    "_wmi.pyd": [
+     "a980f1e7a29842bd946863fc2693fbeb555a9dc0f9e1630dfed9a2fcdef3ece2"
+    ],
+    "pyexpat.pyd": [
+     "d615e193d1affcdbfe504e90d3621cbdcff94bf72b79d899126534507fd6d27a"
+    ],
+    "select.pyd": [
+     "d4d7181b11db0bd22a6cd5cda6f8583d1f5c77615fd0a6ca33350619d6e0438a"
+    ],
+    "unicodedata.pyd": [
+     "208ee1cd3cbad0828433ca7246b05be2b1ff5569983d27d296c0b38888585488"
+    ],
+    "_winrt.cp312-win_amd64.pyd": [
+     "96dce74f66e213ac5fbeaa6476d2b757e7e4df33d1e9827f78f60f9623f5fdfe"
+    ],
+    "_winrt_windows_foundation.cp312-win_amd64.pyd": [
+     "3c7ac22bbe09103f8dfbf728f01f2a00ddb462eb3a28052fa9c54e4721ff7b9d"
+    ],
+    "_winrt_windows_foundation_collections.cp312-win_amd64.pyd": [
+     "c3ab35abf3d7b9807cf29ecc018667b01026621da587bb9a476f8c309adda01f"
+    ],
+    "_winrt_windows_media.cp312-win_amd64.pyd": [
+     "1ca56dc5cc850c801abc4cc6135887736961692da5c54997760bc0729a32dd06"
+    ],
+    "_winrt_windows_media_playback.cp312-win_amd64.pyd": [
+     "fb29787c0c97fd6fa06b9ff58b841e41efda8edbb912bcb258424cefc9a9a824"
+    ],
+    "_winrt_windows_storage_streams.cp312-win_amd64.pyd": [
+     "9bac5f7e64400631c691b53ecf9b71dea32c4556a333282765a096181a42c5f5"
+    ],
+    "_cache.cp312-win_amd64.pyd": [
+     "008ed150589121b0ad5884bf639e22deafd9584ca909667edb567f266998918b"
+    ],
+    "_dns.cp312-win_amd64.pyd": [
+     "c5ae94ca63cee2de1e8191d3dc0be7ae72df27774b749443d971906d5e2530e5"
+    ],
+    "_history.cp312-win_amd64.pyd": [
+     "5b43bf14226e3861e0cef69c4502d12f7b923bf5bfc5f03394e4c9202ef6398b"
+    ],
+    "_listener.cp312-win_amd64.pyd": [
+     "2df8d69b86b99c4cb8b44f2489076a679187673f8be7da4ed4cec058ae815b50"
+    ],
+    "_record_update.cp312-win_amd64.pyd": [
+     "2b020865c40d0507b1643b986f38ee94da725ce58859fa4906c4c9cb0b5d9cb0"
+    ],
+    "_updates.cp312-win_amd64.pyd": [
+     "9cf00296dd64993f4417029c09948ea9a38202a15ff7dc193f264e8fc277311d"
+    ],
+    "answers.cp312-win_amd64.pyd": [
+     "e187e4c46bf6be7be8efd777c02ce58e0591d8068421302c86e331e328ad5443"
+    ],
+    "multicast_outgoing_queue.cp312-win_amd64.pyd": [
+     "1aec036ba896e3686973784ca87181c68e46b38cb9ac9e937c6d30948641655b"
+    ],
+    "query_handler.cp312-win_amd64.pyd": [
+     "27c436199129ff8ec4a8ddc4f97cd9449f1baa97ab9d87ad7852ddf330d2d449"
+    ],
+    "record_manager.cp312-win_amd64.pyd": [
+     "b71d7eb89584c4041fe84dea34a6da822d8e22d06d1da4efa9713d565023eaae"
+    ],
+    "incoming.cp312-win_amd64.pyd": [
+     "2dd7ac4e5ecbdbeceae162a46ff598bdb2ed987a881cdbd40dd137af66d54762"
+    ],
+    "outgoing.cp312-win_amd64.pyd": [
+     "6a3c95ceabbf81a4e795b3ccade15353a4e4e02b3ebe25853e33cc76682079fb"
+    ],
+    "ipaddress.cp312-win_amd64.pyd": [
+     "b56e1c11e403f5c2a8aa338605f64be034ae3ef386b746056a5fa7de0ced1e20"
+    ],
+    "time.cp312-win_amd64.pyd": [
+     "100dc2572ec4006b95bee8240149d08a0c277d6201f9d1628cd51db4097bf9f5"
+    ],
+    "__init__.cp312-win_amd64.pyd": [
+     "e2c410e33ec0ab32669bd676d8a7e88e961da54a654066aa653f712998cb32c3"
+    ],
+    "browser.cp312-win_amd64.pyd": [
+     "28f11afd2e0db5c1813dc7e97d6d10badbb0d4119a2985c8fad4d5da2bb8fae9"
+    ],
+    "info.cp312-win_amd64.pyd": [
+     "de3cda0d0da2e36dc563438c19731ea4da1db73ee7aa1ba69a6ee86ca39a04ef"
+    ],
+    "registry.cp312-win_amd64.pyd": [
+     "032628da3aa3e3d8a3662f4aa3b15ceec3c463363aff7ce7692e3ea9be08c39f"
+    ],
+    "_pocketfft_umath.cp312-win_amd64.pyd": [
+     "4f008612d6b9e2ab3820ee17a1c758c499e45e80a36764c9dfb7bf304b066f03"
+    ],
+    "_umath_linalg.cp312-win_amd64.pyd": [
+     "03bc9de2d6d8e2d9ea3ec781f3c16bcbc9960095cc02ca588f4229cd1560c661"
+    ],
+    "_multiarray_tests.cp312-win_amd64.pyd": [
+     "f09f60242eaed510e1af6384284f53ff56ae42770a62e630bd415bc2b6854d66"
+    ],
+    "_multiarray_umath.cp312-win_amd64.pyd": [
+     "9c10617e66e992b5ac6d9f78fe7cedd0011618e1c2f89d09a185bb63073e2c90"
+    ],
+    "_bounded_integers.cp312-win_amd64.pyd": [
+     "927c1673ba698a85e6253b4d8d2223eb019b021792c54604489767c694d2ab93"
+    ],
+    "_common.cp312-win_amd64.pyd": [
+     "712a7bb4b2d3e56548cdf255eb4e6c1ca0737d7d81d76f09bdccebb0703ae572"
+    ],
+    "_generator.cp312-win_amd64.pyd": [
+     "0fa509dcf5ae21910cb2b3c74271977d0fac7fab15ffd5f32017e08b97e71de6"
+    ],
+    "_mt19937.cp312-win_amd64.pyd": [
+     "e6938df4dd3a193b7d9171d3e192702be3a70de2ebe866cf6fcd92f9e368349d"
+    ],
+    "_pcg64.cp312-win_amd64.pyd": [
+     "8eb5569b221d40884093def83d897376bddd99c9279f182b9db3145b9b897d34"
+    ],
+    "_philox.cp312-win_amd64.pyd": [
+     "cc0c03e2c1443e8981300ddb9cc5ceb504e7f8494323d4ec0a1ad95ae16fbf75"
+    ],
+    "_sfc64.cp312-win_amd64.pyd": [
+     "20c551734cd2b2be2425c8773b795f1e92de8826ebbe6c1103cd0fa6b5c94408"
+    ],
+    "bit_generator.cp312-win_amd64.pyd": [
+     "c7f637df1fa0db9fe4bba6c05dac680d89aed245401423f1ffd16d93366a35a7"
+    ],
+    "mtrand.cp312-win_amd64.pyd": [
+     "e8bdaf22830ceaabc596854a816d39d96d1d60e96c2e12a9a17950b624d480a1"
+    ],
+    "qtcore.pyd": [
+     "74f96322c5e9cea73aefd2ed5870e5275336b31f552fcd32f12fc81d23f1bc6f"
+    ],
+    "qtdbus.pyd": [
+     "10ced1c2a7673f4119eda45cb589f40222baf2ffb33986dd086f70bb3c42a459"
+    ],
+    "qtgui.pyd": [
+     "7bef20046045199c037b7cbfedaa1c5464730fa948b2c9ec8afbf718e63774d4"
+    ],
+    "qtmultimedia.pyd": [
+     "646fc4ace4829c18eedf95deac00258d827d4a704b694027bd1f22162cd17fae"
+    ],
+    "qtmultimediawidgets.pyd": [
+     "f981edac53ff963a858d4c6a2926769788f88524ae07431b92d900d74e22b216"
+    ],
+    "qtnetwork.pyd": [
+     "c5038bb71fc9d57330fa2d8eeec65aab69fcf02687cc8f54dbfb5995cfec6a71"
+    ],
+    "qtopengl.pyd": [
+     "645f5ffcdf31ada7a71bf40e9290ec0ca8afb125dfa0602ca7f10b624b3f1fd3"
+    ],
+    "qtopenglwidgets.pyd": [
+     "0b665e477a541900f9979d5f397a776bb9847fa68df3f7d65231365acf4e94bd"
+    ],
+    "qtpositioning.pyd": [
+     "5175d2d3db2ae3083b9a638a788a52a549ac1b7234ae58b70f51e31bb45d11f6"
+    ],
+    "qtprintsupport.pyd": [
+     "5c4671afb67b53533848ad43d2f58e128b1603309cd89cb8eb11329d234b8e70"
+    ],
+    "qtqml.pyd": [
+     "2a6b5b8e904a2dbf1efd8bede950605bd05e27fb6f403764715bc133fe386d23"
+    ],
+    "qtquick.pyd": [
+     "0b7e25855eecccf0e9d9cf58367ea2d0af69654e995ff500b4af5619ecdb0136"
+    ],
+    "qtquickwidgets.pyd": [
+     "260637faa22bd01d99678d58cee2c2b8de211ad71dd7cfcd1a02b8f1f8e866f1"
+    ],
+    "qtwebchannel.pyd": [
+     "acb4e5f77f967c0c75d62fdaee1ca28402113ae853b173b236afda9526556d04"
+    ],
+    "qtwebenginecore.pyd": [
+     "ec22d4cfa84677cd0903f07225fa8f1c3a523046e5fc7a7cd521a0f77591c963"
+    ],
+    "qtwebenginewidgets.pyd": [
+     "b240206826d00603975c05278f40bf3d3bbbe644055ca4d131dbd5ecb9156258"
+    ],
+    "qtwidgets.pyd": [
+     "f12f4ca641998e5706d5f7b0023147d573f0f2d2361e26dadf31bdbf05fbfd1d"
+    ],
+    "_rust.pyd": [
+     "fe5c4cdb5512f792fb0f5b3ce0cd8c1484614851d56ff5d1e7215213eb9e0bca"
+    ],
+    "shiboken.pyd": [
+     "2f6f3a694f675b1dafdae26903191613c02866ab48e02591ae34ca1a3b1284f1"
+    ]
+   }
   },
   "safeerbrowser.exe": {
    "dovoli": [
     "CET"
    ],
-   "razlog": "zagonski program PyInstaller (uradni bootloader) brez /CETCOMPAT; CFG in /GS ima. Nadgradnja: lasten bootloader z /CETCOMPAT. Rok 31. 12. 2026 (pregled Grok W14): do tedaj lasten zagonski program PyInstaller z /CETCOMPAT oziroma .NET 9; po roku gradnja pade",
-   "rok": "2026-12-31"
+   "tuja": true,
+   "razlicica": "PyInstaller 6.22.3 (windows/requirements.txt)",
+   "sha256_kode": {
+    "safeerbrowser.exe": [
+     "67bdc7f5eeccf01180cd5b3621be7d0265efa6a44742496a7a6c6f9076ef4b1f"
+    ]
+   },
+   "razlog": "Tuja datoteka (odlocitev lastnika 25. 10. 2026: tuje datoteke niso nasa skrb, mi skrbimo za svoje): zagonski program PyInstaller 6.22.3 (runw.exe) brez /CETCOMPAT; CFG in /GS ima. Pripeta je vsota KODE (ikona, razlicica in arhiv modulov so v vsaki gradnji drugi): koda je enaka runw.exe iz kolesa PyInstaller (izmerjeno na paketu CI 176a7ac). Nova razlicica PyInstaller = nova vsota"
   },
   "safeeros.exe": {
    "dovoli": [
     "CET"
    ],
-   "razlog": "zagonski program PyInstaller (uradni bootloader) brez /CETCOMPAT; Go zaganjalnik z istim imenom ima izjemo Go. Rok 31. 12. 2026 (pregled Grok W14): do tedaj lasten zagonski program PyInstaller z /CETCOMPAT oziroma .NET 9; po roku gradnja pade",
-   "rok": "2026-12-31"
+   "tuja": true,
+   "razlicica": "PyInstaller 6.22.3 (windows/requirements.txt)",
+   "sha256_kode": {
+    "safeeros.exe": [
+     "67bdc7f5eeccf01180cd5b3621be7d0265efa6a44742496a7a6c6f9076ef4b1f"
+    ]
+   },
+   "razlog": "Tuja datoteka (odlocitev lastnika 25. 10. 2026: tuje datoteke niso nasa skrb, mi skrbimo za svoje): zagonski program PyInstaller 6.22.3 (runw.exe) brez /CETCOMPAT; CFG in /GS ima. Pripeta je vsota KODE (ikona, razlicica in arhiv modulov so v vsaki gradnji drugi): koda je enaka runw.exe iz kolesa PyInstaller (izmerjeno na paketu CI 176a7ac). Nova razlicica PyInstaller = nova vsota. Go zaganjalnik z istim imenom (windows/SafeerOS.exe, SafeerControl.exe) ima izjemo Go"
   },
   "safeercontrol.exe": {
    "dovoli": [
     "CET"
    ],
-   "razlog": "kot safeeros.exe. Rok 31. 12. 2026 (pregled Grok W14): do tedaj lasten zagonski program PyInstaller z /CETCOMPAT oziroma .NET 9; po roku gradnja pade",
-   "rok": "2026-12-31"
+   "tuja": true,
+   "razlicica": "PyInstaller 6.22.3 (windows/requirements.txt)",
+   "sha256_kode": {
+    "safeercontrol.exe": [
+     "67bdc7f5eeccf01180cd5b3621be7d0265efa6a44742496a7a6c6f9076ef4b1f"
+    ]
+   },
+   "razlog": "Tuja datoteka (odlocitev lastnika 25. 10. 2026: tuje datoteke niso nasa skrb, mi skrbimo za svoje): zagonski program PyInstaller 6.22.3 (runw.exe) brez /CETCOMPAT; CFG in /GS ima. Pripeta je vsota KODE (ikona, razlicica in arhiv modulov so v vsaki gradnji drugi): koda je enaka runw.exe iz kolesa PyInstaller (izmerjeno na paketu CI 176a7ac). Nova razlicica PyInstaller = nova vsota. Go zaganjalnik z istim imenom (windows/SafeerOS.exe, SafeerControl.exe) ima izjemo Go"
   },
   "safeermediawebview.exe": {
    "dovoli": [
@@ -92,7 +333,139 @@
    "dovoli": [
     "GS"
    ],
-   "razlog": "Microsoft UCRT, samo preusmeritve izvozov (brez kode za zascito sklada)"
+   "razlog": "Tuja datoteka (odlocitev lastnika 25. 10. 2026: tuje datoteke niso nasa skrb, mi skrbimo za svoje): Microsoft UCRT, samo preusmeritve izvozov (brez kode za zascito sklada)",
+   "tuja": true,
+   "sha256": {
+    "api-ms-win-core-console-l1-1-0.dll": [
+     "88ace577a9c51061cb7d1a36babbbefa48212fadc838ffde98fdfff60de18386"
+    ],
+    "api-ms-win-core-datetime-l1-1-0.dll": [
+     "1bd81dfd19204b44662510d9054852fb77c9f25c1088d647881c9b976cc16818"
+    ],
+    "api-ms-win-core-debug-l1-1-0.dll": [
+     "591358eb4d1531e9563ee0813e4301c552ce364c912ce684d16576eabf195dc3"
+    ],
+    "api-ms-win-core-errorhandling-l1-1-0.dll": [
+     "d56ce7b1cd76108ad6c137326ec694a14c99d48c3d7b0ace8c3ff4d9bcee3ce8"
+    ],
+    "api-ms-win-core-fibers-l1-1-0.dll": [
+     "91d249d7bc0e38ef6bcb17158b1fdc6dd8888dc086615c9b8b750b87e52a5fb3"
+    ],
+    "api-ms-win-core-fibers-l1-1-1.dll": [
+     "fc9d86cec621383eab636ebc87ddd3f5c19a3cb2a33d97be112c051d0b275429"
+    ],
+    "api-ms-win-core-file-l1-1-0.dll": [
+     "1ca895aba4e7435563a6b43e85eba67a0f8c74aa6a6a94d0fc48fa35535e2585"
+    ],
+    "api-ms-win-core-file-l1-2-0.dll": [
+     "4cadbc0c39da7c6722206fdcebd670abe5b8d261e7b041dd94f9397a89d1990d"
+    ],
+    "api-ms-win-core-file-l2-1-0.dll": [
+     "93c624b366ba16c643fc8933070a26f03b073ad0cf7f80173266d67536c61989"
+    ],
+    "api-ms-win-core-handle-l1-1-0.dll": [
+     "39095f59c41d76ec81bb2723d646fde4c148e7cc3402f4980d2ade95cb9c84f9"
+    ],
+    "api-ms-win-core-heap-l1-1-0.dll": [
+     "8f105771b236dbcb859de271f0a6822ce1cb79c36988dd42c9e3f6f55c5f7eb9"
+    ],
+    "api-ms-win-core-interlocked-l1-1-0.dll": [
+     "53b25e753ca785bf8b695d89dde5818a318890211dc992a89146f16658f0b606"
+    ],
+    "api-ms-win-core-kernel32-legacy-l1-1-1.dll": [
+     "a9b13a1cd1b8c19b0c6b4afcd5bb0dd29c0e2288231ac9e6db8510094ce68ba6"
+    ],
+    "api-ms-win-core-libraryloader-l1-1-0.dll": [
+     "7f39ba298b41e4963047341288cab36b6a241835ee11ba4ad70f44dacd40906c"
+    ],
+    "api-ms-win-core-localization-l1-2-0.dll": [
+     "6ee44dd0d8510dc024c9f7c79b1b9fa88c987b26b6beb6653ddd11751c34e5dc"
+    ],
+    "api-ms-win-core-memory-l1-1-0.dll": [
+     "0512a35316ec9180437f86696a84c5c06a7e4e82e050055a656e5bf9fca206f9"
+    ],
+    "api-ms-win-core-namedpipe-l1-1-0.dll": [
+     "c05f1fffe3b5a2738ea54ce9485cca026fb9635f982626fba1e1dcc531897273"
+    ],
+    "api-ms-win-core-processenvironment-l1-1-0.dll": [
+     "c4eca98c3c67b6395d5b005b00ac1eb0318b86b23aa71035a44c2b1602befba9"
+    ],
+    "api-ms-win-core-processthreads-l1-1-0.dll": [
+     "5ccb89e93d67bc3288d4e84649c5346e66e15e3d7cd65d989daf3f4cb584be9a"
+    ],
+    "api-ms-win-core-processthreads-l1-1-1.dll": [
+     "4ad565a8ba3ef0ea8ab87221ad11f83ee0bc844ce236607958406663b407333e"
+    ],
+    "api-ms-win-core-profile-l1-1-0.dll": [
+     "7809160932f44e59b021699f5bc68799eb7293ee1fa926d6fcca3c3445302e61"
+    ],
+    "api-ms-win-core-rtlsupport-l1-1-0.dll": [
+     "9dc1e91e71c7c054854bd1487cb4e6946d82c9f463430f1c4e8d1471005172b1"
+    ],
+    "api-ms-win-core-string-l1-1-0.dll": [
+     "60fc31d2a0c634412f529dba76af3b9bf991352877c6dae528186d3935704cfd"
+    ],
+    "api-ms-win-core-synch-l1-1-0.dll": [
+     "3a72b4f29f39a265d32ad12f0ce15dbf60129c840e10d84d427829ede45e78ad"
+    ],
+    "api-ms-win-core-synch-l1-2-0.dll": [
+     "efc1e4460984a73cf47a3def033af1c8f3b1dbc1a56cd27781d3aacf3e3330cb"
+    ],
+    "api-ms-win-core-sysinfo-l1-1-0.dll": [
+     "b203d862ddef1dd62bf623fc866c7f7a9c317c1c2ae30d1f52cb41f955b5698e"
+    ],
+    "api-ms-win-core-sysinfo-l1-2-0.dll": [
+     "2703635d835396afd0f138d7c73751afe7e33a24f4225d08c1690b0a371932c0"
+    ],
+    "api-ms-win-core-timezone-l1-1-0.dll": [
+     "33f4fddc181066fce06b2227bded813f95e94ed1f3d785e982c6b6b56c510c57"
+    ],
+    "api-ms-win-core-util-l1-1-0.dll": [
+     "6eda016742a6171205a387a14b3c0b331841567740376f56768f8c151724207d"
+    ],
+    "api-ms-win-crt-conio-l1-1-0.dll": [
+     "b762061b688aae679afe788904d2c9970f74a7dac98f3b42463d08f25e483d3f"
+    ],
+    "api-ms-win-crt-convert-l1-1-0.dll": [
+     "ebb2ae5535a64f65daeab8235585114fc9dd2cf1a49f5852d446250b998b6ae4"
+    ],
+    "api-ms-win-crt-environment-l1-1-0.dll": [
+     "17d63275d00bdd8670422b95bd264c532998e0a1b041079e54fce4b6b7a55819"
+    ],
+    "api-ms-win-crt-filesystem-l1-1-0.dll": [
+     "9a9e2a65a281644e368d0f272b95ba5f6b445d1c35910d06056c5ebeb77402db"
+    ],
+    "api-ms-win-crt-heap-l1-1-0.dll": [
+     "bab9ac3ec83e380ae51e4295ef3bf2c738627812d3a49d1e713661abbc8dc57a"
+    ],
+    "api-ms-win-crt-locale-l1-1-0.dll": [
+     "bd14c67ea28e21d6257ad780a37122c9b5773f69e693f5db6bffaee4d839526e"
+    ],
+    "api-ms-win-crt-math-l1-1-0.dll": [
+     "606d66d82db562ea7979179d06486a0f94d079941d26b80a1e2c49d29959df6f"
+    ],
+    "api-ms-win-crt-private-l1-1-0.dll": [
+     "1bc82bed6143d2bf1b6b08a7809f4a5e29317d6fddd338a7da3c0223522e4bbf"
+    ],
+    "api-ms-win-crt-process-l1-1-0.dll": [
+     "f6156b1020380ec4f0e48577ebedaaef5fb1ab1f337d8b4e72e6a33a7567a9cc"
+    ],
+    "api-ms-win-crt-runtime-l1-1-0.dll": [
+     "c5902934d026d7e15fbe9917d474f3322846a41a25e66f4b2b1f758801879f4b"
+    ],
+    "api-ms-win-crt-stdio-l1-1-0.dll": [
+     "a9c5a153d8c0286f9b41a2b1c65854ad9e6471b8755b7de87bae4470e60bcab6"
+    ],
+    "api-ms-win-crt-string-l1-1-0.dll": [
+     "25b8f83a7767211b11132775a0e27a45aa4ec8ab4e6572599f9c172ae3606b40"
+    ],
+    "api-ms-win-crt-time-l1-1-0.dll": [
+     "7c7f6393f06de11750adb09cc5698ae55cd9fb27b2e51e207286feb1b5b2b156"
+    ],
+    "api-ms-win-crt-utility-l1-1-0.dll": [
+     "d8ba5f17b9ffcbf3aeaf3fa1da226832d2fa90f81acce0cd669464e76ce434ac"
+    ]
+   }
   },
   "python3.dll": {
    "dovoli": [
@@ -100,90 +473,151 @@
     "GS",
     "CET"
    ],
-   "razlog": "uradna gradnja CPython, samo preusmeritve izvozov"
+   "razlog": "Tuja datoteka (odlocitev lastnika 25. 10. 2026: tuje datoteke niso nasa skrb, mi skrbimo za svoje): uradna gradnja CPython, samo preusmeritve izvozov",
+   "tuja": true,
+   "sha256": {
+    "python3.dll": [
+     "fb975a606e7fbf74f64260e3f60c3490b4f74a183c0926fd6ed1ac4c52ac7b1c"
+    ]
+   }
   },
   "python3*.dll": {
    "dovoli": [
     "CFG",
     "CET"
    ],
-   "razlog": "uradna gradnja CPython (python.org) brez /guard:cf in /CETCOMPAT; /GS ima"
+   "razlog": "Tuja datoteka (odlocitev lastnika 25. 10. 2026: tuje datoteke niso nasa skrb, mi skrbimo za svoje): uradna gradnja CPython (python.org) brez /guard:cf in /CETCOMPAT; /GS ima",
+   "tuja": true,
+   "sha256": {
+    "python312.dll": [
+     "9a0e3435aaa680d868150f87ab3e388ad2eebc22f87e036155c7b4eda8cd2120"
+    ]
+   }
   },
   "libcrypto-3*.dll": {
    "dovoli": [
     "CFG",
     "CET"
    ],
-   "razlog": "OpenSSL iz uradne gradnje CPython; /GS ima"
+   "razlog": "Tuja datoteka (odlocitev lastnika 25. 10. 2026: tuje datoteke niso nasa skrb, mi skrbimo za svoje): OpenSSL iz uradne gradnje CPython; /GS ima",
+   "tuja": true,
+   "sha256": {
+    "libcrypto-3-x64.dll": [
+     "d51f2b081e5ac0f94c2bf15650a6b55cf48da1de8c313c9f90003d9ed08ccc9e"
+    ],
+    "libcrypto-3.dll": [
+     "ccfffddcd3defb8d899026298af9af43bc186130f8483d77e97c93233d5f27d7"
+    ]
+   }
   },
   "libssl-3*.dll": {
    "dovoli": [
     "CFG",
     "CET"
    ],
-   "razlog": "OpenSSL iz uradne gradnje CPython; /GS ima"
+   "razlog": "Tuja datoteka (odlocitev lastnika 25. 10. 2026: tuje datoteke niso nasa skrb, mi skrbimo za svoje): OpenSSL iz uradne gradnje CPython; /GS ima",
+   "tuja": true,
+   "sha256": {
+    "libssl-3-x64.dll": [
+     "a2cb46897a5365a740c8f898bf1b9119ba23f01807ad0ba1efb69a9997b43ba0"
+    ],
+    "libssl-3.dll": [
+     "007142039f04d04e0ed607bda53de095e5bc6a8a10d26ecedde94ea7d2d7eefe"
+    ]
+   }
   },
   "libffi-8.dll": {
    "dovoli": [
     "CFG",
     "CET"
    ],
-   "razlog": "libffi iz uradne gradnje CPython; /GS ima"
+   "razlog": "Tuja datoteka (odlocitev lastnika 25. 10. 2026: tuje datoteke niso nasa skrb, mi skrbimo za svoje): libffi iz uradne gradnje CPython; /GS ima",
+   "tuja": true,
+   "sha256": {
+    "libffi-8.dll": [
+     "eff52743773eb550fcc6ce3efc37c85724502233b6b002a35496d828bd7b280a"
+    ]
+   }
   },
   "sqlite3.dll": {
    "dovoli": [
     "CFG",
     "CET"
    ],
-   "razlog": "SQLite iz uradne gradnje CPython; /GS ima"
+   "razlog": "Tuja datoteka (odlocitev lastnika 25. 10. 2026: tuje datoteke niso nasa skrb, mi skrbimo za svoje): SQLite iz uradne gradnje CPython; /GS ima",
+   "tuja": true,
+   "sha256": {
+    "sqlite3.dll": [
+     "8daa45684bf6688fca28d956b2e8942f2fa98f656675ce68e6d61dd869848a7a"
+    ]
+   }
   },
   "pyside6*.dll": {
    "dovoli": [
     "CFG",
     "CET"
    ],
-   "razlog": "uradna gradnja PySide6 (Qt for Python); /GS ima"
+   "razlog": "Tuja datoteka (odlocitev lastnika 25. 10. 2026: tuje datoteke niso nasa skrb, mi skrbimo za svoje): uradna gradnja PySide6 (Qt for Python); /GS ima",
+   "tuja": true,
+   "sha256": {
+    "pyside6.abi3.dll": [
+     "d0b5c701fb3a8ea839e72b602058f3960935156ebeca084893c54c99e54dd707"
+    ],
+    "pyside6qml.abi3.dll": [
+     "045b18fcee846bdd4c546daa3a20346fcf9e812f126d70382aad427bc6bb40c3"
+    ]
+   }
   },
   "shiboken6*.dll": {
    "dovoli": [
     "CFG",
     "CET"
    ],
-   "razlog": "uradna gradnja PySide6 (Shiboken); /GS ima"
+   "razlog": "Tuja datoteka (odlocitev lastnika 25. 10. 2026: tuje datoteke niso nasa skrb, mi skrbimo za svoje): uradna gradnja PySide6 (Shiboken); /GS ima",
+   "tuja": true,
+   "sha256": {
+    "shiboken6.abi3.dll": [
+     "de3c6b2ed5f75c9ac0de4a6844b653b3b9d09263ce68c2b5fc25a96c5c3e8469"
+    ]
+   }
   },
   "opengl32sw.dll": {
    "dovoli": [
     "CFG",
     "CET"
    ],
-   "razlog": "programski OpenGL (Mesa llvmpipe) iz uradne gradnje Qt; /GS ima"
+   "razlog": "Tuja datoteka (odlocitev lastnika 25. 10. 2026: tuje datoteke niso nasa skrb, mi skrbimo za svoje): programski OpenGL (Mesa llvmpipe) iz uradne gradnje Qt; /GS ima",
+   "tuja": true,
+   "sha256": {
+    "opengl32sw.dll": [
+     "34b444c016289b560662ff896deceb7f4b2c0723aed3d319ae167c9186ce42b3"
+    ]
+   }
   },
   "qt6*.dll": {
    "dovoli": [
     "CET"
    ],
-   "razlog": "uradna gradnja Qt 6: nekatere knjiznice (npr. Qt6WebEngineCore) brez /CETCOMPAT; CFG in /GS imajo"
-  },
-  "qtwebengineprocess.exe": {
-   "dovoli": [
-    "CET"
-   ],
-   "razlog": "uradna gradnja Qt 6 (izmerjeno: CET ima; izjema za starejse razlicice)"
-  },
-  "unins*.exe": {
-   "dovoli": [
-    "CFG",
-    "GS",
-    "CET"
-   ],
-   "razlog": "odstranjevalnik Inno Setup 6 (32-bit, uradna gradnja; ASLR in DEP ima). Izmerjeno 25. 10. 2026 v namestitvi 1.0.51"
+   "razlog": "Tuja datoteka (odlocitev lastnika 25. 10. 2026: tuje datoteke niso nasa skrb, mi skrbimo za svoje): uradna gradnja Qt 6: nekatere knjiznice (npr. Qt6WebEngineCore) brez /CETCOMPAT; CFG in /GS imajo",
+   "tuja": true,
+   "sha256": {
+    "qt6webenginecore.dll": [
+     "0f80260d95d1dda217da75121f3caf5e2bacc765305c31426093d82088f2c2b2"
+    ]
+   }
   },
   "safeerpredvajalnik.exe": {
    "dovoli": [
     "CET"
    ],
-   "rok": "2026-12-31",
-   "razlog": "zagonski program PyInstaller (uradni bootloader) brez /CETCOMPAT, kot safeerbrowser.exe; CFG in /GS ima. Rok 31. 12. 2026: lasten bootloader z /CETCOMPAT ali zaganjalnik Go"
+   "tuja": true,
+   "razlicica": "PyInstaller 6.22.3 (windows/requirements.txt)",
+   "sha256_kode": {
+    "safeerpredvajalnik.exe": [
+     "67bdc7f5eeccf01180cd5b3621be7d0265efa6a44742496a7a6c6f9076ef4b1f"
+    ]
+   },
+   "razlog": "Tuja datoteka (odlocitev lastnika 25. 10. 2026: tuje datoteke niso nasa skrb, mi skrbimo za svoje): zagonski program PyInstaller 6.22.3 (runw.exe) brez /CETCOMPAT; CFG in /GS ima. Pripeta je vsota KODE (ikona, razlicica in arhiv modulov so v vsaki gradnji drugi): koda je enaka runw.exe iz kolesa PyInstaller (izmerjeno na paketu CI 176a7ac). Nova razlicica PyInstaller = nova vsota"
   }
  }
 }

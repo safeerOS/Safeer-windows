@@ -1,14 +1,17 @@
 # Safeer Browser for Windows - build and runtime dependencies (Python 3.12, x64)
-PySide6>=6.8.1,<6.12
-pyinstaller>=6.11,<7
+# Pripete razlicice paketov z DLL/pyd v paketu: njihove datoteke so v windows/tools/pe_izjeme.json pripete s
+# SHA-256 (odlocitev lastnika 25. 10. 2026). Nova razlicica = pregled + pe_utrjenost.py PAKET --pripni.
+PySide6==6.11.2
+pyinstaller==6.22.3  # koda zagonskega programa (runw.exe) je v pe_izjeme.json pripeta (sha256_kode)
 Pillow>=10.4,<12
-cryptography>=43,<47
+cryptography==46.0.7
+cffi==2.1.1  # pride s cryptography in soundcard; _cffi_backend.pyd je pripet
 python-vlc>=3.0.21203,<4
 mutagen>=1.47,<2
 truststore>=0.9
 # Prilozeni qrcode (windows/qrcode) ne potrebuje ne pypng ne typing_extensions (windows/qrcode/SAFEER.md): tu ju
 # namenoma ni, da preverjanje tece v istih pogojih kot uporabnikov racunalnik (windows/tests/test_qr_prilozen.py).
-zeroconf>=0.130,<1  # Link Mesh: iskanje sosednjih Hubov (mDNS)
+zeroconf==0.151.5  # Link Mesh: iskanje sosednjih Hubov (mDNS); prevedeni moduli so pripeti
 python-mpv==1.0.8  # libmpv ovojnica (LGPL-2.1+/GPL-2.0+ dvojna licenca); knjiznica libmpv-2.dll je prilozena v windows/vendor/mpv
 # Windows SMTC (sistemske medijske kontrole za predvajalnik): uradna projekcija Python/WinRT (Microsoft, MIT); pripeto na 3.2.1
 winrt-runtime==3.2.1

@@ -76,7 +76,8 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v7
         with:
-          python-version: '3.12'
+          # Pripeta razlicica: python312.dll in moduli standardne knjiznice so v pe_izjeme.json pripeti s SHA-256.
+          python-version: '3.12.10'
           cache: pip
           cache-dependency-path: windows/requirements.txt
       - name: Version
