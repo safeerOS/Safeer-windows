@@ -77,9 +77,22 @@ a = Analysis(  # noqa: F821
 # MSVC runtime: pyi_rth_pyside6 nalozi shiboken6 PRED launcherjem, zato se v proces nalozi msvcp140 iz paketa
 # PySide6/shiboken6 (14.44), libmpv pa zahteva >= razlicico iz manifest.json -> brez tega pogon ne steče
 # (izmerjeno 25. 10. 2026: »MSVC runtime prestar«). Vse kopije zamenjamo z novejsimi iz vendor/mpv/runtime.
-_RUNTIME = {ime: os.path.join(VENDOR_MPV, "runtime", ime)
-            for ime in ("msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll")}
-a.binaries = [(cilj, _RUNTIME.get(os.path.basename(cilj).lower(), vir), vrsta) for cilj, vir, vrsta in a.binaries]
+# Samo podpisan Microsoftov runtime in nikoli starejsi od kopije, ki jo zamenja (Grok X3) - isto kot build_windows.
+import sys  # noqa: E402
+sys.path.insert(0, WINDOWS)
+import build_windows as _gradnja  # noqa: E402
+_RUNTIME = {ime: os.path.join(VENDOR_MPV, "runtime", ime) for ime in _gradnja.MSVC_RUNTIME}
+_NOVE = _gradnja.preveri_vir_runtime(_RUNTIME)
+
+
+def _runtime_za(cilj, vir):
+    ime = os.path.basename(cilj).lower()
+    if ime in _RUNTIME and _gradnja.razlicica_pe(vir) <= _NOVE[ime]:
+        return _RUNTIME[ime]
+    return vir
+
+
+a.binaries = [(cilj, _runtime_za(cilj, vir), vrsta) for cilj, vir, vrsta in a.binaries]
 print("MSVC runtime iz vendor/mpv/runtime:", sorted(c for c, v, _t in a.binaries if v in _RUNTIME.values()))
 
 pyz = PYZ(a.pure)  # noqa: F821

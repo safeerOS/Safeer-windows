@@ -225,24 +225,95 @@ def pyinstaller() -> None:
     prune_bundle()
 
 
-def zamenjaj_msvc_runtime(app_dir: str, vendor: str = "") -> list:
-    """Vse kopije msvcp140/vcruntime140(_1) v paketu zamenja z novejsimi iz vendor/mpv/runtime (runtime MSVC je nazaj
+#: Vsa druzina runtime MSVC (VC_redist; Microsoft: v procesu iste razlicice). vendor/mpv prinese samo MSVC_RUNTIME.
+MSVC_DRUZINA = re.compile(r"^(msvcp140(_\d|_atomic_wait|_codecvt_ids)?|vcruntime140(_1|_threads)?|concrt140|"
+                          r"vccorlib140|vcomp140)\.dll$", re.I)
+#: Podpisnik runtime MSVC (izmerjeno 25. 10. 2026 na 14.51.36247: »CN=Microsoft Windows Software Compatibility
+#: Publisher, O=Microsoft Corporation«, stanje Valid).
+PODPISNIK_MSVC = "O=Microsoft Corporation"
+
+
+def podpis_microsoft(poti) -> dict:
+    """{pot: True/False}: veljaven podpis Authenticode Microsoft Corporation (Get-AuthenticodeSignature)."""
+    if sys.platform != "win32":
+        raise SystemExit("podpis runtime MSVC se preveri samo na Windows")
+    navedi = ",".join("'" + str(p).replace("'", "''") + "'" for p in poti)
+    ukaz = ("foreach ($p in @(" + navedi + ")) { $s = Get-AuthenticodeSignature -LiteralPath $p; "
+            "'{0}|{1}|{2}' -f $p, $s.Status, $s.SignerCertificate.Subject }")
+    izhod = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ukaz],
+                           capture_output=True, text=True, timeout=120).stdout
+    izid = {str(p): False for p in poti}
+    for vrstica in izhod.splitlines():
+        pot, _, ostalo = vrstica.partition("|")
+        stanje, _, podpisnik = ostalo.partition("|")
+        if pot in izid:
+            izid[pot] = stanje.strip() == "Valid" and PODPISNIK_MSVC in podpisnik
+    return izid
+
+
+def razlicica_pe(pot: str) -> tuple:
+    """FileVersion iz VS_FIXEDFILEINFO (pefile pride s PyInstaller na Windows); () ce je ni."""
+    import pefile
+    pe = pefile.PE(pot, fast_load=True)
+    try:
+        pe.parse_data_directories(directories=[pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_RESOURCE"]])
+        info = getattr(pe, "VS_FIXEDFILEINFO", None)
+        info = info[0] if isinstance(info, list) and info else info
+        if info is None:
+            return ()
+        return (info.FileVersionMS >> 16, info.FileVersionMS & 0xFFFF, info.FileVersionLS >> 16,
+                info.FileVersionLS & 0xFFFF)
+    finally:
+        pe.close()
+
+
+def preveri_vir_runtime(viri: dict, podpis=None, razlicica=None) -> dict:
+    """Runtime iz vendor/mpv/runtime gre v VSE programe paketa (Splet, Control, Safeer OS), zato mora biti podpisan
+    z Microsoftovim podpisom in imeti razlicico (Grok X3, 25. 10. 2026; prej se je preverilo samo, ali obstaja).
+    Vrne {ime: razlicica}; sicer ustavi gradnjo."""
+    podpis, razlicica = podpis or podpis_microsoft, razlicica or razlicica_pe
+    slabi = [p for p, ok in podpis(sorted(viri.values())).items() if not ok]
+    if slabi:
+        raise SystemExit("runtime MSVC iz vendor/mpv/runtime ni podpisan z Microsoftovim podpisom: " + ", ".join(slabi))
+    razlicice = {ime: razlicica(pot) for ime, pot in viri.items()}
+    brez = [ime for ime, r in razlicice.items() if not r]
+    if brez:
+        raise SystemExit("runtime MSVC iz vendor/mpv/runtime nima razlicice: " + ", ".join(brez))
+    return razlicice
+
+
+def zamenjaj_msvc_runtime(app_dir: str, vendor: str = "", podpis=None, razlicica=None) -> list:
+    """Kopije msvcp140/vcruntime140(_1) v paketu zamenja z novejsimi iz vendor/mpv/runtime (runtime MSVC je nazaj
     zdruzljiv). pyi_rth_pyside6 nalozi shiboken6 PRED zaganjalnikom, zato starejsi msvcp140 iz PySide6 pride v proces
     pred predpripravi_runtime in libmpv ne stece (»MSVC runtime prestar«: 14.44 < 14.51; testni PC, naloga 13,
-    25. 10. 2026). Brez libmpv v paketu ne naredi nicesar. Vrne imena zamenjanih datotek."""
+    25. 10. 2026). Samo podpisan Microsoftov runtime in nikoli starejsi od kopije v paketu (Grok X3). Brez libmpv v
+    paketu ne naredi nicesar. Vrne imena zamenjanih datotek."""
     runtime = os.path.join(vendor or VENDOR_MPV, "runtime")
     viri = {ime: os.path.join(runtime, ime) for ime in MSVC_RUNTIME if os.path.isfile(os.path.join(runtime, ime))}
     if len(viri) != len(MSVC_RUNTIME):
         return []
-    zamenjane = []
+    razlicica = razlicica or razlicica_pe
+    nove = preveri_vir_runtime(viri, podpis, razlicica)
+    zamenjane, druzina = [], set()
     for mapa, _podmape, datoteke in os.walk(app_dir):
+        v_runtime = os.path.normcase(os.path.abspath(mapa)) == os.path.normcase(os.path.abspath(runtime))
         for ime in datoteke:
             vir = viri.get(ime.lower())
             cilj = os.path.join(mapa, ime)
-            v_runtime = os.path.normcase(os.path.abspath(mapa)) == os.path.normcase(os.path.abspath(runtime))
-            if vir and not v_runtime:
-                shutil.copy2(vir, cilj)
-                zamenjane.append(ime.lower())
+            if v_runtime:
+                continue
+            if not vir:
+                if MSVC_DRUZINA.match(ime):
+                    druzina.add(ime.lower())
+                continue
+            if razlicica(cilj) > nove[ime.lower()]:
+                print(f"MSVC runtime: {os.path.relpath(cilj, app_dir)} je novejsi od vendor/mpv - ostane")
+                continue
+            shutil.copy2(vir, cilj)
+            zamenjane.append(ime.lower())
+    if druzina:
+        print("::warning::MSVC runtime: v paketu ostanejo clani druzine, ki jih vendor/mpv ne prinese (starejsa "
+              "razlicica ob novejsem msvcp140): " + ", ".join(sorted(druzina)))
     return zamenjane
 
 

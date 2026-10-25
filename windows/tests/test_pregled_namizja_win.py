@@ -328,6 +328,16 @@ class Paket(unittest.TestCase):
 
 
 
+def _podpisano(poti):
+    return {p: True for p in poti}
+
+
+def _razlicica(pot):
+    """Ponaredek FileVersion: datoteka z vsebino »novi« je 14.51, »stari« 14.44."""
+    with open(pot, "rb") as f:
+        return (14, 51, 36247, 0) if f.read().startswith(b"novi") else (14, 44, 35211, 0)
+
+
 class LibmpvVPaketu(unittest.TestCase):
     """CI 25. 10. 2026 (pomocnik, naloga 13): gradnja je iskala libmpv v windows/vendor/mpv, fetch_libmpv pa ga
     razpakira v windows/safeer_windows/vendor/mpv - uradni paket je bil brez libmpv. Rabi tudi novejsi MSVC runtime."""
@@ -355,13 +365,65 @@ class LibmpvVPaketu(unittest.TestCase):
                 for ime in ("MSVCP140.dll", "vcruntime140.dll", "VCRUNTIME140_1.dll", "drugo.dll"):
                     with open(os.path.join(app, mapa, ime), "wb") as f:
                         f.write(b"stari")
-            zamenjane = self.b.zamenjaj_msvc_runtime(app, vendor)
+            zamenjane = self.b.zamenjaj_msvc_runtime(app, vendor, podpis=_podpisano, razlicica=_razlicica)
             self.assertEqual(len(zamenjane), 9)
             with open(os.path.join(app, "_internal", "shiboken6", "MSVCP140.dll"), "rb") as f:
                 self.assertEqual(f.read(), b"novi msvcp140.dll")
             with open(os.path.join(app, "_internal", "drugo.dll"), "rb") as f:
                 self.assertEqual(f.read(), b"stari")
             self.assertEqual(self.b.zamenjaj_msvc_runtime(app, os.path.join(m, "ni")), [])   # brez libmpv nic
+
+    def _paket(self, m, vendor_vsebina=b"novi", paket_vsebina=b"stari", druzina=()):
+        vendor = os.path.join(m, "vendor")
+        os.makedirs(os.path.join(vendor, "runtime"))
+        for ime in self.b.MSVC_RUNTIME:
+            with open(os.path.join(vendor, "runtime", ime), "wb") as f:
+                f.write(vendor_vsebina + b" " + ime.encode())
+        app = os.path.join(m, "app", "_internal", "PySide6")
+        os.makedirs(app)
+        for ime in ("MSVCP140.dll", "VCRUNTIME140.dll", "VCRUNTIME140_1.dll") + tuple(druzina):
+            with open(os.path.join(app, ime), "wb") as f:
+                f.write(paket_vsebina)
+        return vendor, os.path.join(m, "app")
+
+    def test_x3_runtime_brez_microsoftovega_podpisa_ustavi_gradnjo(self):
+        """Pregled Grok 20, X3: runtime iz vendor/mpv gre v vse programe paketa - brez veljavnega podpisa Microsoft
+        gradnja pade (prej se je preverilo samo, ali datoteke obstajajo)."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as m:
+            vendor, app = self._paket(m)
+            with self.assertRaises(SystemExit):
+                self.b.zamenjaj_msvc_runtime(app, vendor, podpis=lambda poti: {p: "vcruntime140.dll" not in p
+                                                                                 for p in poti},
+                                             razlicica=_razlicica)
+            with open(os.path.join(app, "_internal", "PySide6", "VCRUNTIME140.dll"), "rb") as f:
+                self.assertEqual(f.read(), b"stari")                                  # nic zamenjano
+
+    def test_x3_novejsi_runtime_v_paketu_ostane(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as m:
+            vendor, app = self._paket(m, vendor_vsebina=b"stari", paket_vsebina=b"novi")
+            self.assertEqual(self.b.zamenjaj_msvc_runtime(app, vendor, podpis=_podpisano, razlicica=_razlicica), [])
+            with open(os.path.join(app, "_internal", "PySide6", "MSVCP140.dll"), "rb") as f:
+                self.assertEqual(f.read(), b"novi")
+
+    def test_x3_druzina_brez_vira_je_opozorilo(self):
+        import contextlib
+        import io
+        import tempfile
+        with tempfile.TemporaryDirectory() as m:
+            vendor, app = self._paket(m, druzina=("MSVCP140_1.dll", "MSVCP140_2.dll"))
+            izpis = io.StringIO()
+            with contextlib.redirect_stdout(izpis):
+                self.assertEqual(len(self.b.zamenjaj_msvc_runtime(app, vendor, podpis=_podpisano,
+                                                                  razlicica=_razlicica)), 3)
+        self.assertIn("::warning::", izpis.getvalue())
+        self.assertIn("msvcp140_1.dll", izpis.getvalue())
+
+    def test_x3_samostojni_predvajalnik_isto_preverjanje(self):
+        spec = (KOREN / "windows" / "SafeerPredvajalnik.spec").read_text(encoding="utf-8")
+        self.assertIn("_gradnja.preveri_vir_runtime(_RUNTIME)", spec)
+        self.assertIn("_gradnja.razlicica_pe(vir) <= _NOVE[ime]", spec)
 
     def test_ffmpeg_pyside_brez_vticnika_multimedia(self):
         import tempfile
