@@ -177,8 +177,8 @@ def metode(okno: "NamizjeOkno") -> Dict[str, Callable[[list], Any]]:
         "programiZaOdpiranje": lambda a: [],
         "odpriZ": lambda a: nd.odpri_z(str((a[0] or [""])[0]) if a and isinstance(a[0], list) and a[0] else ""),
         "odpriRazdelek": lambda a: okno.odpri_razdelek(_s(a)),
-        "spletNaNamizju": lambda a: os_okno.odpri_splet(_s(a), vedno_notri=True) if _s(a).startswith(("http://", "https://"))
-        else os_okno.odpri_spletno_iskanje(_s(a)),
+        # Lupa: Splet v svojem oknu nad namizjem (kot Linux _splet_na_namizju), ne v skritem glavnem oknu.
+        "spletNaNamizju": lambda a: os_okno.splet_na_namizju(_s(a)),
         "odpriVBrskalniku": lambda a: _s(a).startswith(("http://", "https://")) and _odpri_uri(_s(a)),
         "privzetiBrskalnik": lambda a: privzeti_brskalnik(),
         "sistemskeNastavitve": lambda a: _odpri_uri(NASTAVITVE.get(_s(a), "ms-settings:")),

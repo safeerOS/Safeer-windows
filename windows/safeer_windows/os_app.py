@@ -3478,6 +3478,32 @@ class SafeerOsWindow(QMainWindow):
         self.dispatcher.dispatch(self.prebudi)
         return self.odpri_spletno_iskanje(niz)
 
+    def splet_na_namizju(self, niz: str) -> bool:
+        """Iskanje ali naslov iz lupe namizja QML (lastnik, 25. 10. 2026 11:44: »claude« + Enter je polje izpraznil, nic
+        se ni odprlo). Vzrok: iskanje se je odprlo v glavnem oknu Safeer OS, ki je ob namizju QML skrito. Kot Linux
+        (_splet_na_namizju): Splet je svoje okno NAD namizjem, cez delovno povrsino, v ISTEM procesu in z istim
+        brskalnikom (zasebna seja, Scit, nastavljeni iskalnik, zavihki). Je glavno okno vidno, ostane Splet v njem."""
+        niz = str(niz or "").strip()
+        if not niz:
+            return False
+        if self.isVisible() and not self.isMinimized():
+            if niz.lower().startswith(("http://", "https://")):
+                return bool(self.odpri_splet(niz, vedno_notri=True))
+            return self.odpri_spletno_iskanje(niz)
+        self.dispatcher.dispatch(lambda: self._splet_nad_namizjem(niz))
+        return True
+
+    def _splet_nad_namizjem(self, niz: str) -> None:
+        okno = getattr(self, "_okno_spleta_namizja", None)
+        if okno is None or okno not in getattr(self.browser_app, "windows", []):
+            okno = self._sistemsko_okno_brskalnika()
+            self._okno_spleta_namizja = okno
+        okno.open_input(niz, new_tab=True)
+        print("[SafeerOS] Splet nad namizjem: %s" % ("naslov" if "://" in niz else "iskanje"), flush=True)
+        okno.showMaximized()
+        okno.raise_()
+        okno.activateWindow()
+
     def odpri_spletno_iskanje(self, poizvedba: str) -> bool:
         poizvedba = str(poizvedba or "").strip()
         if not poizvedba:

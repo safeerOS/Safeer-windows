@@ -173,13 +173,15 @@ Item {
         polmer: 27
         TextField {
             id: polje
+            objectName: "polje"
             anchors.fill: parent; anchors.leftMargin: 52; anchors.rightMargin: 18
             placeholderText: koren.t("isci")
             placeholderTextColor: koren.paleta.medlo
             color: koren.paleta.besedilo; font.pixelSize: 16
             background: Item {}
             onTextChanged: casovnikIskanja.restart()
-            Keys.onReturnPressed: zadetki.izberi(zadetki.trenutni)
+            Keys.onReturnPressed: zadetki.potrdi()
+            Keys.onEnterPressed: zadetki.potrdi()
             Keys.onDownPressed: zadetki.trenutni = Math.min(zadetki.trenutni + 1, zadetkiModel.count - 1)
             Keys.onUpPressed: zadetki.trenutni = Math.max(zadetki.trenutni - 1, 0)
             Keys.onEscapePressed: text = ""
@@ -190,17 +192,20 @@ Item {
     ListModel { id: zadetkiModel }
     Steklo {
         id: zadetki
+        objectName: "zadetki"
         zamegljeno: zamegljeno
         z: 10
         property int trenutni: 0
         property int zahteva: 0
+        // Besedilo, za katero je seznam (Enter pred osvezitvijo seznama ne sme izbrati zadetka starega besedila).
+        property string poizvedba: ""
         visible: polje.text.length > 0 && zadetkiModel.count > 0
         width: iskanje.width; x: iskanje.x; y: iskanje.y + iskanje.height + 8
         height: Math.min(420, seznamZadetkov.contentHeight + 16)
         barva: koren.plosca(Math.min(0.95, koren.prosojnost + 0.27))
         function isci(q) {
             zadetkiModel.clear(); trenutni = 0
-            q = (q || "").trim(); if (!q) return
+            q = (q || "").trim(); poizvedba = q; if (!q) return
             var st = ++zahteva, ql = q.toLowerCase()
             programi.vsi.filter(function (p) { return p.ime.toLowerCase().indexOf(ql) >= 0 }).slice(0, 5)
                 .forEach(function (p) { zadetkiModel.append({ vrsta: "program", ime: p.ime, opis: koren.t("programi"), kljuc: p.id, ikona: p.ikona || "" }) })
@@ -212,12 +217,21 @@ Item {
                 })
             })
         }
+        // Enter: seznam se osvezi 180 ms po zadnji tipki. Ce uporabnik pritisne Enter prej, najprej poiscemo TRENUTNO
+        // besedilo (programi in Splet so takoj v seznamu), sicer bi se odprl zadetek starega besedila ali nic.
+        function potrdi() {
+            if (casovnikIskanja.running || poizvedba !== polje.text.trim()) {
+                casovnikIskanja.stop()
+                isci(polje.text)
+            }
+            izberi(trenutni)
+        }
         function izberi(i) {
             if (i < 0 || i >= zadetkiModel.count) return
             var z = zadetkiModel.get(i)
             if (z.vrsta === "program") koren.klic("zazeni", [z.kljuc], function (ok) { if (!ok) koren.obvesti(koren.t("niUspelo")) })
             else if (z.vrsta === "datoteka") koren.klic("odpriDatoteko", [z.kljuc])
-            else koren.klic("spletNaNamizju", [z.kljuc])
+            else koren.klic("spletNaNamizju", [z.kljuc], function (ok) { if (ok === false) koren.obvesti(koren.t("niUspelo")) })
             polje.text = ""
         }
         ListView {
