@@ -256,6 +256,7 @@ class SafeerMpvPredvajalnik(QWidget):
             except Exception:
                 pass
             self.mpris = None
+        _budnost(None)
         if self.pogon:
             try:
                 self._nadaljuj.zabelezi(self.zadnji_podatki, takoj=True)
@@ -417,6 +418,7 @@ class SafeerMpvPredvajalnik(QWidget):
             _log.debug("nadaljuj: %s", e)
         if self.mpris:
             self.mpris.ob_podatkih(p)
+        _budnost(p)
         self.gumb_predvajaj.setText("⏸" if p.get("stanje") == "predvaja" else "⏵")
         self.oznaka_cas.setText(f"{_cas(p.get('polozaj', 0))} / {_cas(p.get('trajanje', 0))}")
         self.oznaka_naslov.setText(str(p.get("naslov", ""))[:60])
@@ -432,6 +434,19 @@ class SafeerMpvPredvajalnik(QWidget):
     def _ob_napaki(self, s: str) -> None:
         _log.warning("mpv napaka: %s", s)
         self.oznaka_naslov.setText(f"Napaka: {s}"[:80])
+
+
+def _budnost(p: Optional[dict], razlog: str = "predvajalnik") -> None:
+    """Med predvajanjem racunalnik ne zaspi sam, med videom zaslon ne ugasne; premor, konec in zaprtje sprostijo
+    (Windows: budnost_win, SetThreadExecutionState/PowerSetRequest). None = sprosti."""
+    try:
+        from . import budnost_win
+        if p is None:
+            budnost_win.sprosti(razlog)
+        else:
+            budnost_win.ob_predvajanju(razlog, p)
+    except Exception as e:  # noqa: BLE001 - predvajanje ne sme pasti zaradi budnosti
+        _log.debug("budnost: %s", e)
 
 
 def _cas(s) -> str:
