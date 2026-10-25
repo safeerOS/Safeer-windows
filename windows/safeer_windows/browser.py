@@ -958,11 +958,15 @@ class SafeerBrowserApp(QObject):
 class BrowserWindow(QMainWindow):
     def __init__(self, app: SafeerBrowserApp, private: bool = False, *, embedded: bool = False,
                  on_safeer_home: Optional[Callable[[], None]] = None,
-                 on_fullscreen_changed: Optional[Callable[[bool], None]] = None):
+                 on_fullscreen_changed: Optional[Callable[[bool], None]] = None,
+                 sistemsko: bool = False):
         super().__init__()
         self.app = app
         self.private = private
         self.embedded = embedded
+        #: Samostojno okno, ki je del Safeer OS (stran z Linka, agent): videz in zacetna stran Spleta, naslov
+        #: »Safeer OS · Splet«, temna naslovna vrstica - uporabnik ne sme dobiti obcutka locenega programa (lastnik).
+        self.sistemsko = bool(sistemsko) and not embedded
         self.media_mode = False
         self.safeer_os_web_mode = False
         self.media_allowed_host = ""
@@ -970,7 +974,7 @@ class BrowserWindow(QMainWindow):
         self.on_fullscreen_changed = on_fullscreen_changed
         self._embedded_content_visible = not embedded
         # Vdelan v Safeer OS: nov zavihek in Domov odpreta zacetno stran Splet (enaka na vseh razlicicah).
-        self.home_url = policy.SPLET_URL if embedded else policy.HOME_URL
+        self.home_url = policy.SPLET_URL if (embedded or self.sistemsko) else policy.HOME_URL
         self.stanje_povezave: Optional[Callable[[], Tuple[str, bool]]] = None
         self.jezik_vmesnika: Optional[Callable[[], str]] = None
         self.profile = app.get_private_profile() if private else app.profile
@@ -1115,7 +1119,7 @@ class BrowserWindow(QMainWindow):
 
     def set_safeer_os_web_mode(self, enabled: bool) -> None:
         """Prikaže Safeer Browser kot vdelan odsek Splet v glavnem oknu Safeer OS."""
-        enabled = bool(enabled and self.embedded and not self.media_mode)
+        enabled = bool(enabled and (self.embedded or self.sistemsko) and not self.media_mode)
         self.safeer_os_web_mode = enabled
         if enabled:
             self.tabs.tabBar().show()
@@ -1141,7 +1145,7 @@ class BrowserWindow(QMainWindow):
                 self._set_toolbar_widget_visible(self.ob_strani_button, False)
             self._naslov_kljucavnica.setVisible(True)
             self._naslov_zvezdica.setVisible(True)
-            self.setStyleSheet(SPLET_STYLE)
+            self.setStyleSheet(self._splet_slog())
             self.tabs.tabBar().setIconSize(QSize(18, 18))
             self.povezava_znacka.show()
             self.osvezi_povezavo()
@@ -1169,6 +1173,29 @@ class BrowserWindow(QMainWindow):
             if self.ob_strani_button is not None:
                 self._set_toolbar_widget_visible(self.ob_strani_button, False)
             self.address.setPlaceholderText(tr(self.app, "address"))
+
+    def _splet_slog(self) -> str:
+        """Slog Spleta: v Safeer OS v barvah izbrane teme sistema, sicer privzeti zeleni Safeer."""
+        paleta = getattr(self.app, "paleta", None)
+        if paleta:
+            try:
+                from . import tema
+                return tema.splet_slog(paleta)
+            except Exception:  # noqa: BLE001
+                pass
+        return SPLET_STYLE
+
+    def osvezi_temo(self, paleta: dict) -> None:
+        """Tema sistema se je spremenila: orodna vrstica in odprte zacetne strani Spleta dobijo nove barve."""
+        self.app.paleta = paleta
+        if self.safeer_os_web_mode:
+            self.setStyleSheet(self._splet_slog())
+        for view in self.views():
+            try:
+                if view.url().toString().startswith(policy.SPLET_URL):
+                    view.reload()
+            except Exception:  # noqa: BLE001
+                pass
 
     def _set_toolbar_widget_visible(self, widget: QWidget, visible: bool) -> None:
         """QToolBar owns embedded controls through QWidgetAction; toggle both layers."""
@@ -1329,7 +1356,8 @@ class BrowserWindow(QMainWindow):
 
     def retranslate(self) -> None:
         app = self.app
-        self.setWindowTitle(policy.APP_NAME + (f" — {tr(app, 'private')}" if self.private else ""))
+        self.setWindowTitle("Safeer OS · Splet" if self.sistemsko
+                            else policy.APP_NAME + (f" — {tr(app, 'private')}" if self.private else ""))
         self.address.setPlaceholderText(tr(app, "address"))
         if self.safeer_home_button is not None:
             self.safeer_home_button.setToolTip("Safeer OS Domov")
@@ -1502,6 +1530,8 @@ class BrowserWindow(QMainWindow):
                                                 bool(settings.get("tracking_protection_enabled")))
         if kind == "empty":
             return
+        if self.odpri_drm(target):
+            return
         if new_tab:
             self.new_tab(target)
             return
@@ -1529,6 +1559,11 @@ class BrowserWindow(QMainWindow):
         if not is_main_frame:
             return True
         text = url.toString()
+        if (is_main_frame and nav_type in (QWebEnginePage.NavigationType.NavigationTypeLinkClicked,
+                                           QWebEnginePage.NavigationType.NavigationTypeTyped)
+                and self._je_drm(text)):
+            QTimer.singleShot(0, lambda: self.odpri_drm(text))
+            return False
         if self.media_mode and is_main_frame and url.scheme().lower() in ("http", "https"):
             host = (url.host() or "").lower()
             allowed = self.media_allowed_host
@@ -1725,14 +1760,17 @@ class BrowserWindow(QMainWindow):
         if index < 0:
             return
         url = view.url().toString()
-        if self.embedded and url.startswith(policy.SPLET_URL):
+        if (self.embedded or self.sistemsko) and url.startswith(policy.SPLET_URL):
             title = self._splet_besedila()[0]
             self.tabs.setTabIcon(index, make_icon("globe", "#57D6AD"))
         label = title if title and title != url else (tr(self.app, "home") if url.startswith("safeer://") else url or tr(self.app, "new_tab"))
         self.tabs.setTabText(index, label[:28] + ("…" if len(label) > 28 else ""))
         self.tabs.setTabToolTip(index, label)
         if view is self.current_view():
-            self.setWindowTitle(f"{label} — {policy.APP_NAME}" + (f" ({tr(self.app, 'private')})" if self.private else ""))
+            if self.sistemsko:
+                self.setWindowTitle(f"Safeer OS · Splet · {label}")
+            else:
+                self.setWindowTitle(f"{label} — {policy.APP_NAME}" + (f" ({tr(self.app, 'private')})" if self.private else ""))
 
     def _naslov_v_urejanju(self) -> bool:
         """Ali uporabnik pise v naslovno vrstico - takrat je sprememba naslova strani ne sme prepisati."""
@@ -1820,7 +1858,7 @@ class BrowserWindow(QMainWindow):
 
     def push_home_state(self, view: QWebEngineView) -> None:
         stanje = policy.home_state(self.app.settings)
-        if self.embedded:
+        if self.embedded or self.sistemsko:
             stanje["language"] = self._splet_jezik()
         state = json.dumps(stanje, ensure_ascii=False)
         view.page().runJavaScript(f"window.safeerWindowsInit && window.safeerWindowsInit({state});")
@@ -2244,8 +2282,84 @@ class BrowserWindow(QMainWindow):
             self.on_safeer_home()
             return
         self.app.window_closed(self)
+        if getattr(self, "_drm", None) is not None:
+            self._drm.stop()
         self.dispose_tabs()
         super().closeEvent(event)
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        if self.sistemsko and sys.platform == "win32":
+            # Temna naslovna vrstica kot pri namizju Safeer OS (DWMWA_USE_IMMERSIVE_DARK_MODE, Windows 10 1903+).
+            try:
+                import ctypes
+                vklop = ctypes.c_int(1)
+                for atribut in (20, 19):
+                    if ctypes.windll.dwmapi.DwmSetWindowAttribute(int(self.winId()), atribut, ctypes.byref(vklop), 4) == 0:
+                        break
+            except Exception:  # noqa: BLE001
+                pass
+
+    # -- Safeer DRM v brskalniku ---------------------------------------------
+    # Zasciten video (Netflix, Disney+ ...) predvaja Safeer DRM (Widevine), skrit in vdelan v okno brskalnika - kot v
+    # Spletu in predvajalniku Safeer OS (lastnik, 13. 10. 2026). Uporabnik ostane v brskalniku; »Nazaj« ga vrne na zavihke.
+    def _je_drm(self, url: str) -> bool:
+        if self.embedded or sys.platform != "win32":
+            return False                    # vdelani Splet: Safeer OS to ze naredi sam (os_app.odpri_splet)
+        try:
+            from . import os_backend_win
+            return os_backend_win.je_drm_storitev(url)
+        except Exception:  # noqa: BLE001
+            return False
+
+    def odpri_drm(self, url: str) -> bool:
+        """Storitev z DRM odpre v Safeer DRM nad zavihki tega okna. False = ni storitev z DRM ali ni na voljo."""
+        if not self._je_drm(url):
+            return False
+        try:
+            from . import webview2_media
+            if getattr(self, "_drm", None) is None:
+                self._drm = webview2_media.WebView2MediaWidget(on_home=self._zapri_drm, parent=self.tabs)
+                if getattr(self._drm, "gumb_domov", None) is not None:
+                    self._drm.gumb_domov.hide()
+                self.tabs._stack.installEventFilter(self)
+                # Drug zavihek ali nov zavihek: predvajalnik se zapre (ne igra skrit v ozadju).
+                self.tabs.currentChanged.connect(lambda _i: self._drm.isVisible() and self._drm.close_and_home())
+            if not self._drm.open_url(url, stran=True, storitev=True):
+                return False
+        except Exception as e:  # noqa: BLE001
+            print(f"[SafeerBrowser] Safeer DRM: {e}", flush=True)
+            return False
+        self._drm.setGeometry(self.tabs._stack.geometry())
+        try:
+            self.address.setText(url)       # naslovna vrstica pove, kje je uporabnik
+        except Exception:  # noqa: BLE001
+            pass
+        self._drm.show()
+        self._drm.raise_()
+        return True
+
+    def _zapri_drm(self) -> None:
+        if getattr(self, "_drm", None) is not None:
+            self._drm.hide()
+        try:
+            self.on_current_changed(self.tabs.currentIndex())     # naslovna vrstica spet kaze trenutni zavihek
+        except Exception:  # noqa: BLE001
+            pass
+        if self.isFullScreen():
+            self.toggle_fullscreen()
+
+    def preklopi_celozaslonsko(self) -> None:
+        """Gumb »Celozaslonsko« predvajalnika Safeer DRM (isto ime kot v oknu Safeer OS)."""
+        self.toggle_fullscreen()
+        if getattr(self, "_drm", None) is not None and hasattr(self._drm, "set_fullscreen_ui"):
+            self._drm.set_fullscreen_ui(self.isFullScreen())
+
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802
+        drm = getattr(self, "_drm", None)
+        if drm is not None and obj is self.tabs._stack and event.type() == QEvent.Type.Resize:
+            drm.setGeometry(self.tabs._stack.geometry())
+        return super().eventFilter(obj, event)
 
 
 class SettingsDialog(QDialog):

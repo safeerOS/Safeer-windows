@@ -126,6 +126,7 @@
   });
   var BESEDILA_WINDOWS = {
     sl: {
+      namizjeSafeer: "Safeer OS kot namizje", namizjeSafeerPod: "Iskanje, datoteke, predvajalnik in naprave pod vsemi okni namesto ikon. Opravilna vrstica Windows ostane.",
       naprednoPod: "IP, DNS, VPN in druge nastavitve sistema Windows.",
       zvokNaprednoPod: "Izhodne naprave, mikrofon in druge nastavitve zvoka sistema Windows.",
       samozagonPod: "Upravljaš ga lahko tudi v zagonskih aplikacijah sistema Windows.",
@@ -138,6 +139,7 @@
       scitNapaka_ni_resolved: "Napaka pri vzpostavitvi povezave za Ščit."
     },
     en: {
+      namizjeSafeer: "Safeer OS as the desktop", namizjeSafeerPod: "Search, files, player and devices under all windows instead of icons. The Windows taskbar stays.",
       naprednoPod: "IP, DNS, VPN and other Windows settings.",
       zvokNaprednoPod: "Output devices, microphone and other Windows sound settings.",
       samozagonPod: "You can also manage this in Windows Startup apps.",
@@ -150,6 +152,7 @@
       scitNapaka_ni_resolved: "Error establishing connection for Shield."
     },
     de: {
+      namizjeSafeer: "Safeer OS als Desktop", namizjeSafeerPod: "Suche, Dateien, Player und Geräte unter allen Fenstern statt Symbolen. Die Windows-Taskleiste bleibt.",
       naprednoPod: "IP, DNS, VPN und weitere Windows-Einstellungen.",
       zvokNaprednoPod: "Ausgabegeräte, Mikrofon und weitere Windows-Soundeinstellungen.",
       samozagonPod: "Auch unter Windows-Autostart-Apps verwaltbar.",
@@ -162,6 +165,7 @@
       scitNapaka_ni_resolved: "Der systemweite Schutz ist in dieser Windows-Version noch nicht verfügbar."
     },
     es: {
+      namizjeSafeer: "Safeer OS como escritorio", namizjeSafeerPod: "Búsqueda, archivos, reproductor y dispositivos bajo todas las ventanas en lugar de iconos. La barra de tareas de Windows se mantiene.",
       naprednoPod: "IP, DNS, VPN y otros ajustes de Windows.",
       zvokNaprednoPod: "Dispositivos de salida, micrófono y otros ajustes de sonido de Windows.",
       samozagonPod: "También puedes gestionarlo en Aplicaciones de inicio de Windows.",
@@ -174,6 +178,7 @@
       scitNapaka_ni_resolved: "El Escudo de todo el sistema aún no está disponible en esta versión para Windows."
     },
     fr: {
+      namizjeSafeer: "Safeer OS comme bureau", namizjeSafeerPod: "Recherche, fichiers, lecteur et appareils sous toutes les fenêtres au lieu des icônes. La barre des tâches Windows reste.",
       naprednoPod: "IP, DNS, VPN et autres paramètres Windows.",
       zvokNaprednoPod: "Périphériques de sortie, microphone et autres paramètres audio Windows.",
       samozagonPod: "Également gérable dans les applications de démarrage Windows.",
@@ -186,6 +191,7 @@
       scitNapaka_ni_resolved: "Le Bouclier système n'est pas encore disponible dans cette version Windows."
     },
     it: {
+      namizjeSafeer: "Safeer OS come desktop", namizjeSafeerPod: "Ricerca, file, lettore e dispositivi sotto tutte le finestre al posto delle icone. La barra delle applicazioni di Windows resta.",
       naprednoPod: "IP, DNS, VPN e altre impostazioni di Windows.",
       zvokNaprednoPod: "Dispositivi di uscita, microfono e altre impostazioni audio di Windows.",
       samozagonPod: "Puoi gestirlo anche nelle app di avvio di Windows.",
@@ -380,6 +386,8 @@
     klic(vednoNotri ? "spletNotranji" : "splet", [url]).then(function (r) {
       // Storitve z DRM (Netflix ...) odpre Edge, ker vgrajeni pogon nima Widevine.
       if (r && r.zunanje) { obvesti(t("odpiraSeZunaj", { ime: ime || imeIzNaslova(url), brskalnik: r.brskalnik })); return; }
+      // Safeer DRM: storitev se predvaja v predvajalniku v tem oknu (Python ga je ze pokazal).
+      if (r && r.predvajalnik) return;
       if (!vednoNotri) pojdi("splet");
     });
   }
@@ -2488,6 +2496,8 @@
     if (id === "safeer") document.documentElement.removeAttribute("data-tema"); else document.documentElement.setAttribute("data-tema", id);
     try { localStorage.setItem("safeer_tema", id); } catch (e) {}
     narisiTeme();
+    // Ena tema za ves sistem: namizje, Splet in Safeer Control dobijo isto (lastnik, 13. 10. 2026).
+    if (imaMost()) klic("nastaviTemo", [id]).catch(function () {});
   }
   function narisiTeme() {
     var m = $("temeMreza"); if (!m) return;
@@ -2578,6 +2588,10 @@
     naloziNastavitveBrskalnika();
     $("stikaloCelozaslonsko").setAttribute("aria-checked", S.zacetek && S.zacetek.celozaslonsko ? "true" : "false");
     $("stikaloSamozagon").setAttribute("aria-checked", S.zacetek && S.zacetek.samozagon ? "true" : "false");
+    if ($("stikaloNamizje")) {
+      $("stikaloNamizje").hidden = !(S.zacetek && S.zacetek.namizje === "windows");
+      $("stikaloNamizje").setAttribute("aria-checked", S.zacetek && S.zacetek.namizjeSafeer ? "true" : "false");
+    }
     var cilj = $("skupineNastavitev");
     cilj.innerHTML = "";
     seznamNastavitev().forEach(function (g) {
@@ -3840,6 +3854,13 @@
       klic("celozaslonsko", [nov]);
     });
     on("gumbNamizje", "click", function () { klic("namizje"); });
+    on("stikaloNamizje", "click", function () {
+      var b = $("stikaloNamizje");
+      if (!b) return;
+      var nov = b.getAttribute("aria-checked") !== "true";
+      b.setAttribute("aria-checked", nov ? "true" : "false");
+      klic("namizjeSafeer", [nov]).then(function (zdaj) { b.setAttribute("aria-checked", zdaj ? "true" : "false"); });
+    });
     on("stikaloSamozagon", "click", function () {
       var b = $("stikaloSamozagon");
       if (!b) return;
@@ -4096,6 +4117,9 @@
     koMost(function () {
     klic("zacetek").then(function (z) {
       S.zacetek = z;
+      // Tema je shranjena tudi v sistemu (namizje, Splet, Control): sistem ima prednost, sicer mu damo izbiro strani.
+      if (z && z.tema && z.temaShranjena && z.tema !== trenutnaTema()) nastaviTemo(z.tema);
+      else if (z && z.tema && !z.temaShranjena && trenutnaTema() !== "safeer") klic("nastaviTemo", [trenutnaTema()]).catch(function () {});
       prilagodiPlatformo(z.namizje);
       if (BESEDILA_OS[z.jezik]) jezik = z.jezik;
       prevedi();

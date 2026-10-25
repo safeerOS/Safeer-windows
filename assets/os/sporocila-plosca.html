@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="sl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Safeer – sporočila</title>
+<link rel="stylesheet" href="sporocila-plosca.css">
+</head>
+<body>
+<!-- Plosca sporocil delovne povrsine (kuverta v pultu zgoraj desno, safeer_os.py _preklopi_plosco_sporocil).
+     Podatki iz Safeer OS (most window.SafeerOS, sporocilaSeznam) - brez izmisljenih vsebin. -->
+<main class="plosca" id="plosca">
+  <header class="glava">
+    <h1 id="naslov"></h1>
+    <button type="button" class="zapri" id="zapri" aria-label="✕">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12 M18 6L6 18"/></svg>
+    </button>
+  </header>
+  <div class="zavihki" role="tablist">
+    <button type="button" role="tab" id="zavSporocila" class="izbran" data-vrsta="klepet"></button>
+    <button type="button" role="tab" id="zavEposta" data-vrsta="email"></button>
+  </div>
+  <label class="iskanje">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14z M20 20l-4-4"/></svg>
+    <input type="search" id="iskanje" spellcheck="false" autocomplete="off">
+  </label>
+  <ul class="seznam" id="seznam" role="list"></ul>
+  <footer class="noga">
+    <button type="button" class="gumb" id="novo"></button>
+    <button type="button" class="gumb glavni" id="vse"></button>
+  </footer>
+</main>
+<script src="sporocila-plosca.js"></script>
+</body>
+</html>

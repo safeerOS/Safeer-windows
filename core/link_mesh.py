@@ -299,10 +299,21 @@ class MeshPovezovalec:
         """Oglasi Hubov, ki jih moramo zdaj poklicati (brez omrezja - preizkusljivo)."""
         zdaj = time.time() if zdaj is None else zdaj
         povezani = set(self.hub.sosedje())
+        # Povezan prek Global Linka, mDNS pa ga oglasa doma: poklicemo ga neposredno (lokalno ima prednost).
+        with getattr(self.hub, "_zaklep", threading.Lock()):
+            prek_releja = {hid for hid, p in dict(getattr(self.hub, "_sosedje", {}) or {}).items()
+                           if _je_zanka(str(getattr(p, "naslov", "") or ""))}
         izbrani = []
+        # Isti Hub je lahko v krogu pod dvema id-jema (npr. `n-x` in `n-x-control`, isti kljuc, isti naslov).
+        # Ce smo z njim ze povezani ali ga ze klicemo pod drugim id-jem, ga ne klicemo znova: Hub bi drugo povezavo
+        # z istim kljucem zamenjal s prvo in povezava bi nihala (meritev na Windows, 13. 10. 2026; isto kot Linux).
+        with self._zaklep:
+            zasedeni = povezani | set(self._klicem)
+        zasedeni_kljuci = {k for k in (self._kljuc_clana(i) for i in zasedeni) if k}
         for h in oglasi:
             hid = str(h.get("id") or "")
-            if not hid or hid == self.nas_id or not h.get("tls") or hid in povezani:
+            domov = hid in prek_releja and bool(h.get("mdns")) and not _je_zanka(str(h.get("naslov") or ""))
+            if not hid or hid == self.nas_id or not h.get("tls") or (hid in povezani and not domov):
                 continue
             if h.get("mesh") != link_hub_streznik_mesh():
                 continue            # star Hub: sosednje povezave ne razume
@@ -312,21 +323,34 @@ class MeshPovezovalec:
                 if hid in self._klicem:
                     continue
                 prvic = self._prvic_videni.setdefault(hid, zdaj)
-            try:
-                if link_krog.krog().clan_za_id(hid) is None:
-                    continue
-            except Exception:
-                continue
+            kljuc = self._kljuc_clana(hid)
+            if kljuc is None:
+                continue            # ni v krogu zaupanja
+            if kljuc and kljuc in zasedeni_kljuci and not domov:
+                continue            # isti Hub pod drugim id-jem: ze povezan ali ga ze klicemo
             if self._zavrnjeni.get(hid, (0.0, 0.0))[0] > zdaj:
                 continue            # nas je zavrnil; pocakamo
             if hid < self.nas_id and zdaj - prvic < VECJI_CAKA_S and hid not in self._po_zagonu:
                 continue            # manjsi id klice prvi; pocakamo nanj (razen takoj po nasem zagonu)
             izbrani.append(h)
+            if kljuc:
+                zasedeni_kljuci.add(kljuc)   # isti Hub pod drugim id-jem v tem krogu: enkrat
         return izbrani
+
+    @staticmethod
+    def _kljuc_clana(hid: str) -> Optional[str]:
+        """Kljuc clana kroga za id ("" = clan brez kljuca, None = ni clan ali napaka)."""
+        try:
+            clan = link_krog.krog().clan_za_id(hid)
+        except Exception:  # noqa: BLE001
+            return None
+        if clan is None:
+            return None
+        return str((clan.get("kljuc") if isinstance(clan, dict) else getattr(clan, "kljuc", "")) or "")
 
     def en_krog(self, isci: bool = True) -> None:
         """En krog iskanja in klicanja sosedov. isci=False: samo zapomnjeni sosedje, brez iskanja oglasov mDNS."""
-        oglasi = list(self.poisci() or []) if isci else []
+        oglasi = [dict(h, mdns=True) for h in (self.poisci() or []) if isinstance(h, dict)] if isci else []
         for h in oglasi:
             if h.get("mesh") == link_hub_streznik_mesh() and h.get("tls"):
                 self.zapomni(str(h.get("id") or ""), str(h.get("naslov") or ""))
@@ -356,6 +380,8 @@ class MeshPovezovalec:
                 self._neuspehi[hid] = self._neuspehi.get(hid, 0) + 1
             if self._ustavljen.is_set() or not global_link_vklopljen():
                 return
+            if hid in self.hub.sosedje():
+                return              # ze povezan prek releja: domov ni uspelo, rele ostane
             # Neposredno ga ni (zunaj doma ali za pozarnim zidom): prek link.safeer.si.
             if hid in samo_prek_releja() or self._neuspehi.get(hid, 0) >= RELE_PO_NEUSPEHIH:
                 self._klici_prek_releja(h)

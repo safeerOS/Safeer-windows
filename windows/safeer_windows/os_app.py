@@ -31,6 +31,7 @@ from core import os_dvd, os_media, os_posodobitve, os_scit, os_sporocila, os_tor
 
 from . import en_primerek
 from . import gledalec_zaslona
+from . import tema
 from . import (browser, control_backend, control_window, magnet_win, os_backend_win, policy, vlc_player,
                webview2_media, zapiski)
 
@@ -63,6 +64,20 @@ def _nastavi_jezik_oken(jezik: str) -> str:
     except Exception:
         pass
     return jezik
+
+
+def _ozadje_za_splet():
+    """Slika ozadja namizja za zacetno stran Spleta (safeer://home/ozadje): (vrsta, bajti) ali None."""
+    from . import namizje_qml
+    pot = namizje_qml.pot_ozadja()
+    if not pot:
+        return None
+    vrsta = mimetypes.guess_type(pot)[0] or "image/jpeg"
+    try:
+        with open(pot, "rb") as f:
+            return vrsta, f.read()
+    except OSError:
+        return None
 
 
 def _jezik_oken() -> str:
@@ -749,6 +764,10 @@ class SafeerOsWindow(QMainWindow):
             QApplication.instance(), browser_settings or policy.SettingsStore(), "embedded"
         )
         self.browser_app.jezik_vmesnika = _jezik_oken
+        # En videz sistema: Splet ima temo Safeer OS, zacetna stran Spleta pa ozadje namizja (lastnik, 13. 10. 2026).
+        self.browser_app.paleta = tema.paleta()
+        policy.splet_tema_css = lambda: tema.splet_css(tema.paleta())
+        policy.splet_ozadje = _ozadje_za_splet
         _korak("scit_in_profile")
         self.browser_window = browser.BrowserWindow(
             self.browser_app, private=True, embedded=True,
@@ -774,6 +793,9 @@ class SafeerOsWindow(QMainWindow):
         if hasattr(self.media_player, "stanje_spremenjeno"):
             self.media_player.stanje_spremenjeno.connect(self._media_zabelezi_stanje)
         self.control_backend.ob_mediju = self._link_medij
+        # Safeer Agent / daljinec: »odpri stran na računalniku« in »poišči na računalniku« (Link open_url, search.query).
+        self.control_backend.ob_strani = self._link_stran
+        self.control_backend.ob_iskanju = self._link_iskanje
         # Seznami predvajanja so enaki na vseh napravah v Linku: druge naprave berejo nase, mi njihove (ob odprtju Glasbe).
         self.control_backend.ob_seznamih = self.media_center.seznami_izvoz
         # Moji viri z drugih naprav v Linku (core/viri_sink.py): stran osvezi vire in katalog.
@@ -799,6 +821,10 @@ class SafeerOsWindow(QMainWindow):
         self.browser_window.set_embedded_content_visible(False)
         _korak("pred_webview2")
         self.webview2_media = webview2_media.WebView2MediaWidget(self._zapri_webview2_media, self)
+        if sys.platform == "win32":
+            # Safeer DRM (Widevine) se prenese enkrat v ozadju; do takrat predvaja WebView2.
+            from . import safeer_drm_prenos
+            safeer_drm_prenos.prenesi_v_ozadju()
         self.zaslon.addWidget(self.webview2_media)
         _korak("webview2")
         print("[SafeerOS] DIAG media_views_ready", flush=True)
@@ -943,6 +969,42 @@ class SafeerOsWindow(QMainWindow):
         else:
             self.showMaximized()
         print(f"[SafeerOS] DIAG window_show_called section={self.zacetni_razdelek or 'home'}", flush=True)
+
+    # ------------------------------------------------------------------ namizje Safeer OS (namizje_win.py)
+    def namizje_vklopljeno(self) -> bool:
+        return sys.platform == "win32" and bool(os_backend_win.nalozi_shrambo().get("namizje", False))
+
+    def nastavi_namizje(self, vklop: bool) -> bool:
+        s = os_backend_win.nalozi_shrambo()
+        s["namizje"] = bool(vklop)
+        os_backend_win.shrani_shrambo(s)
+        if vklop:
+            self.dispatcher.dispatch(self.pokazi_namizje)
+        else:
+            self.dispatcher.dispatch(self._skrij_namizje)
+        return bool(vklop)
+
+    def pokazi_namizje(self) -> None:
+        # Qt Quick (lastnik, 13. 10. 2026: prilagojen videz, animacije, prosojni paneli, skupna osnova za platforme).
+        # SAFEER_NAMIZJE=splet: ista stran kot na Linuxu v QtWebEngine (za primerjavo).
+        if getattr(self, "namizje", None) is None:
+            if os.environ.get("SAFEER_NAMIZJE", "").lower() == "splet":
+                from . import namizje_win
+                self.namizje = namizje_win.NamizjeOkno(self, SafeerOsPage, most_js)
+                port = getattr(self, "_asset_server_port", 0)
+                if port:
+                    self.namizje.pokazi(f"http://127.0.0.1:{port}/os/delovna.html")
+                return
+            from . import namizje_qml
+            self.namizje = namizje_qml.NamizjeQml(self)
+            self.namizje.pokazi()
+
+    def _skrij_namizje(self) -> None:
+        okno = getattr(self, "namizje", None)
+        if okno is not None:
+            okno.close()
+            okno.deleteLater()
+            self.namizje = None
 
     def prebudi(self, razdelek: str = "") -> None:
         """Druga kopija je bila zagnana (ikona, bliznjica): pokazi to okno in odpri zeleni razdelek."""
@@ -1712,6 +1774,13 @@ class SafeerOsWindow(QMainWindow):
         from PySide6.QtGui import QDesktopServices
         QDesktopServices.openUrl(QUrl(url))
 
+    def _odpri_drm_storitev(self, url: str) -> None:
+        if self.webview2_media.open_url(url, stran=True, storitev=True):
+            self.zaslon.setCurrentWidget(self.webview2_media)
+            self.setWindowTitle("Safeer OS · Safeer predvajalnik")
+            return
+        os_backend_win.odpri_drm_storitev(url)
+
     def _zapri_webview2_media(self) -> None:
         self.webview2_media.stop()
         self._browser_media_active = False
@@ -2241,6 +2310,7 @@ class SafeerOsWindow(QMainWindow):
                     backend=self.control_backend, parent=self, na_skritje=self._na_skritje_controla,
                     na_odpiranje=self._odpri_notranji_splet)
                 self.control_window.setWindowFlags(Qt.Widget)
+                self.control_window.uporabi_temo(tema.link_css(tema.paleta()))
                 self.zaslon.addWidget(self.control_window)
             else:
                 self.control_window.osvezi_stran()
@@ -2390,7 +2460,10 @@ class SafeerOsWindow(QMainWindow):
                 "razlicica": policy.APP_VERSION,
                 "sistem": f"Windows {platform.release()}",
                 "samozagon": os_backend_win.samozagon_vklopljen(),
+                "namizjeSafeer": self.namizje_vklopljeno(),
                 "povezava": self.control_backend.stanje_povezave(),
+                "tema": tema.trenutna(),
+                "temaShranjena": "tema" in os_backend_win.nalozi_shrambo(),
             }
 
         if metoda == "programi":
@@ -2573,6 +2646,17 @@ class SafeerOsWindow(QMainWindow):
             self.dispatcher.dispatch(lambda: self._nastavi_celozaslonsko(novo))
             return novo
 
+        if metoda == "nastaviTemo":
+            # Ena tema za ves sistem (Nastavitve > Videz): vmesnik, namizje, Splet in Safeer Control.
+            ime = str(a[0]) if a else ""
+            if tema.nastavi(ime):
+                self.dispatcher.dispatch(self.uporabi_temo)
+            return tema.trenutna()
+
+        if metoda == "namizjeSafeer":
+            # Nastavitve: Safeer OS kot namizje Windows (vklop / izklop; brez argumenta vrne stanje).
+            return self.nastavi_namizje(bool(a[0])) if a else self.namizje_vklopljeno()
+
         if metoda == "samozagon":
             return os_backend_win.nastavi_samozagon(bool(a[0]) if a else False)
 
@@ -2651,10 +2735,12 @@ class SafeerOsWindow(QMainWindow):
         if metoda == "oddaljeniZaslon":
             id_nap = str(a[0]) if a else ""
             ime = str(a[1]) if len(a) > 1 else ""
+            # "apps" = locen zaslon naprave (uporabnik za njo tega ne opazi), privzeto pravo namizje naprave.
+            zaslon = "apps" if len(a) > 2 and str(a[2]) == "apps" else "desktop"
             if not id_nap:
                 return False
             from . import oddaljeni_zaslon
-            self.dispatcher.dispatch(lambda: oddaljeni_zaslon.odpri(self.control_backend, id_nap, ime))
+            self.dispatcher.dispatch(lambda: oddaljeni_zaslon.odpri(self.control_backend, id_nap, ime, zaslon=zaslon))
             return True
 
         if metoda == "novaNaprava":
@@ -2732,10 +2818,11 @@ class SafeerOsWindow(QMainWindow):
             app = str(a[1]) if len(a) > 1 else ""
             return self.control_backend.zazeni_na_napravi(id_n, app)
 
-        if metoda == "odpriTukaj":
+        if metoda in ("odpriTukaj", "odpriDatotekoTukaj"):
             id_n = str(a[0]) if a else ""
             app = str(a[1]) if len(a) > 1 else ""
-            izid = self.control_backend.odpri_tukaj(id_n, app)
+            izid = (self.control_backend.odpri_tukaj(id_n, app) if metoda == "odpriTukaj"
+                    else self.control_backend.odpri_datoteko_tukaj(id_n, app))
             # Racunalnik (Linux/Windows) program samo zazene; sliko prinesemo mi - odpremo njegov oddaljeni
             # zaslon in program upravljamo od tu (Android pa sam zacne deliti zaslon, "tu": True).
             naprava = next((n for n in (self.control_backend.naprave or [])
@@ -3032,11 +3119,81 @@ class SafeerOsWindow(QMainWindow):
         if urllib.parse.urlsplit(url).scheme.lower() not in ("http", "https"):
             return False
         if not vedno_notri and os_backend_win.je_drm_storitev(url):
+            if self.webview2_media.ima_drm():
+                # Safeer DRM (Widevine) v istem oknu - uporabnik ostane v Safeer OS; Edge je le rezerva.
+                self.dispatcher.dispatch(lambda: self._odpri_drm_storitev(url))
+                return {"predvajalnik": True}
             izid = os_backend_win.odpri_drm_storitev(url)
             if izid.get("zunanje"):
                 return izid
         self.dispatcher.dispatch(lambda: self._odpri_notranji_splet(url))
         return True
+
+    def uporabi_temo(self) -> None:
+        """Trenutna tema (in ozadje) na vseh delih sistema: Splet (vdelan in okna), namizje, Safeer Control."""
+        p = tema.paleta()
+        for okno in list(getattr(self.browser_app, "windows", [])):
+            try:
+                okno.osvezi_temo(p)
+            except Exception as e:  # noqa: BLE001
+                print("[SafeerOS] tema brskalnika:", e, flush=True)
+        if getattr(self, "namizje", None) is not None and hasattr(self.namizje, "osvezi_videz"):
+            self.namizje.osvezi_videz()
+        if getattr(self, "control_window", None) is not None and hasattr(self.control_window, "uporabi_temo"):
+            self.control_window.uporabi_temo(tema.link_css(p))
+
+    def _link_stran(self, url: str) -> bool:
+        """Stran z naprave v Linku (agent, daljinec): odpre se v samostojnem oknu Safeer Browserja (lastnik, 13. 10. 2026),
+        v istem procesu in z isto zasciteno sejo - brez dodatnega pomnilnika za nov program. Zasciten video (Netflix ...)
+        predvaja skriti Safeer DRM v tem oknu brskalnika (BrowserWindow.odpri_drm)."""
+        url = str(url or "").strip()
+        if not url.lower().startswith(("http://", "https://")) or len(url) > 4096:
+            return False
+        self.dispatcher.dispatch(lambda: self._odpri_v_brskalniku(url))
+        return True
+
+    def _sistemsko_okno_brskalnika(self):
+        """Okno brskalnika kot del Safeer OS: ista seja in videz kot Splet, ikona Safeer OS, isti jezik."""
+        okno = browser.BrowserWindow(self.browser_app, private=True, sistemsko=True)
+        okno.na_magnet = self.odpri_magnet
+        okno.na_predvajalnik = self._predvajaj_stran_v_predvajalniku
+        okno.stanje_povezave = self._stanje_povezave_za_splet
+        okno.jezik_vmesnika = _jezik_oken
+        okno.setWindowIcon(self.windowIcon())
+        self.browser_app.windows.append(okno)
+        okno.set_safeer_os_web_mode(True)
+        okno.resize(1280, 820)
+        return okno
+
+    def _odpri_v_brskalniku(self, url: str) -> None:
+        """Nov zavihek v ze odprtem samostojnem oknu brskalnika ali novo okno (ne vdelani Splet Safeer OS)."""
+        app = self.browser_app
+        okno = next((w for w in reversed(app.windows) if getattr(w, "sistemsko", False) and w.isVisible()), None)
+        if okno is None:
+            okno = self._sistemsko_okno_brskalnika()
+            drm = os_backend_win.je_drm_storitev(url)
+            okno.new_tab(okno.home_url if drm else url)
+            okno.show()
+            if drm and not okno.odpri_drm(url):
+                okno.open_input(url, new_tab=True)
+        else:
+            okno.open_input(url, new_tab=True)      # storitev z DRM odpre Safeer DRM v tem oknu (open_input)
+        if okno.isMinimized():
+            okno.showNormal()
+        okno.raise_()
+        okno.activateWindow()
+
+    def _link_iskanje(self, niz: str) -> bool:
+        """Niz z naprave v Linku (glas na telefonu): namizje se pokaze in ga isce - nic se ne odpre samo (kot Linux).
+        Brez namizja ga isce Splet Safeer OS (uporabnik vidi zadetke, nic se ne zazene)."""
+        niz = " ".join(str(niz or "").split())[:200]
+        if not niz:
+            return False
+        if getattr(self, "namizje", None) is not None and hasattr(self.namizje, "isci_od_drugod"):
+            self.dispatcher.dispatch(lambda: self.namizje.isci_od_drugod(niz))
+            return True
+        self.dispatcher.dispatch(self.prebudi)
+        return self.odpri_spletno_iskanje(niz)
 
     def odpri_spletno_iskanje(self, poizvedba: str) -> bool:
         poizvedba = str(poizvedba or "").strip()
@@ -3099,6 +3256,8 @@ class SafeerOsWindow(QMainWindow):
 
     def koncaj_za_posodobitev(self) -> None:
         """Nova razlicica se zaganja: zapremo vse (Link, zaslon, predvajalnik), sprostimo zaklep in koncamo."""
+        self._koncujem = True
+        self._skrij_namizje()
         self.close()
         # Vrata vmesnika sprostimo PRED zaklepom: nova kopija jih potrebuje takoj (isti izvor strani = iste
         # shranjene nastavitve vmesnika).
@@ -3129,6 +3288,12 @@ class SafeerOsWindow(QMainWindow):
         return vlc_player.VlcPlayerWidget(self)
 
     def closeEvent(self, event) -> None:
+        if getattr(self, "namizje", None) is not None and not getattr(self, "_koncujem", False):
+            # Safeer OS je namizje: zapiranje okna ga le skrije (namizje, Link in predvajanje tecejo naprej).
+            self.webview2_media.stop()
+            self.hide()
+            event.ignore()
+            return
         try:
             if hasattr(self.media_player, "zapri_pogon"):
                 self.media_player.zapri_pogon()
@@ -3167,6 +3332,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--media-engine", choices=("auto", "qt"), default="auto",
                         help=argparse.SUPPRESS)
     parser.add_argument("--ozadje", action="store_true", help="Zazeni le v ozadju")
+    parser.add_argument("--namizje", action="store_true",
+                        help="Safeer OS kot namizje (pod vsemi okni, namesto obicajnega namizja)")
+    parser.add_argument("--brez-namizja", action="store_true", help="Izklopi namizje Safeer OS (vrne obicajno namizje)")
     parser.add_argument("--magnet", type=str, default="",
                         help="Odpri magnet povezavo v Medijskem centru (brskalnik, druga naprava v Linku)")
     parser.add_argument("--magnet-naprava", type=str, default="",
@@ -3240,6 +3408,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     # Safeer Link: povezovanje se zacne ob zagonu programa, v svoji niti. Prej ga je sprozila sele nalozena zacetna
     # stran; pri zagonu v ozadju je teklo tukaj, v glavni niti, in do konca zadrzalo zanko dogodkov.
     window.control_backend.povezi_ob_zagonu(vedno=bool(args.ozadje and not magnet))
+    # Namizje Safeer OS (po vzoru Linuxa): vklop/izklop se zapomni; ob vklopu glavno okno caka v ozadju.
+    if args.namizje or args.brez_namizja:
+        window.nastavi_namizje(bool(args.namizje))
+    if window.namizje_vklopljeno():
+        window.pokazi_namizje()
+        if not (args.razdelek or args.control or magnet or args.okno):
+            window.hide()
 
     koda = app.exec()
     zagotovi_izhod(koda)

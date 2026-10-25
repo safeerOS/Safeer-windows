@@ -26,7 +26,7 @@ import threading
 import time
 import urllib.parse
 import uuid
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 APP_NAME = "Safeer Browser"
 APP_ID = "SafeerBrowser"
@@ -564,6 +564,26 @@ function ovij(objekt, ime) {
     objekt[ime] = function (tip) { var r = izvirna.apply(this, arguments); try { opazi(tip, !!r); } catch (e) {} return r; };
   } catch (e) {}
 }
+// Zasciten video (Widevine/PlayReady): Qt WebEngine nima modula za DRM, Safeer predvajalnik (Safeer DRM) ga ima.
+// Sama zavrnjena poizvedba ni dovolj (strani jo pogosto naredijo le za preizkus) - Splet preklopi, ko stran po zavrnitvi
+// res ima video z virom, ki se v 4 s ne predvaja.
+try {
+  if (navigator.requestMediaKeySystemAccess) {
+    var izvirniEme = navigator.requestMediaKeySystemAccess;
+    var preveriEme = function (poskus) {
+      if (prijavljeno || nalozeno()) return;
+      var m = document.querySelectorAll('video');
+      for (var i = 0; i < m.length; i++) if (m[i].currentSrc || m[i].src) { prijavi(true); return; }
+      if (poskus < 10) setTimeout(function () { preveriEme(poskus + 1); }, 2000);
+    };
+    navigator.requestMediaKeySystemAccess = function () {
+      return izvirniEme.apply(navigator, arguments).catch(function (e) {
+        setTimeout(function () { preveriEme(0); }, 4000);
+        throw e;
+      });
+    };
+  }
+} catch (e) {}
 ovij(window.MediaSource, 'isTypeSupported');
 ovij(window.ManagedMediaSource, 'isTypeSupported');
 ovij(window.HTMLMediaElement && HTMLMediaElement.prototype, 'canPlayType');
@@ -738,10 +758,19 @@ _HOME_FILES = {
 }
 
 
+#: Safeer OS nastavi: tema in ozadje zacetne strani Spleta = tema in ozadje namizja (en videz sistema). Samostojni
+#: Safeer Browser ju nima in ostane, kot je.
+splet_tema_css: Optional[Callable[[], str]] = None
+splet_ozadje: Optional[Callable[[], Optional[Tuple[str, bytes]]]] = None
+
+
 def splet_html() -> str:
     """Zacetna stran Splet v Safeer OS; most do brskalnika gre prek konzole (kot pri home.html)."""
     with open(shared_path("ui/splet.html"), encoding="utf-8") as handle:
         page = handle.read()
+    if splet_tema_css is not None:
+        page = page.replace('<link rel="stylesheet" href="splet.css">',
+                            '<link rel="stylesheet" href="splet.css">\n  <link rel="stylesheet" href="tema.css">', 1)
     return page.replace('<script src="splet.js"></script>',
                         '<script src="storage-guard.js"></script>\n  <script>window.__safeerKonzolniMost = 1;</script>\n'
                         '  <script src="splet.js"></script>')
@@ -901,6 +930,17 @@ def scheme_resource(host: str, path: str, query: str, lang: str = "sl") -> Optio
         return "text/html", home_html().encode("utf-8")
     if name in ("splet", "splet.html"):
         return "text/html", splet_html().encode("utf-8")
+    if name == "tema.css":
+        try:
+            return "text/css", ((splet_tema_css() if splet_tema_css else "") or "").encode("utf-8")
+        except Exception:  # noqa: BLE001
+            return "text/css", b""
+    if name == "ozadje":
+        try:
+            vir = splet_ozadje() if splet_ozadje else None
+        except Exception:  # noqa: BLE001
+            vir = None
+        return vir if vir else None
     if name == "blocked":
         target = urllib.parse.parse_qs(query or "").get("url", [""])[0]
         return "text/html", blocked_html(target, lang).encode("utf-8")

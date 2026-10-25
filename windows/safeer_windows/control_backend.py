@@ -8,6 +8,7 @@ import json
 import os
 import secrets
 import socket
+import ctypes
 import sys
 import threading
 import time
@@ -46,6 +47,8 @@ DEJANJA_PREDAJA = ["play.state", "play.stop", "play.offer"]
 #: Seznami predvajanja so enaki na vseh uporabnikovih napravah v Linku (core/seznami_sink.py, SeznamiSink.kt na
 #: Androidu): druga naprava v Linku prebere sezname Medijskega centra (samo branje, brez posebne pravice).
 DEJANJA_SEZNAMI = ["lists.get"]
+#: Safeer Agent (glas s telefona): niz pokaze iskanje namizja Safeer OS - nic se ne odpre samo (enako kot Linux).
+DEJANJA_ISKANJE = ["search.query"]
 #: Sejni zeton s podpisom velja pri srediscu 12 ur; toliko casa ga uporabljamo, preden vzamemo novega.
 SEJA_HTTP_HRANIMO_S = 1800.0
 #: Najvec znakov besedila, ki ga druga naprava poslje temu racunalniku (kot Safeer Control na Linuxu).
@@ -53,6 +56,30 @@ NAJVEC_PREJETEGA_BESEDILA = 4000
 #: Premori (s) med ponovnimi poskusi zagona sredisca, kadar vrata se drzi kopija programa, ki se zapira.
 POSKUSI_SREDISCA = (1.0, 1.0, 2.0, 2.0, 3.0)
 TIPKE_MEDIJ = ("play_pause", "play", "pause", "stop", "next", "previous", "naslednja", "prejsnja")
+
+
+_VK_MEDIJ = {"play_pause": 0xB3, "play": 0xB3, "pause": 0xB3, "stop": 0xB2, "next": 0xB0, "naslednja": 0xB0,
+             "previous": 0xB1, "prejsnja": 0xB1}
+
+
+def _sistemska_medijska_tipka(k: str) -> bool:
+    """Prava medijska tipka Windows (deluje za vsak predvajalnik, ki jo poslusa). False, ce to ni Windows."""
+    vk = _VK_MEDIJ.get(k)
+    if vk is None or sys.platform != "win32":
+        return False
+    if k in ("play", "pause"):
+        # Ena sama tipka predvajaj/pavza: pritisnemo jo samo, ce se s tem zgodi zeleno (»pavza« ko zveni, »nadaljuj« ko ne).
+        from safeer_windows import glasnost_win
+        zveni = glasnost_win.zveni()
+        if zveni is None or zveni == (k == "play"):
+            return zveni is not None
+    try:
+        u = ctypes.windll.user32
+        u.keybd_event(vk, 0, 0x0001, 0)
+        u.keybd_event(vk, 0, 0x0001 | 0x0002, 0)
+        return True
+    except Exception:  # noqa: BLE001
+        return False
 
 
 class _WindowsDeljenjeZaslona(link_deljenje.DeljenjeZaslona):
@@ -141,6 +168,11 @@ class SafeerControlBackend:
         self.ob_mediju: Optional[Callable[[str, dict], Optional[Dict[str, Any]]]] = None
         #: Seznami predvajanja Medijskega centra (os_app): ob_seznamih(parametri) -> podatki za `lists.get`.
         self.ob_seznamih: Optional[Callable[[dict], dict]] = None
+        #: Safeer Agent in daljinec (lastnik, 13. 10. 2026: naprava je ze privzeto pripravljena na upravljanje z agentom):
+        #: ob_strani(url) odpre stran vidno v Safeer OS, ob_iskanju(niz) pokaze niz v iskanju namizja. Brez Safeer OS
+        #: ostane prejsnje vedenje (navidezni zaslon), search.query pa ni na voljo.
+        self.ob_strani: Optional[Callable[[str], bool]] = None
+        self.ob_iskanju: Optional[Callable[[str], bool]] = None
         self._poslusavci: List[Callable[[str, Any], None]] = []
         self._povezovanje = False
         #: Sejni zeton za klice HTTP tujega sredisca: (zeton, velja do [monotonic], naslov sredisca).
@@ -440,6 +472,11 @@ class SafeerControlBackend:
         if profil == "zaslon":
             return akcija in ("screenshot", "screen.capture", "screen.start", "screen.stop", "screen.status")
         return False
+
+    def _gleda_navidezni(self, posiljatelj: str) -> bool:
+        """Ali [posiljatelj] zdaj gleda navidezni zaslon tega racunalnika (screen.start)."""
+        nz = self.navidezni_zaslon
+        return bool(getattr(nz, "_tece", False)) and bool(posiljatelj) and getattr(nz, "_posiljatelj_seje", "") == posiljatelj
 
     def _lastni_naslovi(self) -> list:
         """Naslovi tega racunalnika za odgovor na `screen.start`. So dodatek: brez njih seja dela kot prej."""
@@ -1554,6 +1591,8 @@ class SafeerControlBackend:
                         stanje_naprave["actions"] = stanje_naprave["actions"] + DEJANJA_SEZNAMI
                     stanje_naprave["keys"] = list(dict.fromkeys(list(stanje_naprave.get("keys") or []) + ["next", "previous"]))
                     stanje_naprave["media"] = medij.get("data") or {}
+                if getattr(self, "ob_iskanju", None) is not None:
+                    stanje_naprave["actions"] = list(stanje_naprave.get("actions") or []) + DEJANJA_ISKANJE
                 izid = {
                     "ok": True,
                     "message": "Stanje",
@@ -1583,6 +1622,10 @@ class SafeerControlBackend:
                 medij = self._medij(k, {}) if (akcija == "key" and k.strip().lower() in TIPKE_MEDIJ) else None
                 if medij is not None and medij.get("ok"):
                     izid = medij
+                elif (akcija == "key" and k.strip().lower() in TIPKE_MEDIJ and not self._gleda_navidezni(posiljatelj)
+                      and _sistemska_medijska_tipka(k.strip().lower())):
+                    # Agent ali daljinec: »pavza na računalniku«, ko predvaja drug program (Splet, Spotify ...).
+                    izid = {"ok": True, "message": f"Tipka {k}"}
                 else:
                     self.navidezni_zaslon.obdelaj_tipko(k)
                     izid = {"ok": True, "message": f"Tipka {k}"}
@@ -1597,6 +1640,12 @@ class SafeerControlBackend:
                     smer=str(params.get("direction") or ""),
                     raven=params.get("level"),
                 )
+                # Prava glasnost racunalnika (agent: »tišje na računalniku«); navidezna stevilka sledi pravi.
+                from safeer_windows import glasnost_win
+                prava = glasnost_win.nastavi(str(params.get("direction") or ""), params.get("level"))
+                if prava is not None:
+                    podatki = prava
+                    self.navidezni_zaslon.glasnost, self.navidezni_zaslon.utisano = prava["level"], prava["muted"]
                 izid = {"ok": True, "message": f"Glasnost {podatki['level']} %", "data": podatki}
 
             elif akcija in ("screenshot", "screen.capture"):
@@ -1607,9 +1656,24 @@ class SafeerControlBackend:
                 url = str(params.get("url") or "").strip()
                 if not (url.startswith("http://") or url.startswith("https://") or url.startswith("safeer://")):
                     izid = {"ok": False, "message": "Dovoljeni so samo naslovi http(s) ali safeer://"}
+                elif getattr(self, "ob_strani", None) is not None and not self._gleda_navidezni(posiljatelj) and url.startswith(("http://", "https://")):
+                    # Ukaz agenta ali daljinca (»odpri stran na računalniku«): stran se odpre vidno v Spletu Safeer OS.
+                    # Naprava, ki gleda nas navidezni zaslon, jo se vedno dobi tam (to je njen zaslon).
+                    izid = ({"ok": True, "message": "Stran se odpira"} if self.ob_strani(url)
+                            else {"ok": False, "message": "Strani ni bilo mogoče odpreti", "code": "ni_odprto"})
                 else:
                     self.navidezni_zaslon.odpri_url(url)
                     izid = {"ok": True, "message": "Stran se odpira na ločenem navideznem zaslonu"}
+
+            elif akcija in DEJANJA_ISKANJE:
+                niz = " ".join(str(params.get("q") or "").split())[:200]
+                if not niz:
+                    izid = {"ok": False, "message": "Ni besedila za iskanje", "code": "prazno"}
+                elif getattr(self, "ob_iskanju", None) is None:
+                    izid = {"ok": False, "message": "Safeer OS na tem računalniku ne teče", "code": "ni_safeer_os"}
+                else:
+                    izid = ({"ok": True, "message": "Iščem na računalniku"} if self.ob_iskanju(niz)
+                            else {"ok": False, "message": "Iskanje ni na voljo", "code": "ni_iskanja"})
 
             elif akcija in ("apps", "apps.list"):
                 ikone = params.get("icons") is not False
@@ -1620,6 +1684,10 @@ class SafeerControlBackend:
                 # odgovor podvojil cez mejo sporocila v hubu (325 kB) - Linux ni dobil nobenega programa.
                 podatki.pop("apps", None)
                 izid = {"ok": True, "message": f"{len(podatki['items'])} programov", "data": podatki}
+
+            elif akcija in ("apps.launch_locen", "files.open_locen"):
+                # Windows (se) nima locenega zaslona: programa ali datoteke ne odpremo na zaslonu uporabnika.
+                izid = {"ok": False, "message": "Računalnik nima ločenega zaslona", "code": "ni_locenega_zaslona"}
 
             elif akcija in ("apps.launch", "launch_app"):
                 app_id = str(params.get("app") or params.get("package") or "").strip()
@@ -2137,7 +2205,9 @@ class SafeerControlBackend:
         if not id_datoteke:
             return {"ok": False, "koda": "manjka_datoteka"}
         if not streznik or not isinstance(streznik, dict) or not streznik.get("base_url"):
-            return self.odpri_datoteko_naprave(id_naprave, id_datoteke)
+            # Brez streznika datoteke ne odpiramo na zaslonu naprave (njen uporabnik bi to videl); vmesnik ponudi
+            # program naprave prek oddaljenega namizja (locen zaslon).
+            return {"ok": False, "koda": "ni_streznika"}
 
         base_url = str(streznik.get("base_url") or "").rstrip("/")
         fp = streznik.get("fp")
@@ -2197,13 +2267,29 @@ class SafeerControlBackend:
         return {"ok": bool(r.get("ok")), "koda": str(r.get("koda") or r.get("code") or ""),
                 "message": str(r.get("message") or "")}
 
+    def odpri_datoteko_tukaj(self, id_naprave: str, id_datoteke: str) -> dict:
+        """Datoteko naprave odpremo na njenem LOCENEM zaslonu in jo gledamo/urejamo tukaj prek oddaljenega namizja -
+        uporabnik za tisto napravo tega ne opazi (lastnik, 13. 10. 2026). Naprava brez locenega zaslona zavrne."""
+        if not id_naprave or not id_datoteke:
+            return {"ok": False, "koda": "manjkajo_parametri"}
+        # Svoje dejanje (ne parameter): starejsa naprava ga ne pozna in ga zavrne - nikoli ne odpre vidno na svojem zaslonu.
+        r = self.ukaz_pocakaj(id_naprave, "files.open_locen", {"id": id_datoteke, "stream": True}, cas=10.0)
+        podatki = r.get("data") if isinstance(r.get("data"), dict) else {}
+        return {"ok": bool(r.get("ok")), "tu": podatki.get("stream") == "pending",
+                "koda": str(r.get("koda") or r.get("code") or ""), "message": str(r.get("message") or "")}
+
     def odpri_tukaj(self, id_naprave: str, app: str) -> dict:
-        r = self.ukaz_pocakaj(id_naprave, "apps.launch", {"app": app, "stream": True}, cas=8.0)
+        naprava = next((n for n in self.naprave if str(n.get("id") or "") == str(id_naprave)), {})
+        platforma = str(naprava.get("platforma") or naprava.get("platform") or "").lower()
+        racunalnik = platforma in ("linux", "windows", "win32", "macos") or str(id_naprave).endswith("-control")
+        # Racunalnik: program na LOCENEM zaslonu (uporabnik tam tega ne opazi). Android: deljenje zaslona s soglasjem.
+        akcija = "apps.launch_locen" if racunalnik else "apps.launch"
+        r = self.ukaz_pocakaj(id_naprave, akcija, {"app": app, "stream": True}, cas=8.0)
         podatki = r.get("data") if isinstance(r.get("data"), dict) else {}
         return {
             "ok": bool(r.get("ok")),
             "tu": podatki.get("stream") == "pending",
-            "koda": str(r.get("koda") or ""),
+            "koda": str(r.get("koda") or r.get("code") or ""),
             "message": str(r.get("message") or ""),
         }
 

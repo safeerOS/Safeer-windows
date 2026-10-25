@@ -6,7 +6,12 @@
   --b: #f2f7f5;
   --d: #a6b8b5;
   --rob: rgba(181, 220, 209, .18);
-  --plosca: rgba(10, 22, 30, .72);
+  --plosca: rgba(var(--prgb), .72);
+  /* Teme Safeer OS (tema.css) zamenjajo te vrednosti; brez nje je videz enak kot prej. */
+  --zrgb: 87, 214, 173;
+  --prgb: 10, 22, 30;
+  --tz: #04261b;
+  --kartica: #0b1620;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--b);
@@ -27,9 +32,9 @@ body { overflow-x: hidden; }
   text-shadow: 0 2px 14px rgba(0, 0, 0, .6); }
 .iskanje { position: relative; display: flex; align-items: center; gap: 12px; max-width: 700px;
   margin: clamp(26px, 5vh, 46px) auto 0; padding: 8px 8px 8px 22px; border-radius: 22px;
-  background: rgba(8, 18, 26, .82); border: 2px solid rgba(87, 214, 173, .55);
-  box-shadow: 0 0 0 6px rgba(87, 214, 173, .07), 0 18px 50px rgba(0, 0, 0, .45); backdrop-filter: blur(10px); }
-.iskanje:focus-within { border-color: var(--z); box-shadow: 0 0 0 6px rgba(87, 214, 173, .14), 0 18px 50px rgba(0, 0, 0, .45); }
+  background: rgba(var(--prgb), .82); border: 2px solid rgba(var(--zrgb), .55);
+  box-shadow: 0 0 0 6px rgba(var(--zrgb), .07), 0 18px 50px rgba(0, 0, 0, .45); backdrop-filter: blur(10px); }
+.iskanje:focus-within { border-color: var(--z); box-shadow: 0 0 0 6px rgba(var(--zrgb), .14), 0 18px 50px rgba(0, 0, 0, .45); }
 .iskanje .lupa { width: 22px; height: 22px; flex: none; fill: none; stroke: #cfdcd8; stroke-width: 2; stroke-linecap: round; }
 .iskanje input { flex: 1; min-width: 0; height: 44px; border: 0; outline: 0; background: transparent;
   color: var(--b); font-size: 1.06rem; font-family: inherit; }
@@ -37,7 +42,7 @@ body { overflow-x: hidden; }
 .iskanje button { flex: none; width: 54px; height: 44px; border: 0; border-radius: 14px; cursor: pointer;
   background: var(--z); display: grid; place-items: center; transition: background .15s; }
 .iskanje button:hover, .iskanje button:focus-visible { background: #6fe3bd; outline: none; }
-.iskanje button svg { width: 24px; height: 24px; fill: none; stroke: #04261b; stroke-width: 2.4;
+.iskanje button svg { width: 24px; height: 24px; fill: none; stroke: var(--tz); stroke-width: 2.4;
   stroke-linecap: round; stroke-linejoin: round; }
 
 /* Bližnjice */
@@ -48,7 +53,7 @@ body { overflow-x: hidden; }
   background: var(--plosca); border: 1px solid var(--rob); color: var(--b); text-decoration: none;
   font: inherit; font-size: .95rem; font-weight: 600; backdrop-filter: blur(8px);
   transition: transform .15s, border-color .15s, background .15s; }
-.bliznjica:hover, .bliznjica:focus-visible { transform: translateY(-2px); border-color: rgba(87, 214, 173, .6);
+.bliznjica:hover, .bliznjica:focus-visible { transform: translateY(-2px); border-color: rgba(var(--zrgb), .6);
   background: rgba(14, 30, 38, .85); outline: none; }
 .bliznjica .znak { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; overflow: hidden;
   font-size: 1.25rem; font-weight: 800; color: #fff; }
@@ -67,7 +72,7 @@ body.ureja .bliznjica.dodaj { opacity: .45; }
 /* Uredi bližnjice / Končano / Obnovi privzete: ploščice v isti mreži, a umirjene (črtkan rob). */
 .bliznjica.orodje { background: rgba(8, 18, 24, .55); border-style: dashed; font-weight: 500; }
 .bliznjica.orodje .znak { color: #cfe3dc; font-size: 1.5rem; font-weight: 400; }
-.bliznjica.orodje.dejaven { border-style: solid; border-color: rgba(87, 214, 173, .7); }
+.bliznjica.orodje.dejaven { border-style: solid; border-color: rgba(var(--zrgb), .7); }
 .bliznjica.orodje.dejaven .znak { color: var(--z); }
 /* Napisi dejanj (Dodaj bližnjico, Uredi bližnjice ...) se prelomijo v dve vrstici namesto odrezanega "Dodaj bližn…". */
 .bliznjica.dodaj .ime, .bliznjica.orodje .ime { white-space: normal; text-align: center; line-height: 1.15; font-size: .85rem; }
@@ -80,15 +85,15 @@ body.ureja .bliznjica.dodaj { opacity: .45; }
   color: var(--b); font: inherit; font-size: 1.2rem; font-weight: 700; cursor: pointer; }
 .predlogi-naslov svg { width: 20px; height: 20px; fill: none; stroke: var(--b); stroke-width: 2.2; stroke-linecap: round; }
 .cipi { display: flex; gap: 8px; flex-wrap: wrap; }
-.cip { padding: 6px 14px; border-radius: 999px; border: 1px solid var(--rob); background: rgba(10, 22, 30, .7);
+.cip { padding: 6px 14px; border-radius: 999px; border: 1px solid var(--rob); background: rgba(var(--prgb), .7);
   color: #d9e4e1; font: inherit; font-size: .88rem; cursor: pointer; }
-.cip:hover, .cip:focus-visible { border-color: rgba(87, 214, 173, .6); outline: none; }
-.cip[aria-selected="true"] { background: var(--z); border-color: var(--z); color: #04261b; font-weight: 700; }
+.cip:hover, .cip:focus-visible { border-color: rgba(var(--zrgb), .6); outline: none; }
+.cip[aria-selected="true"] { background: var(--z); border-color: var(--z); color: var(--tz); font-weight: 700; }
 .kartice { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 16px; }
 .kartica { position: relative; min-height: 170px; border-radius: 16px; overflow: hidden; cursor: pointer;
-  border: 1px solid var(--rob); background: #0b1620; color: #fff; text-align: left; padding: 0; font: inherit;
+  border: 1px solid var(--rob); background: var(--kartica); color: #fff; text-align: left; padding: 0; font: inherit;
   transition: transform .15s, border-color .15s; }
-.kartica:hover, .kartica:focus-visible { transform: translateY(-2px); border-color: rgba(87, 214, 173, .6); outline: none; }
+.kartica:hover, .kartica:focus-visible { transform: translateY(-2px); border-color: rgba(var(--zrgb), .6); outline: none; }
 .kartica svg.slika { position: absolute; inset: 0; width: 100%; height: 100%; }
 .kartica .napis { position: absolute; left: 0; right: 0; bottom: 0; padding: 40px 18px 16px;
   background: linear-gradient(180deg, transparent, rgba(3, 8, 12, .85)); display: flex; align-items: flex-end;
