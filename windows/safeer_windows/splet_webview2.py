@@ -32,8 +32,10 @@ from PySide6.QtWidgets import QWidget
 
 from . import policy
 
-# Dejanja mostu, ki jih sme sproziti katerakoli stran (stevec oglasov, obvestilo o videu); vse drugo samo safeer://.
-_JAVNA_DEJANJA = ("increment_ads", "media_unsupported")
+# Dejanja mostu, ki jih sme sproziti katerakoli stran (stevec oglasov, obvestilo o videu, zahteva za zasciten video -
+# core/drm.SKRIPTA); vse drugo samo safeer://. Vsa tri sprejme Splet samo z zetonom skripte Safeer (on_bridge_message).
+# drm_zahteva je manjkala: na testnem PC 25. 10. se ponudba Safeer DRM ni pokazala (sporocilo zavrzeno tu).
+_JAVNA_DEJANJA = ("increment_ads", "media_unsupported", "drm_zahteva")
 
 
 def izvrsljiva() -> Path:

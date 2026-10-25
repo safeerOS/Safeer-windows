@@ -92,3 +92,18 @@ def test_besedila_v_6_jezikih():
     for j in ("sl", "en", "de", "es", "fr", "it"):
         assert {"drm_zahteva", "drm_predvajaj"} <= set(drm.BESEDILA[j])
         assert {"dv_zahteva", "dv_drm"} <= set(dovoljenja_strani.BESEDILA[j])
+
+
+def test_javna_dejanja_webview2_so_vsa_z_zetonom():
+    """Splet WebView2 (splet_webview2) spusti s tujih strani samo _JAVNA_DEJANJA; vsako mora biti v on_bridge_message
+    preverjeno z zetonom, in zahteva za DRM mora skozi (sicer se ponudba Safeer DRM ne pokaze - testni PC 25. 10.)."""
+    import re
+    from safeer_windows import splet_webview2
+    src = (KOREN / "windows" / "safeer_windows" / "browser.py").read_text(encoding="utf-8")
+    telo = src[src.index("def on_bridge_message"):][:600]
+    z_zetonom = re.search(r"if action in \(([^)]*)\) and not policy\.zeton_veljaven\(payload\)", telo)
+    assert z_zetonom, "on_bridge_message mora preveriti zeton"
+    preverjena = set(re.findall(r'"([a-z_]+)"', z_zetonom.group(1)))
+    assert set(splet_webview2._JAVNA_DEJANJA) <= preverjena
+    assert "drm_zahteva" in splet_webview2._JAVNA_DEJANJA
+
