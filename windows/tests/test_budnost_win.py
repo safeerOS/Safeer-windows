@@ -132,7 +132,8 @@ class ZastavicePredvajanja(unittest.TestCase):
         self.assertTrue(p.steze()["slika"])
 
     def test_brez_windows_ne_naredi_nicesar(self):
-        with mock.patch.object(B, "_je_windows", return_value=False):
+        from core import budnost as jedro_budnosti   # zaledje je v skupni kodi (core/budnost.BudnostWindows)
+        with mock.patch.object(jedro_budnosti, "_je_windows", return_value=False):
             b = B.Budnost()
             self.assertFalse(b.nastavi("predvajanje", VIDEO))
             self.assertEqual(b.stanje(), {})
