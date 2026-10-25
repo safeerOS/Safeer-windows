@@ -220,7 +220,8 @@ class _Osnova(unittest.TestCase):
 
 class SlikaInVnos(_Osnova):
     def test_slika_in_vnos_hkrati(self):
-        tv = self.televizor(self.z.zacni_sejo("tv-test"), vnos_na_s=2000)
+        # Vnos samo z izrecnim dovoljenjem (privzeto ne, pregled Grok W10).
+        tv = self.televizor(self.z.zacni_sejo("tv-test", vnos=True), vnos_na_s=2000)
         self.assertTrue(tv.povezan.wait(8), "naprava se ni povezala")
         self.assertEqual(tv.glava["v"], 2)
         time.sleep(3.0)

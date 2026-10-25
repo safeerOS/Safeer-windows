@@ -49,6 +49,8 @@ DEJANJA_PREDAJA = ["play.state", "play.stop", "play.offer"]
 #: pomaga pri povezavi). »izbrano« in »zaslon« sta iz prejsnjih razlicic: vmesnik ju ne ponuja vec, ze izbrane pa
 #: veljajo naprej kot omejena pravica ZUNAJ ozjega kroga (stari zapisi se sami ne sirijo - pravilo Linuxa).
 PROFILI_DOSTOPA = ("polno", "izbrano", "zaslon", "brez")
+#: Od najbolj omejujocega: pri vec identitetah iste naprave velja najbolj omejujoc profil (pregled Grok W3, 25. 10.).
+NAJBOLJ_OMEJUJOC = ("brez", "zaslon", "izbrano", "polno")
 #: Kar profil zapise v core/link_dostop (ozji krog). Samo »polno« je ozji krog; skupna link_dostop.nastavi mu prek
 #: ozji_krog da tudi upravljanje (z) in mape (d).
 OZJI_KROG_PO_PROFILU = {"polno": ("d", "p", "v", "z"), "izbrano": (), "zaslon": (), "brez": ()}
@@ -180,6 +182,9 @@ class SafeerControlBackend:
         self.lokalna_koda = str(100000 + secrets.randbelow(900000))
         self._lokalna_koda_cas = time.time()
         self.navidezni_zaslon = NavidezniZaslon()
+        # Umik iz kroga ali manj pravic (tudi z druge naprave, core/link_krog) konca tekoco sejo takoj (Grok W2).
+        self.navidezni_zaslon.preveri_sejo = self._preveri_sejo_zaslona
+        self._zaklep_dov = threading.RLock()
         self.povezava: Optional[link_hub.Povezava] = None
         self.naprave: List[dict] = []
         #: "Poslji na napravo": ponudba druge naprave, ki tu caka na Sprejmi/Zavrni (core/link_predvajanje.ponudba_iz).
@@ -440,16 +445,50 @@ class SafeerControlBackend:
                 ids.append(i)
         return ids
 
+    @staticmethod
+    def _fizicna_po_krogu(id_naprave: str) -> str:
+        """Fizicna naprava iz kroga zaupanja TE naprave (kljuc clana, dodan ob seznanitvi), ne iz seznama huba."""
+        try:
+            from core import link_krog
+            clan = link_krog.krog().clan_za_id(str(id_naprave or ""))
+            return link_krog.id_iz_kljuca(str(clan["kljuc"])) if clan and clan.get("kljuc") else ""
+        except Exception:  # noqa: BLE001 - ne vem ni da
+            return ""
+
+    def _ista_naprava_zanesljivo(self, a: str, b: str) -> bool:
+        """Ali sta identiteti dokazano ista fizicna naprava: isti id (brez pripone -os), isto jedro id-ja iz kljuca
+        (prijava s podpisom) ali isti kljuc v krogu te naprave. Polje device/naprava iz seznama huba NE steje: poslje
+        ga druga naprava, dohodno sporocilo pa ne sme podeliti dostopa (AGENTS; pregled Grok W1, 25. 10. 2026)."""
+        a, b = str(a or ""), str(b or "")
+        if not a or not b:
+            return False
+        if a == b or self._osnova_id(a) == self._osnova_id(b):
+            return True
+        try:
+            from core import link_krog
+            n = link_krog.DOLZINA_ID_IZ_KLJUCA
+            if link_krog.je_id_iz_kljuca(a) and link_krog.je_id_iz_kljuca(b) and a[:n] == b[:n]:
+                return True
+        except Exception:  # noqa: BLE001
+            pass
+        fa = self._fizicna_po_krogu(a)
+        return bool(fa) and fa == self._fizicna_po_krogu(b)
+
     def dovoljenje_za(self, id_naprave: str) -> str:
         """Vrne profil dostopa naprave: polno, izbrano, zaslon, brez ali vprasaj. Velja za fizicno napravo:
         izbira za eno identiteto telefona velja tudi za drugo (sicer bi isti telefon vprasal dvakrat).
-        »brez« = uporabnik jo je umaknil iz ozjega kroga (pomaga samo pri povezavi, ne vprasamo znova)."""
+        »brez« = uporabnik jo je umaknil iz ozjega kroga (pomaga samo pri povezavi, ne vprasamo znova).
+        Vec identitet: velja najbolj omejujoc profil (W3); vec pravic samo od dokazano iste naprave (W1)."""
         dovoljenja = self.nastavitve.get("dovoljenja_naprav") or {}
         profil = str(dovoljenja.get(str(id_naprave or "")) or "")
         if profil in PROFILI_DOSTOPA:
             return profil
-        izbrani = [str(dovoljenja.get(s) or "") for s in self.sorodniki(id_naprave)]
-        for kandidat in PROFILI_DOSTOPA:
+        izbrani = []
+        for s in self.sorodniki(id_naprave):
+            p = str(dovoljenja.get(s) or "")
+            if p == "brez" or (p in PROFILI_DOSTOPA and self._ista_naprava_zanesljivo(id_naprave, s)):
+                izbrani.append(p)
+        for kandidat in NAJBOLJ_OMEJUJOC:
             if kandidat in izbrani:
                 return kandidat
         if profil == "vprasaj":
@@ -459,6 +498,28 @@ class SafeerControlBackend:
         if any(str(n.get("id") or "") == str(id_naprave or "") for n in self.naprave):
             return "vprasaj"
         return "polno"
+
+    def _podedovan_profil(self, id_n: str, polje_device: str, dovoljenja: dict, naprave: list) -> str:
+        """Profil, ki ga nova identiteta podeduje od druge identitete iste naprave, ali "" (vprasaj).
+
+        Vec pravic (polno, izbrano, zaslon) samo od DOKAZANO iste naprave (_ista_naprava_zanesljivo: id, jedro id-ja
+        iz kljuca, kljuc v krogu te naprave). Polje device iz seznama huba poslje druga naprava, zato sme prenesti
+        samo omejitev (»brez«), nikoli dostopa (pregled Grok W1). Pri vec kandidatih velja najbolj omejujoc (W3)."""
+        kandidati = []
+        for drug_id, drug_profil in dovoljenja.items():
+            if drug_id == id_n or drug_profil not in PROFILI_DOSTOPA:
+                continue
+            if self._ista_naprava_zanesljivo(id_n, drug_id):
+                kandidati.append(drug_profil)
+            elif drug_profil == "brez" and polje_device and (
+                    self._osnova_id(drug_id) == polje_device or any(
+                        str(e.get("id") or "") == drug_id and str(e.get("device") or "") == polje_device
+                        for e in naprave if isinstance(e, dict))):
+                kandidati.append("brez")
+        for p in NAJBOLJ_OMEJUJOC:
+            if p in kandidati:
+                return p
+        return ""
 
     def _sme_na_streznik(self, id_naprave: str, ves_disk: bool) -> bool:
         """Ali sme naprava na streznik datotek: cel disk samo s profilom `polno`, izbrane mape tudi z `izbrano`."""
@@ -480,51 +541,90 @@ class SafeerControlBackend:
         id_naprave, profil = str(id_naprave or "").strip(), str(profil or "").strip().lower()
         if not id_naprave or profil not in PROFILI_DOSTOPA:
             return False
-        dovoljenja = dict(self.nastavitve.get("dovoljenja_naprav") or {})
-        prej = self.dovoljenje_za(id_naprave)
-        # Pravica velja za fizicno napravo: vse njene identitete (zaslon in Safeer OS) dobijo isti profil.
-        sorodniki = self.sorodniki(id_naprave)
-        for s in sorodniki:
-            dovoljenja[s] = profil
-        self.nastavitve["dovoljenja_naprav"] = dovoljenja
-        ok = self.shrani_nastavitve()
-        if ok:
-            self._uskladi_ozji_krog(sorodniki, profil)
-        if ok and profil != prej and profil != "polno":
-            # Manj pravic kot prej: stari zetoni ne smejo veljati se do 12 h (pregled 29. 9. 2026, tocka 12).
-            for s in sorodniki:
-                self._preklici_zetone(s)
-                # Seja zaslona te naprave (upravljanje) se konca takoj, ne sele ob naslednjem screen.start.
-                try:
-                    self.navidezni_zaslon.ustavi_sejo(posiljatelj=s)
-                except Exception:  # noqa: BLE001
-                    pass
-        if ok:
-            for s in sorodniki:
+        with self._zaklep_dovoljenj():
+            prejsnja = dict(self.nastavitve.get("dovoljenja_naprav") or {})
+            dovoljenja = dict(prejsnja)
+            prej = self.dovoljenje_za(id_naprave)
+            rang = NAJBOLJ_OMEJUJOC.index
+            # Pravica velja za fizicno napravo: vse njene identitete (zaslon in Safeer OS) dobijo isti profil. Vec
+            # pravic samo dokazano isti napravi (Grok W1); omejitev gre na vse znane identitete (W3).
+            cilji = []
+            for s in self.sorodniki(id_naprave):
+                trenutni = str(dovoljenja.get(s) or "")
+                if s == id_naprave or self._ista_naprava_zanesljivo(id_naprave, s) or profil == "brez" or (
+                        trenutni in PROFILI_DOSTOPA and rang(profil) < rang(trenutni)):
+                    cilji.append(s)
+            manj = profil != prej and profil != "polno"
+            if manj:
+                # Najprej preklic (Grok W5): stari zetoni ne veljajo se do 12 h (pregled 29. 9., tocka 12) in seja
+                # zaslona (upravljanje) se konca takoj - tudi ce zapis nastavitev potem ne uspe.
+                for s in cilji:
+                    self._preklici_zetone(s)
+                    try:
+                        self.navidezni_zaslon.ustavi_sejo(posiljatelj=s)
+                    except Exception as e:  # noqa: BLE001
+                        print(f"[ControlBackend] Seje zaslona ni bilo mogoce ustaviti ({type(e).__name__})")
+            for s in cilji:
+                dovoljenja[s] = profil
+            self.nastavitve["dovoljenja_naprav"] = dovoljenja
+            ok = bool(self.shrani_nastavitve())
+            if not ok and not manj:
+                self.nastavitve["dovoljenja_naprav"] = prejsnja      # vec pravic brez zapisa ne velja
+                return False
+            # Manj pravic velja takoj (v pomnilniku in v link_dostop), tudi ce zapis nastavitev ne uspe.
+            usklajeno = self._uskladi_ozji_krog(cilji, profil)
+            for s in cilji:
                 self._opozorjena_dovoljenja.discard(s)
             self._oddaj_dogodek("dovoljenja", dovoljenja)
             self._oddaj_dogodek("stanje", self.stanje_linka())
-        return ok
+            return ok and usklajeno
+
+    def _zaklep_dovoljenj(self):
+        """Ena kljucavnica za spremembe dovoljenj in uskladitev ob zagonu (Grok W6)."""
+        z = getattr(self, "_zaklep_dov", None)
+        if z is None:
+            z = self._zaklep_dov = threading.RLock()
+        return z
 
     @staticmethod
-    def _uskladi_ozji_krog(sorodniki: List[str], profil: str) -> None:
+    def _uskladi_ozji_krog(sorodniki: List[str], profil: str) -> bool:
         """Profil Controla -> zmoznosti v core/link_dostop (ozji krog), da ena izbira velja povsod na tem racunalniku.
         Prej Windows link_dostop ni pisal: nova naprava z »Vse« ni bila v ozjem krogu (njen zaslon in datoteke tu
-        niso bili vidni), naprava iz starega kroga pa je ostala v njem tudi po »Samo ogled zaslona«."""
+        niso bili vidni), naprava iz starega kroga pa je ostala v njem tudi po »Samo ogled zaslona«.
+        Vrne False, ce zapisa ni bilo mogoce uskladiti (klicatelj to pove uporabniku; Grok W6)."""
         try:
             from core import link_dostop
             for s in sorodniki:
                 if link_dostop.zmoznosti(s) != set(OZJI_KROG_PO_PROFILU.get(profil, ())):
-                    link_dostop.nastavi(s, OZJI_KROG_PO_PROFILU.get(profil, ()))
+                    if link_dostop.nastavi(s, OZJI_KROG_PO_PROFILU.get(profil, ())) is False:
+                        raise OSError("zapis ni uspel")
+            return True
         except Exception as e:  # noqa: BLE001 - profil Controla velja tudi brez zapisa (zapis ni berljiv)
             print(f"[ControlBackend] Ozji krog: zapisa dostopa ni mogoce uskladiti ({type(e).__name__})")
+            return False
 
     def uskladi_ozji_krog_ob_zagonu(self) -> None:
-        """Enkrat ob zagonu: izbire iz prejsnjih razlicic (samo v nastavitvah Controla) gredo v core/link_dostop."""
-        dovoljenja = dict(self.nastavitve.get("dovoljenja_naprav") or {})
-        for id_n, profil in dovoljenja.items():
-            if profil in PROFILI_DOSTOPA:
-                self._uskladi_ozji_krog([str(id_n)], str(profil))
+        """Enkrat ob zagonu: izbire iz prejsnjih razlicic (samo v nastavitvah Controla) gredo v core/link_dostop.
+        Vsako napravo pod isto kljucavnico kot nastavi_dovoljenje in s TRENUTNIM profilom: umik takoj po zagonu
+        ne sme povoziti starega posnetka (Grok W6)."""
+        for id_n in list((self.nastavitve.get("dovoljenja_naprav") or {}).keys()):
+            with self._zaklep_dovoljenj():
+                profil = str((self.nastavitve.get("dovoljenja_naprav") or {}).get(id_n) or "")
+                if profil in PROFILI_DOSTOPA:
+                    self._uskladi_ozji_krog([str(id_n)], profil)
+
+    def _preveri_sejo_zaslona(self, posiljatelj: str) -> Tuple[bool, bool]:
+        """(sme gledati, sme upravljati) za tekoco sejo zaslona; navidezni_zaslon jo poklice najvec enkrat na
+        sekundo. Umik iz kroga ali manj pravic - tudi z druge moje naprave (core/link_krog) - sejo konca in preklice
+        zetone (pregled Grok W2: prej je seja z vnosom tekla, dokler se naprava ni sama odklopila)."""
+        try:
+            gledati = bool(self._dejanje_dovoljeno(posiljatelj, "screen.start"))
+            upravljati = gledati and bool(self._sme_upravljati(posiljatelj))
+        except Exception:  # noqa: BLE001 - ne vem ni da
+            gledati = upravljati = False
+        if not gledati:
+            self._preklici_zetone(posiljatelj)
+        return gledati, upravljati
 
     def _dejanje_dovoljeno(self, id_naprave: str, akcija: str) -> bool:
         if akcija == "status" or akcija in DEJANJA_SEZNAMI:
@@ -554,11 +654,15 @@ class SafeerControlBackend:
 
     @staticmethod
     def _umaknjena_iz_kroga(id_naprave: str) -> bool:
+        """Ali je naprava umaknjena iz kroga zaupanja. Krog, ki ga ni mogoce prebrati, pomeni »umaknjena«: ne vem
+        ni da (pregled Grok W4) - naprava obdrzi samo pomoc pri povezavi (DEJANJA_SOLIDARNOST)."""
         try:
             from core import link_krog
+            link_krog.krog()                         # napaka branja kroga -> spodaj umaknjena
             return bool(link_krog.je_umaknjen(str(id_naprave or "")))
-        except Exception:  # noqa: BLE001
-            return False
+        except Exception as e:  # noqa: BLE001
+            print(f"[ControlBackend] Krog zaupanja ni berljiv ({type(e).__name__}): naprava velja za umaknjeno")
+            return True
 
     def _gleda_navidezni(self, posiljatelj: str) -> bool:
         """Ali [posiljatelj] zdaj gleda navidezni zaslon tega racunalnika (screen.start)."""
@@ -1482,15 +1586,8 @@ class SafeerControlBackend:
                 if id_n and id_n != self.device_id and id_n not in dovoljenja:
                     # Druga identiteta ze znane fizicne naprave (telefon: zaslon + Safeer OS) podeduje
                     # njeno izbiro - uporabnika za isti telefon ne vprasamo dvakrat.
-                    fizicna = str(d.get("device") or "") or self._osnova_id(id_n)
-                    podedovano = ""
-                    for drug_id, drug_profil in dovoljenja.items():
-                        if drug_id != id_n and drug_profil in PROFILI_DOSTOPA and (
-                                self._osnova_id(drug_id) == fizicna or any(
-                                    str(e.get("id") or "") == drug_id and str(e.get("device") or "") == fizicna
-                                    for e in (sporocilo.get("devices") or []))):
-                            podedovano = drug_profil
-                            break
+                    podedovano = self._podedovan_profil(id_n, str(d.get("device") or ""), dovoljenja,
+                                                        sporocilo.get("devices") or [])
                     if podedovano:
                         dovoljenja[id_n] = podedovano
                         self.nastavitve["dovoljenja_naprav"] = dovoljenja

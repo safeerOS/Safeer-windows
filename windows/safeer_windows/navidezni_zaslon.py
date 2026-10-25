@@ -150,7 +150,11 @@ class NavidezniZaslon:
         self._posiljatelj_seje = ""
         #: Ali sme naprava, ki gleda, tudi upravljati (miska, tipkovnica - SendInput). Profil »Samo ogled zaslona«
         #: (control_backend) sejo da brez vnosa: prej je naprava s tem profilom lahko upravljala racunalnik.
-        self._vnos_dovoljen = True
+        #: Privzeto NE (pregled Grok W10): vnos dobi samo seja, ki ga klicatelj izrecno dovoli.
+        self._vnos_dovoljen = False
+        #: (posiljatelj) -> (sme gledati, sme upravljati); control_backend. Preverba najvec enkrat na sekundo (W2).
+        self.preveri_sejo = None
+        self._preverba = (0.0, 0, True, False)
         self._seja_nit: Optional[threading.Thread] = None
         #: Stevec sej: nit seje ob koncu pospravi samo, ce je njena seja se tekoca.
         self._seja_st = 0
@@ -643,7 +647,7 @@ class NavidezniZaslon:
         )
 
     # ------------------------------------------------------------------ Pretočna seja (Screen Stream)
-    def zacni_sejo(self, posiljatelj: str, kakovost: str = PRIVZETA_KAKOVOST, vnos: bool = True) -> dict:
+    def zacni_sejo(self, posiljatelj: str, kakovost: str = PRIVZETA_KAKOVOST, vnos: bool = False) -> dict:
         """Začne visoko kakovosten pretočni strežnik za navidezni ločeni zaslon (skladno s core/link_zaslon.py).
         `vnos=False`: naprava sme samo gledati - vnos iz seje se zavrze (glava »vnos«: false)."""
         with self._kljuc:
@@ -803,7 +807,8 @@ class NavidezniZaslon:
                                  daemon=True).start()
             print(f"[NavidezniZaslon] Zaslon {zajem.sirina}x{zajem.visina} @ {zajem.fps} ({zajem.kodirnik})", flush=True)
             try:
-                for kos in zajem.okvirji(lambda: self._tece and seja == self._seja_st and nit_vnos.is_alive()):
+                for kos in zajem.okvirji(lambda: self._tece and seja == self._seja_st and nit_vnos.is_alive()
+                                         and self._seja_dovoljena(seja)):
                     odjemalec.sendall(bytes([1]) + len(kos).to_bytes(4, "big") + kos)
                 prevzel = self._prevzete.pop(seja, None)
                 if prevzel is not None:
@@ -879,6 +884,8 @@ class NavidezniZaslon:
                     vrstica, ostanek = ostanek.split(b"\n", 1)
                     if not vrstica:
                         continue
+                    if seja is not None and (seja != self._seja_st or not self._seja_dovoljena(seja)):
+                        return                   # nova seja ali umik iz kroga: vnos stare seje ne velja vec
                     if not self._vnos_dovoljen:
                         continue                 # samo ogled: vnos naprave ne seze do miske in tipkovnice
                     try:
@@ -891,6 +898,34 @@ class NavidezniZaslon:
                         continue
         except Exception:
             pass
+
+    def _seja_dovoljena(self, seja: int) -> bool:
+        """Ali sme seja teci naprej. Umik iz kroga ali manj pravic (preveri_sejo, najvec enkrat na sekundo) izklopi
+        vnos in sejo ustavi (pregled Grok W2: umik z druge naprave je prej pustil sejo z vnosom teci)."""
+        preveri = getattr(self, "preveri_sejo", None)
+        if seja != self._seja_st:
+            return False
+        if preveri is None:
+            return True
+        zdaj = time.monotonic()
+        cas, st, gledati, _ = getattr(self, "_preverba", (0.0, 0, True, False))
+        if st == seja and zdaj - cas < 1.0:
+            return gledati
+        try:
+            gledati, upravljati = preveri(self._posiljatelj_seje)
+            gledati, upravljati = bool(gledati), bool(upravljati)
+        except Exception:  # noqa: BLE001 - ne vem ni da
+            gledati = upravljati = False
+        self._preverba = (zdaj, seja, gledati, upravljati)
+        if not upravljati:
+            with self._kljuc:
+                if seja == self._seja_st:
+                    self._vnos_dovoljen = False
+        if not gledati:
+            print("[NavidezniZaslon] Naprava nima vec dovoljenja (umik iz kroga): seja se konca", flush=True)
+            threading.Thread(target=self.ustavi_sejo, kwargs={"seja": seja}, name="safeer-zaslon-umik",
+                             daemon=True).start()
+        return gledati
 
     def ustavi_sejo(self, seja: Optional[int] = None, posiljatelj: Optional[str] = None) -> None:
         """Ustavi pretočni strežnik navideznega zaslona.

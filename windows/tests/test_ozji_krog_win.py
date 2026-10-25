@@ -128,6 +128,158 @@ class OzjiKrog(unittest.TestCase):
 
 
 @unittest.skipIf(control_backend is None, "control_backend se ne uvozi")
+class PregledGrok(unittest.TestCase):
+    """Pregled Grok 7 (25. 10. 2026): W1 dedovanje po polju device, W3 najbolj omejujoc profil, W4 krog ni berljiv,
+    W5 umik ob neuspelem zapisu, W6 uskladitev ob zagonu s trenutnim profilom."""
+    TEL = "n-0123456789abcdef"                     # id iz kljuca telefona (prijava s podpisom)
+
+    def setUp(self):
+        b = control_backend.SafeerControlBackend.__new__(control_backend.SafeerControlBackend)
+        b.nastavitve = {"dovoljenja_naprav": {self.TEL: "polno"}}
+        b.naprave = []
+        b.device_id = "n-ta"
+        b._opozorjena_dovoljenja = set()
+        b.shrani_nastavitve = lambda: True
+        b._oddaj_dogodek = lambda *a, **k: None
+        b.stanje_linka = lambda: {}
+        b._datoteke = {}
+        self.preklicani = []
+        b._preklici_zetone = lambda n: self.preklicani.append(n)
+        b.navidezni_zaslon = _Zaslon()
+        b.hub_url = lambda: ""
+        self.b = b
+        self.zapis = {}
+        for p in (mock.patch.object(link_dostop, "nastavi",
+                                    side_effect=lambda n, d: self.zapis.__setitem__(n, set(d)) or True),
+                  mock.patch.object(link_dostop, "zmoznosti", side_effect=lambda n: set(self.zapis.get(n, ()))),
+                  mock.patch.object(link_krog, "je_umaknjen", return_value=False),
+                  mock.patch.object(control_backend.SafeerControlBackend, "_fizicna_po_krogu",
+                                    staticmethod(lambda i: ""))):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_w1_polje_device_ne_podeli_dostopa(self):
+        """Tuja naprava, ki ji seznam huba pripise device = telefon, ne podeduje »polno«; ne kot sorodnik."""
+        dov = self.b.nastavitve["dovoljenja_naprav"]
+        self.assertEqual(self.b._podedovan_profil("n-ffffffffffffffff", self.TEL, dov, []), "")
+        self.assertEqual(self.b._podedovan_profil("uuid-tuja", self.TEL, dov, []), "")
+        # Druga identiteta istega kljuca (Safeer OS telefona) podeduje - isto jedro id-ja iz kljuca.
+        self.assertEqual(self.b._podedovan_profil(self.TEL + "-os", "", dov, []), "polno")
+        # Isti kljuc v krogu te naprave (seznanitev) tudi.
+        with mock.patch.object(control_backend.SafeerControlBackend, "_fizicna_po_krogu",
+                               staticmethod(lambda i: "n-kljuc" if i in (self.TEL, "star-id") else "")):
+            self.assertEqual(self.b._podedovan_profil("star-id", "", dov, []), "polno")
+        # Seznam huba sme prenesti samo omejitev.
+        dov2 = {self.TEL: "brez"}
+        self.assertEqual(self.b._podedovan_profil("uuid-tuja", self.TEL, dov2, []), "brez")
+
+    def test_w1_sorodnik_iz_seznama_ne_razsiri_pravic(self):
+        self.b.naprave = [{"id": self.TEL, "naprava": "X"}, {"id": "uuid-tuja", "naprava": "X"}]
+        self.b.nastavitve["dovoljenja_naprav"]["uuid-tuja"] = "vprasaj"
+        self.assertEqual(self.b.dovoljenje_za("uuid-tuja"), "vprasaj")
+        self.assertFalse(self.b._dejanje_dovoljeno("uuid-tuja", "key"))
+        # Uporabnik da telefonu »polno«: tuja identiteta s poljem naprava ga ne dobi.
+        self.assertTrue(self.b.nastavi_dovoljenje(self.TEL, "polno"))
+        self.assertEqual(self.b.nastavitve["dovoljenja_naprav"]["uuid-tuja"], "vprasaj")
+        # Umik pa velja za vse identitete s tem poljem.
+        self.assertTrue(self.b.nastavi_dovoljenje(self.TEL, "brez"))
+        self.assertEqual(self.b.nastavitve["dovoljenja_naprav"]["uuid-tuja"], "brez")
+
+    def test_w3_najbolj_omejujoc(self):
+        os_id, tv_id = self.TEL + "-os", self.TEL + "-tv"
+        self.b.naprave = [{"id": i, "naprava": "F"} for i in (self.TEL, os_id, tv_id)]
+        self.b.nastavitve["dovoljenja_naprav"] = {self.TEL: "brez", os_id: "polno"}
+        self.assertEqual(self.b.dovoljenje_za(tv_id), "brez")            # prej je zmagal »polno«
+        self.assertEqual(self.b._podedovan_profil(tv_id, "", self.b.nastavitve["dovoljenja_naprav"], []), "brez")
+
+    def test_w4_krog_ni_berljiv(self):
+        with mock.patch.object(link_krog, "krog", side_effect=OSError("zaklenjeno")):
+            self.assertTrue(self.b._umaknjena_iz_kroga(self.TEL))
+            self.assertFalse(self.b._dejanje_dovoljeno(self.TEL, "key"))
+            self.assertFalse(self.b._sme_upravljati(self.TEL))
+            self.assertTrue(self.b._dejanje_dovoljeno(self.TEL, "host.info"))
+
+    def test_w5_umik_ob_neuspelem_zapisu(self):
+        self.zapis[self.TEL] = {"d", "p", "v", "z"}
+        self.b.shrani_nastavitve = lambda: False
+        self.assertFalse(self.b.nastavi_dovoljenje(self.TEL, "brez"))     # uporabnik izve, da zapis ni uspel
+        self.assertIn(self.TEL, self.preklicani)                         # zetoni in seja vseeno takoj
+        self.assertIn(self.TEL, self.b.navidezni_zaslon.ustavljeno)
+        self.assertEqual(self.zapis[self.TEL], set())
+        self.assertEqual(self.b.dovoljenje_za(self.TEL), "brez")
+        # Vec pravic brez zapisa ne velja.
+        self.assertFalse(self.b.nastavi_dovoljenje(self.TEL, "polno"))
+        self.assertEqual(self.b.dovoljenje_za(self.TEL), "brez")
+
+    def test_w6_zagon_s_trenutnim_profilom(self):
+        self.b.nastavitve["dovoljenja_naprav"] = {self.TEL: "polno", "tv": "polno"}
+        izvirna = self.b._uskladi_ozji_krog
+        klici = []
+
+        def uskladi(sorodniki, profil):
+            klici.append((tuple(sorodniki), profil))
+            if sorodniki == [self.TEL]:
+                # Med uskladitvijo uporabnik umakne TV: zagon ne sme zapisati starega »polno«.
+                self.b.nastavitve["dovoljenja_naprav"]["tv"] = "brez"
+            return izvirna(sorodniki, profil)
+        self.b._uskladi_ozji_krog = uskladi
+        self.b.uskladi_ozji_krog_ob_zagonu()
+        self.assertEqual(klici, [((self.TEL,), "polno"), (("tv",), "brez")])
+        self.assertEqual(self.zapis.get("tv", set()), set())          # »polno« iz posnetka ni zapisan
+
+    def test_w2_seja_se_konca_ob_umiku_z_druge_naprave(self):
+        self.b.nastavitve["dovoljenja_naprav"]["tv"] = "polno"
+        self.assertEqual(self.b._preveri_sejo_zaslona("tv"), (True, True))
+        with mock.patch.object(link_krog, "je_umaknjen", return_value=True):
+            self.assertEqual(self.b._preveri_sejo_zaslona("tv"), (False, False))
+        self.assertIn("tv", self.preklicani)
+        self.b.nastavitve["dovoljenja_naprav"]["tv"] = "zaslon"
+        self.assertEqual(self.b._preveri_sejo_zaslona("tv"), (True, False))
+
+
+@unittest.skipIf(control_backend is None, "control_backend se ne uvozi")
+class SejaPoUmiku(unittest.TestCase):
+    """Grok W2/W10: tekoca seja zaslona preveri dovoljenje (najvec enkrat na sekundo) in se ob umiku konca."""
+
+    def _zaslon(self, izid):
+        z = navidezni_zaslon.NavidezniZaslon.__new__(navidezni_zaslon.NavidezniZaslon)
+        z._tece, z._seja_st, z._vnos_dovoljen, z._posiljatelj_seje = True, 3, True, "tel"
+        import threading
+        z._kljuc = threading.RLock()
+        self.klici, self.ustavljene = [], []
+        z.preveri_sejo = lambda p: self.klici.append(p) or izid
+        z.ustavi_sejo = lambda seja=None, posiljatelj=None: self.ustavljene.append(seja)
+        return z
+
+    def test_umik_ustavi_sejo_in_vnos(self):
+        z = self._zaslon((False, False))
+        self.assertFalse(z._seja_dovoljena(3))
+        self.assertFalse(z._vnos_dovoljen)
+        import time
+        for _ in range(50):
+            if self.ustavljene:
+                break
+            time.sleep(0.02)
+        self.assertEqual(self.ustavljene, [3])
+
+    def test_preverba_najvec_enkrat_na_sekundo(self):
+        z = self._zaslon((True, True))
+        for _ in range(100):
+            self.assertTrue(z._seja_dovoljena(3))
+        self.assertEqual(self.klici, ["tel"])
+        self.assertFalse(z._seja_dovoljena(2))                       # stara seja ne velja
+
+    def test_brez_upravljanja_samo_gledanje(self):
+        z = self._zaslon((True, False))
+        self.assertTrue(z._seja_dovoljena(3))
+        self.assertFalse(z._vnos_dovoljen)
+
+    def test_privzeto_brez_vnosa(self):
+        import inspect
+        self.assertIs(inspect.signature(navidezni_zaslon.NavidezniZaslon.zacni_sejo).parameters["vnos"].default, False)
+
+
+@unittest.skipIf(control_backend is None, "control_backend se ne uvozi")
 class VnosSeje(unittest.TestCase):
     def _beri(self, dovoljen):
         z = navidezni_zaslon.NavidezniZaslon.__new__(navidezni_zaslon.NavidezniZaslon)
