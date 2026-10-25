@@ -16,6 +16,7 @@ import sys
 import threading
 import time
 import urllib.parse
+import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any, List, Optional
@@ -1440,7 +1441,6 @@ class SafeerOsWindow(QMainWindow):
             deli = urllib.parse.urlsplit(vir)
             if deli.scheme != "http" or deli.hostname != "127.0.0.1":
                 return ""
-            import urllib.request
             # Lokalni tok na 127.0.0.1: nikoli prek sistemskega posredniskega streznika.
             odpiralnik = urllib.request.build_opener(urllib.request.ProxyHandler({}))
             with odpiralnik.open(vir, timeout=60) as odgovor:
