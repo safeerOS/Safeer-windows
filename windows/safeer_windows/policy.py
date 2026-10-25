@@ -602,15 +602,27 @@ def _drm_skripta() -> str:
     from core import drm
     # Ovoj iz core/drm.SKRIPTA javi zahtevo z dogodkom v DOM; tu (namesto locenega sveta WebKitGTK) ga poslje mostu
     # Safeer z zetonom - stran sama mostu ne more poslati nicesar, sprozi lahko le ponudbo, o kateri odloci uporabnik.
+    # Razlika od Linuxa: WebView2 (Edge) ima Widevine in PlayReady - na testnem PC 25. 10. je vzorec Widevine
+    # (reference.dashif.org) v Spletu predvajal, vrstica pa je trdila »ki ga Splet ne predvaja«. Zato ponudba samo, ce
+    # pogon zahtevanega sistema nima (preverba z enakim klicem; FairPlay ga nima nikoli).
     return drm.SKRIPTA + r"""
 (function () {
   if (window.top !== window) return;
-  var poslano = {};
-  document.addEventListener("__safeerDrm", function (e) {
-    var s = String((e && e.detail) || "").slice(0, 64);
-    if (!/widevine|playready|com\.apple\.fps|fairplay/i.test(s) || poslano[s]) return;
+  var poslano = {}, preverjam = {};
+  function poslji(s) {
+    if (poslano[s]) return;
     poslano[s] = 1;
     __safeerPost({action: 'drm_zahteva', sistem: s});
+  }
+  document.addEventListener("__safeerDrm", function (e) {
+    var s = String((e && e.detail) || "").slice(0, 64);
+    if (!/widevine|playready|com\.apple\.fps|fairplay/i.test(s) || poslano[s] || preverjam[s]) return;
+    preverjam[s] = 1;   // preverba spodaj gre skozi isti ovoj in sprozi ta dogodek se enkrat
+    try {
+      navigator.requestMediaKeySystemAccess(s, [{initDataTypes: ["cenc"],
+        videoCapabilities: [{contentType: 'video/mp4; codecs="avc1.42E01E"'}]}])
+        .then(function () {}, function () { poslji(s); });
+    } catch (x) { poslji(s); }
   }, true);
 })();
 """

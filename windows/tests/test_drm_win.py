@@ -107,3 +107,41 @@ def test_javna_dejanja_webview2_so_vsa_z_zetonom():
     assert set(splet_webview2._JAVNA_DEJANJA) <= preverjena
     assert "drm_zahteva" in splet_webview2._JAVNA_DEJANJA
 
+
+_NODE_DRM = r"""
+const posts = [], poslusalci = {};
+globalThis.window = globalThis; window.top = window;
+globalThis.document = { addEventListener(t, f) { (poslusalci[t] = poslusalci[t] || []).push(f); },
+                        dispatchEvent(e) { (poslusalci[e.type] || []).forEach(f => f(e)); } };
+globalThis.CustomEvent = class { constructor(t, o) { this.type = t; this.detail = o && o.detail; } };
+globalThis.DOMException = class extends Error { constructor(m, n) { super(m); this.name = n; } };
+globalThis.__safeerPost = m => posts.push(m.sistem);
+const podprti = new Set(JSON.parse(process.argv[1]));
+Object.defineProperty(globalThis, "navigator", { configurable: true, writable: true, value: {
+  requestMediaKeySystemAccess: s => podprti.has(s) ? Promise.resolve({})
+                                                  : Promise.reject(new DOMException("x", "NotSupportedError")) } });
+(0, eval)(require("fs").readFileSync(0, "utf8"));
+(async () => {
+  for (const s of ["com.widevine.alpha", "com.microsoft.playready", "com.apple.fps.1_0", "com.widevine.alpha"]) {
+    try { await navigator.requestMediaKeySystemAccess(s, []); } catch (e) {}
+  }
+  await new Promise(r => setTimeout(r, 50));
+  console.log(JSON.stringify(posts));
+})();
+"""
+
+
+@pytest.mark.skipif(not shutil.which("node"), reason="brez node")
+def test_ponudba_samo_ce_webview2_sistema_nima():
+    """WebView2 ima Widevine in PlayReady (testni PC 25. 10.: vzorec Widevine je v Spletu predvajal): ponudba Safeer
+    DRM samo za sistem, ki ga pogon zavrne (FairPlay), vsak sistem najvec enkrat; brez EME vsi."""
+    import json
+
+    def tek(podprti):
+        r = subprocess.run(["node", "-e", _NODE_DRM, json.dumps(podprti)], input=policy.DRM_SCRIPT,
+                           capture_output=True, text=True, timeout=20)
+        assert r.returncode == 0, r.stderr
+        return json.loads(r.stdout.strip().splitlines()[-1])
+    assert tek(["com.widevine.alpha", "com.microsoft.playready"]) == ["com.apple.fps.1_0"]
+    assert tek([]) == ["com.widevine.alpha", "com.microsoft.playready", "com.apple.fps.1_0"]
+
