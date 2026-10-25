@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 from core import link_hub_streznik as lhs
 from core import link_mesh
 
-LAN = "wss://192.168.0.77:8990/cast/ws"
+LAN = "wss://192.0.2.77:8990/cast/ws"
 RELE = "wss://127.0.0.1:45678/cast/ws"
 
 
@@ -40,7 +40,7 @@ class Zamenjava(unittest.TestCase):
         self.assertEqual(rele.zaprta, "podvojena sosednja povezava")
 
     def test_rele_nikoli_ne_zamenja_domace(self):
-        lan = Povezava("192.168.0.77")                                   # dohodna: naslov je IP soseda
+        lan = Povezava("192.0.2.77")                                   # dohodna: naslov je IP soseda
         self.assertTrue(self.hub.dodaj_soseda("n-z", lan, "n-z"))
         self.assertFalse(self.hub.dodaj_soseda("n-z", Povezava("127.0.0.1"), "n-m"))
         self.assertIs(self.hub._sosedje["n-z"], lan)
@@ -49,7 +49,7 @@ class Zamenjava(unittest.TestCase):
     def test_ista_pot_po_starem_pravilu(self):
         a = Povezava(LAN)
         self.assertTrue(self.hub.dodaj_soseda("n-z", a, "n-m"))
-        self.assertFalse(self.hub.dodaj_soseda("n-z", Povezava("192.168.0.77"), "n-z"))
+        self.assertFalse(self.hub.dodaj_soseda("n-z", Povezava("192.0.2.77"), "n-z"))
         self.assertIs(self.hub._sosedje["n-z"], a)
 
 
