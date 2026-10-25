@@ -51,13 +51,20 @@ SHARED_DATA = [
     ("ui/splet-gore.webp", "shared/ui"),
     ("assets/safeer-mark.svg", "shared/assets"),
     ("assets/icon.png", "shared/assets"),
-    ("assets/os/index.html", "shared/assets/os"),
-    ("assets/os/os.js", "shared/assets/os"),
-    ("assets/os/os.css", "shared/assets/os"),
-    ("assets/os/besedila.js", "shared/assets/os"),
-    ("assets/os/znak.svg", "shared/assets/os"),
+    # Cela mapa vmesnika Safeer OS (index.html nalozi tudi namera-iskanja.js; posamezne datoteke so prej manjkale).
+    ("assets/os", "shared/assets/os"),
+    # Ozadja namizja Safeer OS (namizje_qml.OZADJA, 3,4 MB).
+    ("assets/ozadja", "shared/assets/ozadja"),
+    # Namizje Safeer OS v Qt Quick: namizje_qml.QML = <safeer_windows>/qml/Namizje.qml (pregled 25. 10. 2026, V1).
+    ("windows/safeer_windows/qml", "safeer_windows/qml"),
     ("windows/VERSION", "shared/windows"),
 ]
+
+#: Moduli QML, ki jih namizje Safeer OS uvozi (windows/safeer_windows/qml/*.qml) - koreni; prune_bundle obdrzi te in
+#: vse, od cesar so odvisni (vrstice »import« in »depends« v njihovih qmldir), vse drugo v PySide6/qml (Qt3D, Charts,
+#: Multimedia, Quick3D, WebEngine, sloge Fusion/Material/Universal/Imagine/FluentWinUI3/Windows ...) odstrani.
+QML_KORENI = ("QtQml", "QtQuick", "QtQuick.Window", "QtQuick.Controls.Basic", "QtQuick.Controls.impl", "QtQuick.Templates",
+              "QtQuick.Layouts", "QtQuick.Effects", "QtQuick.Dialogs", "QtQuick.Dialogs.quickimpl", "Qt.labs.folderlistmodel")
 
 
 def version() -> str:
@@ -172,7 +179,6 @@ def pyinstaller() -> None:
     if not helper:
         raise SystemExit("QtWebEngineProcess.exe was not bundled")
     print(f"built {EXE} ({dir_size(APP_DIR) / 1048576:.0f} MB); helper: {helper[0]}")
-    prune_bundle()
 
     # Build SafeerOS.exe in the same bundle
     os_launcher = os.path.join(WINDOWS, "launcher_os.py")
@@ -197,6 +203,11 @@ def pyinstaller() -> None:
         if os.path.exists(os_exe):
             shutil.copy2(os_exe, os.path.join(APP_DIR, "SafeerOS.exe"))
             print(f"SafeerOS.exe uspešno dodan v {APP_DIR}")
+            # SafeerOS.exe uporablja _internal brskalnika: dodaj, kar ima samo gradnja Safeer OS (QtQuick, QML ...).
+            copied = merge_internal(os.path.join(DIST, "SafeerOS", "_internal"), os.path.join(APP_DIR, "_internal"))
+            print(f"merge: {len(copied)} datotek iz gradnje SafeerOS v _internal brskalnika")
+    # Na koncu, ko je v _internal vse za oba exe: neuporabljeni moduli Qt in QML (QML namizja ostane).
+    prune_bundle()
 
 
 def dir_size(path: str) -> int:
@@ -227,6 +238,72 @@ def pe_imports(path: str) -> set:
         pe.close()
 
 
+def qmldir_odvisnosti(besedilo: str) -> list:
+    """Moduli, ki jih modul QML potrebuje: vrstice »import X« in »depends X« iz qmldir (brez »optional import« in
+    »default import« - to so izbirni slogi Controls, ki jih namizje ne uporablja)."""
+    izid = []
+    for vrstica in (besedilo or "").splitlines():
+        deli = vrstica.split()
+        if len(deli) >= 2 and deli[0] in ("import", "depends"):
+            izid.append(deli[1])
+    return izid
+
+
+def potrebni_qml(qml: str, koreni=QML_KORENI) -> set:
+    """Mape modulov QML (relativne, z »/«), ki ostanejo: koreni in njihove odvisnosti po qmldir."""
+    potrebni, vrsta = set(), list(koreni)
+    while vrsta:
+        modul = vrsta.pop()
+        rel = modul.replace(".", "/")
+        if rel in potrebni:
+            continue
+        potrebni.add(rel)
+        try:
+            with open(os.path.join(qml, *rel.split("/"), "qmldir"), encoding="utf-8", errors="replace") as f:
+                vrsta.extend(m for m in qmldir_odvisnosti(f.read()) if m.replace(".", "/") not in potrebni)
+        except OSError:
+            continue
+    return potrebni
+
+
+def ohrani_mapo_qml(rel: str, potrebni: set) -> bool:
+    """Mapa v PySide6/qml ostane, ce je potreben modul ali njegova nadrejena mapa (npr. »QtQuick/Controls« za Basic)."""
+    rel = rel.strip("/")
+    return any(p == rel or p.startswith(rel + "/") for p in potrebni)
+
+
+def prune_qml(qml: str) -> None:
+    """PySide6/qml: odstrani mape modulov, ki jih nihce ne uvozi; datoteke v mapah, ki ostanejo (qmldir, vticnik,
+    *.qmltypes), ostanejo cele."""
+    if not os.path.isdir(qml):
+        return
+    potrebni = potrebni_qml(qml)
+    for dirpath, dirs, _files in os.walk(qml, topdown=True):
+        rel_dir = os.path.relpath(dirpath, qml).replace(os.sep, "/")
+        rel_dir = "" if rel_dir == "." else rel_dir
+        for name in list(dirs):
+            rel = (rel_dir + "/" + name).strip("/")
+            if not ohrani_mapo_qml(rel, potrebni):
+                shutil.rmtree(os.path.join(dirpath, name), ignore_errors=True)
+                dirs.remove(name)
+    print("prune: QML ostane:", ", ".join(sorted(potrebni)))
+
+
+def merge_internal(src: str, dst: str) -> list:
+    """SafeerOS.exe tece iz mape SafeerBrowser in uporablja NJEN _internal: datoteke, ki jih potrebuje samo Safeer OS
+    (QtQuick, moduli QML, ...), prekopiramo iz _internal gradnje SafeerOS. Obstojece datoteke ostanejo (iste verzije)."""
+    copied = []
+    for dirpath, _dirs, files in os.walk(src):
+        rel = os.path.relpath(dirpath, src)
+        for name in files:
+            target = os.path.join(dst, rel, name)
+            if not os.path.exists(target):
+                os.makedirs(os.path.dirname(target), exist_ok=True)
+                shutil.copy2(os.path.join(dirpath, name), target)
+                copied.append(os.path.join(rel, name))
+    return copied
+
+
 def prune_bundle() -> None:
     """Removes Qt modules (Qt 3D, Quick Controls, QML plugins ...) that nothing in the browser loads.
 
@@ -239,7 +316,7 @@ def prune_bundle() -> None:
         print("prune: PySide6 folder not found, skipped")
         return
     before = dir_size(APP_DIR)
-    shutil.rmtree(os.path.join(pyside, "qml"), ignore_errors=True)
+    prune_qml(os.path.join(pyside, "qml"))
     resources = os.path.join(pyside, "resources")
     if os.path.isdir(resources):
         for name in os.listdir(resources):
@@ -373,6 +450,25 @@ def smoke_frozen(args) -> None:
     smoke([exe], args.report, args.online, args.screenshot)
 
 
+def qml_frozen(args) -> None:
+    """Namizje QML v zamrznjenem SafeerOS.exe (pregled V1): mapa qml in obrezani moduli Qt Quick morajo biti v paketu."""
+    exe = args.exe or os.path.join(APP_DIR, "SafeerOS.exe")
+    report = os.path.abspath(args.report)
+    os.makedirs(os.path.dirname(report), exist_ok=True)
+    if os.path.exists(report):
+        os.remove(report)
+    env = dict(os.environ, QT_QPA_PLATFORM="offscreen")
+    print("+", exe, "--preveri-qml", report, flush=True)
+    completed = subprocess.run([exe, "--preveri-qml", report], env=env, timeout=180)
+    data = {}
+    if os.path.exists(report):
+        with open(report, encoding="utf-8") as handle:
+            data = json.load(handle)
+    print(json.dumps(data, ensure_ascii=False, indent=2))
+    if completed.returncode != 0 or not data.get("ok"):
+        raise SystemExit(f"Namizje.qml se v zamrznjenem SafeerOS.exe ne nalozi (izhod {completed.returncode})")
+
+
 def find_iscc() -> str:
     candidates = [shutil.which("iscc"), shutil.which("ISCC"),
                   os.path.join(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"), "Inno Setup 6", "ISCC.exe"),
@@ -474,6 +570,9 @@ def main() -> None:
         smoke_parser.add_argument("--online", action="store_true")
         smoke_parser.add_argument("--screenshot")
         smoke_parser.add_argument("--exe")
+    qml_parser = sub.add_parser("qml-frozen")
+    qml_parser.add_argument("--report", default=os.path.join(OUT, "qml-frozen.json"))
+    qml_parser.add_argument("--exe")
     sub.add_parser("install-test")
     args = parser.parse_args()
     if args.command == "fetch-libmpv":
@@ -489,6 +588,8 @@ def main() -> None:
         smoke_source(args)
     elif args.command == "smoke-frozen":
         smoke_frozen(args)
+    elif args.command == "qml-frozen":
+        qml_frozen(args)
     elif args.command == "install-test":
         install_test(args)
 

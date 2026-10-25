@@ -3561,7 +3561,12 @@ def main(argv: Optional[List[str]] = None) -> int:
                         help="Odpri magnet povezavo v Medijskem centru (brskalnik, druga naprava v Linku)")
     parser.add_argument("--magnet-naprava", type=str, default="",
                         help="Magnet z naprave v krogu (Safeer Control): prebere in predvaja se sam")
+    parser.add_argument("--preveri-qml", type=str, default="", metavar="POROCILO",
+                        help=argparse.SUPPRESS)   # CI: nalozi Namizje.qml v zamrznjenem paketu in koncaj (0/1)
     args = parser.parse_args(argv)
+    if args.preveri_qml:
+        from . import namizje_qml
+        return namizje_qml.preveri_nalaganje(args.preveri_qml)
     magnet = ""
     if args.magnet or args.magnet_naprava:
         # Magnet iz registra (klik v brskalniku) ali z druge naprave: samo veljavna BitTorrent povezava.

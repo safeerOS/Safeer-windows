@@ -121,6 +121,8 @@ jobs:
         run: python windows/build_windows.py pyinstaller
       - name: Smoke test built executable
         run: python windows/build_windows.py smoke-frozen --online --report build/windows/out/smoke-frozen.json
+      - name: Load the QML desktop in the frozen SafeerOS.exe
+        run: python windows/build_windows.py qml-frozen --report build/windows/out/qml-frozen.json
       - name: Ensure Inno Setup 6
         run: |
           if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup --no-progress -y }

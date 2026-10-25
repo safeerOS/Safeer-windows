@@ -386,6 +386,44 @@ def besedila_prostorov(besedilo_js: str, jezik: str = "sl") -> dict:
     return izid
 
 
+def preveri_nalaganje(porocilo: str = "") -> int:
+    """Nalozi Namizje.qml z laznim mostom (brez Linka, oken in zapisov) in vrne 0, ce QML nima napak - za CI v
+    zamrznjenem SafeerOS.exe (pregled 25. 10. 2026, V1: manjkajoca mapa qml ali obrezan modul QtQuick v paketu)."""
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+    class Most(QObject):
+        odgovor = Signal(int, bool, str)
+        dogodek = Signal(str, str)
+
+        @Slot(str, str, result=int)
+        def klic(self, _metoda, _argumenti):
+            return 1
+
+        @Slot(str, result=str)
+        def datotekaUrl(self, pot):
+            return pot
+
+    app = QGuiApplication.instance() or QGuiApplication([])
+    most = Most()
+    pogled = QQuickView()
+    pogled.rootContext().setContextProperty("Most", most)
+    pogled.setSource(QUrl.fromLocalFile(str(QML)))
+    napake = [e.toString() for e in pogled.errors()]
+    if not napake and pogled.rootObject() is None:
+        napake = ["Namizje.qml: korenski objekt ni nastal"]
+    izid = {"qml": str(QML), "obstaja": QML.exists(), "napake": napake, "ok": not napake}
+    pogled.deleteLater()
+    app.processEvents()
+    if porocilo:
+        try:
+            Path(porocilo).parent.mkdir(parents=True, exist_ok=True)
+            Path(porocilo).write_text(json.dumps(izid, ensure_ascii=False, indent=2), encoding="utf-8")
+        except OSError as e:
+            print(f"[SafeerOS] Porocila QML ni mogoce zapisati: {e}", flush=True)
+    print(f"[SafeerOS] Preverjanje QML: {'v redu' if not napake else '; '.join(napake)}", flush=True)
+    return 0 if not napake else 1
+
+
 def _beri_besedila_os() -> str:
     try:
         from . import policy
