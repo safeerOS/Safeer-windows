@@ -44,7 +44,8 @@ if (argumenti.profile) { fs.mkdirSync(argumenti.profile, { recursive: true }); a
 if (/^\d{4,5}$/.test(process.env.SAFEER_DRM_CDP || '')) { app.commandLine.appendSwitch('remote-debugging-address', '127.0.0.1'); app.commandLine.appendSwitch('remote-debugging-port', process.env.SAFEER_DRM_CDP); }
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 app.commandLine.appendSwitch('disable-background-mode');
-app.commandLine.appendSwitch('host-resolver-rules', 'MAP *.cfd 127.0.0.1, MAP *.buzz 127.0.0.1, MAP *.monster 127.0.0.1, MAP *.top 127.0.0.1, MAP *.click 127.0.0.1');
+// Zaprte koncnice se ne razresijo (~NOTFOUND); preslikava na 127.0.0.1 bi zahteve poslala lokalnim streznikom (vmesnik Safeer OS).
+app.commandLine.appendSwitch('host-resolver-rules', 'MAP *.cfd ~NOTFOUND, MAP *.buzz ~NOTFOUND, MAP *.monster ~NOTFOUND, MAP *.top ~NOTFOUND, MAP *.click ~NOTFOUND');
 // Strani naj vidijo navaden Chrome (nekateri ponudniki zavrnejo »Electron« v UA).
 app.userAgentFallback = app.userAgentFallback.replace(/ (Electron|safeer-drm|SafeerDRM|Safeer DRM)\/\S+/g, '');
 
@@ -197,11 +198,24 @@ function odpri(url) {
     return { action: 'deny' };
   });
   const zacetnaDomena = osnovnaDomena(varenGostitelj(url));
+  // Vdelan predvajalnik brez storitve ostane na zacetni domeni (https); velja za klik in za preusmeritev streznika.
+  const izvenDomene = (cilj) => {
+    let u = null; try { u = new URL(cilj); } catch (_) {}
+    return !u || u.protocol !== 'https:' || osnovnaDomena(u.hostname) !== zacetnaDomena;
+  };
   wc.on('will-navigate', (e, cilj) => {
     let u = null; try { u = new URL(cilj); } catch (_) {}
     zapisi('NAVIGATION_START', `${varenGostitelj(cilj)} redirected=False`);
-    if (vdelan && !storitev && (!u || u.protocol !== 'https:' || osnovnaDomena(u.hostname) !== zacetnaDomena)) { e.preventDefault(); zapisi('NAVIGATION_BLOCKED', varenGostitelj(cilj)); }
+    if (vdelan && !storitev && izvenDomene(cilj)) { e.preventDefault(); zapisi('NAVIGATION_BLOCKED', varenGostitelj(cilj)); }
     else if (!u || u.protocol !== 'https:') e.preventDefault();
+  });
+  wc.on('will-redirect', (e, cilj, _vMestu, glavni) => {
+    // Novejsi Electron: podatki v dogodku (e.url, e.isMainFrame); starejsi: argumenti.
+    const naslov = (e && typeof e.url === 'string' && e.url) || cilj;
+    const jeGlavni = (e && typeof e.isMainFrame === 'boolean') ? e.isMainFrame : glavni !== false;
+    if (!jeGlavni) return;
+    zapisi('NAVIGATION_START', `${varenGostitelj(naslov)} redirected=True`);
+    if (vdelan && !storitev && izvenDomene(naslov)) { e.preventDefault(); zapisi('NAVIGATION_BLOCKED', varenGostitelj(naslov)); }
   });
   wc.on('certificate-error', (e, cilj, _err, _cert, cb) => { e.preventDefault(); cb(false); zapisi('CERTIFICATE_BLOCKED', varenGostitelj(cilj)); });
   wc.on('render-process-gone', (_e, d) => zapisi('PROCESS_FAILED', d.reason));
