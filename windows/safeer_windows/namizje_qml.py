@@ -27,7 +27,7 @@ from PySide6.QtQuick import QQuickView
 
 from core import os_iskalnik
 
-from . import namizje_win
+from . import namizje_win, slicice_win
 
 _WIN = sys.platform == "win32"
 QML = Path(__file__).resolve().parent / "qml" / "Namizje.qml"
@@ -105,6 +105,8 @@ class NamizjeQml(QQuickView):
         self._nadzor = QFileSystemWatcher()
         self._nadzor.directoryChanged.connect(lambda pot: QTimer.singleShot(400, lambda: self.dogodek("datoteke", {"pot": pot})))
         self._spremljana = ""
+        # Slicice slik in videov (ta racunalnik in naprave v Linku): v nitih v ozadju, vsaka pride sproti kot dogodek.
+        self.slicice = slicice_win.Slicice(lambda d: self.dogodek("slicica", slicica_za_qml(d)))
         self.rootContext().setContextProperty("Most", self.most)
         threading.Thread(target=os_iskalnik.indeks().zgradi_v_ozadju, daemon=True).start()
         self.setSource(QUrl.fromLocalFile(str(QML)))
@@ -133,15 +135,44 @@ class NamizjeQml(QQuickView):
             v = nastavi_videz(a[0] if a and isinstance(a[0], dict) else {})
             self.os_okno.dispatcher.dispatch(self.os_okno.uporabi_temo)
             return dict(v, **{k: x for k, x in videz_za_qml(self._jezik()).items() if k == "ozadja"})
+        if metoda == "diskiNamizja":
+            # Diski s prostim prostorom in opozorilom (core/sistem_podatki - isti modul kot Nastavitve in Linux).
+            from core import sistem_podatki
+            return sistem_podatki.diski()
+        if metoda == "sliciceNamizja":
+            return self._slicice(a)
         if metoda in self._metode:
             return self._metode[metoda](a)
         return self.os_okno._izvedi_metodo(metoda, a)
+
+    def _slicice(self, a: list) -> dict:
+        """[izvor, elementi, streznik]: izvor »ta« (ta racunalnik) ali id naprave v Linku. Slicice naprave samo za
+        napravo v ozjem krogu z datotekami - drugih vmesnik ne kaze in jih tudi tu ne zahtevamo."""
+        izvor = str(a[0]) if a else "ta"
+        elementi = a[1] if len(a) > 1 and isinstance(a[1], list) else []
+        streznik = a[2] if len(a) > 2 and isinstance(a[2], dict) else None
+        if izvor != "ta":
+            cb = self.os_okno.control_backend
+            if not any(n.get("id") == izvor and n.get("ozji") for n in cb.naprave_s_datotekami()):
+                return {"slicice": {}, "v_delu": 0}
+        else:
+            # Ta racunalnik: samo absolutne poti do datotek (vmesnik jih dobi iz seznama mape).
+            elementi = [e for e in elementi if isinstance(e, dict) and os.path.isabs(str(e.get("pot") or ""))]
+        r = self.slicice.zahtevaj(izvor, elementi, streznik)
+        return dict(r, slicice={k: QUrl.fromLocalFile(p).toString() for k, p in r["slicice"].items()})
 
     def _jezik(self) -> str:
         try:
             return str((self.os_okno._izvedi_metodo("zacetek", []) or {}).get("jezik") or "sl")
         except Exception:  # noqa: BLE001
             return "sl"
+
+    def ustavi(self) -> None:
+        self.slicice.ustavi()
+
+    def nalozeno(self) -> bool:
+        """Ali se je namizje nalozilo (koren QML brez napak) - sicer ga ne pokazemo (varnostna vrata)."""
+        return self.rootObject() is not None and not self.errors()
 
     def osvezi_videz(self) -> None:
         """Tema ali ozadje sta se spremenila (Nastavitve Safeer OS ali Prilagodi namizje): namizje se prebarva."""
@@ -158,7 +189,8 @@ class NamizjeQml(QQuickView):
         return z
 
     def odpri_razdelek(self, razdelek: str) -> bool:
-        self.os_okno.dispatcher.dispatch(lambda: self.os_okno.prebudi(razdelek))
+        # Nastavitve, Safeer Link ... v svojem oknu Safeer OS (okno_razdelka.py), drugo v glavnem oknu.
+        self.os_okno.dispatcher.dispatch(lambda: self.os_okno.odpri_razdelek_namizja(razdelek))
         return True
 
     def spremljaj_mapo(self, pot: str) -> bool:
@@ -327,11 +359,17 @@ def ozadje_datoteka() -> str:
     return ""
 
 
+def slicica_za_qml(d: dict) -> dict:
+    """Dogodek »slicica« za QML: pot v predpomnilniku -> file:/// naslov (QML Image ga bere neposredno)."""
+    return {"izvor": d.get("izvor", ""), "id": d.get("id", ""), "url": QUrl.fromLocalFile(str(d.get("pot") or "")).toString()}
+
+
 def naprave_za_izbiro(cb) -> list:
     """Druge naprave v Safeer Linku za izbiro na namizju. Ena vrstica na napravo: racunalnik je v Linku lahko dvakrat
     (Safeer OS in njegov Control, id »…-control«); za programe in datoteke si zapomnimo id, ki to zna."""
     programi = {n["id"] for n in cb.naprave_s_programi()}
-    datoteke = {n["id"] for n in cb.naprave_s_datotekami()}
+    # Datoteke samo naprav v ozjem krogu zaupanja (core/link_dostop; kot Linux): drugih za brskanje ne pokazemo.
+    datoteke = {n["id"] for n in cb.naprave_s_datotekami() if n.get("ozji", True)}
     po_kljucu: dict = {}
     for n in cb.vse_naprave():
         id_n = str(n.get("id") or "")

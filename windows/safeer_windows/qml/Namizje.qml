@@ -29,11 +29,13 @@ Item {
             var p = null
             try { p = JSON.parse(podatki) } catch (e) {}
             if (vrsta === "datoteke" && p && p.pot === datoteke.vir.pot) datoteke.nalozi(true)
+            if (vrsta === "slicica" && p) datoteke.slicicaPrisla(p)
             if (vrsta === "videz" && p) koren.uporabiVidez(p)
             if (vrsta === "iskanjeOdDrugod" && p && p.q) { polje.text = p.q; polje.forceActiveFocus() }
         }
     }
     property string jezik: "sl"
+    property string razlicica: ""
     // Tema sistema (Nastavitve Safeer OS) in videz namizja (Prilagodi namizje) - en videz z vmesnikom, Spletom in Controlom.
     // Privzeto = barve namizja Safeer OS na Linuxu (tokens.css); prava paleta pride iz tema.py (os.css).
     property var paleta: ({ poudarek: "#8ac7ff", poudarekTemna: "#0b1424", besedilo: "#eaf2ff", medlo: "#afbed4",
@@ -73,7 +75,9 @@ Item {
               prilagodi: "Prilagodi namizje …", temaSistema: "Tema in nastavitve sistema …", ozadje: "Ozadje",
               ozadjeWindows: "Ozadje Windows", lastnaSlika: "Lastna slika …", zameglitevNapis: "Zameglitev plošč",
               prosojnostNapis: "Prekrivnost plošč", privzeto: "Privzeto", zapri: "Zapri",
-              temaOpis: "Barve so iz teme sistema (Nastavitve Safeer OS › Videz) – enake v Spletu in Safeer Controlu." },
+              temaOpis: "Barve so iz teme sistema (Nastavitve Safeer OS › Videz) – enake v Spletu in Safeer Controlu.",
+              // Diski, O tem racunalniku, slicice in datum nastanka (lastnik, 25. 10. 2026)
+              diski: "Diski", diskSistem: "Sistemski disk", diskProsto: "{prosto} prostih od {skupaj}", diskMalo: "Na disku {ime} zmanjkuje prostora: prostih je še {prosto}.", poImenu: "Po imenu", poDatumu: "Po datumu nastanka", poVelikosti: "Po velikosti", datumNastanka: "Datum nastanka", vseObdobje: "Vse", danes: "Danes", taTeden: "Ta teden", taMesec: "Ta mesec", letos: "Letos", izberiObdobje: "Izberi obdobje …", od: "Od", do: "Do", uporabi: "Uporabi", obdobjeNapaka: "Vpiši datum, npr. 25. 10. 2026.", pogledSeznam: "Seznam", pogledMreza: "Mreža s sličicami", fotografijeNaprave: "Fotografije", naloziVec: "Naloži več", nastanek: "Nastanek", niVObdobju: "V tem obdobju ni datotek.", oRacunalniku: "O tem računalniku", oRacunalnikuMeni: "O tem računalniku …", racRacunalnik: "Računalnik", racSistem: "Sistem", racJedro: "Jedro", racProcesor: "Procesor", racJeder: "{n} niti", racPomnilnik: "Pomnilnik", racPomnilnikVr: "{skupaj} (na voljo {prosto})", racGraficna: "Grafična kartica", racCas: "Čas delovanja", racMin: "{m} min", racUr: "{h} h", racDni: "{d} d {h} h", racSafeer: "Safeer OS", vseNastavitve: "Vse nastavitve …", nastavitveSistema: "Nastavitve sistema …", razvrsti: "Razvrsti", obicajnoNamizje: "Običajno namizje Windows" },
         en: { isci: "Search apps, files and the web …", splet: "Search the web", programi: "Apps",
               isciProg: "Find an app …", vse: "All", datoteke: "Files", nedavno: "Recent", smeti: "Recycle Bin",
               mape: "Folders", naprave: "Devices", filter: "Filter …", ime: "Name", velikost: "Size",
@@ -94,7 +98,13 @@ Item {
               prilagodi: "Customise desktop …", temaSistema: "System theme and settings …", ozadje: "Wallpaper",
               ozadjeWindows: "Windows wallpaper", lastnaSlika: "Your own picture …", zameglitevNapis: "Panel blur",
               prosojnostNapis: "Panel opacity", privzeto: "Default", zapri: "Close",
-              temaOpis: "Colours come from the system theme (Safeer OS Settings › Appearance) – the same in Web and Safeer Control." }
+              temaOpis: "Colours come from the system theme (Safeer OS Settings › Appearance) – the same in Web and Safeer Control.",
+              diski: "Drives", diskSistem: "System drive", diskProsto: "{prosto} free of {skupaj}", diskMalo: "{ime} is running out of space: {prosto} left.", poImenu: "By name", poDatumu: "By date taken", poVelikosti: "By size", datumNastanka: "Date taken", vseObdobje: "Any time", danes: "Today", taTeden: "This week", taMesec: "This month", letos: "This year", izberiObdobje: "Choose dates …", od: "From", do: "To", uporabi: "Apply", obdobjeNapaka: "Enter a date, e.g. 25. 10. 2026.", pogledSeznam: "List", pogledMreza: "Grid with thumbnails", fotografijeNaprave: "Photos", naloziVec: "Load more", nastanek: "Taken", niVObdobju: "No files in this period.", oRacunalniku: "About this computer", oRacunalnikuMeni: "About this computer …", racRacunalnik: "Computer", racSistem: "System", racJedro: "Kernel", racProcesor: "Processor", racJeder: "{n} threads", racPomnilnik: "Memory", racPomnilnikVr: "{skupaj} ({prosto} available)", racGraficna: "Graphics", racCas: "Uptime", racMin: "{m} min", racUr: "{h} h", racDni: "{d} d {h} h", racSafeer: "Safeer OS", vseNastavitve: "All settings …", nastavitveSistema: "System settings …", razvrsti: "Sort", obicajnoNamizje: "Standard Windows desktop" },
+        // Ostali jeziki Safeer OS: nova besedila prevedena, za starejsa velja anglescina (t() poisce kljuc v en).
+        de: { diski: "Laufwerke", diskSistem: "Systemlaufwerk", diskProsto: "{prosto} frei von {skupaj}", diskMalo: "Auf {ime} wird der Platz knapp: noch {prosto} frei.", poImenu: "Nach Name", poDatumu: "Nach Aufnahmedatum", poVelikosti: "Nach Größe", datumNastanka: "Aufnahmedatum", vseObdobje: "Jederzeit", danes: "Heute", taTeden: "Diese Woche", taMesec: "Dieser Monat", letos: "Dieses Jahr", izberiObdobje: "Zeitraum wählen …", od: "Von", do: "Bis", uporabi: "Anwenden", obdobjeNapaka: "Gib ein Datum ein, z. B. 25. 10. 2026.", pogledSeznam: "Liste", pogledMreza: "Raster mit Vorschaubildern", fotografijeNaprave: "Fotos", naloziVec: "Mehr laden", nastanek: "Aufgenommen", niVObdobju: "Keine Dateien in diesem Zeitraum.", oRacunalniku: "Über diesen Computer", oRacunalnikuMeni: "Über diesen Computer …", racRacunalnik: "Computer", racSistem: "System", racJedro: "Kernel", racProcesor: "Prozessor", racJeder: "{n} Threads", racPomnilnik: "Arbeitsspeicher", racPomnilnikVr: "{skupaj} ({prosto} verfügbar)", racGraficna: "Grafik", racCas: "Laufzeit", racMin: "{m} min", racUr: "{h} h", racDni: "{d} T {h} h", racSafeer: "Safeer OS", vseNastavitve: "Alle Einstellungen …", nastavitveSistema: "Systemeinstellungen …", razvrsti: "Sortieren", obicajnoNamizje: "Normaler Windows-Desktop" },
+        es: { diski: "Unidades", diskSistem: "Unidad del sistema", diskProsto: "{prosto} libres de {skupaj}", diskMalo: "{ime} se está quedando sin espacio: quedan {prosto}.", poImenu: "Por nombre", poDatumu: "Por fecha de captura", poVelikosti: "Por tamaño", datumNastanka: "Fecha de captura", vseObdobje: "Cualquier fecha", danes: "Hoy", taTeden: "Esta semana", taMesec: "Este mes", letos: "Este año", izberiObdobje: "Elegir fechas …", od: "Desde", do: "Hasta", uporabi: "Aplicar", obdobjeNapaka: "Escribe una fecha, p. ej. 25. 10. 2026.", pogledSeznam: "Lista", pogledMreza: "Cuadrícula con miniaturas", fotografijeNaprave: "Fotos", naloziVec: "Cargar más", nastanek: "Captura", niVObdobju: "No hay archivos en este periodo.", oRacunalniku: "Acerca de este equipo", oRacunalnikuMeni: "Acerca de este equipo …", racRacunalnik: "Equipo", racSistem: "Sistema", racJedro: "Núcleo", racProcesor: "Procesador", racJeder: "{n} hilos", racPomnilnik: "Memoria", racPomnilnikVr: "{skupaj} ({prosto} disponibles)", racGraficna: "Gráficos", racCas: "Tiempo encendido", racMin: "{m} min", racUr: "{h} h", racDni: "{d} d {h} h", racSafeer: "Safeer OS", vseNastavitve: "Todos los ajustes …", nastavitveSistema: "Ajustes del sistema …", razvrsti: "Ordenar", obicajnoNamizje: "Escritorio normal de Windows" },
+        fr: { diski: "Disques", diskSistem: "Disque système", diskProsto: "{prosto} libres sur {skupaj}", diskMalo: "{ime} manque d’espace : il reste {prosto}.", poImenu: "Par nom", poDatumu: "Par date de prise de vue", poVelikosti: "Par taille", datumNastanka: "Date de prise de vue", vseObdobje: "Toutes les dates", danes: "Aujourd’hui", taTeden: "Cette semaine", taMesec: "Ce mois-ci", letos: "Cette année", izberiObdobje: "Choisir les dates …", od: "Du", do: "Au", uporabi: "Appliquer", obdobjeNapaka: "Saisis une date, p. ex. 25. 10. 2026.", pogledSeznam: "Liste", pogledMreza: "Grille avec miniatures", fotografijeNaprave: "Photos", naloziVec: "Charger plus", nastanek: "Prise de vue", niVObdobju: "Aucun fichier sur cette période.", oRacunalniku: "À propos de cet ordinateur", oRacunalnikuMeni: "À propos de cet ordinateur …", racRacunalnik: "Ordinateur", racSistem: "Système", racJedro: "Noyau", racProcesor: "Processeur", racJeder: "{n} threads", racPomnilnik: "Mémoire", racPomnilnikVr: "{skupaj} ({prosto} disponibles)", racGraficna: "Graphisme", racCas: "Durée de fonctionnement", racMin: "{m} min", racUr: "{h} h", racDni: "{d} j {h} h", racSafeer: "Safeer OS", vseNastavitve: "Tous les réglages …", nastavitveSistema: "Réglages du système …", razvrsti: "Trier", obicajnoNamizje: "Bureau Windows habituel" },
+        it: { diski: "Unità", diskSistem: "Unità di sistema", diskProsto: "{prosto} liberi su {skupaj}", diskMalo: "Su {ime} lo spazio sta finendo: restano {prosto}.", poImenu: "Per nome", poDatumu: "Per data di scatto", poVelikosti: "Per dimensione", datumNastanka: "Data di scatto", vseObdobje: "Qualsiasi data", danes: "Oggi", taTeden: "Questa settimana", taMesec: "Questo mese", letos: "Quest’anno", izberiObdobje: "Scegli le date …", od: "Dal", do: "Al", uporabi: "Applica", obdobjeNapaka: "Inserisci una data, ad es. 25. 10. 2026.", pogledSeznam: "Elenco", pogledMreza: "Griglia con miniature", fotografijeNaprave: "Foto", naloziVec: "Carica altro", nastanek: "Scatto", niVObdobju: "Nessun file in questo periodo.", oRacunalniku: "Informazioni su questo computer", oRacunalnikuMeni: "Informazioni su questo computer …", racRacunalnik: "Computer", racSistem: "Sistema", racJedro: "Kernel", racProcesor: "Processore", racJeder: "{n} thread", racPomnilnik: "Memoria", racPomnilnikVr: "{skupaj} ({prosto} disponibili)", racGraficna: "Grafica", racCas: "Tempo di attività", racMin: "{m} min", racUr: "{h} h", racDni: "{d} g {h} h", racSafeer: "Safeer OS", vseNastavitve: "Tutte le impostazioni …", nastavitveSistema: "Impostazioni di sistema …", razvrsti: "Ordina", obicajnoNamizje: "Desktop normale di Windows" }
     })
     function t(k, vr) {
         var s = (besedila[jezik] || besedila.en)[k] || besedila.en[k] || k
@@ -297,7 +307,8 @@ Item {
         vstop.start()
         koren.klic("zacetek", [], function (z) {
             z = z || {}
-            koren.jezik = (z.jezik === "sl" || z.jezik === "en") ? z.jezik : "en"
+            koren.jezik = koren.besedila[z.jezik] ? z.jezik : "en"
+            koren.razlicica = String(z.razlicica || "")
             koren.ozadjeUrl = z.ozadje || ""
             if (z.videz) koren.uporabiVidez(z.videz)
             datoteke.zacni(z.mape || [])
@@ -343,7 +354,8 @@ Item {
     }
     Menu {
         id: meniNamizja
-        background: Rectangle { implicitWidth: 230; radius: 12; color: koren.paleta.vnos; border.color: Qt.rgba(1, 1, 1, 0.14) }
+        objectName: "meniNamizja"
+        background: Rectangle { implicitWidth: 330; radius: 12; color: koren.paleta.vnos; border.color: Qt.rgba(1, 1, 1, 0.14) }
         MenuItem {
             text: koren.t("prilagodi")
             contentItem: Text { text: parent.text; color: koren.paleta.besedilo; font.pixelSize: 13; leftPadding: 6 }
@@ -351,13 +363,35 @@ Item {
             onTriggered: prilagodi.odpri()
         }
         MenuItem {
-            text: koren.t("temaSistema")
+            // Nastavitve sistema: okno Nastavitve Safeer OS (samo ta razdelek, brez stare lupine in brez Safeer Linka)
+            text: koren.t("nastavitveSistema")
             contentItem: Text { text: parent.text; color: koren.paleta.besedilo; font.pixelSize: 13; leftPadding: 6 }
             background: Rectangle { radius: 8; color: parent.highlighted ? koren.poudarekA(0.22) : "transparent" }
             onTriggered: koren.klic("odpriRazdelek", ["nastavitve"])
         }
+        MenuItem {
+            text: koren.t("oRacunalnikuMeni")
+            contentItem: Text { text: parent.text; color: koren.paleta.besedilo; font.pixelSize: 13; leftPadding: 6 }
+            background: Rectangle { radius: 8; color: parent.highlighted ? koren.poudarekA(0.22) : "transparent" }
+            onTriggered: oRacunalniku.odpri()
+        }
+        MenuSeparator { contentItem: Rectangle { implicitHeight: 1; color: Qt.rgba(1, 1, 1, 0.12) } }
+        MenuItem {
+            // Varnostna vrata (pravilo lastnika): en klik nazaj na obicajno namizje Windows; vklop spet v Nastavitvah
+            // (»Safeer OS kot namizje«). Isto naredi sistemska bliznjica Ctrl+Alt+Shift+W, tudi ce namizje ne odgovarja.
+            text: koren.t("obicajnoNamizje") + "    Ctrl+Alt+Shift+W"
+            contentItem: Text { text: parent.text; color: koren.paleta.besedilo; font.pixelSize: 13; leftPadding: 6 }
+            background: Rectangle { radius: 8; color: parent.highlighted ? koren.poudarekA(0.22) : "transparent" }
+            onTriggered: koren.klic("namizjeSafeer", [false])
+        }
     }
     Prilagodi { id: prilagodi; z: 30; anchors.fill: parent }
+    ORacunalniku { id: oRacunalniku; z: 30; anchors.fill: parent }
+    // Disk iz »O tem racunalniku«: odpre ga v panelu Datoteke (ta racunalnik).
+    function pokaziMapo(pot) {
+        if (datoteke.naprava) { datoteke.naprava = ""; datoteke.viri = datoteke.lokalniViri }
+        datoteke.odpri({ vrsta: "lokalno", pot: pot })
+    }
 
     // ------------------------------------------------------------------ obvestilo spodaj (z dejanjem, npr. Razveljavi)
     Rectangle {
