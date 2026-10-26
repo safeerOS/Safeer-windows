@@ -24,9 +24,32 @@ class Pravila(unittest.TestCase):
         self.assertEqual(U.osnova("https://ix.example/newznab/api/"), "https://ix.example/newznab")
         self.assertEqual(U.osnova("http://192.168.0.5:5076/api"), "http://192.168.0.5:5076")
         self.assertEqual(U.osnova("http://nzbhydra.local"), "http://nzbhydra.local")
-        for slab in ("http://ix.example/api", "ftp://ix.example", "https://user:pass@ix.example", "ix.example", "",
+        for slab in ("http://ix.example/api", "ftp://ix.example", "https://user:pass@ix.example", "",
                      "https://ix.example/a b", "http://8.8.8.8/api"):
             self.assertIsNone(U.osnova(slab), slab)
+        # Lastnik 25. 10. 2026 (kot Android): gola domena dobi https:// sama.
+        self.assertEqual(U.osnova(" nzbfinder.ws "), "https://nzbfinder.ws")
+        self.assertEqual(U.osnova("ix.example/api?"), "https://ix.example")
+        self.assertEqual(U.osnova("nzbfinder.ws:8443"), "https://nzbfinder.ws:8443")
+        self.assertEqual(U.osnova("localhost:5076"), "https://localhost:5076")
+        self.assertEqual(U.osnova("192.168.1.10:5076"), "https://192.168.1.10:5076")
+        self.assertEqual(U.osnova("[::1]:5076"), "https://[::1]:5076")
+        self.assertEqual(U.osnova("abc123.example"), "https://abc123.example")      # kratko heks ime s piko ostane
+
+    def test_kljuc_v_polju_za_naslov(self):
+        """Grokov pregled 31, H1 (Android bed1134): gola domena je vsak vnos brez sheme spremenila v https://<vnos> - kljuc
+        API v polju za naslov bi postal gostitelj in sel necifriran v DNS. Gostitelj mora biti ime s piko brez kljuca."""
+        heks32, uuid = "0123456789abcdef0123456789abcdef", "abcdef01-2345-6789-abcd-ef0123456789"
+        rd = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRST"
+        for slab in (heks32, uuid, "https://" + heks32, rd, heks32 + ":443", heks32 + ".ws", "https://%s.example" % uuid,
+                     "nzbfinder", "http//nzbfinder.ws", "https:/nzbfinder.ws", "https://nas:5076", "https://x.example:99999",
+                     "https://x.example:abc", "jaz:geslo@x.example", "https://x..example"):
+            self.assertIsNone(U.osnova(slab), slab)
+        for kljuc in (" %s " % heks32, uuid, "https://%s/api" % heks32, rd, heks32 + ".home", "aB3dE5gH7jK9mN1pQ3sT"):
+            self.assertTrue(U.naslov_je_kljuc(kljuc), kljuc)
+        for ime in ("nzbfinder.ws", "nzbfinder", "https://api.nzbgeek.info/api?", "http://192.168.1.20:5076", "localhost:5076",
+                    "", "abc123.example"):
+            self.assertFalse(U.naslov_je_kljuc(ime), ime)
 
     def test_kljuc(self):
         self.assertEqual(U.ocisti_kljuc(" 0123456789abcdef0123456789abcdef "), "0123456789abcdef0123456789abcdef")
@@ -109,7 +132,7 @@ class Shramba(unittest.TestCase):
         self.assertEqual(st["usenet"], {"url": "enc:https://ix.example", "kljuc": "enc:0123456789abcdef"})
         self.assertEqual(d.indeksator(), ("https://ix.example", "0123456789abcdef"))
         s = debrid.most(d, [])
-        self.assertEqual(s["usenet"], {"gostitelj": "ix.example", "torbox": False})
+        self.assertEqual(s["usenet"], {"gostitelj": "ix.example", "torbox": False, "torbox_pro": None, "stanje": "nepreverjen"})
         self.assertNotIn("0123456789abcdef", json.dumps(s))
         self.assertFalse(d.usenet_na_voljo())                   # brez kljuca TorBox ne
         d.nastavi_kljuc(P.TORBOX, "t" * 32)
@@ -128,7 +151,8 @@ class Shramba(unittest.TestCase):
         z = [U.Zadetek("Film.1080p", "https://ix.example/getnzb/a.nzb?apikey=0123456789abcdef", 2 * 1073741824)]
         with mock.patch.object(debrid, "usenet_isci", return_value=z) as isci:
             tokovi = d.usenet_isci("tt1375666")
-        isci.assert_called_once_with("https://ix.example", "0123456789abcdef", "tt1375666")
+        isci.assert_called_once()
+        self.assertEqual(isci.call_args[0], ("https://ix.example", "0123456789abcdef", "tt1375666"))
         self.assertEqual(len(tokovi), 1)
         self.assertNotIn("0123456789abcdef", json.dumps(tokovi))
         with mock.patch.object(debrid, "usenet_nzb", return_value=(b"<nzb/>", "")) as nzb, \
@@ -137,6 +161,8 @@ class Shramba(unittest.TestCase):
         nzb.assert_called_once_with(z[0].povezava)
         self.assertEqual(tb.call_args[0][0], "t" * 32)
         self.assertEqual(izid.url, "https://cdn.example/f")
+        # NZB od indeksatorja in povezava TorBoxa potrdita oba kljuca (stanje sledi uporabi).
+        self.assertEqual((d.stanje_kljuca(P.INDEKSATOR), d.stanje_kljuca(P.TORBOX)), (P.STANJE_VELJA, P.STANJE_VELJA))
         self.assertEqual(d.usenet_tok("usenet:neznan", "x").napaka, U.NAPAKA_INDEKSATOR)
 
     def test_torbox_usenet_pot(self):

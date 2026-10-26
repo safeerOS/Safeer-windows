@@ -8,7 +8,8 @@ from core import debrid, debrid_pravila as P, media_servers, os_media
 
 H1 = "2849211f150e966ef7924f43aec22727a644e10d"
 H2 = "9f23769f0000000000000000000000000000abcd"
-KLJUC_TB = "0f0e0d0c-0b0a-0908-0706-050403020100"
+#: Izmisljen; prejsnji (0f0e0d0c-…-050403020100, 17 nicel od 32 znakov) je vzorec (P.je_vzorec_kljuca).
+KLJUC_TB = "7c1e9a4b-2f6d-4e8a-b3c5-9d0f1a2e6b74"
 KLJUC_RD = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMNOP"
 
 
@@ -102,7 +103,9 @@ class Storitev(unittest.TestCase):
 
     def test_most_izbira_in_pozabi(self):
         d, _ = _debrid()
-        debrid.most(d, ["kljuc", P.TORBOX, KLJUC_TB])
+        # Preverba ob vnosu (TorBox user/me) brez omrezja: preizkus nikoli ne klice prave storitve.
+        with mock.patch.object(debrid, "torbox_preveri", return_value=(P.PREVERBA_VELJAVEN, P.TORBOX_PRO)):
+            self.assertTrue(debrid.most(d, ["kljuc", P.TORBOX, KLJUC_TB])["ok"])
         self.assertEqual(debrid.most(d, ["aktivna", ""])["aktivna"], "")       # Brez debrida
         self.assertEqual(debrid.most(d, ["aktivna", P.TORBOX])["aktivna"], P.TORBOX)
         self.assertFalse(debrid.most(d, ["samo_takoj", False])["samo_takoj"])

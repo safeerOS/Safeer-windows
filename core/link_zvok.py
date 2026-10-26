@@ -367,8 +367,11 @@ class ZvokNaNapravo:
                     break
         except (OSError, ssl.SSLError, ValueError):
             pass
-        if seja == self._seja:
-            z = self._zajem
+        # Pod kljucem: ustavi() zajem ubije in pobere (wait) pod istim kljucem. Prej je ta nit lahko poslala kill
+        # procesu, ki ga je ustavi() med tem ze pobral (Popen.poll v kill ne caka na wait druge niti) - PID je lahko
+        # ze tuj (varovalo signalov v CI 40193737914, 25. 10. 2026).
+        with self._kljuc:
+            z = self._zajem if seja == self._seja else None
             if z is not None:
                 try:
                     z.kill()

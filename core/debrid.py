@@ -18,7 +18,8 @@ import urllib.parse
 import urllib.request
 import uuid
 from collections import OrderedDict
-from concurrent.futures import Future
+from concurrent.futures import FIRST_COMPLETED, Future
+from concurrent.futures import wait as futures_wait
 from dataclasses import dataclass
 from typing import Callable, Optional, Sequence
 
@@ -115,10 +116,36 @@ def _beri_omejeno(o, meja: int = P.NAJVEC_ODGOVORA) -> bytes:
     return podatki
 
 
+class _BrezPreusmeritve(urllib.request.HTTPRedirectHandler):
+    """Zahteva s kljucem (v glavi ali v naslovu) ne sledi preusmeritvi (AGENTS.md: omrezje s kljucem). urllib.urlopen
+    ob 3xx kopira glavo Authorization tudi v zahtevo drugemu gostitelju (izmerjeno 25. 10. 2026, Python 3.12.3, dva
+    lokalna streznika): 302 storitve ali vmesnega posrednika bi odnesel kljuc. Odgovor 3xx je zato napaka storitve."""
+
+    def redirect_request(self, *_a, **_k):
+        return None
+
+
+def _odpri_s_kljucem(zahteva: urllib.request.Request, rok: float):
+    """urlopen brez sledenja preusmeritvam: 3xx pride kot urllib.error.HTTPError s kodo odgovora."""
+    return urllib.request.build_opener(_BrezPreusmeritve()).open(zahteva, timeout=rok)  # nosec B310 - naslovi storitev
+
+
+class _SkokNzb(urllib.request.HTTPRedirectHandler):
+    """Prenos NZB (kljuc indeksatorja v naslovu) sledi preusmeritvi samo, ce skok dovoli U.dovoljen_skok - Android
+    (Usenet.nzb) preusmeritvam NZB sledi, zato jih ne zavrnemo vseh; nikoli s https na http in ne na tuj http."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not U.dovoljen_skok(req.full_url, newurl):
+            _log.info("usenet nzb: preusmeritev zavrnjena")
+            return None
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
 def klic(naslov: str, kljuc: Optional[str], metoda: str = "GET", obrazec: Optional[list] = None,
          rok: float = 20.0, telo: Optional[tuple] = None) -> Odgovor:
-    """Klic s kljucem v glavi (nikoli v naslovu); [obrazec] gre kot application/x-www-form-urlencoded, [telo] je
-    (bajti, Content-Type) - npr. multipart z NZB za Usenet. Odgovor najvec P.NAJVEC_ODGOVORA bajtov (vecji je napaka)."""
+    """Klic s kljucem v glavi (ali, samo pri requestdl, v naslovu); [obrazec] gre kot application/x-www-form-urlencoded,
+    [telo] je (bajti, Content-Type) - npr. multipart z NZB za Usenet. Odgovor najvec P.NAJVEC_ODGOVORA bajtov (vecji je
+    napaka). Preusmeritvi ne sledi (_BrezPreusmeritve): 3xx je Odgovor s to kodo, kljuc ne gre drugam."""
     glave = {"Accept": "application/json", "User-Agent": "SafeerOS/1.0"}
     if kljuc:
         glave["Authorization"] = P.glava_avtorizacije(kljuc)
@@ -130,7 +157,7 @@ def klic(naslov: str, kljuc: Optional[str], metoda: str = "GET", obrazec: Option
         podatki, glave["Content-Type"] = telo[0], telo[1]
     zahteva = urllib.request.Request(naslov, data=podatki, headers=glave, method=metoda)
     try:
-        with urllib.request.urlopen(zahteva, timeout=rok) as o:
+        with _odpri_s_kljucem(zahteva, rok) as o:
             return Odgovor(o.status, _beri_omejeno(o).decode("utf-8", "replace"), _datum_ms(o.headers))
     except urllib.error.HTTPError as e:
         telo_n = _beri_omejeno(e) if e.fp is not None else b""
@@ -155,13 +182,17 @@ def _tb_datoteke(a) -> list:
                        str(d.get("mimetype") or "")) for d in (a or []) if isinstance(d, dict)]
 
 
-def torbox_predpomnjeni(kljuc: str, hashi: Sequence[str], rok: float = 4.0) -> set:
-    """Kateri hashi so pri TorBoxu ze pripravljeni: en klic checkcached (do 100), nic ne doda v racun. Ob napaki prazno."""
+def torbox_predpomnjeni(kljuc: str, hashi: Sequence[str], rok: float = 4.0,
+                        ob_napaki: Optional[Callable[[str], None]] = None) -> set:
+    """Kateri hashi so pri TorBoxu ze pripravljeni: en klic checkcached (do 100), nic ne doda v racun. Ob napaki prazno;
+    [ob_napaki] dobi vrsto napake storitve (Debrid.ob_izidu: zavrnjen kljuc ze ob preverbi ⚡ - kot Android)."""
     h = P.hashi_za_preverbo(hashi)
     if not h:
         return set()
     try:
         o = klic(P.torbox_naslov_predpomnjenih(h), kljuc, rok=rok)
+        if not _tb_uspeh(o) and ob_napaki is not None:
+            _javi(lambda n, _u: ob_napaki(n), _tb_napaka(o).napaka, False)     # napaka zapisa stanja ne podre ⚡
         data = (o.json or {}).get("data") if _tb_uspeh(o) else None
         izid = P.predpomnjeni(data.keys() if isinstance(data, dict) else (), h)
         _log.info("checkcached: %d od %d pripravljenih", len(izid), len(h))
@@ -267,7 +298,7 @@ CAKANI = _Cakani()
 def _rd_napaka(o: Odgovor) -> Izid:
     j = o.json if isinstance(o.json, dict) else {}
     koda = j.get("error_code") if isinstance(j.get("error_code"), int) else None
-    return Izid(napaka=P.rd_vrsta_napake(o.koda, koda), opis=str(j.get("error") or "")[:200], ponudnik=P.REAL_DEBRID)
+    return Izid(napaka=P.rd_vrsta_napake_uporabe(o.koda, koda), opis=str(j.get("error") or "")[:200], ponudnik=P.REAL_DEBRID)
 
 
 def _rd_izbrisi(kljuc: str, tid: str, dodano_ob: Optional[int], samo_predpomnjeno: bool) -> None:
@@ -537,6 +568,70 @@ def izmeri(ponudnik: str, url: str) -> Optional[P.Meritev]:
         return None
 
 
+# ---------------------------------------------------------------------- preverba kljuca ob vnosu
+
+def torbox_preveri(kljuc: str, rok: float = 8.0) -> tuple:
+    """(P.PREVERBA_*, paket) - TorBox »user/me« s kljucem v glavi. Odgovor nosi e-naslov racuna: iz njega vzamemo samo
+    paket; odgovora ne zapisemo nikamor. Brez povezave P.PREVERBA_NI_ODGOVORA."""
+    try:
+        o = klic(P.TORBOX_UPORABNIK, kljuc, rok=rok)
+    except Exception as e:  # noqa: BLE001 - brez povezave kljuca ne zavrnemo
+        _log.info("torbox preverba: %s", type(e).__name__)
+        return P.PREVERBA_NI_ODGOVORA, None
+    izid, paket = P.torbox_preverba(o.koda, o.json)
+    _log.info("torbox preverba: HTTP %d, %s", o.koda, izid)
+    return izid, paket
+
+
+def _preveri_racun(ime: str, naslov: str, kljuc: str, pravilo: Callable[[int, object], str], rok: float) -> tuple:
+    """(P.PREVERBA_*, None) za Real-Debrid ali AllDebrid »/user« (kljuc v glavi, nic ne doda v racun). Odgovor nosi
+    uporabnisko ime in e-naslov: iz njega vzamemo SAMO izid, odgovora ne zapisemo nikamor."""
+    try:
+        o = klic(naslov, kljuc, rok=rok)
+    except Exception as e:  # noqa: BLE001 - brez povezave kljuca ne zavrnemo
+        _log.info("preverba %s: %s", ime, type(e).__name__)
+        return P.PREVERBA_NI_ODGOVORA, None
+    izid = pravilo(o.koda, o.json)
+    _log.info("preverba %s: HTTP %d, %s", ime, o.koda, izid)
+    return izid, None
+
+
+def rd_preveri(kljuc: str, rok: float = 8.0) -> tuple:
+    return _preveri_racun("Real-Debrid", P.RD_UPORABNIK, kljuc, P.rd_preverba, rok)
+
+
+def ad_preveri(kljuc: str, rok: float = 8.0) -> tuple:
+    return _preveri_racun("AllDebrid", P.AD_UPORABNIK, kljuc, P.ad_preverba, rok)
+
+
+def preveri_kljuc(p: str, kljuc: str) -> tuple:
+    """(P.PREVERBA_*, paket) pri storitvi [p] - blokirajoce (do 8 s), samo z delovne niti. Funkcije se poiscejo ob klicu
+    (preizkusi jih zamenjajo)."""
+    if p == P.TORBOX:
+        return torbox_preveri(kljuc)
+    return rd_preveri(kljuc) if p == P.REAL_DEBRID else ad_preveri(kljuc)
+
+
+def indeksator_preveri(osn: str, kljuc: str, rok: float = 8.0) -> str:
+    """P.PREVERBA_* za kljuc indeksatorja Newznab: eno iskanje z enim zadetkom (izmerjeno 25. 10. 2026 na nzbfinder.ws:
+    napacen kljuc -> HTTP 401 in `<error code="100">`, t=caps kljuca ne preveri). Naslov s kljucem ne gre v dnevnik."""
+    zahteva = urllib.request.Request(U.naslov_preverbe(osn, kljuc),
+                                     headers={"Accept": "application/rss+xml, application/xml, text/xml",
+                                              "User-Agent": "SafeerOS/1.0"})
+    try:
+        try:
+            with _odpri_s_kljucem(zahteva, rok) as o:
+                koda, telo = o.status, _beri_do(o, 64 * 1024)
+        except urllib.error.HTTPError as e:
+            koda, telo = e.code, _beri_do(e, 64 * 1024) if e.fp else b""
+    except Exception as e:  # noqa: BLE001 - brez povezave kljuca ne zavrnemo
+        _log.info("preverba indeksatorja: %s", type(e).__name__)
+        return P.PREVERBA_NI_ODGOVORA
+    izid = U.preverba_indeksatorja(koda, telo.decode("utf-8", "replace"))
+    _log.info("preverba indeksatorja: HTTP %d, %s", koda, izid)
+    return izid
+
+
 # ---------------------------------------------------------------------- Usenet (indeksator Newznab + TorBox)
 
 def _beri_do(o, najvec: int) -> bytes:
@@ -550,8 +645,20 @@ def _beri_do(o, najvec: int) -> bytes:
     return b"".join(deli)
 
 
-def usenet_isci(osn: str, kljuc_ix: str, ident: str, rok: float = 8.0) -> list:
-    """Zadetki indeksatorja za id Stremio (film tt… ali epizoda tt…:S:E); ob napaki prazno. Naslov (s kljucem) ne gre v dnevnik."""
+def _javi(ob_izidu: Optional[Callable[[str, bool], None]], napaka: str, uspeh: bool) -> None:
+    """Izid klica s kljucem za stanje kljuca (Debrid.ob_izidu); napaka pri zapisu stanja ne podre klica."""
+    if ob_izidu is None:
+        return
+    try:
+        ob_izidu(napaka, uspeh)
+    except Exception as e:  # noqa: BLE001
+        _log.info("stanje kljuca: %s", type(e).__name__)
+
+
+def usenet_isci(osn: str, kljuc_ix: str, ident: str, rok: float = 8.0,
+                ob_izidu: Optional[Callable[[str, bool], None]] = None) -> list:
+    """Zadetki indeksatorja za id Stremio (film tt… ali epizoda tt…:S:E); ob napaki prazno. Naslov (s kljucem) ne gre v
+    dnevnik in ne sledi preusmeritvi (kot preverba ob vnosu)."""
     naslov = U.naslov_iskanja(osn, kljuc_ix, ident)
     if not naslov:
         return []
@@ -559,11 +666,16 @@ def usenet_isci(osn: str, kljuc_ix: str, ident: str, rok: float = 8.0) -> list:
         zahteva = urllib.request.Request(naslov, headers={"Accept": "application/rss+xml, application/xml, text/xml",
                                                           "User-Agent": "SafeerOS/1.0"})
         try:
-            with urllib.request.urlopen(zahteva, timeout=rok) as o:
+            with _odpri_s_kljucem(zahteva, rok) as o:
                 koda, telo = o.status, _beri_do(o, U.NAJVEC_ODGOVORA_BAJTOV)
         except urllib.error.HTTPError as e:
             koda, telo = e.code, _beri_do(e, 64 * 1024) if e.fp else b""
         besedilo = telo.decode("utf-8", "replace")
+        # Stanje kljuca po istem pravilu kot preverba ob vnosu: RSS potrdi kljuc, 401 ali Newznab 100-102 ga zavrne
+        # (403 brez napake je lahko Cloudflare, stran HTML ni potrditev).
+        izid = U.preverba_indeksatorja(koda, besedilo)
+        _javi(ob_izidu, {P.PREVERBA_NEVELJAVEN: P.NAPAKA_KLJUC, P.PREVERBA_ZAKLENJEN: P.NAPAKA_ZAKLENJEN}.get(izid, ""),
+              izid == P.PREVERBA_VELJAVEN)
         if not 200 <= koda < 300:
             _log.info("usenet iskanje: HTTP %d", koda)
             return []
@@ -579,21 +691,34 @@ def usenet_isci(osn: str, kljuc_ix: str, ident: str, rok: float = 8.0) -> list:
         return []
 
 
+def _isti_gostitelj(a: str, b: str) -> bool:
+    try:
+        return (urllib.parse.urlsplit(a).hostname or "") == (urllib.parse.urlsplit(b).hostname or "")
+    except ValueError:
+        return False
+
+
 def usenet_nzb(povezava: str, rok: float = 30.0) -> tuple:
-    """NZB z indeksatorja: (bajti, "") ali (None, napaka). Povezava vsebuje kljuc - ne gre v dnevnik."""
+    """NZB z indeksatorja: (bajti, "") ali (None, napaka). Povezava vsebuje kljuc - ne gre v dnevnik; vsak skok
+    preusmeritve preveri U.dovoljen_skok (_SkokNzb)."""
     try:
         zahteva = urllib.request.Request(povezava, headers={"User-Agent": "SafeerOS/1.0"})
         try:
-            with urllib.request.urlopen(zahteva, timeout=rok) as o:
-                koda, telo = o.status, _beri_do(o, U.NAJVEC_NZB_BAJTOV + 1)
+            with urllib.request.build_opener(_SkokNzb()).open(zahteva, timeout=rok) as o:  # nosec B310 - skoki preverjeni
+                koda, telo, koncni = o.status, _beri_do(o, U.NAJVEC_NZB_BAJTOV + 1), o.geturl()
         except urllib.error.HTTPError as e:
-            koda, telo = e.code, _beri_do(e, 64 * 1024) if e.fp else b""
+            koda, telo, koncni = e.code, _beri_do(e, 64 * 1024) if e.fp else b"", e.geturl()
         if len(telo) > U.NAJVEC_NZB_BAJTOV:
             return None, U.NAPAKA_INDEKSATOR
         zacetek = telo[:4096].decode("utf-8", "replace")
         if 200 <= koda < 300 and U.je_nzb(zacetek):
             return telo, ""
-        n = U.napaka(zacetek) or (P.NAPAKA_KLJUC if koda in (401, 403) else P.NAPAKA_MEJA if koda == 429 else U.NAPAKA_INDEKSATOR)
+        # 401/403 brez napake Newznab je lahko Cloudflare ali posrednik (U.preverba_indeksatorja) - ni zavrnjen kljuc.
+        n = U.napaka(zacetek) or (P.NAPAKA_MEJA if koda == 429 else U.NAPAKA_INDEKSATOR)
+        if n in (P.NAPAKA_KLJUC, P.NAPAKA_ZAKLENJEN) and not _isti_gostitelj(povezava, koncni or povezava):
+            # Grokov pregled 36, D2: 401 drugega gostitelja po preusmeritvi (CDN, potekel podpisan naslov) ni odgovor
+            # indeksatorja o kljucu - kljuca indeksatorja ne oznacimo »ne velja«.
+            n = U.NAPAKA_INDEKSATOR
         _log.info("usenet nzb: HTTP %d, napaka %s", koda, n)
         return None, n
     except Exception as e:  # noqa: BLE001
@@ -674,15 +799,47 @@ class Debrid:
     centra; [sifriraj]/[desifriraj] sta sifrirnik gesel streznikov (sistemska zbirka skrivnosti)."""
 
     def __init__(self, beri: Callable[[], dict], pisi: Callable[[dict], None],
-                 sifriraj: Callable[[str], str], desifriraj: Callable[[str], str]):
+                 sifriraj: Callable[[str], str], desifriraj: Callable[[str], str],
+                 pozabi: Optional[Callable[[str], None]] = None):
         self._beri, self._pisi = beri, pisi
         self._sifriraj, self._desifriraj = sifriraj, desifriraj
+        # Odstranjen ali zamenjan kljuc izbrisemo tudi iz zbirke skrivnosti (ne samo oznako iz nastavitev).
+        self._pozabi_skrivnost = pozabi or (lambda _enc: None)
         self._zaklep = threading.Lock()
         self._kljuci: dict = {}          # predpomnilnik desifriranih kljucev (samo v pomnilniku)
         self._povezave_nzb: dict = {}    # id toka »usenet:…« -> povezava NZB s kljucem (samo v pomnilniku)
         # Zadnji prenesen NZB (id toka -> (cas, bajti)): preverba »pripravljen« in nato poskus s cakanjem za isto izdajo
         # ne preneseta NZB dvakrat (indeksatorji stejejo prenose NZB na dan).
         self._nzb: "OrderedDict[str, tuple]" = OrderedDict()
+        # Zadnja preverba kljuca po storitvi (samo v pomnilniku - po zagonu se nepreverjen preveri znova, kot Android).
+        self._zadnja_preverba: dict = {}
+        # Odtis kljuca, ki ga je ta zadnja preverba preverila: zamenjan kljuc se preveri takoj (P.preveri_zdaj po kljucu).
+        self._preverjen_odtis: dict = {}
+        self._preverjam = threading.Lock()      # ena preverba nepreverjenih naenkrat (okno odprto veckrat zapored)
+        # (storitev, odtis) -> zadnji »Preveri« ali vpis tega kljuca (time.monotonic): najvec 1 na minuto (S8).
+        self._rocna: "OrderedDict[tuple, float]" = OrderedDict()
+        self._zaklep_rocne = threading.Lock()
+        # Grokov pregled 40, S3: (storitev, odtis) -> »ne velja« ali »zaklenjen« v pomnilniku, ZE PRED zapisom v
+        # nastavitve - zapora velja tudi, ce zapis ne uspe (poln disk, nastavitve samo za branje, zbirka zaklenjena).
+        # Grokov pregled 47: velja po kljucu, »Odstrani« in zamenjava je ne odpravita (U1); bere in pise se samo pod
+        # _zaklep_zapor (U4) - pise ga vec niti (⚡, predvajanje, »Preveri« v niti mostu, samodejna preverba).
+        self._zaprti: dict = {}
+        self._odtisa_ix: dict = {}       # (oznaka naslova, oznaka kljuca) -> (stari, novi) odtis indeksatorja (O1; samo v pomnilniku)
+        self._zaklep_zapor = threading.Lock()   # notranji: pod njim se ne klice nic drugega (zaklep nastavitev je zunanji)
+
+    def _rocna_cez(self, p: str, odtis: str) -> int:
+        """Grokov pregled 40, S8: 0 = »Preveri« ali vpis kljuca z [odtis] sme k storitvi (cas se zabelezi), sicer sekunde
+        do naslednjega. Prej ni bilo meje - vsak klik na »Preveri« ali Enter z istim kljucem je bil nov poskus prijave."""
+        zdaj = time.monotonic()
+        with self._zaklep_rocne:
+            zadnjic = self._rocna.get((p, odtis))
+            if zadnjic is not None and not P.rocna_preverba_dovoljena(zadnjic, zdaj):
+                return min(int(P.ROCNA_PREVERBA_S), int(P.ROCNA_PREVERBA_S - (zdaj - zadnjic)) + 1)
+            self._rocna.pop((p, odtis), None)
+            self._rocna[(p, odtis)] = zdaj
+            while len(self._rocna) > 64:
+                self._rocna.popitem(last=False)
+        return 0
 
     def _nastavitve(self) -> dict:
         d = self._beri()
@@ -690,7 +847,7 @@ class Debrid:
 
     def _spremeni(self, fn: Callable[[dict], None]) -> None:
         with self._zaklep:
-            d = dict(self._nastavitve())
+            d = self._z_novim_odtisom(dict(self._nastavitve()))     # O1: stanje pod starim odtisom gre z naslednjim zapisom na novega
             fn(d)
             self._pisi(d)
 
@@ -709,23 +866,392 @@ class Debrid:
     def z_kljucem(self) -> list:
         return [p for p in P.VSI if self.kljuc(p)]
 
-    def nastavi_kljuc(self, p: str, vnos: str) -> bool:
+    def _pozabi(self, *zapisi: str) -> None:
+        """Sifrirane zapise (oznake v zbirki skrivnosti), ki jih nastavitve ne uporabljajo vec, izbrisi."""
+        for enc in zapisi:
+            if enc:
+                self._kljuci.pop(enc, None)
+                try:
+                    self._pozabi_skrivnost(enc)
+                except Exception:  # noqa: BLE001 - zbirka zaklenjena: oznaka v nastavitvah je ze odstranjena
+                    _log.info("brisanje skrivnosti ni uspelo")
+
+    @staticmethod
+    def _zapis_stanja(stanje: Optional[str], odtis: str) -> Optional[dict]:
+        """Stanje kljuca v nastavitvah: {"s", "odtis", "ob"} - odtis (P.odtis_stanja), nikoli kljuc."""
+        return {"s": stanje, "odtis": odtis, "ob": time.time()} if stanje else None
+
+    @staticmethod
+    def _postavi_zaporo(d: dict, p: str, odtis: Optional[str], s: Optional[str]) -> None:
+        """Grokov pregled 47, U1 (kot Android a15fb57): zapora po KLJUCU v nastavitvah (d["zapore"][p] = {odtis: stanje},
+        zadnjih P.NAJVEC_ZAPOR) - prezivi zamenjavo kljuca, »Odstrani« in ponovni zagon; odpravi jo samo »velja«."""
+        if not odtis:
+            return
+        zs = d.get("zapore")
+        if not isinstance(zs, dict):
+            if zs is not None:
+                Debrid._zapri_druge(d, p)          # pokvarjen razdelek zapor (U2)
+            zs = d["zapore"] = {}
+        zs[p] = P.z_zaporo(P.zapore_iz_zapisa(zs.get(p)) or {}, odtis, s)
+
+    @staticmethod
+    def _ima_kljuc(d: dict, q: str) -> bool:
+        if q == P.INDEKSATOR:
+            u = d.get("usenet")
+            return isinstance(u, dict) and bool(u.get("url")) and bool(u.get("kljuc"))
+        k = d.get("kljuci")
+        return isinstance(k, dict) and bool(k.get(q))
+
+    @staticmethod
+    def _zapri_druge(d: dict, p: str) -> None:
+        """Grokov pregled 47, U2: razdelek stanj ali zapor, ki ni slovar (pokvarjena datoteka, druga razlicica), je do
+        zapisa zaprl vse kljuce (S3), prvi zapis stanja katere koli storitve pa ga je zamenjal s praznim - zapore DRUGIH
+        storitev so izginile in njihovi kljuci so spet sli storitvam (odpove odprto). Zdaj vsaka druga storitev s
+        shranjenim kljucem brez dokoncnega stanja dobi zapis »ne velja« brez odtisa (P.stanje_iz_zapisa: velja za kateri
+        koli kljuc) - nazaj ga vrne samo »Preveri« ali vpis, ki ga storitev potrdi."""
+        st = d.get("stanja")
+        st = d["stanja"] = dict(st) if isinstance(st, dict) else {}
+        for q in P.VSI + (P.INDEKSATOR,):
+            z = st.get(q)
+            dokoncno = (isinstance(z, dict) and bool(z.get("odtis"))
+                        and z.get("s") in (P.STANJE_VELJA, P.STANJE_NE_VELJA, P.STANJE_ZAKLENJEN))
+            if q != p and Debrid._ima_kljuc(d, q) and not dokoncno:
+                st[q] = {"s": P.STANJE_NE_VELJA, "ob": time.time()}
+        _log.warning("stanja kljucev ni mogoce prebrati - druge storitve ostanejo zaprte do »Preveri«")
+
+    @staticmethod
+    def _postavi_stanje(d: dict, p: str, zapis: Optional[dict]) -> None:
+        """Stanje kljuca na mestu storitve [p] in zapora po kljucu (U1). [zapis] None (»Odstrani«) pobrise samo mesto
+        storitve - zapora kljuca ostane."""
+        if d.get("stanja") is not None and not isinstance(d.get("stanja"), dict):
+            Debrid._zapri_druge(d, p)              # pokvarjen razdelek stanj ne odpre drugih storitev (U2)
+        st = d.setdefault("stanja", {})
+        if zapis is None:
+            st.pop(p, None)
+        else:
+            st[p] = zapis
+            Debrid._postavi_zaporo(d, p, zapis.get("odtis"), zapis.get("s"))
+
+    def nastavi_kljuc(self, p: str, vnos: str, paket: Optional[int] = None, stanje: Optional[str] = None) -> bool:
+        """Shrani kljuc (sifriran) s paketom in stanjem preverbe (None = nepreverjen). Brez preverbe in zavrnitve
+        vzorca - vnos uporabnika gre skozi vpisi_kljuc."""
         k = P.ocisti_kljuc(vnos)
         if p not in P.VSI or k is None:
             return False
         enc = self._sifriraj(k)
         if not enc:
             return False
-        self._spremeni(lambda d: d.setdefault("kljuci", {}).__setitem__(p, enc))
+        staro: list = []
+        odtis = P.odtis_stanja(k)
+
+        def f(d: dict) -> None:
+            staro.append(str((d.get("kljuci") or {}).get(p) or ""))
+            d.setdefault("kljuci", {})[p] = enc
+            pak = d.setdefault("paketi", {})
+            if paket is None:
+                pak.pop(p, None)
+            else:
+                pak[p] = int(paket)
+            # Grokov pregled 40, S3: ISTI kljuc brez stanja (uvoz, selitev, uskladitev) ohrani svoje stanje - prej je tiho
+            # pobrisal »zaklenjen« in kljuc je spet sel storitvi. Grokov pregled 47, U2: zapis na mestu storitve je vedno
+            # zapis SHRANJENEGA kljuca (tudi zapora po kljucu gre nanj) - prej je ostal zapis prejsnjega kljuca in
+            # popravilo pokvarjenega razdelka zapor (_zapri_druge) bi ga vzelo za dokoncno stanje.
+            s = stanje if stanje is not None else self._stanje_v(d, p, odtis)
+            self._postavi_stanje(d, p, self._zapis_stanja(s, odtis))
+        self._spomni_zaporo(p, odtis, stanje)
+        self._spremeni(f)
+        self._pozabi(*[x for x in staro if x != enc])
         return True
 
+    def vpisi_kljuc(self, p: str, vnos: str, preveri: Optional[Callable[[str], tuple]] = None) -> dict:
+        """Vnos v oknu »Debrid storitve«: oblika in vzorec (P.kljuc_iz_vnosa - brez klica storitve), preverba pri
+        storitvi (TorBox user/me, Real-Debrid in AllDebrid /user), shranjevanje s stanjem.
+        {"ok", "preverba": P.PREVERBA_*, "paket", "stanje"}. Zavrnjen kljuc se ne shrani; izpad ga shrani kot nepreverjen."""
+        k = P.kljuc_iz_vnosa(vnos, p)
+        if p not in P.VSI or k is None:
+            return {"ok": False, "preverba": P.PREVERBA_OBLIKA, "paket": None, "stanje": None}
+        odtis = P.odtis_stanja(k)
+        cez = self._rocna_cez(p, odtis)
+        if cez:
+            return {"ok": False, "preverba": P.PREVERBA_POCAKAJ, "paket": None, "stanje": None, "cez_s": cez}
+        # Grokov pregled 47, U1 (kot Android a15fb57): stanje TEGA kljuca, tudi ce ni vec shranjen (zapora po kljucu).
+        # Prej samo shranjenega: prej zaprt kljuc je po zamenjavi, »Odstrani« ali ponovnem zagonu ob izpadu storitve
+        # postal »nepreverjen« in ⚡, predvajanje in samodejna preverba so ga spet posiljali zaklenjenemu racunu.
+        prej = self._stanje_v(self._nastavitve(), p, odtis)
+        izid, paket = preveri(k) if preveri is not None else preveri_kljuc(p, k)
+        s = P.stanje_po_vpisu(prej, izid)
+        if s is None:
+            return {"ok": False, "preverba": izid, "paket": None, "stanje": None}
+        self._zadnja_preverba[p], self._preverjen_odtis[p] = time.time(), P.odtis_stanja(k)
+        return {"ok": self.nastavi_kljuc(p, k, paket, s), "preverba": izid, "paket": paket, "stanje": s}
+
+    # ---- stanje kljuca (lastnik 25. 10. 2026, kot Android Debrid.stanjeKljuca/obIzidu/preveriNepreverjene)
+    def _oznaka(self, d: dict, p: str) -> tuple:
+        """Sifrirani zapisi kljuca [p] v nastavitvah [d]: zapis stanja velja samo, ce se med preverbo niso spremenili."""
+        if p == P.INDEKSATOR:
+            u = d.get("usenet") if isinstance(d.get("usenet"), dict) else {}
+            return str(u.get("url") or ""), str(u.get("kljuc") or "")
+        return (str((d.get("kljuci") or {}).get(p) or ""),)
+
+    def _odtis(self, p: str) -> Optional[str]:
+        """Odtis kljuca [p] (indeksator: naslov in kljuc) ali None, ce kljuca ni."""
+        if p == P.INDEKSATOR:
+            ix = self.indeksator()
+            return P.odtis_indeksatorja(ix[0], ix[1]) if ix else None
+        k = self.kljuc(p)
+        return P.odtis_stanja(k) if k else None
+
+    def _odtisa_indeksatorja(self, d: dict) -> Optional[tuple]:
+        """(stari, novi) odtis shranjenega indeksatorja v [d]: stari je odtis naslova, kot je shranjen (do U5, 9ea51fe), novi
+        P.odtis_indeksatorja. Desifriranje samo enkrat na par zapisov (zbirka skrivnosti je klic D-Bus); None = ni
+        indeksatorja ali ga ni mogoce prebrati."""
+        u = d.get("usenet")
+        if not isinstance(u, dict) or not u.get("url") or not u.get("kljuc"):
+            return None
+        oznaki = (str(u["url"]), str(u["kljuc"]))
+        par = self._odtisa_ix.get(oznaki)
+        if par is None:
+            ix = self._indeksator_iz(d)
+            if not ix:
+                return None
+            if len(self._odtisa_ix) >= 16:
+                self._odtisa_ix.clear()
+            par = self._odtisa_ix[oznaki] = (P.odtis_stanja(ix[0] + "|" + ix[1]), P.odtis_indeksatorja(ix[0], ix[1]))
+        return par
+
+    def _z_novim_odtisom(self, d: dict) -> dict:
+        """Grokov pregled 49, O1: U5 (9ea51fe) je odtis indeksatorja izracunal iz poenotenega naslova, stanje in zapore
+        iz prejsnje razlicice pa so pod odtisom naslova, kot je bil vpisan (»www.«, velike crke …): zaklenjen indeksator je
+        bil »brez stanja« in ga je samodejna preverba klicala (zaklep racuna). Vrne [d] z odtisom shranjenega indeksatorja
+        prenesenim na novega (stanje na mestu storitve in zapora v seznamu; ob dveh zaporah velja strozja) ali [d] samega."""
+        st, zs = d.get("stanja"), d.get("zapore")
+        mesto = isinstance(st, dict) and isinstance(st.get(P.INDEKSATOR), dict)
+        seznam = isinstance(zs, dict) and isinstance(zs.get(P.INDEKSATOR), dict)
+        if not mesto and not seznam:
+            return d
+        par = self._odtisa_indeksatorja(d)
+        if not par or par[0] == par[1]:
+            return d
+        star, nov = par
+        mesto = mesto and st[P.INDEKSATOR].get("odtis") == star
+        seznam = seznam and star in zs[P.INDEKSATOR]
+        if not mesto and not seznam:
+            return d
+        d = dict(d)
+        if mesto:
+            d["stanja"] = dict(st, **{P.INDEKSATOR: dict(st[P.INDEKSATOR], odtis=nov)})
+        if seznam:
+            z, novi = zs[P.INDEKSATOR], {}
+            for o, s in z.items():
+                if o == star:
+                    if nov not in z:                # sicer pride na vrsto pri vnosu novega odtisa
+                        novi[nov] = s
+                elif o == nov:
+                    novi[o] = P.strozja_zapora(s, z[star])
+                else:
+                    novi[o] = s
+            d["zapore"] = dict(zs, **{P.INDEKSATOR: novi})
+        return d
+
+    def _stanje_v(self, d: dict, p: str, odtis: Optional[str]) -> Optional[str]:
+        """Stanje kljuca z [odtis] (P.STANJE_*), tudi kljuca, ki ni (vec) shranjen: P.stanje_z_zaporo iz zapore v
+        pomnilniku (S3), zapisa na mestu storitve v nastavitvah [d] (P.stanje_iz_zapisa: neberljiv zapis je »ne velja«) in
+        zapore po kljucu (Grokov pregled 47, U1). None = ni zapisa ali je zapis drugega kljuca."""
+        if not odtis:
+            return None
+        if p == P.INDEKSATOR:
+            d = self._z_novim_odtisom(d)           # Grokov pregled 49, O1: stanje in zapora pod odtisom pred U5 veljata
+        st = d.get("stanja")
+        na_mestu = (P.STANJE_NE_VELJA if st is not None and not isinstance(st, dict)    # pokvarjen razdelek stanj (S3)
+                    else P.stanje_iz_zapisa((st or {}).get(p), odtis))
+        zs = d.get("zapore")
+        zapore = P.zapore_iz_zapisa(zs.get(p) if isinstance(zs, dict) else zs)
+        zapora = P.STANJE_NE_VELJA if zapore is None else zapore.get(odtis)    # pokvarjen razdelek zapor: zaprto (U2)
+        with self._zaklep_zapor:
+            v_pomnilniku = self._zaprti.get((p, odtis))
+        return P.stanje_z_zaporo(v_pomnilniku, na_mestu, zapora)
+
+    def _spomni_zaporo(self, p: str, odtis: Optional[str], s: Optional[str]) -> None:
+        """Grokov pregled 40, S3: »ne velja« in »zaklenjen« v pomnilnik pred zapisom; potrjeno stanje zaporo odpravi."""
+        if not odtis or s is None:
+            return
+        with self._zaklep_zapor:
+            if s in (P.STANJE_NE_VELJA, P.STANJE_ZAKLENJEN):
+                self._zaprti[(p, odtis)] = s
+            elif s == P.STANJE_VELJA:               # U1: »nepreverjen« zapore ne odpravi (kot Android)
+                self._zaprti.pop((p, odtis), None)
+
+    def stanje_kljuca(self, p: str) -> Optional[str]:
+        """P.STANJE_* shranjenega kljuca [p]; None = ni kljuca ali ga se nihce ni preveril (stanje drugega kljuca ne velja)."""
+        return self._stanje_v(self._nastavitve(), p, self._odtis(p))
+
+    def sme_klicati(self, p: str) -> bool:
+        """Ali storitev [p] s shranjenim kljucem sploh klicemo (P.sme_klicati: ne »ne velja« in ne »zaklenjen«)."""
+        return P.sme_klicati(self.stanje_kljuca(p))
+
+    def kljuc_velja(self, p: str) -> bool:
+        """Kljuc, ki ga je storitev potrdila - samo tak bo sel med naprave (P.za_uskladitev), ko bo namizje usklajevalo."""
+        return P.za_uskladitev(self.stanje_kljuca(p))
+
+    def _zapisi_stanje(self, p: str, oznaka: tuple, odtis: str, s: str, paket: Optional[int] = None,
+                       samo_iz: Optional[tuple] = None) -> bool:
+        """Zapis stanja za kljuc z [odtis], ce je kljuc se isti kot ob zacetku preverbe ([oznaka]) in - z [samo_iz] - ce je
+        stanje TA trenutek (pod zaklepom nastavitev) eno od [samo_iz]; True = zapisano."""
+        zapisano: list = []
+
+        def f(d: dict) -> None:
+            if self._oznaka(d, p) != oznaka:
+                # Kljuc je bil medtem zamenjan ali odstranjen: mesto storitve je novega kljuca, zapora pa velja za kljuc
+                # zahteve (Grokov pregled 47, U1) - ponoven vpis ga brez odgovora storitve ne odklene.
+                if s in (P.STANJE_NE_VELJA, P.STANJE_ZAKLENJEN):
+                    self._postavi_zaporo(d, p, odtis, s)
+                return
+            if samo_iz is not None and self._stanje_v(d, p, odtis) not in samo_iz:
+                return                              # druga nit je medtem zapisala novejse stanje (Grok 40, S6)
+            self._postavi_stanje(d, p, self._zapis_stanja(s, odtis))
+            if paket is not None and p == P.TORBOX:
+                d.setdefault("paketi", {})[p] = int(paket)
+            zapisano.append(True)
+        if s in (P.STANJE_NE_VELJA, P.STANJE_ZAKLENJEN):
+            self._spomni_zaporo(p, odtis, s)        # S3: zapora velja, tudi ce zapis spodaj ne uspe
+        try:
+            self._spremeni(f)
+        except Exception as e:  # noqa: BLE001 - zapora ostane v pomnilniku, klic se ne podre
+            _log.warning("%s: stanja ni bilo mogoce zapisati (%s)", P.ime(p), type(e).__name__)
+            return False
+        if zapisano and s not in (P.STANJE_NE_VELJA, P.STANJE_ZAKLENJEN):
+            self._spomni_zaporo(p, odtis, s)
+        return bool(zapisano)
+
+    def _vezava(self, p: str) -> tuple:
+        """(oznaka, odtis) kljuca [p] ob ZACETKU zahteve - preberi jo, preden preberes kljuc za zahtevo. Grokov pregled
+        36, D2: ob_izidu je oznako in odtis bral sele po odgovoru - 401 starega kljuca je oznacil »ne velja« kljuc, ki ga je
+        uporabnik vpisal med zahtevo (uspeh starega pa novega »velja«)."""
+        return self._oznaka(self._nastavitve(), p), self._odtis(p)
+
+    def ob_izidu(self, p: str, napaka: str, uspeh: bool, vezava: Optional[tuple] = None) -> None:
+        """Med uporabo: zavrnjen kljuc (P.NAPAKA_KLJUC, npr. 401) -> »ne velja«; zaklenjen racun (P.NAPAKA_ZAKLENJEN) ->
+        »zaklenjen«; odgovor s povezavo ali zadetki -> velja. Zapise samo spremembo. [p] je storitev ali P.INDEKSATOR.
+        Po »ne velja« ali »zaklenjen« storitve ne klicemo vec (P.sme_klicati), dokler uporabnik ne pritisne »Preveri«.
+        [vezava] = _vezava(p) pred zahtevo: ce je bil kljuc medtem zamenjan, se izid ne zapise (_zapisi_stanje)."""
+        oznaka, odtis = vezava if vezava is not None else self._vezava(p)
+        if not odtis:
+            return
+        if p == P.INDEKSATOR and napaka in (P.NAPAKA_KLJUC, P.NAPAKA_ZAKLENJEN):
+            self._pozabi_povezave(lambda o: o != odtis)     # Grok 40, S1: zavrnjen kljuc ne ostane v povezavah NZB
+        prej = self._stanje_v(self._nastavitve(), p, odtis)     # stanje kljuca zahteve, tudi ce je zamenjan (U1)
+        novo = P.stanje_po_uporabi(prej, napaka, uspeh)
+        if novo == P.STANJE_VELJA:
+            # Grokov pregled 40, S6: »velja« samo iz »nepreverjen« ali brez stanja - preverjeno pod zaklepom nastavitev,
+            # da pozen uspeh ne prepise zapore, ki jo je druga nit zapisala po branju [prej].
+            self._zapisi_stanje(p, oznaka, odtis, novo, samo_iz=(None, P.STANJE_NEPREVERJEN))
+        elif novo is not None:
+            if self._zapisi_stanje(p, oznaka, odtis, novo):
+                _log.info("%s: med uporabo - stanje »%s«, storitve ne klicemo vec", P.ime(p), novo)
+        elif uspeh and prej in (P.STANJE_NE_VELJA, P.STANJE_ZAKLENJEN):
+            _log.info("%s: pozen uspeh ne odpravi stanja »%s« (samo »Preveri«)", P.ime(p), prej)
+
+    def _preveri_eno(self, p: str) -> tuple:
+        """(P.PREVERBA_*, paket) za shranjen kljuc [p] - blokirajoce. Shranjen ne-kljuc (vzorec iz navodil ali oblika iz
+        prejsnje razlicice) ne gre storitvi (Grokov pregled 36, D7): »ne velja« brez klica - zavrnjen vpis manj."""
+        if p == P.INDEKSATOR:
+            ix = self.indeksator()
+            if not ix:
+                return P.PREVERBA_OBLIKA, None
+            if P.kljuc_iz_vnosa(ix[1], P.INDEKSATOR) is None:
+                return P.PREVERBA_NEVELJAVEN, None
+            return indeksator_preveri(ix[0], ix[1]), None
+        k = self.kljuc(p)
+        if not k:
+            return P.PREVERBA_OBLIKA, None
+        if P.kljuc_iz_vnosa(k, p) is None:
+            return P.PREVERBA_NEVELJAVEN, None
+        return preveri_kljuc(p, k)
+
+    def preveri_nepreverjene(self) -> bool:
+        """Kljuci brez stanja (shranjeni pred to razlicico) ali nepreverjeni: preverba pri storitvi, nepreverjen najvec na
+        P.PREVERI_ZNOVA_S. Zavrnjen ostane shranjen z oznako »ne velja« (vrstica pove, da ga je treba vpisati znova).
+        Blokirajoce (do 8 s na kljuc) - samo z delovne niti. True = stanje katerega se je spremenilo."""
+        if not self._preverjam.acquire(blocking=False):
+            return False                            # preverba ze tece (okno odprto znova)
+        try:
+            spremenjeno = False
+            for p in P.VSI + (P.INDEKSATOR,):
+                oznaka, odtis = self._oznaka(self._nastavitve(), p), self._odtis(p)
+                if not odtis:
+                    continue
+                prej, zdaj = self.stanje_kljuca(p), time.time()
+                # Omejitev je po kljucu in v pomnilniku: tudi ce se stanje ne zapise, isti kljuc najvec na 10 min.
+                zadnjic = float(self._zadnja_preverba.get(p, 0.0)) if self._preverjen_odtis.get(p) == odtis else 0.0
+                if not P.preveri_zdaj(prej, zadnjic, zdaj):
+                    continue
+                self._zadnja_preverba[p], self._preverjen_odtis[p] = zdaj, odtis
+                izid, paket = self._preveri_eno(p)
+                if izid == P.PREVERBA_OBLIKA:
+                    continue
+                s = P.stanje_po_preverbi(izid) or P.STANJE_NE_VELJA
+                if s != prej or (paket is not None and paket != self.paket(p)):
+                    spremenjeno = self._zapisi_stanje(p, oznaka, odtis, s, paket) or spremenjeno
+            return spremenjeno
+        finally:
+            self._preverjam.release()
+
+    def preveri_izrecno(self, p: str) -> dict:
+        """Uporabnik je pritisnil »Preveri« pri kljucu [p] (storitev ali P.INDEKSATOR): ena preverba ne glede na stanje -
+        edina pot, po kateri se kljuc »ne velja« ali »zaklenjen« znova poskusi (lastnik 26. 10. 2026). Gumb je med
+        preverbo zaklenjen. {"ok", "preverba", "stanje"[, "cez_s"]}.
+        Grokov pregled 40, S8: isti kljuc najvec enkrat na minuto (P.PREVERBA_POCAKAJ, brez klica) in brez cakanja na
+        tekoco samodejno preverbo (do 4 x 8 s v niti mostu) - P.PREVERBA_TECE."""
+        if not self._preverjam.acquire(blocking=False):
+            return {"ok": False, "preverba": P.PREVERBA_TECE, "stanje": self.stanje_kljuca(p)}
+        try:
+            oznaka, odtis = self._oznaka(self._nastavitve(), p), self._odtis(p)
+            if not odtis:
+                return {"ok": False, "preverba": P.PREVERBA_OBLIKA, "stanje": None}
+            cez = self._rocna_cez(p, odtis)
+            if cez:
+                return {"ok": False, "preverba": P.PREVERBA_POCAKAJ, "stanje": self.stanje_kljuca(p), "cez_s": cez}
+            self._zadnja_preverba[p], self._preverjen_odtis[p] = time.time(), odtis
+            izid, paket = self._preveri_eno(p)
+            s = P.stanje_po_rocni_preverbi(izid)
+            if s is None:
+                # Grokov pregled 40, S2: storitev ni odgovorila - zaprt kljuc ostane zaprt (vmesnik to pove).
+                _log.info("%s: »Preveri« brez odgovora storitve - stanje ostane", P.ime(p))
+            else:
+                self._zapisi_stanje(p, oznaka, odtis, s, paket)
+            return {"ok": True, "preverba": izid, "stanje": self.stanje_kljuca(p)}
+        finally:
+            self._preverjam.release()
+
+    def paket(self, p: str) -> Optional[int]:
+        """Paket ob zadnji preverbi kljuca (TorBox: P.TORBOX_PAKETI) ali None, ce ga ne poznamo."""
+        v = (self._nastavitve().get("paketi") or {}).get(p)
+        return v if isinstance(v, int) and not isinstance(v, bool) else None
+
     def pozabi_kljuc(self, p: str) -> None:
-        self._spremeni(lambda d: (d.setdefault("kljuci", {}).pop(p, None), d.setdefault("meritve", {}).pop(p, None)))
+        staro: list = []
+
+        def f(d: dict) -> None:
+            staro.append(str((d.get("kljuci") or {}).get(p) or ""))
+            d.setdefault("kljuci", {}).pop(p, None)
+            d.setdefault("meritve", {}).pop(p, None)
+            d.setdefault("paketi", {}).pop(p, None)
+            self._postavi_stanje(d, p, None)
+        self._spremeni(f)
+        # Grokov pregled 47, U4: skrivnost se izbrise takoj po zapisu nastavitev. Prej je bil vmes pregled _zaprti brez
+        # zaklepa - zapora, ki jo je druga nit dodala med pregledom, je vrgla RuntimeError in sifriran kljuc je ostal v
+        # zbirki, ceprav je vmesnik rekel »odstranjen«. Zapora po kljucu ostane (U1, kot Android).
+        self._pozabi(*staro)
+        self._zadnja_preverba.pop(p, None)
+        self._preverjen_odtis.pop(p, None)
 
     # ---- Usenet: uporabnikov indeksator Newznab (naslov in kljuc samo sifrirana, kot kljuci storitev)
     def indeksator(self) -> Optional[tuple]:
         """(osnova, kljuc) ali None. Naslov je lahko zaseben (streznik v domacem omrezju), zato je tudi sifriran."""
-        u = self._nastavitve().get("usenet") or {}
+        return self._indeksator_iz(self._nastavitve())
+
+    def _indeksator_iz(self, d: dict) -> Optional[tuple]:
+        u = d.get("usenet") or {}
         if not isinstance(u, dict) or not u.get("url") or not u.get("kljuc"):
             return None
         try:
@@ -735,37 +1261,95 @@ class Debrid:
             return None
         return (osn, k) if osn and k else None
 
-    def nastavi_indeksator(self, naslov: str, kljuc: str) -> bool:
+    def _zamenjaj_indeksator(self, nov: Optional[dict], stanje: Optional[dict] = None, odtis: Optional[str] = None) -> None:
+        staro: list = []
+
+        def f(d: dict) -> None:
+            u = d.get("usenet")
+            if isinstance(u, dict):
+                staro.extend([str(u.get("url") or ""), str(u.get("kljuc") or "")])
+            if nov is None:
+                d.pop("usenet", None)
+            else:
+                d["usenet"] = nov
+            # Grokov pregled 40, S3: isti naslov in kljuc brez stanja ohrani svoje stanje; U2: zapis na mestu je vedno
+            # zapis shranjenega indeksatorja (kot nastavi_kljuc).
+            if nov is None:
+                self._postavi_stanje(d, P.INDEKSATOR, None)
+            else:
+                self._postavi_stanje(d, P.INDEKSATOR, stanje if stanje is not None
+                                     else self._zapis_stanja(self._stanje_v(d, P.INDEKSATOR, odtis), odtis))
+        if nov is not None:                         # odstranitev: zapora po kljucu ostane (U1), brez pregleda _zaprti (U4)
+            self._spomni_zaporo(P.INDEKSATOR, odtis, (stanje or {}).get("s"))
+        self._spremeni(f)
+        self._pozabi(*[x for x in staro if x not in (nov or {}).values()])     # U4: takoj po zapisu nastavitev
+        self._zadnja_preverba.pop(P.INDEKSATOR, None)
+        self._preverjen_odtis.pop(P.INDEKSATOR, None)
+        # Grokov pregled 40, S1: povezave NZB s prejsnjim kljucem (v naslovu) ne ostanejo v pomnilniku.
+        nov_odtis = self._odtis(P.INDEKSATOR)
+        self._pozabi_povezave(lambda o: o is not None and o == nov_odtis)
+
+    def nastavi_indeksator(self, naslov: str, kljuc: str, stanje: Optional[str] = None) -> bool:
         osn, k = U.osnova(naslov), U.ocisti_kljuc(kljuc)
         if not osn or not k:
             return False
         enc_u, enc_k = self._sifriraj(osn), self._sifriraj(k)
         if not enc_u or not enc_k:
             return False
-        self._spremeni(lambda d: d.__setitem__("usenet", {"url": enc_u, "kljuc": enc_k}))
+        odtis = P.odtis_indeksatorja(osn, k)
+        self._zamenjaj_indeksator({"url": enc_u, "kljuc": enc_k}, self._zapis_stanja(stanje, odtis), odtis)
         return True
 
+    def vpisi_indeksator(self, naslov: str, kljuc: str, preveri: Optional[Callable[[str, str], str]] = None) -> dict:
+        """Vnos indeksatorja (npr. NZBFinder: kljuc s strani profila): oblika in vzorec (P.kljuc_iz_vnosa), preverba z
+        enim iskanjem, shranjevanje s stanjem. {"ok", "preverba": P.PREVERBA_*, "stanje"}. Zavrnjen kljuc se ne shrani.
+        Grokov pregled 31, H1: kljuc v polju za naslov (U.naslov_je_kljuc) se ne shrani in ne gre nikamor - tudi ne v DNS."""
+        if U.naslov_je_kljuc(naslov):
+            return {"ok": False, "preverba": U.PREVERBA_NASLOV_JE_KLJUC, "stanje": None}
+        osn, k = U.osnova(naslov), P.kljuc_iz_vnosa(kljuc, P.INDEKSATOR)
+        if not osn or not k:
+            return {"ok": False, "preverba": P.PREVERBA_OBLIKA, "stanje": None}
+        # Grokov pregled 47, U5: meja, zapora in stanje po poenotenem naslovu (P.odtis_indeksatorja).
+        odtis = P.odtis_indeksatorja(osn, k)
+        cez = self._rocna_cez(P.INDEKSATOR, odtis)
+        if cez:
+            return {"ok": False, "preverba": P.PREVERBA_POCAKAJ, "stanje": None, "cez_s": cez}
+        # Grokov pregled 47, U1: stanje tega naslova in kljuca, tudi ce ni vec shranjen (zapora po kljucu, kot Android).
+        prej = self._stanje_v(self._nastavitve(), P.INDEKSATOR, odtis)
+        izid = (preveri or indeksator_preveri)(osn, k)
+        s = P.stanje_po_vpisu(prej, izid)
+        if s is None:
+            return {"ok": False, "preverba": izid, "stanje": None}
+        ok = self.nastavi_indeksator(osn, k, s)
+        self._zadnja_preverba[P.INDEKSATOR] = time.time()
+        self._preverjen_odtis[P.INDEKSATOR] = odtis
+        return {"ok": ok, "preverba": izid, "stanje": s}
+
     def pozabi_indeksator(self) -> None:
-        self._spremeni(lambda d: d.pop("usenet", None))
+        self._zamenjaj_indeksator(None)
 
     def gostitelj_indeksatorja(self) -> str:
         ix = self.indeksator()
         return (urllib.parse.urlsplit(ix[0]).hostname or "") if ix else ""
 
     def usenet_na_voljo(self) -> bool:
-        """Indeksator, kljuc TorBox (prenese in pretaka TorBox) in uporabnik ni izbral »Brez debrida«."""
-        return self.indeksator() is not None and bool(self.kljuc(P.TORBOX)) and self.aktivna() is not None
+        """Indeksator, kljuc TorBox (prenese in pretaka TorBox) in uporabnik ni izbral »Brez debrida«. Iskanje in prenos
+        NZB tecejo sama ob seznamu virov: s kljucem, ki ga je indeksator ali TorBox zavrnil, ali z zaklenjenim racunom ne
+        (P.sme_klicati - vsak klic bi bil se en zavrnjen poskus prijave; indeksatorji stejejo klice API na dan)."""
+        return (self.indeksator() is not None and bool(self.kljuc(P.TORBOX)) and self.aktivna() is not None
+                and self.sme_klicati(P.INDEKSATOR) and self.sme_klicati(P.TORBOX))
 
     def usenet_isci(self, ident: str) -> list:
         """Tokovi Usenet za id Stremio: [{"url": "usenet:…", "opis": …, "gb": …}]. Povezave NZB ostanejo v pomnilniku."""
+        vezava = self._vezava(P.INDEKSATOR)
         ix = self.indeksator()
         if not ix or not self.usenet_na_voljo() or not U.iscemo(ident):
             return []
         tokovi = []
-        for z in usenet_isci(ix[0], ix[1], ident):
+        for z in usenet_isci(ix[0], ix[1], ident, ob_izidu=lambda n, u: self.ob_izidu(P.INDEKSATOR, n, u, vezava)):
             idt = U.id_toka(z.povezava)
             with self._zaklep:
-                self._povezave_nzb[idt] = z.povezava
+                self._povezave_nzb[idt] = (z.povezava, vezava)
                 while len(self._povezave_nzb) > 500:
                     self._povezave_nzb.pop(next(iter(self._povezave_nzb)))
             tokovi.append({"url": idt, "opis": U.opis(z), "naslov": z.naslov, "gb": z.velikost / 1073741824.0,
@@ -795,24 +1379,57 @@ class Debrid:
                                  or sum(len(b) for _c, b in self._nzb.values()) > self.NZB_NAJVEC_BAJTOV):
                 self._nzb.popitem(last=False)
 
+    @staticmethod
+    def _odtis_povezave(v: object) -> Optional[str]:
+        """Odtis kljuca indeksatorja, s katerim je bila povezava NZB najdena (vezava ob iskanju), ali None."""
+        vezava = v[1] if isinstance(v, tuple) and len(v) == 2 else None
+        return vezava[1] if isinstance(vezava, tuple) and len(vezava) == 2 and vezava[1] else None
+
+    def _pozabi_povezave(self, ostane: Callable[[Optional[str]], bool]) -> None:
+        """Povezave NZB (in NZB iz njih), katerih kljuc indeksatorja ne ostane v rabi, odstrani iz pomnilnika (Grokov
+        pregled 40, S1: povezava nosi kljuc v naslovu - zamenjan, odstranjen ali zavrnjen kljuc ne sme ostati v njej)."""
+        with self._zaklep:
+            for idt in [i for i, v in self._povezave_nzb.items() if not ostane(self._odtis_povezave(v))]:
+                self._povezave_nzb.pop(idt, None)
+                self._nzb.pop(idt, None)
+
     def usenet_tok(self, id_toka: str, ime_izdaje: str, indeks: Optional[int] = None,
                    samo_takoj: bool = False, rok_cakanja: float = U.CAKAJ_PRENOSA_S,
                    preklic: Optional[threading.Event] = None) -> Izid:
         """NZB od indeksatorja (ta racunalnik), nato TorBox. Napaka indeksatorja je U.NAPAKA_INDEKSATOR."""
+        vezava_tb = self._vezava(P.TORBOX)
         k = self.kljuc(P.TORBOX)
         if not k:
             return Izid(napaka=P.NAPAKA_KLJUC, ponudnik=P.TORBOX)
+        for p in (P.TORBOX, P.INDEKSATOR):
+            if not self.sme_klicati(p):         # zavrnjen ali zaklenjen: brez prenosa NZB in brez klica TorBoxa
+                return Izid(napaka=self._napaka_stanja(p), ponudnik=P.TORBOX)
         with self._zaklep:
-            povezava = self._povezave_nzb.get(id_toka)
+            v = self._povezave_nzb.get(id_toka)
+        # Povezava NZB nosi kljuc indeksatorja iz casa iskanja: izid velja za tisti kljuc (vezava ob iskanju).
+        povezava, vezava_ix = v if isinstance(v, tuple) else (v, None)
         if not povezava:
+            return Izid(napaka=U.NAPAKA_INDEKSATOR, ponudnik=P.TORBOX)
+        # Grokov pregled 40, S1: sme_klicati zgoraj pove stanje TRENUTNEGA kljuca. Povezava iz prejsnjega iskanja je po
+        # zamenjavi ali odstranitvi zaklenjenega kljuca poslala STARI kljuc indeksatorju - klicemo samo s kljucem, ki je
+        # se shranjen (isti odtis), in torej z njegovim stanjem.
+        odtis_ix, trenutni = self._odtis_povezave(v), self._odtis(P.INDEKSATOR)
+        if not odtis_ix or odtis_ix != trenutni:
+            self._pozabi_povezave(lambda o: o is not None and o == trenutni)
+            _log.info("usenet: povezava NZB je iz iskanja s prejsnjim kljucem indeksatorja - brez klica, iskanje znova")
             return Izid(napaka=U.NAPAKA_INDEKSATOR, ponudnik=P.TORBOX)
         nzb = self._nzb_zapomnjen(id_toka)
         if nzb is None:
-            nzb, _napaka = usenet_nzb(povezava)
+            nzb, napaka = usenet_nzb(povezava)
+            # Stanje kljuca indeksatorja sledi uporabi (401 ali Newznab 100-102 -> »ne velja«, NZB -> velja).
+            _javi(lambda n, u: self.ob_izidu(P.INDEKSATOR, n, u, vezava_ix), napaka, nzb is not None)
             if nzb is None:
                 return Izid(napaka=U.NAPAKA_INDEKSATOR, ponudnik=P.TORBOX)
             self._zapomni_nzb(id_toka, nzb)
-        return torbox_usenet(k, nzb, ime_izdaje, indeks, samo_takoj, rok_cakanja=rok_cakanja, preklic=preklic)
+        izid = torbox_usenet(k, nzb, ime_izdaje, indeks, samo_takoj, rok_cakanja=rok_cakanja, preklic=preklic)
+        # Lastnik 25. 10. 2026 (kot Android Usenet.tok): stanje kljuca TorBox sledi uporabi (401 -> »ne velja«).
+        _javi(lambda n, u: self.ob_izidu(P.TORBOX, n, u, vezava_tb), izid.napaka, bool(izid.url))
+        return izid
 
     def usenet_takoj(self, tokovi: Sequence[dict], rok: float = U.TAKOJ_ROK_S) -> Optional[tuple]:
         """Lastnik 25. 10. 2026: Usenet, ki ga ima TorBox ze pripravljenega, gre pred vse druge vire. Prve U.TAKOJ_IZDAJ izdaj
@@ -823,20 +1440,27 @@ class Debrid:
             return None
         konec = time.monotonic() + max(0.1, rok)
         preklic = threading.Event()
-        niti = [(i, v_ozadju(self.usenet_tok, str(tokovi[i].get("url") or ""), str(tokovi[i].get("naslov") or ""),
-                             None, True, P.CAKAJ_NOVEGA_S, preklic)) for i in izbrani]
+        niti = [v_ozadju(self.usenet_tok, str(tokovi[i].get("url") or ""), str(tokovi[i].get("naslov") or ""),
+                         None, True, P.CAKAJ_NOVEGA_S, preklic) for i in izbrani]
+
+        def pripravljen(f: Future) -> Optional[bool]:
+            if not f.done():
+                return None
+            izid = _izid_do(f, 0.0)
+            return isinstance(izid, Izid) and bool(izid.url)
         try:
-            pripravljene = []
-            for _i, f in niti:
-                izid = _izid_do(f, konec)
-                pripravljene.append(izid if isinstance(izid, Izid) and izid.url else None)
-                if pripravljene[-1] is not None:
-                    break           # najboljsa pripravljena po kakovosti: slabsih ne cakamo
+            # Skupno pravilo izbire (U.izberi_usenet, isti primeri kot Android): najboljsa pripravljena zmaga, ko so
+            # boljse odgovorile »ne«; dokler boljsa se caka, cakamo do roka.
+            while True:
+                k = U.izberi_usenet([pripravljen(f) for f in niti], time.monotonic() >= konec)
+                if k != U.CAKAJ:
+                    break
+                futures_wait([f for f in niti if not f.done()], timeout=max(0.01, konec - time.monotonic()),
+                             return_when=FIRST_COMPLETED)
         finally:
             preklic.set()
-        k = U.najboljsa_pripravljena([x is not None for x in pripravljene])
         _log.info("usenet takoj: %s", "izdaja %d pripravljena" % k if k >= 0 else "nobena pripravljena")
-        return (izbrani[k], pripravljene[k]) if k >= 0 else None
+        return (izbrani[k], niti[k].result()) if k >= 0 else None
 
     # ---- nastavitve
     def samo_takoj(self) -> bool:
@@ -871,25 +1495,43 @@ class Debrid:
         storitve = []
         for p in P.VSI:
             m = self.zadnja_meritev(p)
-            storitve.append({"id": p, "ime": P.ime(p), "kljuc": bool(self.kljuc(p)), "kje": P.kje_kljuc(p),
-                             "meritev": P.opis_meritve(m) if m else ""})
+            kljuc = bool(self.kljuc(p))
+            # stanje: velja / ne_velja / nepreverjen (tudi kljuc brez zapisa stanja); "" = ni kljuca. Nikoli kljuc.
+            storitve.append({"id": p, "ime": P.ime(p), "kljuc": kljuc, "kje": P.kje_kljuc(p),
+                             "meritev": P.opis_meritve(m) if m else "",
+                             "paket": P.ime_paketa(self.paket(p)) if kljuc else "",
+                             "stanje": (self.stanje_kljuca(p) or P.STANJE_NEPREVERJEN) if kljuc else ""})
+        tb = self.paket(P.TORBOX) if self.kljuc(P.TORBOX) else None
+        gost = self.gostitelj_indeksatorja()
         return {"storitve": storitve, "aktivna": self.aktivna() or "", "samo_takoj": self.samo_takoj(),
                 "oznaka": P.OZNAKA_PREDPOMNJEN,
-                "usenet": {"gostitelj": self.gostitelj_indeksatorja(), "torbox": bool(self.kljuc(P.TORBOX))}}
+                # torbox_pro: None = paketa ne poznamo (kljuc ni bil preverjen) - Usenet ima samo Pro.
+                "usenet": {"gostitelj": gost, "torbox": bool(self.kljuc(P.TORBOX)),
+                           "torbox_pro": None if tb is None else tb == P.TORBOX_PRO,
+                           "stanje": (self.stanje_kljuca(P.INDEKSATOR) or P.STANJE_NEPREVERJEN) if gost else ""}}
 
     # ---- predvajanje
     def predpomnjeni(self, hashi: Sequence[str]) -> set:
         """Hashi, ki jih ima storitev pripravljene (⚡). Prava preverba je samo pri TorBoxu."""
+        vezava = self._vezava(P.TORBOX)
         k = self.kljuc(P.TORBOX)
-        if self.aktivna() is None or not k:
-            return set()
-        return torbox_predpomnjeni(k, hashi)
+        if self.aktivna() is None or not k or not self.sme_klicati(P.TORBOX):
+            return set()                        # zavrnjen kljuc: ⚡ ob vsakem seznamu virov bi bil nov zavrnjen klic
+        # Zavrnjen kljuc ze ob preverbi ⚡ (kot Android TorBox.predpomnjeni): vrstica v »Debrid storitve« pove »ne velja«.
+        return torbox_predpomnjeni(k, hashi, ob_napaki=lambda napaka: self.ob_izidu(P.TORBOX, napaka, False, vezava))
+
+    def _napaka_stanja(self, p: str) -> str:
+        """Napaka za uporabnika, ko storitve [p] ne klicemo (P.sme_klicati)."""
+        return P.NAPAKA_ZAKLENJEN if self.stanje_kljuca(p) == P.STANJE_ZAKLENJEN else P.NAPAKA_KLJUC
 
     def _poskus(self, p: str, hash_: str, indeks: Optional[int], magnet: str, samo_pred: bool,
                 preklic: Optional[threading.Event] = None) -> Izid:
+        vezava = self._vezava(p)                # pred kljucem: izid zahteve velja samo za ta kljuc (Grok 36, D2)
         k = self.kljuc(p)
         if not k:
             return Izid(napaka=P.NAPAKA_KLJUC, ponudnik=p)
+        if not self.sme_klicati(p):
+            return Izid(napaka=self._napaka_stanja(p), ponudnik=p)
         if p == P.TORBOX:
             casi = list(self._nastavitve().get("torbox_novi") or [])
             izid = torbox_tok(k, hash_, indeks, magnet, samo_pred, casi, preklic=preklic)
@@ -899,6 +1541,13 @@ class Debrid:
             izid = rd_tok(k, magnet, indeks, samo_pred, preklic=preklic)
         else:
             izid = ad_tok(k, hash_, indeks, samo_pred, preklic=preklic)
+        # Lastnik 25. 10. 2026 (kot Android Debrid.obIzidu): stanje kljuca sledi uporabi (401 -> »ne velja«, povezava -> velja).
+        _javi(lambda n, u: self.ob_izidu(p, n, u, vezava), izid.napaka, bool(izid.url))
+        if izid.napaka == P.NAPAKA_DOVOLJENJE:
+            # Grokov pregled 40, S4: RD 9 - potrjen kljuc ostane, uporabnik izve, da racun tega ne omogoca (paket);
+            # kljuc, ki ga storitev se ni potrdila, ne velja za to rabo.
+            izid = Izid(izid.url, P.NAPAKA_PAKET if self.stanje_kljuca(p) == P.STANJE_VELJA else P.NAPAKA_KLJUC,
+                        izid.opis, izid.ponudnik)
         # Izid vedno nosi storitev, ki je odgovorila (sporocilo napake jo imenuje).
         return izid if izid.ponudnik else Izid(izid.url, izid.napaka, izid.opis, p)
 
@@ -910,9 +1559,15 @@ class Debrid:
             samo_takoj: Optional[bool] = None) -> Izid:
         """Povezava za torrent prek storitev s kljucem. Vec storitev: vse hkrati (samo pripravljeno), med uspesnimi
         izmerimo ping in hitrost do tega racunalnika - predvaja najhitrejsa. Nikoli tiho na neposreden torrent."""
-        red = self.vrstni_red()
-        if not red:
+        vsi = self.vrstni_red()
+        if not vsi:
             return Izid(napaka=P.NAPAKA_KLJUC)
+        # Lastnik 26. 10. 2026 (zaklep racuna): storitve s kljucem »ne velja« ali »zaklenjen« ne klicemo - tudi ob
+        # predvajanju ne. Ce ni nobene druge, uporabnik dobi napako (nikoli tiho na neposreden torrent).
+        red = [p for p in vsi if self.sme_klicati(p)]
+        if not red:
+            napake = [(p, self._napaka_stanja(p)) for p in vsi]
+            return Izid(napaka=P.razlog_po_storitvah(napake), ponudnik=P.ponudnik_napake(napake))
         h = str(hash_ or "").strip().lower()
         if not P.je_hash(h):
             return Izid(napaka=P.NAPAKA_NI_DATOTEKE)
@@ -960,21 +1615,35 @@ class Debrid:
 
 def most(dbr: Debrid, a: list) -> dict:
     """Metoda mostu »mediaDebrid« (Linux os_katalog, Windows os_app): [] -> stanje; ["aktivna", p | ""];
-    ["kljuc", p, vnos] -> {"ok": bool, ...stanje}; ["pozabi", p]; ["samo_takoj", da]; ["usenet", naslov, kljuc];
-    ["pozabi_usenet"]. Vrne stanje brez kljucev (pri Usenetu samo gostitelja indeksatorja)."""
+    ["kljuc", p, vnos] -> {"ok": bool, "preverba": P.PREVERBA_*, "paket": ime, ...stanje}; ["pozabi", p];
+    ["samo_takoj", da]; ["usenet", naslov, kljuc] -> {"ok", "preverba", ...stanje}; ["pozabi_usenet"];
+    ["preveri"] -> preverba kljucev brez stanja ali nepreverjenih (okno »Debrid storitve« jo poklice po odprtju) in stanje;
+    ["preveri", p | "usenet"] -> uporabnik je pritisnil »Preveri« (edina pot za »ne velja« in »zaklenjen«).
+    Vrne stanje brez kljucev (pri Usenetu samo gostitelja indeksatorja). Klic s preverbo je blokirajoc (do 8 s na
+    kljuc) - most tece v delovni niti (os_katalog.izvedi)."""
     ukaz = str(a[0]) if a else ""
-    ok = True
+    izid: dict = {"ok": True}
     if ukaz == "aktivna":
         p = str(a[1]) if len(a) > 1 else ""
         dbr.nastavi_aktivno(p if p in P.VSI else None)
     elif ukaz == "kljuc":
-        ok = len(a) > 2 and dbr.nastavi_kljuc(str(a[1]), str(a[2]))
+        # Preverba ob vnosu (TorBox user/me, Real-Debrid in AllDebrid /user): vmesnik dobi samo izid in ime paketa -
+        # nikoli kljuca, uporabniskega imena ali e-naslova.
+        izid = dbr.vpisi_kljuc(str(a[1]), str(a[2])) if len(a) > 2 else {"ok": False, "preverba": P.PREVERBA_OBLIKA}
+        izid = dict(izid, paket=P.ime_paketa(izid.get("paket")))
     elif ukaz == "pozabi" and len(a) > 1 and str(a[1]) in P.VSI:
         dbr.pozabi_kljuc(str(a[1]))
     elif ukaz == "samo_takoj":
         dbr.nastavi_samo_takoj(bool(a[1]) if len(a) > 1 else True)
     elif ukaz == "usenet":
-        ok = len(a) > 2 and dbr.nastavi_indeksator(str(a[1]), str(a[2]))
+        izid = dbr.vpisi_indeksator(str(a[1]), str(a[2])) if len(a) > 2 else {"ok": False, "preverba": P.PREVERBA_OBLIKA}
     elif ukaz == "pozabi_usenet":
         dbr.pozabi_indeksator()
-    return dict(dbr.stanje(), ok=bool(ok))
+    elif ukaz == "preveri" and len(a) > 1:
+        p = str(a[1])
+        p = P.INDEKSATOR if p == "usenet" else p
+        izid = dbr.preveri_izrecno(p) if p in P.VSI + (P.INDEKSATOR,) else {"ok": False, "preverba": P.PREVERBA_OBLIKA}
+    elif ukaz == "preveri":
+        dbr.preveri_nepreverjene()
+    return dict(dbr.stanje(), ok=bool(izid.get("ok")), preverba=str(izid.get("preverba") or ""),
+                paket=str(izid.get("paket") or ""), cez_s=int(izid.get("cez_s") or 0))
