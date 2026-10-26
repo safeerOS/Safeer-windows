@@ -755,8 +755,58 @@ def _je_predvajalni_vir(url: str) -> bool:
 _PLATFORME_BREZ_RACUNA = ("youtube.com", "youtu.be", "soundcloud.com", "bandcamp.com")
 
 
-def _platforma_brez_racuna(url: object) -> bool:
+#: Imena parametrov poizvedbe in poti Xtream, ki nosijo uporabnika, geslo ali kljuc (Pregled 98, Ķ3).
+_PARAMETRI_POVERILNIC = frozenset({"username", "user", "usr", "login", "password", "pass", "passwd", "pwd",
+                                   "token", "key", "apikey", "api_key", "auth", "mac"})
+_POTI_S_POVERILNICAMI = frozenset({"live", "movie", "series", "timeshift"})
+
+
+def _ima_poverilnice(url: object) -> bool:
+    """Naslov nosi uporabnika, geslo ali kljuc (userinfo, parameter poizvedbe ali pot Xtream /live/<u>/<g>/...). Ob
+    dvomu (naslova ni mogoce razcleniti) True - fail-closed."""
     besedilo = str(url or "")
+    try:
+        deli = urllib.parse.urlsplit(besedilo)
+        if deli.username or deli.password:
+            return True
+        imena = {ime.casefold() for ime, _ in urllib.parse.parse_qsl(deli.query, keep_blank_values=True)}
+    except ValueError:
+        return True
+    if imena & _PARAMETRI_POVERILNIC:
+        return True
+    pot = [d for d in deli.path.split("/") if d]
+    return len(pot) >= 3 and pot[0].casefold() in _POTI_S_POVERILNICAMI
+
+
+def _kljuc_racuna(url: object) -> tuple:
+    """(gostitelj brez vrat, odtis uporabnika ali None) za zaklep socasnih osvezitev istega racuna (Pregled 98, Ķ2).
+    Uporabnik iz userinfo, parametra poizvedbe ali poti Xtream; v pomnilniku samo odtis, nikoli uporabnik ali geslo.
+    None = uporabnika ni mogoce prebrati - tak klic caka na VSE osvezitve istega gostitelja (nikoli dve prijavi)."""
+    besedilo = str(url or "")
+    try:
+        deli = urllib.parse.urlsplit(besedilo)
+        gostitelj = (deli.hostname or "").casefold().rstrip(".") or "?"
+        uporabnik = deli.username or ""
+        if not uporabnik:
+            poizvedba = {k.casefold(): v for k, v in urllib.parse.parse_qsl(deli.query, keep_blank_values=True)}
+            uporabnik = next((poizvedba[k] for k in ("username", "user", "usr", "login") if poizvedba.get(k)), "")
+        if not uporabnik:
+            pot = [d for d in deli.path.split("/") if d]
+            if len(pot) >= 3 and pot[0].casefold() in _POTI_S_POVERILNICAMI:
+                uporabnik = pot[1]
+    except ValueError:
+        return ("?", None)
+    odtis = hashlib.sha256(uporabnik.encode("utf-8", "surrogateescape")).hexdigest()[:16] if uporabnik else None
+    return (gostitelj, odtis)
+
+
+def _platforma_brez_racuna(url: object) -> bool:
+    """Znana platforma brez racuna ali predvajalni vir - NIKOLI, ce naslov nosi poverilnice (Pregled 98, Ķ3,
+    26. 10. 2026: panel IPTV, ki ga ujame vzorec predvajalnega vira, bi sicer izklopil premor in prepoved rezervne
+    zahteve z geslom)."""
+    besedilo = str(url or "")
+    if _ima_poverilnice(besedilo):
+        return False
     try:
         gostitelj = (urllib.parse.urlsplit(besedilo).hostname or "").casefold()
     except ValueError:
@@ -2408,9 +2458,7 @@ class MediaCenter:
             data.setdefault("viri", []).append(source)
             self._save(data)
         if caka:
-            self._vir_potrjen(viri_sink.URL, canonical)
-            if prevzet.get("naslov"):
-                self._vir_potrjen(str(prevzet.get("tip") or viri_sink.URL), str(prevzet["naslov"]))
+            self._potrdi_prejeti_vir(canonical, prevzet)
             return {"ok": True, "napaka": "", "caka": True, "vir": {k: v for k, v in source.items() if k != "vnosi"}}
         # Odziv vira začnemo meriti takoj ob dodajanju, da je meritev navadno
         # že na voljo, ko uporabnik prvič izbere film ali epizodo.
@@ -2504,6 +2552,25 @@ class MediaCenter:
             source["link_naslov"] = str(prevzet.get("naslov") or naslov)
         else:
             source["dodan"] = viri_sink.nov_cas(self._zdaj_ms(), 0, viri_sink.cas_izbrisa(stanje["izbrisani"], tip, naslov) or 0)
+
+    def _potrdi_prejeti_vir(self, canonical: str, prevzet: object) -> None:
+        """Prejet vir v Linku potrdi samo kot URL in samo za naslov, ki je bil na tej napravi dejansko dodan (Pregled 98,
+        Ķ4, 26. 10. 2026). _vir_potrjen pozabi izbris in zavrnitev - tip in naslov iz dohodnega sporocila bi sicer
+        izbrala, katero izbrisano ali zavrnjeno stvar ta naprava pozabi (o vsebinah te naprave odloca samo ta naprava)."""
+        self._vir_potrjen(viri_sink.URL, canonical)
+        if not isinstance(prevzet, dict):
+            return
+        naslov = prevzet.get("naslov")
+        if not isinstance(naslov, str) or not naslov or naslov == canonical:
+            return
+        if str(prevzet.get("tip") or viri_sink.URL) != viri_sink.URL:
+            return
+        try:
+            enak = canonical_url(naslov) == canonical
+        except Exception:  # noqa: BLE001 - neveljaven naslov ni ta vir
+            enak = False
+        if enak:
+            self._vir_potrjen(viri_sink.URL, naslov)
 
     def _vir_potrjen(self, tip: str, naslov: str) -> None:
         """Vir je res dodan (predvajljiv): znan izbris in zavrnitev istega vira pozabimo, izvoz za naprave osvezimo."""
@@ -2774,15 +2841,25 @@ class MediaCenter:
         if source_id.startswith("streznik-"):
             return self._refresh_source_ena(source_id)
         with self._lock:
+            source = next((s for s in self._load().get("viri", []) if isinstance(s, dict) and s.get("id") == source_id), None)
+            # Pregled 98, Ķ2 (26. 10. 2026): zaklep po RACUNU, ne po id vira - isti racun je lahko v vec virih (type=m3u in
+            # m3u_plus, player_api.php, druga vrata); nikoli dve hkratni prijavi istega racuna.
+            racun = _kljuc_racuna(source.get("url")) if source is not None and self._racun_vira(source) else None
             tece = self.__dict__.setdefault("_osvezuje_vire", set())
-            if source_id in tece:
+            racuni = self.__dict__.setdefault("_osvezuje_racune", [])
+            if source_id in tece or (racun is not None and any(
+                    g == racun[0] and (u is None or racun[1] is None or u == racun[1]) for g, u in racuni)):
                 return {"ok": False, "napaka": "", "ze_tece": True}
             tece.add(source_id)
+            if racun is not None:
+                racuni.append(racun)
         try:
             return self._refresh_source_ena(source_id)
         finally:
             with self._lock:
                 tece.discard(source_id)
+                if racun is not None:
+                    racuni.remove(racun)
 
     def _refresh_source_ena(self, source_id: str) -> dict:
         if source_id.startswith("streznik-"):
@@ -2896,6 +2973,9 @@ class MediaCenter:
         cutoff = zdaj - max(60, int(max_age))
         ids = [source.get("id", "") for source in self.sources()
                if not source.get("caka_uporabnika")             # prejet vir z racunom: sele ob uporabnikovi osvezitvi
+               # Pregled 98, Ķ1 (26. 10. 2026; lastnik: nevarnost zaklepa racuna je prioriteta): vira z racunom (IPTV)
+               # samodejna pot nikoli ne odpre - prijava z geslom med predvajanjem bi bila druga hkratna povezava.
+               and not self._racun_vira(source)
                and zdaj >= self._zavrnjen_do(source)            # premor po zavrnitvi velja tudi za samodejno pot
                and (int(source.get("posodobljeno") or 0) < cutoff
                     or (_je_predvajalni_vir(str(source.get("url") or ""))

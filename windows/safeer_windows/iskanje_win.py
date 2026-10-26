@@ -13,6 +13,7 @@ mape se pogleda v zivo (datoteka, shranjena po gradnji indeksa).
 from __future__ import annotations
 
 import os
+import re
 import threading
 import time
 from typing import Callable, Dict, List, Optional, Tuple
@@ -42,6 +43,31 @@ def _vrsta_pogona(koren: str) -> int:
 DRIVE_REMOTE = 4
 
 
+_POLNA_POT_POGONA = re.compile(r"[A-Za-z]:[\\/]")
+_REZERVIRANA_IMENA = frozenset({"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"}
+                               | {"COM" + c for c in "123456789\u00b9\u00b2\u00b3"}
+                               | {"LPT" + c for c in "123456789\u00b9\u00b2\u00b3"})
+
+
+def _je_polna_pot_pogona(pot: str) -> bool:
+    """True samo za polno pot na pogonu s crko (C:\\mapa, C:/mapa) - cisto besedilno, neodvisno od trenutne mape.
+    Pregled 98, Ķ5 (26. 10. 2026): »D:.«, »D:..«, »D:mapa« in »\\mapa« je abspath razresil glede na TRENUTNO mapo
+    (isti razred napake, ki ga je ujel CI z delovno mapo na D:); tok ADS (»:« za pogonom), ».«, »..«, sestavine s piko
+    ali presledkom na koncu in rezervirana imena (NUL, COM1) niso mape."""
+    if not isinstance(pot, str) or "\x00" in pot or not _POLNA_POT_POGONA.match(pot):
+        return False
+    if ":" in pot[2:]:
+        return False
+    for sestavina in re.split(r"[\\/]+", pot[3:]):
+        if not sestavina:
+            continue
+        if sestavina in (".", "..") or sestavina[-1] in ". ":
+            return False
+        if sestavina.split(".", 1)[0].rstrip(" ").upper() in _REZERVIRANA_IMENA:
+            return False
+    return True
+
+
 def lokalna_mapa(pot: str, vrsta_pogona: Callable[[str], int] = _vrsta_pogona) -> bool:
     """Ali smemo mapo indeksirati in po njej hoditi: ne pot UNC, ne omrezni pogon, ne koren diska. Pregled Grok 59 G3:
     znana mapa iz registra je lahko preusmerjena na streznik (pot UNC) ali na koren diska D: - jedro
@@ -50,9 +76,9 @@ def lokalna_mapa(pot: str, vrsta_pogona: Callable[[str], int] = _vrsta_pogona) -
     pot = str(pot or "")
     if not pot or pot.startswith(("\\\\", "//")):
         return False
-    # Pogon brez poti (»D:«) je koren diska. abspath bi dal TRENUTNO mapo na tem pogonu - CI Windows 26. 10. 2026
-    # (delovna mapa na D:) je zato »D:« sprejel kot lokalno mapo; na tem PC je bil koren, ker delovna mapa ni na D:.
-    if len(pot.rstrip("\\/")) == 2 and pot[1] == ":" and pot[0].isalpha():
+    # Samo polna pot na pogonu (Pregled 98, Ķ5): »D:«, »D:.«, »D:mapa«, »\\mapa« bi abspath razresil glede na trenutno
+    # mapo - CI Windows 26. 10. 2026 (delovna mapa na D:) je zato »D:« sprejel kot lokalno mapo.
+    if not _je_polna_pot_pogona(pot):
         return False
     pogon, ostalo = os.path.splitdrive(os.path.abspath(pot))
     if pogon.startswith(("\\\\", "//")):

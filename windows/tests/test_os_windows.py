@@ -502,11 +502,24 @@ class TestOsWindows(unittest.TestCase):
 
     def test_media_samodejno_osvezi_samo_zastarele_vire(self):
         payload = b'{"items":[{"title":"Film","url":"https://cdn.test/film.mp4"}]}'
+        # Pregled 98, Ķ1 (26. 10. 2026): v ozadju se osvezi samo POZITIVNO znan javen vir (viri_sink.znan_javen, ali vir, ki
+        # ga je uporabnik oznacil kot javnega); neznan vir velja za vir z racunom (fail-closed) in ga osvezi samo uporabnik.
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             center = os_media.MediaCenter(td, roots=[])
             with mock.patch.object(center, "_download",
                                    return_value=(payload, "application/json", "https://api.test/catalog")) as download:
                 self.assertTrue(center.add_source("https://api.test/catalog")["ok"])
+                download.reset_mock()
+                stored = center._load()
+                stored["viri"][0]["posodobljeno"] = 0
+                center._save(stored)
+                self.assertEqual(center.refresh_stale(max_age=3600)["osvezenih"], 0)
+                download.assert_not_called()
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            center = os_media.MediaCenter(td, roots=[])
+            javni = "https://iptv-org.github.io/catalog.json"
+            with mock.patch.object(center, "_download", return_value=(payload, "application/json", javni)) as download:
+                self.assertTrue(center.add_source(javni)["ok"])
                 download.reset_mock()
                 self.assertEqual(center.refresh_stale(max_age=3600)["osvezenih"], 0)
                 download.assert_not_called()
