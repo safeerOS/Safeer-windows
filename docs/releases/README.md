@@ -4,6 +4,7 @@ One file per version. Packages: [GitHub Releases](https://github.com/safeerOS/Sa
 
 ## Safeer OS for Windows
 
+- [1.0.52](RELEASE_NOTES_1.0.52.md) (2026-10-26) — Safeer Player kot svoj namestitveni program, zaščita računa IPTV, skupna koda Linux 1.0.133.
 - [1.0.51](RELEASE_NOTES_1.0.51.md) (2026-10-09) — Zaslon računalnika z zvokom.
 - [1.0.50](RELEASE_NOTES_1.0.50.md) (2026-10-09) — Firefox ostane za Ščitom.
 - [1.0.49](RELEASE_NOTES_1.0.49.md) (2026-10-09) — Kazalec miške je na tablici, telefonu in televizorju viden – in se premika takoj.

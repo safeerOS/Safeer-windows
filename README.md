@@ -12,7 +12,7 @@ on a Windows server, not yet on a wide range of real computers.
 
 | | |
 |---|---|
-| **Safeer OS for Windows** (browser, Safeer Control and Safeer Media in one app) | **1.0.51** — `windows/VERSION` on `main`, release [`safeer-os-windows-v1.0.51`](https://github.com/safeerOS/Safeer-windows/releases/tag/safeer-os-windows-v1.0.51) |
+| **Safeer OS for Windows** (browser, Safeer Control and Safeer Media in one app) | **1.0.52** — `windows/VERSION` on `main`, release [`safeer-os-windows-v1.0.52`](https://github.com/safeerOS/Safeer-windows/releases/tag/safeer-os-windows-v1.0.52) |
 | What changed · Kaj je novega | [CHANGELOG.md](CHANGELOG.md) · every version / vse različice: [docs/releases/](docs/releases/) |
 | Download · Prenos | [safeer.si/browser/windows/](https://safeer.si/browser/windows/) · [GitHub Releases](../../releases/latest) |
 
