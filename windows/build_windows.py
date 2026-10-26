@@ -140,6 +140,9 @@ def mpv_vendor_args() -> list:
     manjka = [f for f in _MPV_OBVEZNO if not os.path.isfile(os.path.join(VENDOR_MPV, f))]
     if manjka:
         raise SystemExit("libmpv: windows/safeer_windows/vendor/mpv je nepopoln, manjka: " + ", ".join(manjka))
+    # python-mpv ob uvozu isce libmpv-2.dll na PATH (CI 40360126842, 26. 10. 2026: »Cannot find mpv-1.dll ...«) -
+    # preverjamo PRILOZENO knjiznico, zato jo damo na zacetek PATH (obstojeca spremenljivka, gradnja brez niti).
+    os.environ["PATH"] = VENDOR_MPV + os.pathsep + os.environ.get("PATH", "")
     try:
         import mpv  # noqa: F401
     except Exception as e:  # noqa: BLE001
