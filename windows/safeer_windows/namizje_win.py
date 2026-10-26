@@ -22,7 +22,7 @@ from typing import Any, Callable, Dict, Optional
 
 from core import os_datoteke, os_iskalnik, os_lupa
 
-from . import namizje_datoteke as nd
+from . import iskanje_win, namizje_datoteke as nd
 
 _WIN = sys.platform == "win32"
 
@@ -149,7 +149,8 @@ def metode(okno: "NamizjeOkno") -> Dict[str, Callable[[list], Any]]:
     return {
         "mapa": lambda a: nd.preglej(_s(a, 0, "~")),
         "nedavne": lambda a: nd.nedavne(),
-        "isciDatoteke": lambda a: os_iskalnik.isci(_s(a), min(300, max(1, int(a[1]))) if len(a) > 1 and isinstance(a[1], (int, float))
+        "nedavneSledenje": lambda a: nd.sledenje_nedavnim(),
+        "isciDatoteke": lambda a: iskanje_win.isci(_s(a), min(300, max(1, int(a[1]))) if len(a) > 1 and isinstance(a[1], (int, float))
                                                  and not isinstance(a[1], bool) else os_datoteke.NAJVEC_ZADETKOV),
         "odpriDatoteko": lambda a: nd.odpri(_s(a)),
         "pokaziVMapi": lambda a: nd.pokazi_v_mapi(_s(a)),

@@ -43,6 +43,15 @@ _MEJE = b" -_.([{+,;"
 kljuc = os_datoteke.kljuc_imena
 
 
+def _naprava(v: os.DirEntry) -> int:
+    """st_dev mape. Na Windows ga DirEntry.stat() ne napolni (vedno 0, dokumentacija Pythona), zato os.stat - prej
+    se je indeks na Windows ustavil na prvi ravni domače mape (testni PC 26. 10. 2026: 113 imen, nobene podmape)."""
+    st = v.stat(follow_symlinks=False)
+    if st.st_dev or os.name != "nt":
+        return st.st_dev
+    return os.stat(v.path, follow_symlinks=False).st_dev
+
+
 class Indeks:
     """Imena datotek in map pod `koren`; gradi se v ozadju, išče v pomnilniku."""
 
@@ -137,7 +146,7 @@ class Indeks:
                 if mapa_je and ime not in os_datoteke.PRESKOCI and globina < NAJVEC_GLOBINA:
                     try:
                         # Drug disk ali omrežno mesto pod domačo mapo: ne hodimo vanj (počasno, lahko ogromno).
-                        if naprava is None or v.stat(follow_symlinks=False).st_dev == naprava:
+                        if naprava is None or _naprava(v) == naprava:
                             vrsta.append((v.path, globina + 1))
                     except OSError:
                         pass

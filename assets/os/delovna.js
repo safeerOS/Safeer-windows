@@ -45,7 +45,7 @@
       taRacunalnik: "Ta računalnik", domov: "Domača mapa",
       DOCUMENTS: "Dokumenti", PICTURES: "Fotografije", VIDEOS: "Videi", MUSIC: "Glasba", DOWNLOAD: "Prenosi", DESKTOP: "Namizje",
       nalagam: "Nalagam …", praznaMapa: "Mapa je prazna.", niZadetkov: "Ni ustreznih datotek.",
-      niNedavnih: "Še ni nedavnih datotek.", niPriljubljenih: "Še nimaš priljubljenih. Desni klik na datoteko ali mapo → Dodaj med priljubljene.",
+      niNedavnih: "Še ni nedavnih datotek.", nedavneIzklopljeno: "Windows ne beleži nedavno odprtih datotek. Vklopi jih v Nastavitve > Prilagajanje > Start > »Prikaži nedavno odprte elemente«.", niPriljubljenih: "Še nimaš priljubljenih. Desni klik na datoteko ali mapo → Dodaj med priljubljene.",
       niMape: "Mape ni več.", niDovoljenja: "Do te mape nimaš dovoljenja.",
       napravaNeOdgovori: "Naprava trenutno ni dosegljiva. Podatki niso prikazani, da ne bi bili zastareli.",
       napravaNeDeli: "Naprava ne deli datotek. Na njej v Safeer Linku vklopi deljenje datotek.",
@@ -246,7 +246,7 @@
       taRacunalnik: "This computer", domov: "Home folder",
       DOCUMENTS: "Documents", PICTURES: "Pictures", VIDEOS: "Videos", MUSIC: "Music", DOWNLOAD: "Downloads", DESKTOP: "Desktop",
       nalagam: "Loading …", praznaMapa: "This folder is empty.", niZadetkov: "No matching files.",
-      niNedavnih: "No recent files yet.", niPriljubljenih: "No favourites yet. Right-click a file or folder → Add to favourites.",
+      niNedavnih: "No recent files yet.", nedavneIzklopljeno: "Windows is not keeping track of recently opened files. Turn it on in Settings > Personalization > Start > \"Show recently opened items\".", niPriljubljenih: "No favourites yet. Right-click a file or folder → Add to favourites.",
       niMape: "The folder no longer exists.", niDovoljenja: "You don't have access to this folder.",
       napravaNeOdgovori: "The device can't be reached right now. Nothing is shown so you never see stale data.",
       napravaNeDeli: "The device doesn't share files. Turn on file sharing for it in Safeer Link.",
@@ -905,7 +905,15 @@
     var st = ++D.zahteva;
     function prispelo(fn) { return function (r) { if (st === D.zahteva) fn(r); }; }
     if (vir.vrsta === "nedavno") {
-      klic("nedavne").then(prispelo(function (r) { nastaviVnose(r || [], t("niNedavnih")); drobtine([t("nedavno")]); }))
+      klic("nedavne").then(prispelo(function (r) {
+        drobtine([t("nedavno")]);
+        if (r && r.length) { nastaviVnose(r, t("niNedavnih")); return; }
+        // Prazno: ce sistem nedavnih elementov ne belezi (Windows: »Prikazi nedavno odprte elemente« izklopljeno),
+        // to povemo - ne skrijemo. Sistem brez te metode (Linux) ostane pri »Se ni nedavnih«.
+        klic("nedavneSledenje").then(prispelo(function (v) {
+          nastaviVnose([], v === false ? t("nedavneIzklopljeno") : t("niNedavnih"));
+        })).catch(prispelo(function () { nastaviVnose([], t("niNedavnih")); }));
+      }))
         .catch(prispelo(function () { nastaviVnose([], t("niUspelo"), true); }));
     } else if (vir.vrsta === "najvecje") {
       // Za skupni prostor: najvecje datoteke v domaci mapi (pregled traja najvec 1,5 s, v ozadju).
