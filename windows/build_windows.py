@@ -221,6 +221,8 @@ def pyinstaller() -> None:
             # SafeerOS.exe uporablja _internal brskalnika: dodaj, kar ima samo gradnja Safeer OS (QtQuick, QML ...).
             copied = merge_internal(os.path.join(DIST, "SafeerOS", "_internal"), os.path.join(APP_DIR, "_internal"))
             print(f"merge: {len(copied)} datotek iz gradnje SafeerOS v _internal brskalnika")
+            if pospravi_vmesno_gradnjo(DIST):
+                print("vmesna gradnja dist/SafeerOS odstranjena (v paketu je SafeerBrowser/SafeerOS.exe)")
     zamenjane = zamenjaj_msvc_runtime(APP_DIR)
     if zamenjane:
         print(f"MSVC runtime iz vendor/mpv/runtime: {len(zamenjane)} kopij ({', '.join(sorted(set(zamenjane)))})")
@@ -343,6 +345,19 @@ def zamenjaj_msvc_runtime(app_dir: str, vendor: str = "", podpis=None, razlicica
 #: FFmpeg v paketu mrtva tuja koda brez CFG/CET (13+ MB).
 FFMPEG_PYSIDE = re.compile(r"^(avcodec|avformat|avutil|avfilter|avdevice|swresample|swscale|postproc)-[0-9]+\.dll$",
                            re.I)
+
+
+def pospravi_vmesno_gradnjo(dist: str) -> bool:
+    """Odstrani vmesno gradnjo dist/SafeerOS, ko sta SafeerOS.exe in njen _internal ze v SafeerBrowser (merge_internal).
+    Ni v paketu (package, smoke-frozen, qml-frozen, kodek-frozen in namestitvena programa vzamejo SafeerBrowser) in je
+    prune_bundle ne obreze, zato je ostal ves tuj FFmpeg PySide6 brez CFG/CET - korak »PE hardening« pregleda cel
+    build/windows/dist in je padel (CI 40364712707; izmerjeno na tem PC 26. 10. 2026: avcodec-61, avformat-61, avutil-59,
+    swresample-5, swscale-8 in plugins/multimedia samo v dist/SafeerOS, SafeerBrowser jih nima). Vrne, ali je odstranil."""
+    vmesna = os.path.join(dist, "SafeerOS")
+    if not os.path.isfile(os.path.join(dist, "SafeerBrowser", "SafeerOS.exe")) or not os.path.isdir(vmesna):
+        return False
+    shutil.rmtree(vmesna)
+    return True
 
 
 def odstrani_ffmpeg_pyside(pyside: str) -> list:
