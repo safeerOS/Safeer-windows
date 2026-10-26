@@ -50,6 +50,10 @@ def lokalna_mapa(pot: str, vrsta_pogona: Callable[[str], int] = _vrsta_pogona) -
     pot = str(pot or "")
     if not pot or pot.startswith(("\\\\", "//")):
         return False
+    # Pogon brez poti (»D:«) je koren diska. abspath bi dal TRENUTNO mapo na tem pogonu - CI Windows 26. 10. 2026
+    # (delovna mapa na D:) je zato »D:« sprejel kot lokalno mapo; na tem PC je bil koren, ker delovna mapa ni na D:.
+    if len(pot.rstrip("\\/")) == 2 and pot[1] == ":" and pot[0].isalpha():
+        return False
     pogon, ostalo = os.path.splitdrive(os.path.abspath(pot))
     if pogon.startswith(("\\\\", "//")):
         return False

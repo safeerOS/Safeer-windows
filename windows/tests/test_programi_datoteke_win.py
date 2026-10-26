@@ -233,8 +233,12 @@ def test_nedavne_iz_premaknjenih_in_novih(monkeypatch, tmp_path):
     os.utime(dok / "stara" / "porocilo.txt", (star, star))
     (recent / "porocilo.txt.lnk").write_bytes(bliznjica(str(dom / "Documents" / "stara" / "porocilo.txt")))
     os.utime(recent / "porocilo.txt.lnk", (time.time() - 5 * 86400, time.time() - 5 * 86400))  # odprta pred 5 dnevi
-    # nova datoteka, ki je ni nihce odprl (Recent je ne pozna)
+    # nova datoteka, ki je ni nihce odprl (Recent je ne pozna). Izrecno novejsa od vsega v preizkusu: tudi porocilo.txt je
+    # »sveze« (cas ustvarjanja = zdaj), na hitrem CI runnerju z ISTIM casom ustvarjanja - takrat je vrstni red po poti
+    # dal porocilo.txt prvo (CI Windows 26. 10. 2026; ponovljeno na tem PC z enakim casom ustvarjanja, tmp-n26/ci35.py).
     (dok / "nova.pdf").write_bytes(b"%PDF")
+    novejse = time.time() + 60
+    os.utime(dok / "nova.pdf", (novejse, novejse))
     (dok / "~$zaklep.docx").write_bytes(b"x")
     znane = {"DOCUMENTS": str(dok)}
     imena = [e["ime"] for e in nd.nedavne(znane=znane, recent=str(recent))]
@@ -314,6 +318,9 @@ def test_g3_omrezne_mape_in_koreni_diskov(tmp_path):
     assert not iw.lokalna_mapa(r"\\streznik\domov\x\Documents")
     assert not iw.lokalna_mapa("//streznik/domov/Documents")
     assert not iw.lokalna_mapa("C:\\") and not iw.lokalna_mapa("D:")
+    # Pogon trenutne mape brez poti: abspath bi dal trenutno mapo (CI: delovna mapa na D:), a je koren pogona.
+    trenutni = os.path.splitdrive(os.getcwd())[0]
+    assert not iw.lokalna_mapa(trenutni) and not iw.lokalna_mapa(trenutni + "/")
     assert not iw.lokalna_mapa(r"Z:\Dokumenti", vrsta_pogona=lambda k: iw.DRIVE_REMOTE), "preslikan omrezni disk"
     assert iw.lokalna_mapa(r"D:\Dokumenti", vrsta_pogona=lambda k: 3)
 
