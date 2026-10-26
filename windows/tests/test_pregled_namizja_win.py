@@ -386,6 +386,30 @@ class LibmpvVPaketu(unittest.TestCase):
                 f.write(paket_vsebina)
         return vendor, os.path.join(m, "app")
 
+    def test_pripet_runtime_brez_potrjenega_podpisa_velja_samo_z_vsoto(self):
+        """CI 40361223511: runner podpisa ne potrdi - pripeta vsota SHA-256 velja, druga vsebina z istim imenom ne."""
+        import hashlib
+        import tempfile
+        with tempfile.TemporaryDirectory() as m:
+            pot = os.path.join(m, "vcruntime140.dll")
+            with open(pot, "wb") as f:
+                f.write(b"pripeta vsebina")
+            vsota = hashlib.sha256(b"pripeta vsebina").hexdigest()
+            nepodpisano = lambda poti: {p: False for p in poti}   # noqa: E731
+            with self.assertRaises(SystemExit):
+                self.b.preveri_vir_runtime({"vcruntime140.dll": pot}, podpis=nepodpisano, razlicica=_razlicica)
+            stari = dict(self.b.PRIPETI_MSVC)
+            try:
+                self.b.PRIPETI_MSVC[vsota] = "vcruntime140.dll"
+                self.assertTrue(self.b.preveri_vir_runtime({"vcruntime140.dll": pot}, podpis=nepodpisano,
+                                                           razlicica=_razlicica))
+                self.b.PRIPETI_MSVC[vsota] = "msvcp140.dll"          # vsota drugega imena ne velja
+                with self.assertRaises(SystemExit):
+                    self.b.preveri_vir_runtime({"vcruntime140.dll": pot}, podpis=nepodpisano, razlicica=_razlicica)
+            finally:
+                self.b.PRIPETI_MSVC.clear()
+                self.b.PRIPETI_MSVC.update(stari)
+
     def test_x3_runtime_brez_microsoftovega_podpisa_ustavi_gradnjo(self):
         """Pregled Grok 20, X3: runtime iz vendor/mpv gre v vse programe paketa - brez veljavnega podpisa Microsoft
         gradnja pade (prej se je preverilo samo, ali datoteke obstajajo)."""

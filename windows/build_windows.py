@@ -234,6 +234,24 @@ MSVC_DRUZINA = re.compile(r"^(msvcp140(_\d|_atomic_wait|_codecvt_ids)?|vcruntime
 #: Podpisnik runtime MSVC (izmerjeno 25. 10. 2026 na 14.51.36247: »CN=Microsoft Windows Software Compatibility
 #: Publisher, O=Microsoft Corporation«, stanje Valid).
 PODPISNIK_MSVC = "O=Microsoft Corporation"
+#: SHA-256 runtime MSVC 14.51.36247 iz nase izdaje milutv-libmpv safeer-av1-dash-snapshot-r1 (zip pripet v fetch_libmpv,
+#: podpis na testnem PC 25. 10. 2026 »Valid«). CI 40361223511 (26. 10. 2026): na runnerju Get-AuthenticodeSignature
+#: istih datotek ne potrdi (podpisnik Microsoft Windows Software Compatibility Publisher) - pripeta vsota je enako stroga.
+PRIPETI_MSVC = {
+    "7c26614e1d733892c2deac7e245ce115504b1d80592dd0a01b08e3e5a55f89ca": "msvcp140.dll",
+    "d1f4225df2cd877dbf130d5668a021dce3f94118455ff5ec952061c30afc9ce7": "vcruntime140.dll",
+    "a7146c08f89fe5b04541ab507cdb59ff7b44534d4ba3c668a426c6450a03434e": "vcruntime140_1.dll",
+}
+
+
+def _pripet_msvc(pot: str) -> bool:
+    """Datoteka je natanko pripeti runtime MSVC z istim imenom (vsota SHA-256)."""
+    try:
+        with open(pot, "rb") as f:
+            vsota = hashlib.sha256(f.read()).hexdigest()
+    except OSError:
+        return False
+    return PRIPETI_MSVC.get(vsota, "").lower() == os.path.basename(pot).lower()
 
 
 def podpis_microsoft(poti) -> dict:
@@ -275,7 +293,7 @@ def preveri_vir_runtime(viri: dict, podpis=None, razlicica=None) -> dict:
     z Microsoftovim podpisom in imeti razlicico (Grok X3, 25. 10. 2026; prej se je preverilo samo, ali obstaja).
     Vrne {ime: razlicica}; sicer ustavi gradnjo."""
     podpis, razlicica = podpis or podpis_microsoft, razlicica or razlicica_pe
-    slabi = [p for p, ok in podpis(sorted(viri.values())).items() if not ok]
+    slabi = [p for p, ok in podpis(sorted(viri.values())).items() if not ok and not _pripet_msvc(p)]
     if slabi:
         raise SystemExit("runtime MSVC iz vendor/mpv/runtime ni podpisan z Microsoftovim podpisom: " + ", ".join(slabi))
     razlicice = {ime: razlicica(pot) for ime, pot in viri.items()}
