@@ -751,6 +751,25 @@ def _je_predvajalni_vir(url: str) -> bool:
     return _je_predloga_predvajalnika(url) or _je_korenski_predvajalni_vir(url)
 
 
+#: Znane platforme, ki jih beremo samo prek uradnih vdelav - nimajo racuna pri ponudniku IPTV (enako Linux).
+_PLATFORME_BREZ_RACUNA = ("youtube.com", "youtu.be", "soundcloud.com", "bandcamp.com")
+
+
+def _platforma_brez_racuna(url: object) -> bool:
+    besedilo = str(url or "")
+    try:
+        gostitelj = (urllib.parse.urlsplit(besedilo).hostname or "").casefold()
+    except ValueError:
+        return False
+    return (any(gostitelj == d or gostitelj.endswith("." + d) for d in _PLATFORME_BREZ_RACUNA)
+            or _je_predvajalni_vir(besedilo))
+
+
+class _PrazenOdgovor(ValueError):
+    """Ponudnik je na naslov vira z racunom odgovoril brez seznama (prazno telo, stran HTML - racun potekel ali
+    zaklenjen; Linux pregled 46, Ö5)."""
+
+
 def _je_neposredni_medijski_tok(url: str) -> bool:
     """Prepozna neposreden medijski URL, ki ga ne smemo prenesti kot katalog."""
     path = urllib.parse.urlsplit(url).path.lower()
@@ -2379,8 +2398,20 @@ class MediaCenter:
             if _je_predvajalni_vir(canonical):
                 source["tip"] = "predvajalni_vir"
             self._vir_dodan(source, viri_sink.URL, canonical, prevzet)
+            caka = bool(prevzet) and self._caka_uporabnika(canonical)
+            if caka:
+                # Lastnik 26. 10. 2026 (nevarnost zaklepa racuna je prioriteta; Linux pregled 51, Ñ2 in 57, Ş1): vir, ki ni
+                # pozitivno znan javen, prejet z druge naprave v Linku, se ob prejemu NE prenese - vsaka naprava v krogu bi
+                # ponudniku poslala prijavo z geslom. Prenese ga uporabnikov »Osvezi« na tej napravi; samodejna pota ga
+                # preskocijo (refresh_all, refresh_stale). Ozjega kroga (prva uporaba ob odprtju vira) Windows se nima.
+                source["caka_uporabnika"] = int(time.time())
             data.setdefault("viri", []).append(source)
             self._save(data)
+        if caka:
+            self._vir_potrjen(viri_sink.URL, canonical)
+            if prevzet.get("naslov"):
+                self._vir_potrjen(str(prevzet.get("tip") or viri_sink.URL), str(prevzet["naslov"]))
+            return {"ok": True, "napaka": "", "caka": True, "vir": {k: v for k, v in source.items() if k != "vnosi"}}
         # Odziv vira začnemo meriti takoj ob dodajanju, da je meritev navadno
         # že na voljo, ko uporabnik prvič izbere film ali epizodo.
         threading.Thread(target=self._izmeri_ping, args=(canonical,), daemon=True).start()
@@ -2706,7 +2737,54 @@ class MediaCenter:
             final_url = canonical_url(response.geturl())
             return payload, response.headers.get_content_type(), final_url
 
+    #: Ponudnik je seznam zavrnil (401/402/403/429 ali, pri viru z racunom, kateri koli odgovor brez seznama): znova sele po
+    #: teh premorih, zapisanih v viru (velja po ponovnem zagonu, za samodejna pota IN za uporabnikov »Osvezi« - Linux
+    #: pregled 68, Ą5: 10 klikov je bilo 10 prijav na racun, ki ga je ponudnik ze zavrnil).
+    ZAVRNJEN_PREMORI_S = (600.0, 3600.0, 6 * 3600.0, 24 * 3600.0)
+    ZAVRNJENE_KODE = frozenset({401, 402, 403, 429})
+    #: Vir z racunom, pri katerem tolikokrat zapored ni bilo povezave (koda 0), dobi isti rastoci premor (Linux Ê1).
+    NI_POVEZAVE_ZAPORED = 3
+
+    def _zavrnjen_do(self, source: dict) -> float:
+        """Do kdaj (unix) vira, ki ga je ponudnik zavrnil, ne prenasamo znova (0: ni zavrnjen)."""
+        zavrnjen = source.get("zavrnjen")
+        if not isinstance(zavrnjen, dict):
+            return 0.0
+        try:
+            n, ob = int(zavrnjen.get("n") or 1), float(zavrnjen.get("ob") or 0)
+        except (TypeError, ValueError):
+            return 0.0
+        return ob + self.ZAVRNJEN_PREMORI_S[min(max(n, 1), len(self.ZAVRNJEN_PREMORI_S)) - 1]
+
+    @staticmethod
+    def _racun_vira(source: dict) -> bool:
+        """Vir z racunom pri ponudniku: vsak, ki ni pozitivno znan javen (viri_sink.za_ozji_krog), razen znanih platform
+        brez racuna - premor ob vsakem odgovoru brez seznama, ena zahteva, nikoli rezervna pot (enako Linux)."""
+        url = source.get("url")
+        return viri_sink.za_ozji_krog(url, source.get("javni") is True) and not _platforma_brez_racuna(url)
+
+    @staticmethod
+    def _caka_uporabnika(naslov: str) -> bool:
+        """Prejet vir, ki ga ob prejemu ne prenesemo: vsak, ki ni POZITIVNO znan javen (enako Linux, pregled 57, Ş1)."""
+        return viri_sink.za_ozji_krog(naslov)
+
     def refresh_source(self, source_id: str) -> dict:
+        """Osvezi vir. Najvec ena osvezitev istega vira naenkrat (Linux pregled 68, Ą5): socasen »Osvezi« in osvezitev v
+        ozadju bi sicer poslala ponudniku dve prijavi z geslom - drugi klic vrne {"ze_tece": True} brez zahteve."""
+        if source_id.startswith("streznik-"):
+            return self._refresh_source_ena(source_id)
+        with self._lock:
+            tece = self.__dict__.setdefault("_osvezuje_vire", set())
+            if source_id in tece:
+                return {"ok": False, "napaka": "", "ze_tece": True}
+            tece.add(source_id)
+        try:
+            return self._refresh_source_ena(source_id)
+        finally:
+            with self._lock:
+                tece.discard(source_id)
+
+    def _refresh_source_ena(self, source_id: str) -> dict:
         if source_id.startswith("streznik-"):
             with self._lock:
                 self._server_cache = {key: value for key, value in self._server_cache.items()
@@ -2717,6 +2795,12 @@ class MediaCenter:
                            if item.get("id") == source_id), None)
         if source is None:
             return {"ok": False, "napaka": "ni_vira"}
+        if self._racun_vira(source):
+            # Premor po zavrnitvi velja tudi za uporabnikov »Osvezi« (lastnikova prednost: nikoli zaklep racuna).
+            ostane = self._zavrnjen_do(source) - time.time()
+            if ostane > 0:
+                return {"ok": False, "napaka": "premor", "premor_s": int(ostane) + 1,
+                        "vir": {k: v for k, v in source.items() if k != "vnosi"}}
         try:
             music_embed, embed_error = _official_music_embed(source["url"], source["id"], source["ime"])
             if embed_error:
@@ -2743,18 +2827,44 @@ class MediaCenter:
                 payload, content_type, final_url = self._download(source["url"])
                 items = parse_payload(payload, content_type, final_url, source["id"], source["ime"])
                 if not items:
+                    if self._racun_vira(source):
+                        # Odgovor brez seznama na naslov z geslom: brez se ene zahteve z geslom (vdelani predvajalnik)
+                        # in samodejno vse redkeje (Linux pregled 46, Ö5).
+                        raise _PrazenOdgovor("Ponudnik ni vrnil seznama.")
                     items = _resolve_embed_or_direct_source(final_url, source["id"], source["ime"])
             source.update({"vnosi": items, "stevilo": len(items), "posodobljeno": int(time.time()), "napaka": ""})
             ok, error = True, ""
         except Exception as exc:
             host = (urllib.parse.urlsplit(source["url"]).hostname or "").casefold()
             restricted = host == "bandcamp.com" or host.endswith(".bandcamp.com")
-            items = [] if restricted else _resolve_embed_or_direct_source(source["url"], source["id"], source["ime"])
+            koda = exc.code if isinstance(exc, urllib.error.HTTPError) else 0
+            racun = self._racun_vira(source)
+            ni_povezave = 0
+            if racun and koda == 0 and not isinstance(exc, _PrazenOdgovor):
+                # Prekinjena povezava, TLS, rok: nekateri paneli zaklenjen racun ali IP odrezejo ze na ravni povezave.
+                try:
+                    ni_povezave = int(source.get("ni_povezave") or 0) + 1
+                except (TypeError, ValueError):
+                    ni_povezave = 1
+                source["ni_povezave"] = ni_povezave
+            if (koda in self.ZAVRNJENE_KODE or (racun and (koda > 0 or isinstance(exc, _PrazenOdgovor)))
+                    or ni_povezave >= self.NI_POVEZAVE_ZAPORED):
+                prej = source.get("zavrnjen") if isinstance(source.get("zavrnjen"), dict) else {}
+                try:
+                    n = int(prej.get("n") or 0)
+                except (TypeError, ValueError):
+                    n = 0
+                source["zavrnjen"] = {"koda": koda, "ob": int(time.time()), "n": min(n + 1, len(self.ZAVRNJEN_PREMORI_S))}
+            # Vir z racunom ali zavrnjen: nikoli druge zahteve na isti naslov (rezervna pot vdelave).
+            items = [] if restricted or racun or koda in self.ZAVRNJENE_KODE else \
+                _resolve_embed_or_direct_source(source["url"], source["id"], source["ime"])
             if items:
                 source.update({"vnosi": items, "stevilo": len(items), "posodobljeno": int(time.time()), "napaka": ""})
                 ok, error = True, ""
             else:
-                error = _text(exc, 180) or "Vira ni bilo mogoče prebrati."
+                # Sporocilo brez uporabnika in gesla iz naslova (viri_sink.sporocilo_napake, enako Linux).
+                error = (viri_sink.sporocilo_napake(exc, source.get("url"), source.get("javni") is True)
+                         or "Vira ni bilo mogoče prebrati.")
                 source["napaka"] = error
                 ok = False
         with self._lock:
@@ -2762,23 +2872,34 @@ class MediaCenter:
             saved = next((item for item in data.get("viri", []) if item.get("id") == source_id), None)
             if saved is None:
                 return {"ok": False, "napaka": "ni_vira"}
+            if ok:
+                # Ponudnik seznam spet da: premor in cakanje odpadeta (samo ob uspehu - po neuspehu bi refresh_stale vir
+                # sam ponavljal).
+                for oznaka in ("zavrnjen", "ni_povezave", "caka_uporabnika"):
+                    source.pop(oznaka, None)
+                    saved.pop(oznaka, None)
             saved.update(source)
             self._save(data)
         public = {k: value for k, value in source.items() if k != "vnosi"}
         return {"ok": ok, "napaka": error, "vir": public}
 
     def refresh_all(self) -> dict:
-        ids = [source.get("id", "") for source in self.sources()]
+        # Cakajoci vir osvezi samo uporabnikov pritisk na NJEGOVO vrstico: skupna osvezitev bi naenkrat poslala zahteve z
+        # gesli vsem virom, ki jih uporabnik na tej napravi se ni potrdil (Linux Ñ2, Ş1).
+        ids = [source.get("id", "") for source in self.sources() if not source.get("caka_uporabnika")]
         results = [self.refresh_source(source_id) for source_id in ids]
         return {"ok": all(item.get("ok") for item in results), "rezultati": results}
 
     def refresh_stale(self, max_age: int = 6 * 60 * 60) -> dict:
         """V ozadju osveži le vire, katerih uspešni podatki so že zastareli."""
-        cutoff = int(time.time()) - max(60, int(max_age))
+        zdaj = int(time.time())
+        cutoff = zdaj - max(60, int(max_age))
         ids = [source.get("id", "") for source in self.sources()
-               if int(source.get("posodobljeno") or 0) < cutoff
-               or (_je_predvajalni_vir(str(source.get("url") or ""))
-                   and source.get("tip") != "predvajalni_vir")]
+               if not source.get("caka_uporabnika")             # prejet vir z racunom: sele ob uporabnikovi osvezitvi
+               and zdaj >= self._zavrnjen_do(source)            # premor po zavrnitvi velja tudi za samodejno pot
+               and (int(source.get("posodobljeno") or 0) < cutoff
+                    or (_je_predvajalni_vir(str(source.get("url") or ""))
+                        and source.get("tip") != "predvajalni_vir"))]
         results = [self.refresh_source(source_id) for source_id in ids]
         return {"ok": all(item.get("ok") for item in results), "osvezenih": len(results),
                 "rezultati": results}
