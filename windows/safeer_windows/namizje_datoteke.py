@@ -426,12 +426,16 @@ NEDAVNO_DNI = 30
 _NEDAVNO_MAP = 400
 
 
-def _sveze_v_mapah(mape: List[str], od: float, najvec: int) -> List[tuple]:
-    """(cas, pot) datotek, spremenjenih po [od], v znanih mapah do dveh ravni globoko (brez skritih)."""
+def _sveze_v_mapah(mape: List[str], od: float, najvec: int, proracun: Optional[int] = None) -> List[tuple]:
+    """(cas, pot) datotek, spremenjenih po [od], v znanih mapah do dveh ravni globoko (brez skritih). Proracun map je
+    razdeljen po korenih (G7: prej skupen - velike Dokumenti so ga porabili in Prenosov ni pregledal); kar koren ne
+    porabi, dobijo naslednji."""
     izid, pregledanih = [], 0
-    for koren in mape:
+    proracun = proracun or _NEDAVNO_MAP
+    for n, koren in enumerate(mape):
+        delez = pregledanih + max(1, (proracun - pregledanih) // (len(mape) - n))
         vrsta = [(koren, 0)]
-        while vrsta and pregledanih < _NEDAVNO_MAP:
+        while vrsta and pregledanih < delez:
             mapa, globina = vrsta.pop(0)
             pregledanih += 1
             try:
@@ -486,6 +490,10 @@ def nedavne(najvec: int = 24, znane: Optional[dict] = None, recent: Optional[str
     """Nedavne datoteke, najnovejse najprej: odprte (mapa Recent sistema Windows) in nove ali spremenjene v
     uporabnikovih mapah (Namizje, Dokumenti, Prenosi ...). Na testnem PC 26. 10. 2026 Windows v Recent ni zapisal
     nicesar 12 dni, datoteke, ki jih ustvari drug program, pa tja sploh ne pridejo - prej je seznam ostal prazen."""
+    if not sledenje_nedavnim():
+        # Uporabnik ali skrbnik je izklopil nedavne (Start_TrackDocs=0, NoRecentDocsHistory): nic, vmesnik pokaze
+        # nedavneIzklopljeno. Pregled Grok 59 G2: prej so se se vedno pokazale nove datoteke iz map.
+        return []
     mapa = recent or os.path.join(os.environ.get("APPDATA", ""), "Microsoft", "Windows", "Recent")
     try:
         vnosi = [e for e in os.scandir(mapa) if e.name.lower().endswith(".lnk") and e.is_file()]
@@ -505,7 +513,8 @@ def nedavne(najvec: int = 24, znane: Optional[dict] = None, recent: Optional[str
         pot = cilj_bliznjice(glava)
         if pot:
             kandidati.append((e.stat().st_mtime, preslikaj_premaknjeno(pot, znane)))
-    mape = [p for p in dict.fromkeys(znane.values()) if p and os.path.isdir(p)]
+    from .iskanje_win import lokalna_mapa
+    mape = [p for p in dict.fromkeys(znane.values()) if p and lokalna_mapa(p) and os.path.isdir(p)]  # G3
     kandidati += _sveze_v_mapah(mape, time.time() - NEDAVNO_DNI * 86400, najvec * 4)
     kandidati.sort(key=lambda k: -k[0])
     izhod, videno = [], set()

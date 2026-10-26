@@ -97,7 +97,8 @@ def test_zagon_paketa_brez_lupine(paketi, monkeypatch):
     zagnani = []
     monkeypatch.setattr(ob.subprocess, "Popen", lambda argv, **k: zagnani.append(argv))
     assert ob.zazeni_program("shell:AppsFolder\\" + CLAUDE)
-    assert zagnani == [["explorer.exe", "shell:AppsFolder\\" + CLAUDE]]
+    assert zagnani == [[ob.EXPLORER, "shell:AppsFolder\\" + CLAUDE]]
+    assert os.path.isabs(ob.EXPLORER) and os.path.basename(ob.EXPLORER) == "explorer.exe"
     for zlo in ('shell:AppsFolder\\Claude_pzs8sxrjxfjjc!Claude & calc', 'shell:AppsFolder\\x"|calc',
                 "shell:AppsFolder\\..\\..\\Windows\\notepad.exe", "shell:AppsFolder\\Claude_pzs8sxrjxfjjc!Claude\r\nx"):
         assert not ob.zazeni_program(zlo), zlo
@@ -125,7 +126,8 @@ def test_ikona_iz_manifesta(tmp_path):
 def test_claude_code_najden_in_odprt_v_konzoli(paketi, prazen_start, monkeypatch, tmp_path):
     dom = tmp_path / "USERPROFILE"
     monkeypatch.setattr(os.path, "expanduser", lambda p: p.replace("~", str(dom), 1))
-    monkeypatch.setattr(ob.shutil, "which", lambda ukaz: None)
+    monkeypatch.setattr(ob, "_v_path", lambda ukaz: "")
+    monkeypatch.setattr(ob, "_wt", lambda: "")
     assert ob._ukazni_program("claude-code") == ""
     (dom / ".local" / "bin").mkdir(parents=True)
     exe = dom / ".local" / "bin" / "claude.exe"
@@ -224,6 +226,7 @@ def test_nedavne_iz_premaknjenih_in_novih(monkeypatch, tmp_path):
     for m in (dom, dok / "stara", recent):
         m.mkdir(parents=True)
     monkeypatch.setattr(os.path, "expanduser", lambda p: p.replace("~", str(dom), 1))
+    monkeypatch.setattr(nd, "sledenje_nedavnim", lambda: True)  # ne beri pravega registra tega PC
     # bliznjica iz casa pred premikom: kaze na dom\Documents\stara\porocilo.txt, datoteka je zdaj v D:\Dokumenti
     (dok / "stara" / "porocilo.txt").write_text("x")
     star = time.time() - 40 * 86400
@@ -258,3 +261,86 @@ def test_sledenje_nedavnim_izklopljeno(monkeypatch):
     assert nd.sledenje_nedavnim() is False
     vrednosti["Start_TrackDocs"] = 1
     assert nd.sledenje_nedavnim() is True
+
+
+# ------------------------------------------------------------------ pregled Grok 59 (naloga 30)
+def _stik(stik, cilj):
+    import subprocess
+    r = subprocess.run(["cmd", "/c", "mklink", "/J", str(stik), str(cilj)], capture_output=True)
+    if r.returncode != 0:
+        pytest.skip("mklink /J ni uspel")
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="stiki (junction) so samo na Windows")
+def test_g1_indeks_ne_gre_v_stike(tmp_path):
+    koren, drugje = tmp_path / "Dokumenti", tmp_path / "drugje"
+    (koren / "prava").mkdir(parents=True)
+    drugje.mkdir()
+    (koren / "prava" / "oznakag1prava.txt").write_text("x")
+    (drugje / "oznakag1drugje.txt").write_text("x")
+    _stik(koren / "stik-drugam", drugje)
+    _stik(koren / "stik-zanka", koren)
+    try:
+        idx = os_iskalnik.Indeks(str(koren))
+        idx.zgradi()
+        assert [os.path.basename(p) for p, *_ in idx.isci("oznakag1prava")] == ["oznakag1prava.txt"], "brez kopij iz zanke"
+        assert idx.isci("oznakag1drugje") == [], "stik na drugo mesto (drug disk) se ne indeksira"
+        assert {i for _p, i, *_ in idx.isci("stik")} == {"stik-drugam", "stik-zanka"}, "ime stika ostane vidno"
+    finally:
+        for s in ("stik-drugam", "stik-zanka"):
+            os.rmdir(koren / s)  # samo stik, cilj ostane
+
+
+def test_g2_nedavne_spostujejo_izklop(monkeypatch, tmp_path):
+    dok, recent = tmp_path / "Dokumenti", tmp_path / "Recent"
+    dok.mkdir()
+    recent.mkdir()
+    (dok / "nova.pdf").write_bytes(b"%PDF")
+    (recent / "a.lnk").write_bytes(bliznjica(str(dok / "nova.pdf")))
+    monkeypatch.setattr(nd, "sledenje_nedavnim", lambda: False)
+    assert nd.nedavne(znane={"DOCUMENTS": str(dok)}, recent=str(recent)) == []
+    monkeypatch.setattr(nd, "sledenje_nedavnim", lambda: True)
+    assert [e["ime"] for e in nd.nedavne(znane={"DOCUMENTS": str(dok)}, recent=str(recent))] == ["nova.pdf"]
+
+
+def test_g3_omrezne_mape_in_koreni_diskov(tmp_path):
+    dom = tmp_path / "Uporabniki" / "x"
+    dom.mkdir(parents=True)
+    koren = os.path.splitdrive(str(tmp_path))[0] + os.sep
+    mape = [{"vrsta": "DOWNLOAD", "pot": koren}, {"vrsta": "DOCUMENTS", "pot": r"\\streznik\domov\x\Documents"}]
+    assert iw.korenine(mape, str(dom)) == [str(dom)], "koren diska in pot UNC brez lastnega indeksa"
+    nad = [{"vrsta": "DOCUMENTS", "pot": str(tmp_path / "Uporabniki")}]
+    assert iw.korenine(nad, str(dom)) == [str(tmp_path / "Uporabniki")], "domaca mapa se ne indeksira dvakrat"
+    assert not iw.lokalna_mapa(r"\\streznik\domov\x\Documents")
+    assert not iw.lokalna_mapa("//streznik/domov/Documents")
+    assert not iw.lokalna_mapa("C:\\") and not iw.lokalna_mapa("D:")
+    assert not iw.lokalna_mapa(r"Z:\Dokumenti", vrsta_pogona=lambda k: iw.DRIVE_REMOTE), "preslikan omrezni disk"
+    assert iw.lokalna_mapa(r"D:\Dokumenti", vrsta_pogona=lambda k: 3)
+
+
+def test_g5_programi_z_absolutno_potjo(monkeypatch, tmp_path):
+    podtaknjeno, prazno = tmp_path / "Prenosi", tmp_path / "prazno"
+    podtaknjeno.mkdir()
+    prazno.mkdir()
+    (podtaknjeno / "claude.cmd").write_text("@echo zlo")
+    monkeypatch.chdir(podtaknjeno)
+    monkeypatch.setenv("PATH", os.pathsep.join([".", "Prenosi", str(prazno)]))
+    monkeypatch.setattr(os.path, "expanduser", lambda p: p.replace("~", str(tmp_path / "ni"), 1))
+    monkeypatch.setenv("APPDATA", str(tmp_path / "ni"))
+    assert ob._ukazni_program("claude-code") == "", "ne iz trenutne mape ali relativnega vnosa v PATH"
+    monkeypatch.setenv("PATH", str(podtaknjeno))
+    najden = ob._ukazni_program("claude-code")
+    assert os.path.normcase(najden) == os.path.normcase(str(podtaknjeno / "claude.cmd")), "absolutna mapa v PATH velja"
+    assert os.path.isabs(ob.POWERSHELL) and ob.POWERSHELL.lower().endswith(r"windowspowershell\v1.0\powershell.exe")
+    assert os.path.isabs(ob.EXPLORER)
+
+
+def test_g7_proracun_map_po_korenih(monkeypatch, tmp_path):
+    velike, prenosi = tmp_path / "Dokumenti", tmp_path / "Prenosi"
+    for i in range(60):
+        (velike / ("p%02d" % i)).mkdir(parents=True)
+    prenosi.mkdir()
+    (prenosi / "prenos.zip").write_bytes(b"PK")
+    monkeypatch.setattr(nd, "_NEDAVNO_MAP", 20)
+    sveze = nd._sveze_v_mapah([str(velike), str(prenosi)], time.time() - 3600, 10)
+    assert [os.path.basename(p) for _c, p in sveze] == ["prenos.zip"], "Prenosi pregledani kljub velikim Dokumentom"

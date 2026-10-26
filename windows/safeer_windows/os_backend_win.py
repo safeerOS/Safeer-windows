@@ -77,6 +77,37 @@ ZNANE_MAPE_REGISTER = (("DESKTOP", "Desktop"), ("DOCUMENTS", "Personal"),
                        ("MUSIC", "My Music"), ("VIDEOS", "My Video"))
 
 
+def _sistemski(*deli: str) -> str:
+    """Program Windows z absolutno potjo. Pregled Grok 59 G5: CreateProcess z golim imenom (»explorer.exe«) najprej
+    isce v mapi programa in v trenutni mapi - tja podtaknjen explorer.exe ali powershell.exe bi tekel namesto pravega."""
+    return os.path.join(os.environ.get("SystemRoot") or os.environ.get("windir") or r"C:\Windows", *deli)
+
+
+EXPLORER = _sistemski("explorer.exe")
+POWERSHELL = _sistemski("System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+
+
+def _v_path(ukaz: str) -> str:
+    """Program po PATH, a samo iz absolutnih map (brez trenutne mape, ».« in relativnih vnosov, ki jih shutil.which
+    na Windows doda ali sprejme - G5). Koncnice iz PATHEXT, ce ukaz nima svoje."""
+    koncnice = [""] if os.path.splitext(ukaz)[1] else [k for k in os.environ.get("PATHEXT", ".EXE;.CMD;.BAT").split(";") if k]
+    for mapa in os.environ.get("PATH", "").split(os.pathsep):
+        mapa = mapa.strip().strip('"')
+        if not mapa or not os.path.isabs(mapa):
+            continue
+        for k in koncnice:
+            p = os.path.join(mapa, ukaz + k)
+            if os.path.isfile(p):
+                return p
+    return ""
+
+
+def _wt() -> str:
+    """Windows Terminal: vzdevek aplikacije v %LOCALAPPDATA%\\Microsoft\\WindowsApps, sicer absolutna mapa v PATH."""
+    p = os.path.join(os.environ.get("LOCALAPPDATA", ""), "Microsoft", "WindowsApps", "wt.exe")
+    return p if os.path.isabs(p) and os.path.lexists(p) else _v_path("wt.exe")
+
+
 def znane_mape() -> dict:
     """{vrsta: pot} znanih map iz registra; brez vnosa privzeta pot pod domaco mapo."""
     registrske = {}
@@ -253,7 +284,7 @@ def odpri_mapo(pot: str) -> bool:
         return False
     try:
         if sys.platform == "win32":
-            subprocess.Popen(["explorer.exe", os.path.abspath(pot)])
+            subprocess.Popen([EXPLORER, os.path.abspath(pot)])
         else:
             subprocess.Popen(["xdg-open", pot], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return True
@@ -265,7 +296,7 @@ def odpri_mapo(pot: str) -> bool:
 def pokazi_v_mapi(pot: str) -> bool:
     try:
         if sys.platform == "win32":
-            subprocess.Popen(["explorer.exe", f"/select,{pot}"])
+            subprocess.Popen([EXPLORER, f"/select,{pot}"])
             return True
         subprocess.Popen(["xdg-open", os.path.dirname(pot) if os.path.isfile(pot) else pot])
         return True
@@ -395,7 +426,7 @@ def _beri_appsfolder(z_mapami: bool) -> tuple:
         return [], {}
     okolje = dict(os.environ, SAFEER_MAPE_PAKETOV="1" if z_mapami else "0")
     try:
-        r = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", _SKRIPTA_APPSFOLDER],
+        r = subprocess.run([POWERSHELL, "-NoProfile", "-NonInteractive", "-Command", _SKRIPTA_APPSFOLDER],
                            capture_output=True, timeout=_ROK_LUPINE_S, env=okolje, creationflags=_brez_okna())
         podatki = json.loads(r.stdout.decode("utf-8-sig") or "{}")
     except (OSError, subprocess.SubprocessError, ValueError):
@@ -537,8 +568,7 @@ def _ukazni_program(kljuc: str) -> str:
             p = os.path.expanduser(os.path.expandvars(p))
             if "%" not in p and os.path.isfile(p):
                 return p
-        najden = shutil.which(ukaz)
-        return najden or ""
+        return _v_path(ukaz)
     return ""
 
 
@@ -547,7 +577,7 @@ def _zazeni_ukazni(kljuc: str) -> bool:
     if not exe:
         return False
     dom = os.path.expanduser("~")
-    wt = shutil.which("wt.exe")
+    wt = _wt()
     if wt:
         subprocess.Popen([wt, "-d", dom, exe], cwd=dom)  # seznam argumentov: brez lupine
     else:
@@ -690,7 +720,7 @@ def zazeni_program(pot: str) -> bool:
             appid = pot[len("shell:AppsFolder\\"):]
             if not _PAKET_ID.match(appid):
                 return False  # samo AppID paketa; nikoli niz z znaki lupine
-            subprocess.Popen(["explorer.exe", "shell:AppsFolder\\" + appid])
+            subprocess.Popen([EXPLORER, "shell:AppsFolder\\" + appid])
             return True
         if sys.platform == "win32":
             os.startfile(pot)  # noqa: S606

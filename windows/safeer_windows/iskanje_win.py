@@ -30,17 +30,46 @@ def _pod(pot: str, koren: str) -> bool:
     return p == k or p.startswith(k.rstrip("\\/") + os.sep)
 
 
-def korenine(mape: List[dict], dom: Optional[str] = None) -> List[str]:
-    """Domaca mapa in znane mape, ki niso pod njo ali pod drugo izbrano (cista funkcija; preizkus)."""
+def _vrsta_pogona(koren: str) -> int:
+    try:
+        import ctypes
+        return int(ctypes.windll.kernel32.GetDriveTypeW(koren))
+    except (AttributeError, OSError):
+        return 0
+
+
+#: GetDriveTypeW: omrezni pogon (preslikan disk, npr. Z: -> \\streznik\mapa).
+DRIVE_REMOTE = 4
+
+
+def lokalna_mapa(pot: str, vrsta_pogona: Callable[[str], int] = _vrsta_pogona) -> bool:
+    """Ali smemo mapo indeksirati in po njej hoditi: ne pot UNC, ne omrezni pogon, ne koren diska. Pregled Grok 59 G3:
+    znana mapa iz registra je lahko preusmerjena na streznik (pot UNC) ali na koren diska D: - jedro
+    (core/os_iskalnik.py) namenoma ne hodi na omrezje in na drug disk, zato ga lastni indeks tu ne sme obiti. Preverja
+    se samo niz poti in vrsta pogona, brez dostopa do mape (isdir na UNC caka na rok SMB)."""
+    pot = str(pot or "")
+    if not pot or pot.startswith(("\\\\", "//")):
+        return False
+    pogon, ostalo = os.path.splitdrive(os.path.abspath(pot))
+    if pogon.startswith(("\\\\", "//")):
+        return False
+    if ostalo.strip("\\/") == "":
+        return False                                        # koren diska (C:\, D:\): ves disk in domaca mapa dvakrat
+    return not (pogon and vrsta_pogona(pogon + "\\") == DRIVE_REMOTE)
+
+
+def korenine(mape: List[dict], dom: Optional[str] = None, lokalna: Callable[[str], bool] = lokalna_mapa) -> List[str]:
+    """Domaca mapa in znane mape, ki niso pod njo ali pod drugo izbrano (cista funkcija; preizkus). Omrezne mape in
+    koreni diskov ne dobijo svojega indeksa (G3); mapa, nadrejena domaci, jo nadomesti - domaca se ne indeksira dvakrat."""
     dom = os.path.abspath(dom or os.path.expanduser("~"))
     izid = [dom]
     for m in mape:
         pot = str(m.get("pot") or "")
-        if not pot or m.get("vrsta") == "HOME" or not os.path.isdir(pot):
+        if not pot or m.get("vrsta") == "HOME" or not lokalna(pot) or not os.path.isdir(pot):
             continue
         if any(_pod(pot, k) for k in izid):
             continue
-        izid = [k for k in izid if k == dom or not _pod(k, pot)]  # sirsa mapa nadomesti ozjo
+        izid = [k for k in izid if not _pod(k, pot)]  # sirsa mapa nadomesti ozjo (tudi domaco)
         izid.append(os.path.abspath(pot))
     return izid
 
@@ -80,7 +109,8 @@ def _v_indeksu(niz: str, idx: os_iskalnik.Indeks, meja: int, zdaj: float) -> Lis
         idx.zastarel()
         izid.extend((o + os_iskalnik.svezina(zdaj - float(e.get("spremenjeno") or 0)), -1, e) for o, e in sveze)
     if not izid and idx.nepopoln:
-        izid = [(0.0, i, e) for i, e in enumerate(os_datoteke.isci(niz, idx.koren))]
+        # hoja po disku na niti zahteve: kratko, za vsak indeks posebej (G3; prej privzetih 1,5 s na indeks)
+        izid = [(0.0, i, e) for i, e in enumerate(os_datoteke.isci(niz, idx.koren, rok=HOJA_BREZ_INDEKSA_S))]
     return izid
 
 
