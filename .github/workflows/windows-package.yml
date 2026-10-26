@@ -147,6 +147,38 @@ jobs:
         run: python windows/tools/pe_utrjenost.py build/windows/out --porocilo build/windows/out/pe-namestitveni.json
       - name: Install, launch and uninstall
         run: python windows/build_windows.py install-test
+      # Safeer Player (naloga 103): drugi namestitveni program iz ISTEGA zgrajenega paketa (isti _internal), svoj AppId,
+      # samo bliznjica Safeer Player -> SafeerOS.exe --predvajalnik. Gradi se sele po install-test, ker build_windows.py
+      # (ni v nalogi) isce namestitveni program v build/windows/out in drugega ne pricakuje.
+      - name: Build the Safeer Player installer (installer.iss /DPredvajalnik, same package as the browser)
+        run: |
+          $version = '${{ steps.version.outputs.version }}'
+          $dist = "$PWD\build\windows\dist\SafeerBrowser"
+          # Isti paket kot Browser: brez SafeerOS.exe in _internal bi Player namestil nedelujoco bliznjico.
+          foreach ($pot in @("$dist\SafeerOS.exe", "$dist\_internal", "$PWD\build\windows\safeer.ico")) {
+            if (-not (Test-Path $pot)) { throw "Ni $pot (pricakovano po build_windows.py package)" }
+          }
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /Qp /DPredvajalnik "/DAppVersion=$version" "/DAppSourceDir=$dist" "/DAppOutputDir=$PWD\build\windows\out" "/DAppIconFile=$PWD\build\windows\safeer.ico" windows\installer.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC (Safeer Player) je koncal s kodo $LASTEXITCODE" }
+          $setup = "build/windows/out/SafeerPlayer-$version-windows-x64-setup.exe"
+          if (-not (Test-Path $setup)) { throw "Ni $setup" }
+          Write-Host "::notice::$setup $((Get-Item $setup).Length) B"
+      - name: PE hardening of the Safeer Player installer (measure only, like the browser installer)
+        # Vsebina (isti _internal) je ze preverjena z --preveri zgoraj; nov je samo ovoj Inno Setup, kot pri Browserju.
+        run: python windows/tools/pe_utrjenost.py "build/windows/out/SafeerPlayer-${{ steps.version.outputs.version }}-windows-x64-setup.exe" --porocilo build/windows/out/pe-namestitveni-player.json
+      - name: Safeer Player installer - install, Player window opens, uninstall
+        run: python windows/tools/smoke_predvajalnik.py "build/windows/out/SafeerPlayer-${{ steps.version.outputs.version }}-windows-x64-setup.exe" --porocilo build/windows/out/smoke-predvajalnik.json
+      - name: Safeer Player installer in SHA256SUMS
+        # Izdaja preveri vse datoteke s sha256sum -c SHA256SUMS; build_windows.py package je vsote zapisal pred Playerjem.
+        run: |
+          $ime = "SafeerPlayer-${{ steps.version.outputs.version }}-windows-x64-setup.exe"
+          $vsote = "build/windows/out/SHA256SUMS"
+          $hash = (Get-FileHash -Algorithm SHA256 "build/windows/out/$ime").Hash.ToLower()
+          $vrstice = @(Get-Content $vsote | Where-Object { $_ -and ($_ -notmatch ([regex]::Escape($ime) + '$')) })
+          $vrstice += "$hash  $ime"
+          # LF kot pri sha256sum na Linuxu (posel release).
+          [IO.File]::WriteAllText((Resolve-Path $vsote), (($vrstice -join "`n") + "`n"))
+          Get-Content $vsote
       - name: Upload Windows packages
         uses: actions/upload-artifact@v7
         with:
@@ -155,6 +187,13 @@ jobs:
             build/windows/out/*.exe
             build/windows/out/*.zip
             build/windows/out/SHA256SUMS
+          if-no-files-found: error
+      # Svoj artefakt za gumb Safeer Player na safeer.si; v izdajo gre tudi prek build/windows/out/*.exe zgoraj.
+      - name: Upload Safeer Player installer
+        uses: actions/upload-artifact@v7
+        with:
+          name: safeer-player-windows-${{ steps.version.outputs.version }}
+          path: build/windows/out/SafeerPlayer-*-windows-x64-setup.exe
           if-no-files-found: error
       - name: Upload standalone player (test build, not attached to releases)
         uses: actions/upload-artifact@v7

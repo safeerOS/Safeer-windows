@@ -1,6 +1,8 @@
 ; Safeer Browser for Windows - Inno Setup 6 script
 ; Built by windows/build_windows.py package:
 ;   ISCC /DAppVersion=1.0.0 /DAppSourceDir=...\dist\SafeerBrowser /DAppOutputDir=... /DAppIconFile=...\safeer.ico installer.iss
+; Safeer Player (naloga 103): isti skript z /DPredvajalnik da SafeerPlayer-<razlicica>-windows-x64-setup.exe iz ISTEGA
+; zgrajenega paketa (isti _internal, SafeerOS.exe --predvajalnik). En skript namesto dveh, da se ne razideta.
 
 #ifndef AppVersion
   #define AppVersion "0.0.0"
@@ -14,19 +16,37 @@
 #ifndef AppIconFile
   #define AppIconFile "..\build\windows\safeer.ico"
 #endif
-#define AppName "Safeer Browser"
-#define AppExe "SafeerBrowser.exe"
+#ifdef Predvajalnik
+; Svoj AppId, svoja mapa in svoj vnos v Programi in funkcije: Player se namesti in odstrani neodvisno od Browserja.
+  #define AppName "Safeer Player"
+  #define AppExe "SafeerOS.exe"
+  #define AppArgs "--predvajalnik"
+  #define AppAumid "Safeer.Player"
+  #define AppBase "SafeerPlayer"
+  #define AppUrl "https://safeer.si/"
+#else
+  #define AppName "Safeer Browser"
+  #define AppExe "SafeerBrowser.exe"
+  #define AppArgs ""
+  #define AppAumid "Safeer.Browser"
+  #define AppBase "SafeerBrowser"
+  #define AppUrl "https://safeer.si/browser/"
+#endif
 #define ClientKey "Software\Clients\StartMenuInternet\SafeerBrowser"
 
 [Setup]
+#ifdef Predvajalnik
+AppId={{01C74370-7B72-41D5-9695-C6CA57BAE246}
+#else
 AppId={{6D1F3A52-8C4B-4E27-9B61-5A0E7C3D9F14}
+#endif
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
 AppPublisher=Safeer
 AppPublisherURL=https://safeer.si
-AppSupportURL=https://safeer.si/browser/
-AppUpdatesURL=https://safeer.si/browser/
+AppSupportURL={#AppUrl}
+AppUpdatesURL={#AppUrl}
 DefaultDirName={autopf}\{#AppName}
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
@@ -36,14 +56,19 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0.17763
 OutputDir={#AppOutputDir}
-OutputBaseFilename=SafeerBrowser-{#AppVersion}-windows-x64-setup
+OutputBaseFilename={#AppBase}-{#AppVersion}-windows-x64-setup
 SetupIconFile={#AppIconFile}
 UninstallDisplayIcon={app}\{#AppExe}
 UninstallDisplayName={#AppName}
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
+#ifdef Predvajalnik
+; Player ne registrira brskalnika ne povezav (http, .html): to ostane Safeer Browser.
+ChangesAssociations=no
+#else
 ChangesAssociations=yes
+#endif
 CloseApplications=yes
 RestartApplications=no
 VersionInfoVersion={#AppVersion}
@@ -61,11 +86,18 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Source: "{#AppSourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
+#ifdef Predvajalnik
+; Samo Safeer Player: brez bliznjic Browser in Safeer OS, ceprav sta programa v istem paketu (isti _internal).
+Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"; Parameters: "{#AppArgs}"; AppUserModelID: "{#AppAumid}"
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Parameters: "{#AppArgs}"; Tasks: desktopicon; AppUserModelID: "{#AppAumid}"
+#else
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"; AppUserModelID: "Safeer.Browser"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon; AppUserModelID: "Safeer.Browser"
 Name: "{autoprograms}\Safeer OS"; Filename: "{app}\SafeerOS.exe"; AppUserModelID: "Safeer.OS"
 Name: "{autodesktop}\Safeer OS"; Filename: "{app}\SafeerOS.exe"; Tasks: desktopicon; AppUserModelID: "Safeer.OS"
+#endif
 
+#ifndef Predvajalnik
 [Registry]
 ; Browser registration so Windows lists Safeer Browser in Settings > Apps > Default apps.
 Root: HKA; Subkey: "{#ClientKey}"; ValueType: string; ValueName: ""; ValueData: "{#AppName}"; Flags: uninsdeletekey
@@ -96,6 +128,11 @@ Root: HKA; Subkey: "Software\Classes\SafeerBrowserHTML\shell\open\command"; Valu
 
 Root: HKA; Subkey: "Software\Classes\.htm\OpenWithProgids"; ValueType: string; ValueName: "SafeerBrowserHTML"; ValueData: ""; Flags: uninsdeletevalue
 Root: HKA; Subkey: "Software\Classes\.html\OpenWithProgids"; ValueType: string; ValueName: "SafeerBrowserHTML"; ValueData: ""; Flags: uninsdeletevalue
+#endif
 
 [Run]
+#ifdef Predvajalnik
+Filename: "{app}\{#AppExe}"; Parameters: "{#AppArgs}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
+#else
 Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
+#endif
