@@ -10,6 +10,8 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
+import time
 from typing import List, Optional
 
 CONFIG_DIR = os.path.join(os.environ.get("APPDATA") or os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "SafeerOS")
@@ -68,9 +70,68 @@ def shrani_shrambo(podatki: dict) -> bool:
 # Datoteke
 # ---------------------------------------------------------------------------
 
+#: Znane mape Windows v registru (User Shell Folders): lahko so prestavljene - na testnem PC 26. 10. 2026 so vse na
+#: disku D:, ~\Documents pa ne obstaja (glavno okno je zato poznalo samo domaco mapo in Prenose na C:).
+ZNANE_MAPE_REGISTER = (("DESKTOP", "Desktop"), ("DOCUMENTS", "Personal"),
+                       ("DOWNLOAD", "{374DE290-123F-4565-9164-39C4925E467B}"), ("PICTURES", "My Pictures"),
+                       ("MUSIC", "My Music"), ("VIDEOS", "My Video"))
+
+
+def _sistemski(*deli: str) -> str:
+    """Program Windows z absolutno potjo. Pregled Grok 59 G5: CreateProcess z golim imenom (»explorer.exe«) najprej
+    isce v mapi programa in v trenutni mapi - tja podtaknjen explorer.exe ali powershell.exe bi tekel namesto pravega."""
+    return os.path.join(os.environ.get("SystemRoot") or os.environ.get("windir") or r"C:\Windows", *deli)
+
+
+EXPLORER = _sistemski("explorer.exe")
+POWERSHELL = _sistemski("System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+
+
+def _v_path(ukaz: str) -> str:
+    """Program po PATH, a samo iz absolutnih map (brez trenutne mape, ».« in relativnih vnosov, ki jih shutil.which
+    na Windows doda ali sprejme - G5). Koncnice iz PATHEXT, ce ukaz nima svoje."""
+    koncnice = [""] if os.path.splitext(ukaz)[1] else [k for k in os.environ.get("PATHEXT", ".EXE;.CMD;.BAT").split(";") if k]
+    for mapa in os.environ.get("PATH", "").split(os.pathsep):
+        mapa = mapa.strip().strip('"')
+        if not mapa or not os.path.isabs(mapa):
+            continue
+        for k in koncnice:
+            p = os.path.join(mapa, ukaz + k)
+            if os.path.isfile(p):
+                return p
+    return ""
+
+
+def _wt() -> str:
+    """Windows Terminal: vzdevek aplikacije v %LOCALAPPDATA%\\Microsoft\\WindowsApps, sicer absolutna mapa v PATH."""
+    p = os.path.join(os.environ.get("LOCALAPPDATA", ""), "Microsoft", "WindowsApps", "wt.exe")
+    return p if os.path.isabs(p) and os.path.lexists(p) else _v_path("wt.exe")
+
+
+def znane_mape() -> dict:
+    """{vrsta: pot} znanih map iz registra; brez vnosa privzeta pot pod domaco mapo."""
+    registrske = {}
+    if sys.platform == "win32":
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                                r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders") as k:
+                for vrsta, ime in ZNANE_MAPE_REGISTER:
+                    try:
+                        registrske[vrsta] = os.path.expandvars(str(winreg.QueryValueEx(k, ime)[0]))
+                    except OSError:
+                        pass
+        except OSError:
+            pass
+    privzete = {vrsta: pot for vrsta, pot, _ in MAPE_WINDOWS}
+    return {vrsta: registrske.get(vrsta) or privzete[vrsta] for vrsta, _ in ZNANE_MAPE_REGISTER}
+
+
 def uporabniske_mape() -> List[dict]:
     izhod = []
+    znane = znane_mape()
     for vrsta, pot, privzeto_ime in MAPE_WINDOWS:
+        pot = znane.get(vrsta, pot)
         if os.path.isdir(pot):
             izhod.append({
                 "vrsta": vrsta,
@@ -180,6 +241,10 @@ def preglej_mapo(pot: str, skrite: bool = False) -> dict:
 def isci_datoteke(poizvedba: str, koren: Optional[str] = None) -> List[dict]:
     if not poizvedba or len(poizvedba.strip()) < 2:
         return []
+    if koren is None:
+        # Vse uporabnikove mape z indeksom (tudi na drugem disku), kot lupa namizja - prej samo hoja po domaci mapi.
+        from . import iskanje_win
+        return iskanje_win.isci(poizvedba, 50)
     poizvedba_lower = poizvedba.strip().lower()
     koren = os.path.abspath(koren or os.path.expanduser("~"))
     zadetki = []
@@ -219,7 +284,7 @@ def odpri_mapo(pot: str) -> bool:
         return False
     try:
         if sys.platform == "win32":
-            subprocess.Popen(["explorer.exe", os.path.abspath(pot)])
+            subprocess.Popen([EXPLORER, os.path.abspath(pot)])
         else:
             subprocess.Popen(["xdg-open", pot], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return True
@@ -231,7 +296,7 @@ def odpri_mapo(pot: str) -> bool:
 def pokazi_v_mapi(pot: str) -> bool:
     try:
         if sys.platform == "win32":
-            subprocess.Popen(["explorer.exe", f"/select,{pot}"])
+            subprocess.Popen([EXPLORER, f"/select,{pot}"])
             return True
         subprocess.Popen(["xdg-open", os.path.dirname(pot) if os.path.isfile(pot) else pot])
         return True
@@ -273,6 +338,9 @@ def pridobi_ikono_programa(pot: str, ime: str = "") -> str:
 
     if pot in _IKONA_PREDPOMNILNIK:
         return _IKONA_PREDPOMNILNIK[pot]
+
+    if pot.lower().startswith("shell:appsfolder\\"):
+        return _ikona_paketa(pot[len("shell:AppsFolder\\"):])  # logotip iz manifesta paketa
 
     polna_pot = pot
     if not os.path.isabs(polna_pot):
@@ -320,6 +388,201 @@ _NI_PROGRAM = re.compile(
 def _ni_program(ime: str) -> bool:
     """Pomožni vnosi v meniju Start (odstranjevalniki, navodila, namestitve) niso programi za seznam."""
     return bool(_NI_PROGRAM.search(ime))
+
+
+# --------------------------------------------------------------- paketne aplikacije (MSIX, Microsoft Store)
+# Lastnik 26. 10. 2026: Safeer ne najde Claude. Claude in 45 drugih aplikacij na testnem PC je paketov MSIX - v meniju
+# Start nimajo .lnk, vidi jih samo shell:AppsFolder. Izmerjeno 26. 10. (3 ponovitve, PowerShell z -NoProfile):
+# COM Shell.Application NameSpace('shell:AppsFolder') 0,59-0,64 s, Get-StartApps 0,81-0,91 s, oba 196 vnosov / 46
+# paketnih; Get-AppxPackage (mape za ikone) +0,63-0,79 s. pywin32/comtypes v paketu ni, zato COM prek PowerShell.
+
+#: AppID paketne aplikacije: <ime paketa>_<13 znakov zaloznika>!<id aplikacije>. Samo to gre v explorer.exe - nikoli
+#: presledek, &, |, " ali drug znak lupine. Vnosi »zn=BV5!!!!...« (oglasevane bliznjice MSI za Office) niso paketi.
+_PAKET_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9.\-]{0,99}_[a-z0-9]{13}![A-Za-z0-9][A-Za-z0-9.\-]{0,99}\Z")
+#: Paketi, ki niso program za uporabnika (na testnem PC 26. 10.: pomocnik obvestil Acrobata, sporocila operaterja -
+#: na PC brez SIM ne delajo); drugo, kar pokaze meni Start, ostane.
+_POMOZNI_PAKET = re.compile(r"\b(notification manager|operator messages)\b", re.IGNORECASE)
+PAKETNE_VELJAJO_S = 60.0
+_ROK_LUPINE_S = 15.0
+_PAKETNE: dict = {"cas": -1e9, "seznam": [], "mape": {}, "z_mapami": False, "osvezujem": False}
+
+_SKRIPTA_APPSFOLDER = (
+    "[Console]::OutputEncoding=[Text.Encoding]::UTF8;"
+    "$a=@((New-Object -ComObject Shell.Application).NameSpace('shell:AppsFolder').Items() |"
+    " Where-Object { $_.Path -like '*!*' } | ForEach-Object { @{i=$_.Name; a=$_.Path} });"
+    "$m=@(); if ($env:SAFEER_MAPE_PAKETOV -eq '1') { $m=@(Get-AppxPackage | ForEach-Object {"
+    " @{d=$_.PackageFamilyName; p=$_.InstallLocation} }) };"
+    "@{a=$a; m=$m} | ConvertTo-Json -Compress -Depth 4"
+)
+
+
+def _brez_okna() -> int:
+    return getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+
+def _beri_appsfolder(z_mapami: bool) -> tuple:
+    """([(ime, appid)], {druzina paketa: mapa namestitve}) iz shell:AppsFolder; ob napaki ([], {})."""
+    if sys.platform != "win32":
+        return [], {}
+    okolje = dict(os.environ, SAFEER_MAPE_PAKETOV="1" if z_mapami else "0")
+    try:
+        r = subprocess.run([POWERSHELL, "-NoProfile", "-NonInteractive", "-Command", _SKRIPTA_APPSFOLDER],
+                           capture_output=True, timeout=_ROK_LUPINE_S, env=okolje, creationflags=_brez_okna())
+        podatki = json.loads(r.stdout.decode("utf-8-sig") or "{}")
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return [], {}
+    return _razberi_appsfolder(podatki)
+
+
+def _razberi_appsfolder(podatki: object) -> tuple:
+    """Cista funkcija (preizkus): JSON PowerShella -> ([(ime, appid)], {druzina: mapa})."""
+    if not isinstance(podatki, dict):
+        return [], {}
+    vnosi = podatki.get("a") or []
+    if isinstance(vnosi, dict):  # ConvertTo-Json en element izpise brez seznama
+        vnosi = [vnosi]
+    aplikacije = []
+    for v in vnosi if isinstance(vnosi, list) else []:
+        if not isinstance(v, dict):
+            continue
+        ime, appid = str(v.get("i") or "").strip(), str(v.get("a") or "").strip()
+        if ime and _PAKET_ID.match(appid) and not _ni_program(ime) and not _POMOZNI_PAKET.search(ime):
+            aplikacije.append((ime, appid))
+    mape = podatki.get("m") or []
+    if isinstance(mape, dict):
+        mape = [mape]
+    druzine = {}
+    for m in mape if isinstance(mape, list) else []:
+        if isinstance(m, dict) and m.get("d") and m.get("p"):
+            druzine[str(m["d"])] = str(m["p"])
+    return aplikacije, druzine
+
+
+def _osvezi_paketne(z_mapami: bool) -> None:
+    aplikacije, mape = _beri_appsfolder(z_mapami)
+    if aplikacije or not _PAKETNE["seznam"]:
+        _PAKETNE["seznam"] = aplikacije
+    if mape:
+        _PAKETNE["mape"] = mape
+    _PAKETNE["z_mapami"] = _PAKETNE["z_mapami"] or z_mapami
+    _PAKETNE["cas"] = time.monotonic()
+
+
+def paketne_aplikacije(z_mapami: bool = False) -> list:
+    """[(ime, appid)] paketnih aplikacij. Prvic (ali brez seznama) pocaka na lupino; starejsi od PAKETNE_VELJAJO_S
+    odgovori s starim in se osvezi v ozadju - odprtje seznama programov ne caka 0,6 s vsako minuto."""
+    star = time.monotonic() - _PAKETNE["cas"] > PAKETNE_VELJAJO_S
+    if _PAKETNE["cas"] < 0 or (z_mapami and not _PAKETNE["z_mapami"]):
+        _osvezi_paketne(z_mapami)
+    elif star and not _PAKETNE["osvezujem"]:
+        _PAKETNE["osvezujem"] = True
+
+        def ozadje() -> None:
+            try:
+                _osvezi_paketne(z_mapami or _PAKETNE["z_mapami"])
+            finally:
+                _PAKETNE["osvezujem"] = False
+        threading.Thread(target=ozadje, name="safeer-appsfolder", daemon=True).start()
+    return list(_PAKETNE["seznam"])
+
+
+def _ikona_paketa(appid: str) -> str:
+    """Logotip iz AppxManifest.xml paketa (Square44x44Logo, sicer Logo) kot data: URI; prazno, ce ga ni."""
+    if appid in _IKONA_PREDPOMNILNIK:
+        return _IKONA_PREDPOMNILNIK[appid]
+    druzina, _, aplikacija = appid.partition("!")
+    mapa = _PAKETNE["mape"].get(druzina) or ""
+    _IKONA_PREDPOMNILNIK[appid] = uri = _logotip_paketa(mapa, aplikacija) if mapa else ""
+    return uri
+
+
+def _logotip_paketa(mapa: str, aplikacija: str) -> str:
+    try:
+        with open(os.path.join(mapa, "AppxManifest.xml"), "rb") as f:
+            manifest = f.read(2 * 1024 * 1024).decode("utf-8", "replace")
+    except OSError:
+        return ""
+    # Element <Application Id="..."> te aplikacije, nato VisualElements; brez njega logotip paketa.
+    kos = manifest
+    m = re.search(r'<Application\b[^>]*\bId="%s"' % re.escape(aplikacija), manifest)
+    if m:
+        konec = manifest.find("</Application>", m.end())
+        kos = manifest[m.start():konec if konec > 0 else len(manifest)]
+    rel = ""
+    for vzorec in (r'Square44x44Logo="([^"]+)"', r'Square150x150Logo="([^"]+)"', r"<Logo>([^<]+)</Logo>"):
+        n = re.search(vzorec, kos) or re.search(vzorec, manifest)
+        if n:
+            rel = n.group(1).strip()
+            break
+    if not rel:
+        return ""
+    koren = os.path.realpath(mapa)
+    osnova = os.path.realpath(os.path.join(koren, rel.replace("/", os.sep)))
+    if not osnova.startswith(koren + os.sep):
+        return ""  # pot iz manifesta ne sme iz mape paketa
+    stebelo, koncnica = os.path.splitext(os.path.basename(osnova))
+    try:
+        imena = os.listdir(os.path.dirname(osnova))
+    except OSError:
+        return ""
+    # Razlicice velikosti (Logo.targetsize-48.png, Logo.scale-200.png): najprej 48, nato vecje merilo, nato osnovna.
+    prednost = (".targetsize-48" + koncnica, ".targetsize-64" + koncnica, ".scale-200" + koncnica,
+                ".scale-150" + koncnica, ".scale-100" + koncnica, koncnica)
+    izbrano = ""
+    nizka = {i.lower(): i for i in imena}
+    for pripona in prednost:
+        ime = nizka.get((stebelo + pripona).lower())
+        if ime:
+            izbrano = os.path.join(os.path.dirname(osnova), ime)
+            break
+    if not izbrano:
+        izbrano = next((os.path.join(os.path.dirname(osnova), i) for i in sorted(imena)
+                        if i.lower().startswith(stebelo.lower() + ".") and i.lower().endswith(koncnica.lower())), "")
+    if not izbrano or koncnica.lower() != ".png":
+        return ""
+    try:
+        with open(izbrano, "rb") as f:
+            png = f.read(512 * 1024 + 1)
+    except OSError:
+        return ""
+    if len(png) > 512 * 1024 or not png.startswith(b"\x89PNG"):
+        return ""
+    return "data:image/png;base64," + base64.b64encode(png).decode("ascii")
+
+
+# --------------------------------------------------------------- ukazni programi (Claude Code)
+# Na testnem PC 26. 10.: Claude Code 2.1.310 je samostojen %USERPROFILE%\.local\bin\claude.exe (namestitev
+# claude.ai/install), ni v PATH in ni del aplikacije Claude. Lastnik ga isce po imenu, zato je med programi kot
+# »Claude Code« in se odpre v svojem oknu terminala (Windows Terminal, ce je; sicer konzola).
+CLI_PREDPONA = "cli:"
+_UKAZNI = (("claude-code", "Claude Code", "programiranje",
+            (os.path.join("~", ".local", "bin", "claude.exe"), os.path.join("%APPDATA%", "npm", "claude.cmd")), "claude"),)
+
+
+def _ukazni_program(kljuc: str) -> str:
+    """Pot do ukaznega programa ali prazno."""
+    for k, _ime, _skup, poti, ukaz in _UKAZNI:
+        if k != kljuc:
+            continue
+        for p in poti:
+            p = os.path.expanduser(os.path.expandvars(p))
+            if "%" not in p and os.path.isfile(p):
+                return p
+        return _v_path(ukaz)
+    return ""
+
+
+def _zazeni_ukazni(kljuc: str) -> bool:
+    exe = _ukazni_program(kljuc)
+    if not exe:
+        return False
+    dom = os.path.expanduser("~")
+    wt = _wt()
+    if wt:
+        subprocess.Popen([wt, "-d", dom, exe], cwd=dom)  # seznam argumentov: brez lupine
+    else:
+        subprocess.Popen([exe], cwd=dom, creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
+    return True
 
 
 def poisci_start_menu_programe(z_ikonami: bool = True) -> List[dict]:
@@ -374,6 +637,36 @@ def poisci_start_menu_programe(z_ikonami: bool = True) -> List[dict]:
                         "opis": ""
                     })
 
+    # Paketne aplikacije (MSIX: Claude, Microsoft Store ...) - .lnk z istim imenom ima prednost (zgoraj).
+    for ime, appid in paketne_aplikacije(z_mapami=z_ikonami):
+        if ime.lower() in videni:
+            continue
+        videni.add(ime.lower())
+        pot = "shell:AppsFolder\\" + appid
+        programi.append({
+            "id": "win_pkg_" + hashlib.sha256(appid.lower().encode("utf-8")).hexdigest()[:16],
+            "ime": ime,
+            "pot": pot,
+            "skupina": doloci_skupino(ime, appid),
+            "ikona": pridobi_ikono_programa(pot, ime) if z_ikonami else "",
+            "opis": ""
+        })
+
+    # Ukazni programi brez bliznjice (Claude Code): samo, ce so namesceni.
+    for kljuc, ime, skup, _poti, _ukaz in _UKAZNI:
+        if ime.lower() in videni or not _ukazni_program(kljuc):
+            continue
+        videni.add(ime.lower())
+        exe = _ukazni_program(kljuc)
+        programi.append({
+            "id": "win_cli_" + kljuc,
+            "ime": ime,
+            "pot": CLI_PREDPONA + kljuc,
+            "skupina": skup,
+            "ikona": pridobi_ikono_programa(exe, ime) if z_ikonami else "",
+            "opis": ""
+        })
+
     # Dodaj še pogosta sistemska orodja Windows, če niso najdena
     sistemski = [
         ("Nadzorna plošča", "control.exe", "sistem"),
@@ -401,8 +694,8 @@ def poisci_start_menu_programe(z_ikonami: bool = True) -> List[dict]:
 
 
 def _pot_programa(pot: str) -> str:
-    """Stran poslje id iz seznama programov (win_app_...): poiscemo bliznjico, ki ji pripada."""
-    if not str(pot or "").startswith("win_app_"):
+    """Stran poslje id iz seznama programov (win_app_..., win_pkg_..., win_cli_...): poiscemo, kar mu pripada."""
+    if not str(pot or "").startswith(("win_app_", "win_pkg_", "win_cli_")):
         return pot
     try:
         for p in poisci_start_menu_programe(z_ikonami=False):
@@ -421,6 +714,14 @@ def zazeni_program(pot: str) -> bool:
         pogosti[pot] = pogosti.get(pot, 0) + 1
         shrani_shrambo(shramba)
 
+        if pot.startswith(CLI_PREDPONA):
+            return _zazeni_ukazni(pot[len(CLI_PREDPONA):])
+        if pot.lower().startswith("shell:appsfolder\\"):
+            appid = pot[len("shell:AppsFolder\\"):]
+            if not _PAKET_ID.match(appid):
+                return False  # samo AppID paketa; nikoli niz z znaki lupine
+            subprocess.Popen([EXPLORER, "shell:AppsFolder\\" + appid])
+            return True
         if sys.platform == "win32":
             os.startfile(pot)  # noqa: S606
             return True

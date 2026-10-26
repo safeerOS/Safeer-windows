@@ -401,25 +401,127 @@ def cilj_bliznjice(podatki: bytes) -> str:
     return ansi(struct.unpack_from("<I", podatki, li + 0x10)[0]) + ansi(struct.unpack_from("<I", podatki, li + 0x18)[0])
 
 
-def nedavne(najvec: int = 24) -> List[dict]:
-    """Nedavno odprte datoteke (mapa Recent sistema Windows), najnovejse najprej; mape in manjkajoce izpusti."""
-    mapa = os.path.join(os.environ.get("APPDATA", ""), "Microsoft", "Windows", "Recent")
+# Znane mape, prestavljene na drug disk (testni PC 26. 10. 2026: vse na D:): bliznjice v Recent iz casa pred premikom
+# kazejo na staro pot pod domaco mapo - 207 od 221 bliznjic z manjkajocim ciljem, od tega 67 datotek najdenih na
+# novem mestu. Bliznjic brez LinkInfo je bilo 65, vse spletni naslovi (61) ali Nadzorna plosca (4) - ne datoteke.
+_PRIVZETE_ZNANE = (("DESKTOP", "Desktop"), ("DOCUMENTS", "Documents"), ("DOWNLOAD", "Downloads"),
+                   ("PICTURES", "Pictures"), ("MUSIC", "Music"), ("VIDEOS", "Videos"))
+
+
+def preslikaj_premaknjeno(pot: str, znane: dict, dom: Optional[str] = None) -> str:
+    """Pot pod privzeto znano mapo (~/Documents ...), ki je zdaj drugje, na novo mesto (cista funkcija); sicer pot."""
+    dom = dom or os.path.expanduser("~")
+    for vrsta, privzeto in _PRIVZETE_ZNANE:
+        stara, nova = os.path.join(dom, privzeto), znane.get(vrsta)
+        if not nova or os.path.normcase(nova) == os.path.normcase(stara):
+            continue
+        if os.path.normcase(pot).startswith(os.path.normcase(stara) + os.sep):
+            return os.path.join(nova, os.path.relpath(pot, stara))
+    return pot
+
+
+#: Datoteke, ki jih programi sami ustvarijo zraven pravih (zaklep Officea, zacasne) - niso »nedavne datoteke«.
+_NI_NEDAVNA = (("~$",), (".tmp", ".crdownload", ".part", ".partial", ".lnk", ".ini", ".db"))
+NEDAVNO_DNI = 30
+_NEDAVNO_MAP = 400
+
+
+def _sveze_v_mapah(mape: List[str], od: float, najvec: int, proracun: Optional[int] = None) -> List[tuple]:
+    """(cas, pot) datotek, spremenjenih po [od], v znanih mapah do dveh ravni globoko (brez skritih). Proracun map je
+    razdeljen po korenih (G7: prej skupen - velike Dokumenti so ga porabili in Prenosov ni pregledal); kar koren ne
+    porabi, dobijo naslednji."""
+    izid, pregledanih = [], 0
+    proracun = proracun or _NEDAVNO_MAP
+    for n, koren in enumerate(mape):
+        delez = pregledanih + max(1, (proracun - pregledanih) // (len(mape) - n))
+        vrsta = [(koren, 0)]
+        while vrsta and pregledanih < delez:
+            mapa, globina = vrsta.pop(0)
+            pregledanih += 1
+            try:
+                with os.scandir(mapa) as vsebina:
+                    vnosi = list(vsebina)
+            except OSError:
+                continue
+            for v in vnosi:
+                ime = v.name
+                if ime.startswith((".",) + _NI_NEDAVNA[0]) or ime.lower().endswith(_NI_NEDAVNA[1]):
+                    continue
+                try:
+                    # Na Windows da scandir stat in atribute brez dodatnega klica (prej 4,4 s za mape na D:).
+                    st = v.stat(follow_symlinks=False)
+                except OSError:
+                    continue
+                if getattr(st, "st_file_attributes", 0) & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM):
+                    continue
+                if v.is_dir(follow_symlinks=False):
+                    if globina < 2 and ime not in os_datoteke.PRESKOCI:
+                        vrsta.append((v.path, globina + 1))
+                    continue
+                cas = max(st.st_mtime, st.st_ctime)                # ctime: tudi preneseno/premaknjeno s starim datumom
+                if cas >= od:
+                    izid.append((cas, v.path))
+    izid.sort(reverse=True)
+    return izid[:najvec]
+
+
+def sledenje_nedavnim() -> bool:
+    """Ali Windows belezi nedavno odprte elemente (Nastavitve > Prilagajanje > Start > »Prikazi nedavno odprte
+    elemente«; pravilnik NoRecentDocsHistory). Izklopljeno = mapa Recent ostane prazna ali zastarela."""
+    if not _WIN:
+        return True
+    try:
+        import winreg
+    except ImportError:
+        return True
+    for koren, pot, ime, izklop in ((winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced", "Start_TrackDocs", 0),
+                                    (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Policies\Explorer", "NoRecentDocsHistory", 1),
+                                    (winreg.HKEY_LOCAL_MACHINE, r"Software\Microsoft\Windows\CurrentVersion\Policies\Explorer", "NoRecentDocsHistory", 1)):
+        try:
+            with winreg.OpenKey(koren, pot) as k:
+                if int(winreg.QueryValueEx(k, ime)[0]) == izklop:
+                    return False
+        except (OSError, ValueError):
+            pass
+    return True
+
+
+def nedavne(najvec: int = 24, znane: Optional[dict] = None, recent: Optional[str] = None) -> List[dict]:
+    """Nedavne datoteke, najnovejse najprej: odprte (mapa Recent sistema Windows) in nove ali spremenjene v
+    uporabnikovih mapah (Namizje, Dokumenti, Prenosi ...). Na testnem PC 26. 10. 2026 Windows v Recent ni zapisal
+    nicesar 12 dni, datoteke, ki jih ustvari drug program, pa tja sploh ne pridejo - prej je seznam ostal prazen."""
+    if not sledenje_nedavnim():
+        # Uporabnik ali skrbnik je izklopil nedavne (Start_TrackDocs=0, NoRecentDocsHistory): nic, vmesnik pokaze
+        # nedavneIzklopljeno. Pregled Grok 59 G2: prej so se se vedno pokazale nove datoteke iz map.
+        return []
+    mapa = recent or os.path.join(os.environ.get("APPDATA", ""), "Microsoft", "Windows", "Recent")
     try:
         vnosi = [e for e in os.scandir(mapa) if e.name.lower().endswith(".lnk") and e.is_file()]
     except OSError:
-        return []
+        vnosi = []
     vnosi.sort(key=lambda e: -e.stat().st_mtime)
-    izhod, videno = [], set()
+    if znane is None:
+        from . import os_backend_win
+        znane = os_backend_win.znane_mape()
+    kandidati: List[tuple] = []
     for e in vnosi[:200]:
         try:
             with open(e.path, "rb") as f:
-                pot = cilj_bliznjice(f.read(65536))
+                glava = f.read(65536)
         except OSError:
             continue
-        if not pot or os.path.normcase(pot) in videno or not os.path.isfile(pot):
+        pot = cilj_bliznjice(glava)
+        if pot:
+            kandidati.append((e.stat().st_mtime, preslikaj_premaknjeno(pot, znane)))
+    from .iskanje_win import lokalna_mapa
+    mape = [p for p in dict.fromkeys(znane.values()) if p and lokalna_mapa(p) and os.path.isdir(p)]  # G3
+    kandidati += _sveze_v_mapah(mape, time.time() - NEDAVNO_DNI * 86400, najvec * 4)
+    kandidati.sort(key=lambda k: -k[0])
+    izhod, videno = [], set()
+    for cas, pot in kandidati:
+        if os.path.normcase(pot) in videno or not os.path.isfile(pot):
             continue
         videno.add(os.path.normcase(pot))
-        cas = e.stat().st_mtime
         try:
             velikost = os.path.getsize(pot)
         except OSError:

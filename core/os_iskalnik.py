@@ -13,6 +13,7 @@ dokler prvega ni, odgovarja staro iskanje po disku. Zadetek, ki ga na disku ni v
 from __future__ import annotations
 
 import os
+import stat
 import threading
 import time
 from array import array
@@ -41,6 +42,28 @@ _MEJE = b" -_.([{+,;"
 
 #: Ime za primerjavo: male črke brez šumnikov in naglasov - isto pravilo kot pri hoji po disku.
 kljuc = os_datoteke.kljuc_imena
+
+
+def _naprava(v: os.DirEntry) -> int:
+    """st_dev mape. Na Windows ga DirEntry.stat() ne napolni (vedno 0, dokumentacija Pythona), zato os.stat - prej
+    se je indeks na Windows ustavil na prvi ravni domače mape (testni PC 26. 10. 2026: 113 imen, nobene podmape)."""
+    st = v.stat(follow_symlinks=False)
+    if st.st_dev or os.name != "nt":
+        return st.st_dev
+    return os.stat(v.path, follow_symlinks=False).st_dev
+
+
+def _stik(v: os.DirEntry) -> bool:
+    """Windows: stik (mklink /J) ali priklopljen nosilec (IO_REPARSE_TAG_MOUNT_POINT). os.stat(follow_symlinks=False)
+    zanj vrne disk, na katerem stik lezi, ne cilja - indeks je sel na drug disk in v zanke (testni PC 26. 10. 2026:
+    stik v Dokumentih na nadrejeno mapo = 15 kopij vsake datoteke). Mape OneDrive (datoteke na zahtevo) imajo drugo
+    oznako in ostanejo. Pregled Grok 59 G1."""
+    if os.name != "nt":
+        return False
+    if hasattr(v, "is_junction"):
+        return v.is_junction()
+    oznaka = getattr(stat, "IO_REPARSE_TAG_MOUNT_POINT", 0xA0000003)
+    return getattr(os.stat(v.path, follow_symlinks=False), "st_reparse_tag", 0) == oznaka
 
 
 class Indeks:
@@ -137,7 +160,7 @@ class Indeks:
                 if mapa_je and ime not in os_datoteke.PRESKOCI and globina < NAJVEC_GLOBINA:
                     try:
                         # Drug disk ali omrežno mesto pod domačo mapo: ne hodimo vanj (počasno, lahko ogromno).
-                        if naprava is None or v.stat(follow_symlinks=False).st_dev == naprava:
+                        if not _stik(v) and (naprava is None or _naprava(v) == naprava):
                             vrsta.append((v.path, globina + 1))
                     except OSError:
                         pass
