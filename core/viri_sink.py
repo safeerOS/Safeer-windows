@@ -196,6 +196,10 @@ def ima_prijavo(url: object) -> bool:
     return brez_prijave(url) != str(url or "")
 
 
+#: Javni dodatek Stremio brez kljuca (Android StremioPravila JAVNI_DODATKI); enako media_servers.CINEMETA.
+CINEMETA_MANIFEST = "https://v3-cinemeta.strem.io/manifest.json"
+
+
 def znan_javen(naslov: object, oznacen: bool = False) -> bool:
     """Ali je vir POZITIVNO znan kot javen, brez racuna (pregled 46, Ö1 - ob dvomu ne, kot preverba v ozadju v
     pregledu 39, I1): naslov http(s) brez presledkov in nevidnih znakov, brez prijave ali racuna v naslovu (ima_prijavo,
@@ -212,7 +216,10 @@ def znan_javen(naslov: object, oznacen: bool = False) -> bool:
     from . import kanali_iptv
     if ima_prijavo(besedilo) or kanali_iptv.s_poverilnicami(besedilo, seznam=True):
         return False
-    return kanali_iptv.znan_javni_vir(besedilo) or oznacen is True
+    # Javni dodatek Stremio brez kljuca: samo tocen naslov Cinemete (enako kot Android StremioPravila JAVNI_DODATKI, Ñ1);
+    # po zdruzitvi kljuci-namizje + mc-iptv-serije (26. 10. 2026) ga je sicer izvoz izpustil (test_skrivni_dodatki).
+    # Brez uvoza media_servers: ta ni v tovoru Safeer Control (Grok 82, Ĥ1) - naslov je zapisan tu, enak media_servers.CINEMETA.
+    return kanali_iptv.znan_javni_vir(besedilo) or besedilo == CINEMETA_MANIFEST or oznacen is True
 
 
 def za_ozji_krog(naslov: object, oznacen: bool = False) -> bool:
@@ -376,6 +383,10 @@ def zapis_androida_javen(zapis: object) -> bool:
     except RecursionError:
         return False                    # pregloboko gnezden zapis: ne vemo, kaj je notri - ob dvomu ne
     if _RACUN_V_BESEDILU.search(besedilo):
+        return False
+    # Pregled 95, Ĵ2 (26. 10. 2026): kljuc z imenom storitve ali koncnico (torboxKey, realdebrid, secret ...) vzorec
+    # racuna ne prepozna - ista prepoznava kot za nastavitve dodatkov (skrivni_dodatki.ima_kljucno_polje).
+    if skrivni_dodatki.ima_kljucno_polje(besedilo):
         return False
     naslovi = _NASLOV_V_BESEDILU.findall(besedilo)
     if besedilo.count("//") != len(naslovi):
