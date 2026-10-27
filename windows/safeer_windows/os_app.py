@@ -1073,13 +1073,32 @@ class SafeerOsWindow(QMainWindow):
         print(f"[SafeerOS] DIAG window_show_called section={self.zacetni_razdelek or 'home'}", flush=True)
 
     # ------------------------------------------------------------------ namizje Safeer OS (namizje_win.py)
+    # Lastnik 27. 10. 2026: na Windows je Safeer OS namizje (videz kot na Linuxu) ali pa prvotno namizje Windows -
+    # domacega okna v starem videzu ni vec. Izbira se zapomni pod KLJUC_NAMIZJA (privzeto namizje Safeer); stari
+    # zapis »namizje« se ne bere vec (pri lastniku je bil false in 1.0.52 se je odprl v navadnem oknu). Sesutja in
+    # napaka QML izklopijo namizje samo do konca tega zagona (_namizje_izklopljeno_do_konca).
+    KLJUC_NAMIZJA = "namizje_izbira"
+
     def namizje_vklopljeno(self) -> bool:
-        return sys.platform == "win32" and bool(os_backend_win.nalozi_shrambo().get("namizje", False))
+        if sys.platform != "win32" or getattr(self, "_namizje_izklopljeno_do_konca", False):
+            return False
+        return os_backend_win.nalozi_shrambo().get(self.KLJUC_NAMIZJA) != "windows"
+
+    def shrani_izbiro_namizja(self, vklop: bool) -> None:
+        """Safeer (True) ali prvotno namizje Windows (False); se zapomni za naslednje zagone."""
+        s = os_backend_win.nalozi_shrambo()
+        s[self.KLJUC_NAMIZJA] = "safeer" if vklop else "windows"
+        os_backend_win.shrani_shrambo(s)
+        if vklop:
+            self._namizje_izklopljeno_do_konca = False
+
+    def izklopi_namizje_do_konca(self) -> None:
+        """Varnostna vrata (sesutja, napaka QML): obicajno namizje Windows samo v tem zagonu, izbira ostane."""
+        self._namizje_izklopljeno_do_konca = True
+        self.dispatcher.dispatch(self._skrij_namizje)
 
     def nastavi_namizje(self, vklop: bool) -> bool:
-        s = os_backend_win.nalozi_shrambo()
-        s["namizje"] = bool(vklop)
-        os_backend_win.shrani_shrambo(s)
+        self.shrani_izbiro_namizja(vklop)
         if vklop:
             # Uporabnik ga je vklopil sam: stevec sesutij in razlog samodejnega izklopa se pocistita (S5).
             from . import varnostna_vrata as vv
@@ -1117,7 +1136,7 @@ class SafeerOsWindow(QMainWindow):
                 self.namizje = None
                 from . import varnostna_vrata as vv
                 vv.pisi(dict(vv.beri(), razlog="nalaganje", izklopljeno_ob=vv.zdaj()))
-                self.nastavi_namizje(False)
+                self.izklopi_namizje_do_konca()
                 self.prebudi("nastavitve")
                 return
             self.namizje.pokazi()
@@ -1131,7 +1150,7 @@ class SafeerOsWindow(QMainWindow):
         if not pokazi:
             print("[SafeerOS] Varnostna vrata: namizje se je vec zagonov zapored sesulo - obicajno namizje Windows.",
                   flush=True)
-            self.nastavi_namizje(False)
+            self.izklopi_namizje_do_konca()
             self.prebudi("nastavitve")
             return
         self.pokazi_namizje()
@@ -1152,9 +1171,7 @@ class SafeerOsWindow(QMainWindow):
                 return
 
             def zapisi() -> None:
-                s = os_backend_win.nalozi_shrambo()
-                s["namizje"] = False
-                os_backend_win.shrani_shrambo(s)
+                self.shrani_izbiro_namizja(False)      # izbira uporabnika: prvotno namizje Windows (se zapomni)
                 vv.pisi(dict(vv.stabilno(vv.beri()), razlog="bliznjica"))
 
             def v_glavno(potrdi) -> None:
@@ -1293,6 +1310,14 @@ class SafeerOsWindow(QMainWindow):
         """Druga kopija je bila zagnana (ikona, bliznjica): pokazi to okno in odpri zeleni razdelek."""
         if getattr(self, "predvajalnik", False) and razdelek != "media":
             self._zapusti_nacin_predvajalnika()
+        # Lastnik 27. 10. 2026: ikona Safeer OS brez razdelka odpre namizje Safeer (tudi ce je bilo izbrano prvotno
+        # namizje Windows), nikoli domacega okna v starem videzu.
+        if not razdelek and sys.platform == "win32" and not getattr(self, "predvajalnik", False):
+            if getattr(self, "namizje", None) is None:
+                self.nastavi_namizje(True)
+            else:
+                self.namizje.pokazi()
+            return
         if self.isMinimized() or not self.isVisible():
             if self.v_oknu:
                 self.showNormal()
@@ -3872,6 +3897,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     # Safeer Player namizja ne zazene in ne skrije svojega okna (samo Medijski center, naloga 39).
     if (args.namizje or args.brez_namizja) and not predvajalnik:
         window.nastavi_namizje(bool(args.namizje))
+    elif not predvajalnik and not (args.ozadje or args.razdelek or args.control or magnet or args.okno):
+        # Lastnik 27. 10. 2026: odprtje Safeer OS (ikona) je namizje Safeer - tudi po izbiri prvotnega namizja Windows;
+        # samodejni zagon ob prijavi (--ozadje) izbiro spostuje.
+        window.shrani_izbiro_namizja(True)
     window.zacni_varnostna_vrata()
     if window.namizje_vklopljeno() and not predvajalnik:
         window.zacni_namizje_ob_zagonu()

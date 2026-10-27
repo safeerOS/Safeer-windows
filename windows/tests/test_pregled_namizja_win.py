@@ -59,8 +59,9 @@ class VarnostnaVrataIzNitiBliznjice(unittest.TestCase):
         izvor = (WIN / "os_app.py").read_text(encoding="utf-8")
         telo = izvor.split("def zacni_varnostna_vrata", 1)[1].split("\n    def ", 1)[0]
         self.assertIn("vv.vrata(zapisi, v_glavno)", telo)
-        self.assertIn('s["namizje"] = False', telo)
-        self.assertIn("os_backend_win.shrani_shrambo(s)", telo)
+        # Lastnik 27. 10. 2026: izbira prvotnega namizja Windows se zapomni (shrani_izbiro_namizja pise naravnost v
+        # shrambo, brez glavne niti).
+        self.assertIn("self.shrani_izbiro_namizja(False)", telo)
         self.assertNotIn("self.nastavi_namizje(False)", telo)          # ta gre skozi glavno nit
 
     def test_cist_izhod_in_razlog(self):
