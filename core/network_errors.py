@@ -42,6 +42,26 @@ BESEDILA = {
            "Riprova", "Usa Indietro o Home nel browser per tornare."),
 }
 
+#: Lastnik 27. 10. 2026: seja Spleta je sla na lasten posrednik, ki ne sprejme povezave (nastavitev), stran pa je kazala
+#: le »Povezava se je prekinila« - nihce ni vedel, da gre za nastavitev Spleta (Chrome in Firefox sta delala).
+BESEDILA_POSREDNIK = {
+    "sl": "Splet uporablja lasten posrednik %s, ki ne sprejme povezave. Izklopite ali popravite ga v nastavitvah Spleta (Lasten posrednik).",
+    "en": "The browser uses a custom proxy %s that refuses the connection. Turn it off or fix it in the browser settings (Custom proxy).",
+    "de": "Der Browser nutzt einen eigenen Proxy %s, der die Verbindung ablehnt. Schalte ihn in den Browser-Einstellungen aus oder korrigiere ihn (Eigener Proxy).",
+    "es": "El navegador usa un proxy propio %s que rechaza la conexión. Desactívalo o corrígelo en los ajustes del navegador (Proxy propio).",
+    "fr": "Le navigateur utilise un proxy personnalisé %s qui refuse la connexion. Désactivez-le ou corrigez-le dans les réglages du navigateur (Proxy personnalisé).",
+    "it": "Il browser usa un proxy personalizzato %s che rifiuta la connessione. Disattivalo o correggilo nelle impostazioni del browser (Proxy personalizzato).",
+}
+
+#: Napake, pri katerih seja posrednika sploh ne doseze (zavrnjena povezava ali napaka posrednika).
+def napaka_posrednika(error) -> bool:
+    try:
+        return any(error.matches(Gio.io_error_quark(), k) for k in (
+            Gio.IOErrorEnum.CONNECTION_REFUSED, Gio.IOErrorEnum.PROXY_FAILED, Gio.IOErrorEnum.PROXY_NOT_ALLOWED,
+            Gio.IOErrorEnum.PROXY_NEED_AUTH, Gio.IOErrorEnum.PROXY_AUTH_FAILED))
+    except (TypeError, AttributeError):
+        return False
+
 
 #: Prehodne napake povezave (lastnik, 20. 10. 2026: Google iskanje v Spletu je enkrat pokazalo »Strani trenutno ni
 #: mogoce odpreti«, ponovni poskus je delal - prej se je samodejno ponovilo samo iskanje DuckDuckGo). Brez napak
@@ -127,19 +147,33 @@ def opis_napake(error) -> str:
         return ""
 
 
-def error_html(uri, method, certificate=False, jezik="sl", koda=""):
+def error_html(uri, method, certificate=False, jezik="sl", koda="", posrednik=""):
     jezik = (jezik or "sl")[:2] if (jezik or "sl")[:2] in BESEDILA else "en"
     t_cert, t_ni, m_cert, m_ni, t_znova, t_nazaj = BESEDILA[jezik]
     host = html.escape(urllib.parse.urlsplit(uri).hostname or '')
     target = html.escape(uri, quote=True)
     title = t_cert if certificate else t_ni
     message = m_cert if certificate else m_ni
+    if posrednik and not certificate:
+        message = html.escape(BESEDILA_POSREDNIK[jezik] % _posrednik_za_prikaz(posrednik))
     retry = f'<a href="{target}">{t_znova}</a>' if method == 'GET' and not certificate else ''
     oznaka = f'<p class="k">{html.escape(koda)}</p>' if koda else ''
     return f'''<!doctype html><html lang="{jezik}"><meta name="viewport" content="width=device-width,initial-scale=1">
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
     <title>{title} — Safeer</title><style>html{{color-scheme:dark}}body{{background:#0c1420;color:#eef4fa;font:18px system-ui;max-width:620px;margin:12vh auto;padding:28px;line-height:1.6}}h1{{font-size:28px}}p{{color:#bdcadd}}a{{display:inline-block;padding:12px 22px;background:#85cd3e;color:#102006;border-radius:10px;text-decoration:none;font-weight:600}}.k{{font-size:13px;color:#7f8ea3}}</style>
     <h1>{title}</h1><p>{host}</p><p>{message}</p>{retry}<p>{t_nazaj}</p>{oznaka}</html>'''
+
+
+def _posrednik_za_prikaz(url: str) -> str:
+    """Samo shema, gostitelj in vrata - brez uporabniskega imena in gesla, ki sta lahko v naslovu posrednika."""
+    try:
+        d = urllib.parse.urlsplit(str(url).strip())
+        if d.hostname:
+            gost = "[%s]" % d.hostname if ":" in d.hostname else d.hostname
+            return "%s://%s%s" % (d.scheme or "http", gost, ":%d" % d.port if d.port else "")
+    except ValueError:
+        pass
+    return ""
 
 
 def _ima_vire(view):
@@ -154,9 +188,10 @@ def _ima_vire(view):
 
 
 class NetworkErrorHandler:
-    def __init__(self, view, jezik=None):
+    def __init__(self, view, jezik=None, posrednik=None):
         self.view = view
         self.jezik = jezik          # klicljivo ali niz; Splet: jezik vmesnika
+        self.posrednik = posrednik  # klicljivo: naslov lastnega posrednika seje ali "" (stran napake ga omeni)
         self.requests = {}
         self.retried = {}           # naslov -> stevilo samodejnih ponovitev
         self.error_document = False
@@ -225,11 +260,17 @@ class NetworkErrorHandler:
             return 'GET' if all(m == 'GET' for m in self.requests.values()) else None
         return None
 
-    def show_error(self, uri, certificate=False, koda=""):
+    def show_error(self, uri, certificate=False, koda="", posrednik=""):
         self.view._safeer_load_failed = True
         self.error_document = True
         jezik = self.jezik() if callable(self.jezik) else (self.jezik or "sl")
-        self.view.load_alternate_html(error_html(uri, self._metoda(uri), certificate, jezik, koda), uri, None)
+        self.view.load_alternate_html(error_html(uri, self._metoda(uri), certificate, jezik, koda, posrednik), uri, None)
+
+    def _lasten_posrednik(self) -> str:
+        try:
+            return str(self.posrednik() or "") if callable(self.posrednik) else ""
+        except Exception:  # noqa: BLE001 - stran napake se pokaze tudi, ce nastavitev ni mogoce prebrati
+            return ""
 
     def _brez_virov(self):
         return not _ima_vire(self.view)
@@ -264,5 +305,6 @@ class NetworkErrorHandler:
             self.pending = GLib.timeout_add(int(ZAMIKI_PONOVITVE[poskusov] * 1000), retry)
             return True
         certificate = error.matches(Gio.tls_error_quark(), Gio.TlsError.BAD_CERTIFICATE)
-        self.show_error(uri, certificate, koda)
+        posrednik = self._lasten_posrednik() if napaka_posrednika(error) else ""
+        self.show_error(uri, certificate, koda, posrednik)
         return True

@@ -794,6 +794,11 @@ def torbox_usenet(kljuc: str, nzb: bytes, ime_izdaje: str, indeks: Optional[int]
 
 # ---------------------------------------------------------------------- storitev za Medijski center
 
+#: Naloga 114: lasten pogon Usenet z uporabnikovim ponudnikom NNTP (core/usenet_vezava.py) - Izid.ponudnik.
+LASTNI_USENET = "nntp"
+NAPAKA_LASTNI_POGON = "lastni_pogon"
+
+
 class Debrid:
     """Kljuci, nastavitve in izbira storitve. [beri]/[pisi] berejo in zapisejo razdelek »debrid« nastavitev Medijskega
     centra; [sifriraj]/[desifriraj] sta sifrirnik gesel streznikov (sistemska zbirka skrivnosti)."""
@@ -808,6 +813,9 @@ class Debrid:
         self._zaklep = threading.Lock()
         self._kljuci: dict = {}          # predpomnilnik desifriranih kljucev (samo v pomnilniku)
         self._povezave_nzb: dict = {}    # id toka »usenet:…« -> povezava NZB s kljucem (samo v pomnilniku)
+        # Naloga 114: lasten pogon (usenet_vezava.Vezava: na_voljo(), predvajaj(nzb, ime)); None = samo TorBox.
+        # Nastavi ga os_katalog na Linuxu; Windows in preizkusi brez njega delajo kot prej.
+        self.lastni_usenet = None
         # Zadnji prenesen NZB (id toka -> (cas, bajti)): preverba »pripravljen« in nato poskus s cakanjem za isto izdajo
         # ne preneseta NZB dvakrat (indeksatorji stejejo prenose NZB na dan).
         self._nzb: "OrderedDict[str, tuple]" = OrderedDict()
@@ -1336,8 +1344,19 @@ class Debrid:
         """Indeksator, kljuc TorBox (prenese in pretaka TorBox) in uporabnik ni izbral »Brez debrida«. Iskanje in prenos
         NZB tecejo sama ob seznamu virov: s kljucem, ki ga je indeksator ali TorBox zavrnil, ali z zaklenjenim racunom ne
         (P.sme_klicati - vsak klic bi bil se en zavrnjen poskus prijave; indeksatorji stejejo klice API na dan)."""
-        return (self.indeksator() is not None and bool(self.kljuc(P.TORBOX)) and self.aktivna() is not None
-                and self.sme_klicati(P.INDEKSATOR) and self.sme_klicati(P.TORBOX))
+        if (self.indeksator() is not None and bool(self.kljuc(P.TORBOX)) and self.aktivna() is not None
+                and self.sme_klicati(P.INDEKSATOR) and self.sme_klicati(P.TORBOX)):
+            return True
+        # Naloga 114: z lastnim ponudnikom NNTP TorBox ni potreben; »Brez debrida« ga ne izklopi, ker ni debrid.
+        return self.indeksator() is not None and self.sme_klicati(P.INDEKSATOR) and self.lastni_usenet_na_voljo()
+
+    def lastni_usenet_na_voljo(self) -> bool:
+        """Lasten pogon z uporabnikovim ponudnikom (brez omrezja); napaka pomeni ne."""
+        l = self.lastni_usenet
+        try:
+            return bool(l is not None and l.na_voljo())
+        except Exception:  # noqa: BLE001
+            return False
 
     def usenet_isci(self, ident: str) -> list:
         """Tokovi Usenet za id Stremio: [{"url": "usenet:…", "opis": …, "gb": …}]. Povezave NZB ostanejo v pomnilniku."""
@@ -1395,8 +1414,12 @@ class Debrid:
 
     def usenet_tok(self, id_toka: str, ime_izdaje: str, indeks: Optional[int] = None,
                    samo_takoj: bool = False, rok_cakanja: float = U.CAKAJ_PRENOSA_S,
-                   preklic: Optional[threading.Event] = None) -> Izid:
-        """NZB od indeksatorja (ta racunalnik), nato TorBox. Napaka indeksatorja je U.NAPAKA_INDEKSATOR."""
+                   preklic: Optional[threading.Event] = None, lastni: Optional[bool] = None) -> Izid:
+        """NZB od indeksatorja (ta racunalnik), nato TorBox. Napaka indeksatorja je U.NAPAKA_INDEKSATOR.
+        Naloga 114: [lastni] True = samo lasten pogon; False = samo TorBox; None = lasten pogon, ce je na voljo, razen pri
+        [samo_takoj] (vzporedna preverba »pripravljen« v usenet_takoj ne sme odpreti treh lokalnih streznikov)."""
+        if lastni is True or (lastni is None and not samo_takoj and self.lastni_usenet_na_voljo()):
+            return self._usenet_lastni(id_toka, ime_izdaje)
         vezava_tb = self._vezava(P.TORBOX)
         k = self.kljuc(P.TORBOX)
         if not k:
@@ -1404,12 +1427,39 @@ class Debrid:
         for p in (P.TORBOX, P.INDEKSATOR):
             if not self.sme_klicati(p):         # zavrnjen ali zaklenjen: brez prenosa NZB in brez klica TorBoxa
                 return Izid(napaka=self._napaka_stanja(p), ponudnik=P.TORBOX)
+        nzb, napaka = self._nzb_toka(id_toka, P.TORBOX)
+        if nzb is None:
+            return napaka
+        izid = torbox_usenet(k, nzb, ime_izdaje, indeks, samo_takoj, rok_cakanja=rok_cakanja, preklic=preklic)
+        # Lastnik 25. 10. 2026 (kot Android Usenet.tok): stanje kljuca TorBox sledi uporabi (401 -> »ne velja«).
+        _javi(lambda n, u: self.ob_izidu(P.TORBOX, n, u, vezava_tb), izid.napaka, bool(izid.url))
+        return izid
+
+    def _usenet_lastni(self, id_toka: str, ime_izdaje: str) -> Izid:
+        """Naloga 114: NZB od indeksatorja, predvaja lasten pogon (127.0.0.1 z zetonom) z uporabnikovim ponudnikom.
+        Pravila indeksatorja (stanje kljuca, odtis povezave, predpomnjen NZB) so ista kot pri TorBoxu."""
+        l = self.lastni_usenet
+        if l is None or not self.lastni_usenet_na_voljo():
+            return Izid(napaka=NAPAKA_LASTNI_POGON, ponudnik=LASTNI_USENET)
+        if not self.sme_klicati(P.INDEKSATOR):
+            return Izid(napaka=self._napaka_stanja(P.INDEKSATOR), ponudnik=LASTNI_USENET)
+        nzb, napaka = self._nzb_toka(id_toka, LASTNI_USENET)
+        if nzb is None:
+            return napaka
+        url, koda = l.predvajaj(nzb, ime_izdaje)
+        if not url:
+            _log.info("usenet: lasten pogon ni predvajal (%s)", koda)   # koda je stalen niz brez imen in id-jev
+            return Izid(napaka=NAPAKA_LASTNI_POGON, opis=str(koda), ponudnik=LASTNI_USENET)
+        return Izid(url=url, ponudnik=LASTNI_USENET)
+
+    def _nzb_toka(self, id_toka: str, ponudnik: str) -> tuple:
+        """(NZB, None) ali (None, Izid z napako) - skupno za TorBox in lasten pogon."""
         with self._zaklep:
             v = self._povezave_nzb.get(id_toka)
         # Povezava NZB nosi kljuc indeksatorja iz casa iskanja: izid velja za tisti kljuc (vezava ob iskanju).
         povezava, vezava_ix = v if isinstance(v, tuple) else (v, None)
         if not povezava:
-            return Izid(napaka=U.NAPAKA_INDEKSATOR, ponudnik=P.TORBOX)
+            return None, Izid(napaka=U.NAPAKA_INDEKSATOR, ponudnik=ponudnik)
         # Grokov pregled 40, S1: sme_klicati zgoraj pove stanje TRENUTNEGA kljuca. Povezava iz prejsnjega iskanja je po
         # zamenjavi ali odstranitvi zaklenjenega kljuca poslala STARI kljuc indeksatorju - klicemo samo s kljucem, ki je
         # se shranjen (isti odtis), in torej z njegovim stanjem.
@@ -1417,19 +1467,16 @@ class Debrid:
         if not odtis_ix or odtis_ix != trenutni:
             self._pozabi_povezave(lambda o: o is not None and o == trenutni)
             _log.info("usenet: povezava NZB je iz iskanja s prejsnjim kljucem indeksatorja - brez klica, iskanje znova")
-            return Izid(napaka=U.NAPAKA_INDEKSATOR, ponudnik=P.TORBOX)
+            return None, Izid(napaka=U.NAPAKA_INDEKSATOR, ponudnik=ponudnik)
         nzb = self._nzb_zapomnjen(id_toka)
         if nzb is None:
             nzb, napaka = usenet_nzb(povezava)
             # Stanje kljuca indeksatorja sledi uporabi (401 ali Newznab 100-102 -> »ne velja«, NZB -> velja).
             _javi(lambda n, u: self.ob_izidu(P.INDEKSATOR, n, u, vezava_ix), napaka, nzb is not None)
             if nzb is None:
-                return Izid(napaka=U.NAPAKA_INDEKSATOR, ponudnik=P.TORBOX)
+                return None, Izid(napaka=U.NAPAKA_INDEKSATOR, ponudnik=ponudnik)
             self._zapomni_nzb(id_toka, nzb)
-        izid = torbox_usenet(k, nzb, ime_izdaje, indeks, samo_takoj, rok_cakanja=rok_cakanja, preklic=preklic)
-        # Lastnik 25. 10. 2026 (kot Android Usenet.tok): stanje kljuca TorBox sledi uporabi (401 -> »ne velja«).
-        _javi(lambda n, u: self.ob_izidu(P.TORBOX, n, u, vezava_tb), izid.napaka, bool(izid.url))
-        return izid
+        return nzb, None
 
     def usenet_takoj(self, tokovi: Sequence[dict], rok: float = U.TAKOJ_ROK_S) -> Optional[tuple]:
         """Lastnik 25. 10. 2026: Usenet, ki ga ima TorBox ze pripravljenega, gre pred vse druge vire. Prve U.TAKOJ_IZDAJ izdaj
