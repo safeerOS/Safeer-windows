@@ -1161,3 +1161,21 @@ body.en-razdelek #vsebina { padding-top: 30px; }
 .prostor-napis small .pika { border-radius: 50%; background: var(--ok); display: inline-block; }
 .prostor-napis small .pika.siva { background: #6b7780; }
 
+/* Usenet ponudnik (naloga 44, kot Linux naloga 114 katalog.css): barve samo iz zetonov teme; fokus viden za tipkovnico. */
+.unp-sekcija { margin-top: 18px; }
+.unp-sekcija h4 { margin: 0 0 4px; font-size: 16px; }
+.unp-obrazec { display: grid; grid-template-columns: repeat(3, minmax(160px, 1fr)); gap: 10px; margin: 12px 0 6px; }
+.unp-obrazec [hidden] { display: none; }
+.unp-polje { display: grid; gap: 4px; min-width: 0; color: var(--medlo); font-size: 13px; }
+.unp-polje input { min-width: 0; padding: 10px 13px; border: 1px solid var(--rob); border-radius: 11px; background: var(--vnos); color: var(--besedilo); font: inherit; font-size: 14px; outline: 0; color-scheme: dark; }
+.unp-polje input:focus { border-color: var(--zelena); }
+.unp-polje input:focus-visible, .unp-obrazec .gumb:focus-visible { outline: 2px solid var(--fokus); outline-offset: 2px; }
+.unp-siroko { grid-column: 1 / -1; margin: 0; }
+.unp-obrazec .gumbi { margin-top: 4px; }
+.unp-obrazec .vgr-potrdi { display: flex; align-items: center; gap: 8px; color: var(--besedilo); font-size: 14px; }
+.unp-opozorilo { margin: 0 0 6px; color: var(--rdeca); }
+.unp-stanje { margin: 0; color: var(--besedilo); }
+.unp-stanje.slabo { color: var(--rdeca); }
+.unp-stanje.dobro { color: var(--ok); }
+.unp-obrazec .gumb.potrdi { background: var(--rdeca); color: var(--zelena-temna); }
+@media (max-width: 720px) { .unp-obrazec { grid-template-columns: 1fr; } }

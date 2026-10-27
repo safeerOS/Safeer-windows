@@ -568,6 +568,29 @@
           <button class="gumb" type="submit" data-t="katPoveziStreznik">Poveži medijski strežnik</button>
           <button class="gumb" type="button" id="mediaOdkrijDlna" data-t="katOdkrijDlna">Poišči strežnike v domačem omrežju</button>
         </form>
+    <!-- Lasten ponudnik Usenet (naloga 114, core/usenet_vezava.py): geslo gre samo v sistemsko zbirko in se nikoli ne
+         vrne na stran (polje je ob vsakem odprtju prazno); »Preveri« samo na klik, izid je koda iz besedila.js. -->
+    <section class="vgr-sekcija unp-sekcija" id="unpSekcija" aria-labelledby="unpNaslov">
+      <h4 id="unpNaslov" data-t="unpNaslov"></h4>
+      <p class="drobno vgr-odgovornost" data-t="unpOpis"></p>
+      <p class="drobno unp-stanje" id="unpStanje"></p>
+      <form class="unp-obrazec" id="unpObrazec" novalidate autocomplete="off">
+        <label class="unp-polje"><span data-t="unpIme"></span><input id="unpIme" type="text" maxlength="80" autocomplete="off"></label>
+        <label class="unp-polje"><span data-t="unpStreznik"></span><input id="unpStreznik" type="text" maxlength="253" autocomplete="off" spellcheck="false" autocapitalize="off" data-ph="unpStreznikPh"></label>
+        <label class="unp-polje"><span data-t="unpVrata"></span><input id="unpVrata" type="number" min="1" max="65535" inputmode="numeric" value="563"></label>
+        <label class="unp-polje"><span data-t="unpUporabnik"></span><input id="unpUporabnik" type="text" maxlength="400" autocomplete="username" spellcheck="false" autocapitalize="off"></label>
+        <label class="unp-polje"><span data-t="unpGeslo"></span><input id="unpGeslo" type="password" maxlength="400" autocomplete="current-password"></label>
+        <label class="unp-polje"><span data-t="unpPovezav"></span><input id="unpPovezav" type="number" min="1" max="100" inputmode="numeric" value="8" aria-describedby="unpNamigPovezav"></label>
+        <p class="drobno unp-siroko" id="unpNamigPovezav" data-t="unpNamigPovezav"></p>
+        <label class="vgr-potrdi unp-siroko"><input type="checkbox" id="unpTls" checked><span data-t="unpTls"></span></label>
+        <div class="unp-siroko unp-brez-tls" id="unpBrezTls" hidden>
+          <p class="drobno unp-opozorilo" role="alert" data-t="unpOpozoriloBrezTls"></p>
+          <label class="vgr-potrdi"><input type="checkbox" id="unpBrezTlsPotrdi"><span data-t="unpPotrdiBrezTls"></span></label>
+        </div>
+        <div class="gumbi unp-siroko"><button type="button" class="gumb" id="unpPozabi" data-t="unpPozabi"></button><button type="button" class="gumb" id="unpPreveri" data-t="unpPreveri"></button><button type="submit" class="gumb glavni" id="unpShrani" data-t="unpShrani"></button></div>
+        <p class="drobno kat-vir-sporocilo unp-siroko" id="unpSporocilo" role="status" aria-live="polite"></p>
+      </form>
+    </section>
         <div id="mediaNastavitveMesto"></div>
         <div id="skupineNastavitev"></div>
         <p class="o-sistemu" id="oSistemu"></p>

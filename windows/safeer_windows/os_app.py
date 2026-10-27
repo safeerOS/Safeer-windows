@@ -33,7 +33,7 @@ from core import os_dvd, os_media, os_posodobitve, os_scit, os_sporocila, os_tor
 from . import en_primerek
 from . import gledalec_zaslona
 from . import tema
-from . import (browser, control_backend, control_window, magnet_win, os_backend_win, policy, vlc_player,
+from . import (browser, control_backend, control_window, magnet_win, os_backend_win, policy, usenet_win, vlc_player,
                webview2_media, zapiski)
 
 
@@ -738,6 +738,8 @@ class SafeerOsWindow(QMainWindow):
             lambda ime, koda: self.poslji_dogodek("kodaPrijave", {"ime": ime, "koda": koda}))
         _korak("control_backend")
         self.media_center = os_media.MediaCenter(os_backend_win.CONFIG_DIR)
+        # Naloga 44: lasten ponudnik Usenet (okno Moji viri -> Usenet ponudnik in predvajanje NZB, ista vezava).
+        usenet_win.vezi(self.media_center)
         # Pred predvajanjem preverimo, da prvi tok res odgovori (mrtva povezava ne sme biti prva).
         self.media_center.preveri_tokove = True
         # Film iz torrenta (dodatek): branje torrenta traja - stran med tem pove, da ga pripravljamo.
@@ -3221,6 +3223,11 @@ class SafeerOsWindow(QMainWindow):
             # Naloga 131: debrid storitve - stanje, izbira ob zvrsteh, kljuci (core/debrid.most).
             from core import debrid
             return debrid.most(self.media_center.debrid, list(a or []))
+
+        if metoda == "mediaUsenetPonudnik":
+            # Naloga 44 (kot Linux 114): okno Moji viri -> Usenet ponudnik (core/usenet_vezava.most). Klic tece v delovni
+            # niti (obdelaj_klic), preverba ponudnika na glavni niti ni dovoljena.
+            return usenet_win.most(self.media_center, a)
 
         if metoda == "mediaOdkrijDlna":
             from core import media_servers

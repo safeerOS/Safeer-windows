@@ -1544,7 +1544,9 @@ class MediaCenter:
             return []
 
     def _usenet_razreseno(self, item_id: str, item: dict, t: dict, izid, rezerve: list) -> dict:
-        tok = {"url": izid.url, "vir": "Usenet · " + debrid_pravila.ime(izid.ponudnik), "opis": str(t.get("opis") or "")}
+        # Naloga 114: lasten pogon nima imena storitve (debrid_pravila.ime pozna samo debride).
+        ime = "NNTP" if izid.ponudnik == debrid.LASTNI_USENET else debrid_pravila.ime(izid.ponudnik)
+        tok = {"url": izid.url, "vir": "Usenet · " + ime, "opis": str(t.get("opis") or "")}
         razlicice = [tok] + list(rezerve[:9])
         resolved = dict(item, url=izid.url, razlicice=razlicice, stevilo_razlicic=len(razlicice), debrid=izid.ponudnik,
                         usenet=True)
@@ -1557,6 +1559,14 @@ class MediaCenter:
         hitrost, placan. Rok [rok] skupaj z iskanjem pri indeksatorju (preverba ⚡ tece hkrati), prve tri izdaje."""
         konec = time.monotonic() + rok
         zadetki = self._usenet_zadetki(item_id, item, ident, rok)
+        if zadetki and self.debrid.lastni_usenet_na_voljo():
+            # Naloga 114: z lastnim ponudnikom NNTP je vsaka izdaja »takoj« (pretakamo neposredno, brez prenosa pri
+            # TorBoxu); po vrsti kakovosti, najvec dva poskusa do 15 GB kot pri TorBoxu. En film naenkrat (vezava).
+            for i in usenet_pravila.za_samodejno([float(t.get("gb") or 0.0) for t in zadetki]):
+                t = zadetki[i]
+                izid = self.debrid.usenet_tok(str(t["url"]), str(t.get("naslov") or ""), lastni=True)
+                if izid.url:
+                    return self._usenet_razreseno(item_id, item, t, izid, rezerve)
         ostane = konec - time.monotonic()
         if not zadetki or ostane <= 0.2:
             return None
@@ -1573,10 +1583,13 @@ class MediaCenter:
         if not self._usenet_mogoc(tip, ident):
             return None
         zadetki = self._usenet_zadetki(item_id, item, ident)
+        # Lasten pogon je ze poskusil prvi korak (naloga 114): tu samo TorBox, sicer dvakrat isto izdajo prek NNTP.
+        # Brez lastnega pogona klic ostane enak kot prej (obstojeci nadomestki usenet_tok nimajo argumenta lastni).
+        samo_torbox = {"lastni": False} if self.debrid.lastni_usenet_na_voljo() else {}
         for i in usenet_pravila.za_samodejno([float(t.get("gb") or 0.0) for t in zadetki]):
             t = zadetki[i]
             izid = self.debrid.usenet_tok(str(t["url"]), str(t.get("naslov") or ""), samo_takoj=samo_takoj,
-                                          rok_cakanja=debrid_pravila.CAKAJ_NOVEGA_S)
+                                          rok_cakanja=debrid_pravila.CAKAJ_NOVEGA_S, **samo_torbox)
             if izid.url:
                 return self._usenet_razreseno(item_id, item, t, izid, rezerve)
         return None
