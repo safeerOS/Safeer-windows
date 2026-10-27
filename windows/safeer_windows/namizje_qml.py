@@ -89,6 +89,19 @@ class Most(QObject):
         return QUrl.fromLocalFile(pot).toString() if pot else ""
 
 
+def stevilo_neprebranih(seznam: Any) -> int:
+    """Neprebrana sporocila vseh oseb (sporocilaSeznam: skupine z vsoto »neprebrano«, core/sporocila/storitev.py
+    zdruzeni_pogovori) za gumb Sporocila na namizju - isto stevilo kot v oknu Sporocila."""
+    n = 0
+    skupine = seznam.get("skupine") if isinstance(seznam, dict) else None
+    for s in skupine or []:
+        try:
+            n += max(0, int((s or {}).get("neprebrano") or 0))
+        except (TypeError, ValueError, AttributeError):
+            continue
+    return n
+
+
 class NamizjeQml(QQuickView):
     WM_WINDOWPOSCHANGING = 0x0046
     HWND_BOTTOM = 1
@@ -143,6 +156,8 @@ class NamizjeQml(QQuickView):
             return self._slicice(a)
         if metoda == "besedilaProstorov":
             return besedila_prostorov(_beri_besedila_os(), self._jezik())
+        if metoda == "sporocilaNeprebrana":
+            return stevilo_neprebranih(self.os_okno._izvedi_metodo("sporocilaSeznam", [""]))
         if metoda == "bliznjice":
             from . import varnostna_vrata as vv
             return dict(vv.STANJE)
