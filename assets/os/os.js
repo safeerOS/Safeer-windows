@@ -558,6 +558,25 @@
       if (p) zazeni(p);
       return;
     }
+    // Pogovor (zadetek lupe na namizju, plosca Sporocila): okno Sporocila pri tem pogovoru. Prej je sel »pogovor:...«
+    // v pojdi(), ki ga ni poznal, in nazaj v odpriRazdelek - okno in stran sta si ga podajala v krogu (27. 10. 2026).
+    if (kam.indexOf("pogovor:") === 0) {
+      var cilj = kam.slice(8), dv = cilj.indexOf(":");
+      // V oknu drugega razdelka: cel cilj naprej (Safeer OS ga da oknu Sporocila, okno_razdelka.okno_za).
+      if (!vTemOknu("sporocila")) { if (!PREDVAJALNIK) klic("odpriRazdelek", [kam]).catch(function () {}); return; }
+      if (dv < 0) { pojdi("sporocila"); return; }
+      var kanal = cilj.slice(0, dv), idPogovora = cilj.slice(dv + 1);
+      pojdi("sporocila");
+      klic("sporocilaSeznam", [""]).then(function (p) {
+        posodobiSeznamIzOdgovora(p || {});
+        var najden = null;
+        (S.sporocilaSkupine || []).forEach(function (sk) {
+          (sk.pogovori || []).forEach(function (x) { if (!najden && x.kanal_id === kanal && x.id === idPogovora) najden = [sk.oseba, x]; });
+        });
+        if (najden) odpriPogovor(najden[0], najden[1]);
+      }).catch(function () {});
+      return;
+    }
     if (kam === "hitro") { odpriHitro(); return; }
     if (kam === "napajanje") { odpriNapajanje(); return; }
     if (kam === "mint") { odpriMint(); return; }

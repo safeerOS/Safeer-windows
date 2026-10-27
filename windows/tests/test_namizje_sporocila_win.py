@@ -38,6 +38,34 @@ class GumbSporocila(unittest.TestCase):
             self.assertIn("{n}", vrstica.split("sporocilaNeprebrana: ", 1)[1].split('",', 1)[0], j)
 
 
+NL = chr(10)
+KONEC_FUNKCIJE, KONEC_POJDI, KONEC_BLOKA = NL + "        }" + NL, NL + "  };", NL + "    }" + NL
+OSJS = (KOREN / "assets" / "os" / "os.js").read_text(encoding="utf-8")
+
+
+class IskanjePogovorov(unittest.TestCase):
+    def test_lupa_isce_pogovore_kot_linux(self):
+        isci = QML.split("function isci(q) {", 1)[1].split(KONEC_FUNKCIJE, 1)[0]
+        self.assertIn('koren.klic("sporocilaSeznam", [""]', isci)
+        self.assertIn("Date.now() - sporocilaCas < 30000", isci)       # ne ob vsaki crki
+        self.assertIn("if (q.length >= 2)", isci)
+        self.assertIn('kljuc: "pogovor:" + p.kanal_id + ":" + p.id', QML)
+
+    def test_zadetek_odpre_pogovor(self):
+        izberi = QML.split("function izberi(i) {", 1)[1].split(KONEC_FUNKCIJE, 1)[0]
+        self.assertIn('else if (z.vrsta === "pogovor") koren.klic("odpriRazdelek", [z.kljuc])', izberi)
+        # Pogovor ni Splet: brez te veje bi sel v spletNaNamizju (zadnja veja).
+        self.assertLess(izberi.index('z.vrsta === "pogovor"'), izberi.index("spletNaNamizju"))
+
+    def test_okno_sporocila_odpre_pogovor_brez_kroga(self):
+        pojdi = OSJS.split("window.safeerOsPojdi = function (kam) {", 1)[1].split(KONEC_POJDI, 1)[0]
+        blok = pojdi.split('if (kam.indexOf("pogovor:") === 0) {', 1)[1].split(KONEC_BLOKA, 1)[0]
+        self.assertIn("odpriPogovor(najden[0], najden[1])", blok)
+        self.assertIn('klic("odpriRazdelek", [kam])', blok)      # drugo okno: cel cilj naprej, ne samo »sporocila«
+        self.assertNotIn("pojdi(kam)", blok)                     # pojdi() »pogovor:« ne pozna -> krog okno <-> stran
+        self.assertLess(pojdi.index('kam.indexOf("pogovor:") === 0'), pojdi.index("pojdi(kam);"))
+
+
 @unittest.skipIf(namizje_qml is None, "namizje_qml se ne uvozi (PySide6)")
 class SteviloNeprebranih(unittest.TestCase):
     def test_vsota_skupin(self):

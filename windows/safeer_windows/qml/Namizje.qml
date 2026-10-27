@@ -211,11 +211,38 @@ Item {
             programi.vsi.filter(function (p) { return p.ime.toLowerCase().indexOf(ql) >= 0 }).slice(0, 5)
                 .forEach(function (p) { zadetkiModel.append({ vrsta: "program", ime: p.ime, opis: koren.t("programi"), kljuc: p.id, ikona: p.ikona || "" }) })
             zadetkiModel.append({ vrsta: "splet", ime: koren.t("splet") + ": " + q, opis: "", kljuc: q, ikona: "" })
+            // Sporocila (lastnik 27. 10. 2026, kot na Linuxu - popis 3.1): osebe in pogovori po imenu, naslovu, zadevi in
+            // zadnjem sporocilu. Seznam iz Safeer OS najvec vsakih 30 s, ne ob vsaki crki.
+            if (q.length >= 2) {
+                if (Date.now() - sporocilaCas < 30000) dodajSporocila(izSporocil(sporocilaSkupine, ql))
+                else koren.klic("sporocilaSeznam", [""], function (r) {
+                    zadetki.sporocilaSkupine = (r && r.skupine) || []; zadetki.sporocilaCas = Date.now()
+                    if (st === zahteva) zadetki.dodajSporocila(zadetki.izSporocil(zadetki.sporocilaSkupine, ql))
+                })
+            }
             koren.klic("isciDatoteke", [q, 8], function (r) {
                 if (st !== zahteva) return
                 ;(r || []).forEach(function (d) {
                     zadetkiModel.insert(Math.max(0, zadetkiModel.count - 1), { vrsta: "datoteka", ime: d.ime, opis: d.pot, kljuc: d.pot, ikona: "" })
                 })
+            })
+        }
+        property var sporocilaSkupine: []
+        property real sporocilaCas: 0
+        function izSporocil(skupine, ql) {
+            return (skupine || []).filter(function (s) {
+                var o = s.oseba || {}, p = s.pogovori || []
+                var besedilo = (o.ime || "") + " " + (o.identitete || []).map(function (x) { return x[1] || "" }).join(" ") + " "
+                             + p.map(function (x) { return (x.zadeva || "") + " " + (x.zadnje_sporocilo || "") }).join(" ")
+                return p.length > 0 && besedilo.toLowerCase().indexOf(ql) >= 0
+            }).slice(0, 4)
+        }
+        // Pogovori gredo pred »Splet: ...« (zadnji zadetek); datoteke pridejo pozneje na isto mesto.
+        function dodajSporocila(seznam) {
+            seznam.forEach(function (s) {
+                var p = s.pogovori[0]
+                zadetkiModel.insert(Math.max(0, zadetkiModel.count - 1), { vrsta: "pogovor", ime: (s.oseba || {}).ime || "",
+                    opis: koren.t("sporocilaGumb") + " · " + (p.zadnje_sporocilo || p.zadeva || ""), kljuc: "pogovor:" + p.kanal_id + ":" + p.id, ikona: "" })
             })
         }
         // Enter: seznam se osvezi 180 ms po zadnji tipki. Ce uporabnik pritisne Enter prej, najprej poiscemo TRENUTNO
@@ -232,6 +259,7 @@ Item {
             var z = zadetkiModel.get(i)
             if (z.vrsta === "program") koren.klic("zazeni", [z.kljuc], function (ok) { if (!ok) koren.obvesti(koren.t("niUspelo")) })
             else if (z.vrsta === "datoteka") koren.klic("odpriDatoteko", [z.kljuc])
+            else if (z.vrsta === "pogovor") koren.klic("odpriRazdelek", [z.kljuc])     // okno Sporocila pri tem pogovoru
             else koren.klic("spletNaNamizju", [z.kljuc], function (ok) { if (ok === false) koren.obvesti(koren.t("niUspelo")) })
             polje.text = ""
         }
@@ -245,7 +273,7 @@ Item {
                 Row {
                     anchors.verticalCenter: parent.verticalCenter; x: 10; spacing: 12
                     Image { source: model.ikona; width: 26; height: 26; visible: model.ikona !== ""; sourceSize: Qt.size(52, 52) }
-                    Text { text: model.vrsta === "splet" ? "🌐" : "📄"; visible: model.ikona === ""; font.pixelSize: 20; width: 26 }
+                    Text { text: model.vrsta === "splet" ? "🌐" : model.vrsta === "pogovor" ? "✉" : "📄"; visible: model.ikona === ""; font.pixelSize: 20; width: 26 }
                     Column {
                         Text { text: model.ime; color: koren.paleta.besedilo; font.pixelSize: 14; elide: Text.ElideRight; width: seznamZadetkov.width - 70 }
                         Text { text: model.opis; color: koren.paleta.medlo; font.pixelSize: 11; elide: Text.ElideMiddle; width: seznamZadetkov.width - 70; visible: text !== "" }
