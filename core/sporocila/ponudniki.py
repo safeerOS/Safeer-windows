@@ -11,14 +11,14 @@ from __future__ import annotations
 NAVADNO, APLIKACIJE, OAUTH, DRUG = "navadno", "aplikacije", "oauth", "drug"
 
 PONUDNIKI: list[dict] = [
-    {"id": "gmail", "ime": "Gmail", "domene": ["gmail.com", "googlemail.com"], "imap": "imap.gmail.com", "imap_vrata": 993, "smtp": "smtp.gmail.com", "smtp_vrata": 465, "geslo": APLIKACIJE, "navodila": "gmail"},
+    {"id": "gmail", "ime": "Gmail", "domene": ["gmail.com", "googlemail.com"], "imap": "imap.gmail.com", "imap_vrata": 993, "smtp": "smtp.gmail.com", "smtp_vrata": 465, "geslo": APLIKACIJE, "navodila": "gmail", "geslo_stran": "https://myaccount.google.com/apppasswords"},
     {"id": "siol", "ime": "Siol (Telekom Slovenije)", "domene": ["siol.net", "siol.com"], "imap": "imap.siol.net", "imap_vrata": 993, "smtp": "mail.siol.net", "smtp_vrata": 465, "geslo": NAVADNO, "navodila": "navadno"},
     {"id": "t2", "ime": "T-2", "domene": ["t-2.net", "t-2.si"], "imap": "imap.t-2.net", "imap_vrata": 993, "smtp": "smtp.t-2.net", "smtp_vrata": 465, "geslo": NAVADNO, "navodila": "navadno"},
     {"id": "telemach", "ime": "Telemach", "domene": ["telemach.net", "telemach.si"], "imap": "imap.telemach.net", "imap_vrata": 993, "smtp": "smtp.telemach.net", "smtp_vrata": 587, "geslo": NAVADNO, "navodila": "navadno"},
     {"id": "amis", "ime": "Amis", "domene": ["amis.net"], "imap": "imap.amis.net", "imap_vrata": 993, "smtp": "smtp.amis.net", "smtp_vrata": 465, "geslo": NAVADNO, "navodila": "navadno"},
     {"id": "arnes", "ime": "Arnes", "domene": ["arnes.si", "guest.arnes.si"], "imap": "imap.arnes.si", "imap_vrata": 993, "smtp": "mail.arnes.si", "smtp_vrata": 465, "geslo": NAVADNO, "navodila": "arnes"},
-    {"id": "yahoo", "ime": "Yahoo Mail", "domene": ["yahoo.com", "yahoo.co.uk", "yahoo.de", "ymail.com", "rocketmail.com"], "imap": "imap.mail.yahoo.com", "imap_vrata": 993, "smtp": "smtp.mail.yahoo.com", "smtp_vrata": 465, "geslo": APLIKACIJE, "navodila": "yahoo"},
-    {"id": "icloud", "ime": "iCloud Mail", "domene": ["icloud.com", "me.com", "mac.com"], "imap": "imap.mail.me.com", "imap_vrata": 993, "smtp": "smtp.mail.me.com", "smtp_vrata": 587, "geslo": APLIKACIJE, "navodila": "icloud"},
+    {"id": "yahoo", "ime": "Yahoo Mail", "domene": ["yahoo.com", "yahoo.co.uk", "yahoo.de", "ymail.com", "rocketmail.com"], "imap": "imap.mail.yahoo.com", "imap_vrata": 993, "smtp": "smtp.mail.yahoo.com", "smtp_vrata": 465, "geslo": APLIKACIJE, "navodila": "yahoo", "geslo_stran": "https://login.yahoo.com/account/security"},
+    {"id": "icloud", "ime": "iCloud Mail", "domene": ["icloud.com", "me.com", "mac.com"], "imap": "imap.mail.me.com", "imap_vrata": 993, "smtp": "smtp.mail.me.com", "smtp_vrata": 587, "geslo": APLIKACIJE, "navodila": "icloud", "geslo_stran": "https://account.apple.com"},
     {"id": "gmx", "ime": "GMX", "domene": ["gmx.net", "gmx.de", "gmx.at", "gmx.ch", "gmx.com"], "imap": "imap.gmx.net", "imap_vrata": 993, "smtp": "mail.gmx.net", "smtp_vrata": 465, "geslo": NAVADNO, "navodila": "gmx"},
     {"id": "mailcom", "ime": "mail.com", "domene": ["mail.com", "email.com", "usa.com"], "imap": "imap.mail.com", "imap_vrata": 993, "smtp": "smtp.mail.com", "smtp_vrata": 465, "geslo": NAVADNO, "navodila": "gmx"},
     {"id": "zoho", "ime": "Zoho Mail", "domene": ["zohomail.eu", "zohomail.com", "zoho.com", "zoho.eu"], "imap": "imap.zoho.eu", "imap_vrata": 993, "smtp": "smtp.zoho.eu", "smtp_vrata": 465, "geslo": APLIKACIJE, "navodila": "zoho"},
@@ -29,20 +29,18 @@ PONUDNIKI: list[dict] = [
     {"id": DRUG, "ime": "", "domene": [], "imap": "", "imap_vrata": 993, "smtp": "", "smtp_vrata": 465, "geslo": NAVADNO, "navodila": "drug"},
 ]
 
-#: Ponudniki brez IMAP/SMTP in klepeti: na racunalniku uradna spletna aplikacija (odpre se v Safeer OS kot
-#: spletna aplikacija) ali uradna stran za prenos namizne aplikacije. Vse povezave so uradne strani ponudnikov.
+#: Ponudniki brez IMAP/SMTP in spletni klepeti so v core/spletni_klepeti.py (en katalog za Sporocila in stranske plosce
+#: vseh brskalnikov Safeer; vdelajo se v Sporocila). Tu ostanejo programi, ki v enem oknu zdruzijo vec storitev - samo
+#: uradna stran za prenos; Safeer nicesar ne prenasa sam.
 APLIKACIJE_SPOROCIL: list[dict] = [
-    {"ime": "Outlook", "vrsta": "posta", "splet": "https://outlook.live.com/mail/", "prenos": "https://www.microsoft.com/microsoft-365/outlook/email-and-calendar-software-microsoft-outlook"},
-    {"ime": "Proton Mail", "vrsta": "posta", "splet": "https://mail.proton.me/", "prenos": "https://proton.me/mail/download"},
-    {"ime": "Tuta Mail", "vrsta": "posta", "splet": "https://app.tuta.com/", "prenos": "https://tuta.com/#download"},
-    {"ime": "Signal", "vrsta": "klepet", "splet": "", "prenos": "https://signal.org/download/"},
-    {"ime": "Telegram", "vrsta": "klepet", "splet": "https://web.telegram.org/", "prenos": "https://desktop.telegram.org/"},
-    {"ime": "WhatsApp", "vrsta": "klepet", "splet": "https://web.whatsapp.com/", "prenos": "https://www.whatsapp.com/download"},
-    {"ime": "Viber", "vrsta": "klepet", "splet": "", "prenos": "https://www.viber.com/download/"},
-    {"ime": "Element (Matrix)", "vrsta": "klepet", "splet": "https://app.element.io/", "prenos": "https://element.io/download"},
-    {"ime": "Messenger", "vrsta": "klepet", "splet": "https://www.messenger.com/", "prenos": ""},
-    {"ime": "Discord", "vrsta": "klepet", "splet": "https://discord.com/app", "prenos": "https://discord.com/download"},
-    {"ime": "Slack", "vrsta": "klepet", "splet": "https://app.slack.com/", "prenos": "https://slack.com/downloads"},
+    # Vec kanalov v eni aplikaciji (lastnik, 12. 10. 2026): programi, ki v enem oknu zdruzijo vec storitev ali protokolov.
+    # Najprej odprtokodni. Uradne strani preverjene 12. 10. 2026.
+    {"ime": "Thunderbird", "vrsta": "vec", "opis": "e-pošta, koledar in klepet Matrix", "splet": "", "prenos": "https://www.thunderbird.net/"},
+    {"ime": "Ferdium", "vrsta": "vec", "opis": "WhatsApp, Telegram, Discord, Slack … v enem oknu (odprta koda)", "splet": "", "prenos": "https://ferdium.org/download"},
+    {"ime": "Pidgin", "vrsta": "vec", "opis": "XMPP, IRC in drugi protokoli (odprta koda)", "splet": "", "prenos": "https://pidgin.im/"},
+    {"ime": "Delta Chat", "vrsta": "vec", "opis": "klepet prek tvoje e-pošte (odprta koda)", "splet": "", "prenos": "https://get.delta.chat"},
+    {"ime": "Beeper", "vrsta": "vec", "opis": "WhatsApp, Signal, Telegram, Messenger, Instagram, Discord, Slack …", "splet": "", "prenos": "https://www.beeper.com/download"},
+    {"ime": "Rambox", "vrsta": "vec", "opis": "delovni prostor za več storitev (del funkcij plačljiv)", "splet": "", "prenos": "https://rambox.app/"},
 ]
 
 
@@ -55,6 +53,9 @@ def iz_naslova(naslov: str) -> dict | None:
     return next((p for p in PONUDNIKI if d in p["domene"]), None)
 
 
-def za_vmesnik() -> dict:
-    """Vse, kar potrebuje spletni vmesnik (brez navodil - ta so prevedena v besedila.js)."""
-    return {"ponudniki": [{k: v for k, v in p.items()} for p in PONUDNIKI], "aplikacije": list(APLIKACIJE_SPOROCIL)}
+def za_vmesnik(jezik: str = "sl") -> dict:
+    """Vse, kar potrebuje spletni vmesnik (brez navodil - ta so prevedena v besedila.js). »klepeti«: katalog vdeljivih
+    spletnih klepetov in poste (core/spletni_klepeti.py) z imeni v jeziku vmesnika."""
+    from core import spletni_klepeti
+    return {"ponudniki": [{k: v for k, v in p.items()} for p in PONUDNIKI], "aplikacije": list(APLIKACIJE_SPOROCIL),
+            "klepeti": spletni_klepeti.za_vmesnik(jezik)}
