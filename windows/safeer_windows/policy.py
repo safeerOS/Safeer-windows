@@ -84,14 +84,18 @@ PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 def resource_roots() -> List[str]:
     roots = []
-    local_appdata = os.environ.get("LOCALAPPDATA", "")
-    if local_appdata:
-        app_dir = os.path.join(local_appdata, "SafeerOS", "app")
-        if os.path.isdir(app_dir):
-            roots.append(app_dir)
     bundle = getattr(sys, "_MEIPASS", None)
     if bundle:
+        # Namesceni paket uporablja SAMO svojo kodo. Preizkus 27. 10. 2026 (naloga 41): mapa %LOCALAPPDATA%\SafeerOS\app,
+        # ki jo je pustil stari zaganjalnik 1.0.51 (Go, koda iz zip), je imela prednost - 1.0.52 je tekel s kodo 25. 10.
+        # (brez popravka Scita, Playerja in prevodov).
         roots.append(os.path.join(bundle, "shared"))
+    else:
+        local_appdata = os.environ.get("LOCALAPPDATA", "")
+        if local_appdata:
+            app_dir = os.path.join(local_appdata, "SafeerOS", "app")
+            if os.path.isdir(app_dir):
+                roots.append(app_dir)
     roots.append(os.path.abspath(os.path.join(PACKAGE_DIR, "..", "..")))
     return roots
 
