@@ -85,6 +85,31 @@ def _ozadje_za_splet():
 _PROSTORI_ZAKLEP = threading.Lock()
 
 
+def _naslov_okna(okno) -> str:
+    """Naslov glavnega okna: »Safeer Player« v nacinu predvajalnika (naloga 39), sicer »Safeer OS«."""
+    return "Safeer Player" if getattr(okno, "predvajalnik", False) else "Safeer OS"
+
+
+def _ikona_predvajalnika(pot: str) -> QIcon:
+    """Ikona Safeer Player: znak Safeer z oznako predvajanja (kot SafeerPredvajalnik.spec), da se v opravilni vrstici
+    loci od Safeer OS."""
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QColor, QPainter, QPixmap, QPolygonF
+    slika = QPixmap(pot)
+    if slika.isNull():
+        return QIcon(pot)
+    slika = slika.scaled(256, 256)
+    p = QPainter(slika)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.setPen(QColor(0, 0, 0, 0))
+    p.setBrush(QColor("#0b1220"))
+    p.drawEllipse(140, 140, 112, 112)
+    p.setBrush(QColor("#ffffff"))
+    p.drawPolygon(QPolygonF([QPointF(180, 166), QPointF(180, 226), QPointF(230, 196)]))
+    p.end()
+    return QIcon(slika)
+
+
 def _jezik_oken() -> str:
     from . import oddaljeni_zaslon
     return oddaljeni_zaslon._JEZIK
@@ -677,8 +702,10 @@ class SafeerOsPage(QWebEnginePage):
 
 class SafeerOsWindow(QMainWindow):
     def __init__(self, v_oknu: bool = False, zacetni_razdelek: str = "", media_engine: str = "auto",
-                 browser_settings: Optional[policy.SettingsStore] = None, magnet: str = ""):
+                 browser_settings: Optional[policy.SettingsStore] = None, magnet: str = "", predvajalnik: bool = False):
         super().__init__()
+        #: Safeer Player (--predvajalnik, naloga 39): to okno kaze samo Medijski center (os.js ?predvajalnik=1).
+        self.predvajalnik = bool(predvajalnik)
         print("[SafeerOS] DIAG window_init_started", flush=True)
         import time as _time
         _t0 = _time.perf_counter()
@@ -695,7 +722,7 @@ class SafeerOsWindow(QMainWindow):
         self.zacetni_razdelek = zacetni_razdelek
         self.media_engine = media_engine if media_engine in ("auto", "qt") else "auto"
         self._fullscreen_restore_maximized = not v_oknu
-        self.setWindowTitle("Safeer OS")
+        self.setWindowTitle(_naslov_okna(self))
         self.setMinimumSize(960, 600)
 
         # Dispečer za varno izvajanje klicev na glavni GUI niti
@@ -740,7 +767,7 @@ class SafeerOsWindow(QMainWindow):
         try:
             icon_p = policy.shared_path("assets/icon.png")
             if os.path.exists(icon_p):
-                self.setWindowIcon(QIcon(icon_p))
+                self.setWindowIcon(_ikona_predvajalnika(icon_p) if self.predvajalnik else QIcon(icon_p))
         except Exception:
             pass
 
@@ -1234,8 +1261,36 @@ class SafeerOsWindow(QMainWindow):
             print(f"[SafeerOS] Okno razdelka {razdelek}: {e}", flush=True)
         self.prebudi(razdelek)
 
+    def odpri_predvajalnik(self) -> None:
+        """Safeer Player je bil zagnan, ko Safeer OS ze tece (en_primerek): samo okno Medijskega centra. Domace okno
+        ostane, kakor je (lastnik, naloga 39) - kot na Linuxu (safeer_os.py _odpri_predvajalnik)."""
+        if self.predvajalnik:
+            self.prebudi("media")      # ta proces je ze Safeer Player
+            return
+        try:
+            from . import okno_razdelka
+            if okno_razdelka.odpri(self, okno_razdelka.PREDVAJALNIK, SafeerOsPage, most_js, _jezik_oken()):
+                return
+        except Exception as e:  # noqa: BLE001
+            print(f"[SafeerOS] Okno Safeer Player: {e}", flush=True)
+        self.prebudi("media")
+
+    def _zapusti_nacin_predvajalnika(self) -> None:
+        """Tece Safeer Player, uporabnik pa odpre Safeer OS: isto okno postane cel Safeer OS (en proces, en Link)."""
+        self.predvajalnik = False
+        self.setWindowTitle(_naslov_okna(self))
+        try:
+            self.setWindowIcon(QIcon(policy.shared_path("assets/icon.png")))
+        except Exception:  # noqa: BLE001
+            pass
+        port = getattr(self, "_asset_server_port", None)
+        if port:
+            self.view.load(QUrl(f"http://127.0.0.1:{int(port)}/os/index.html"))
+
     def prebudi(self, razdelek: str = "") -> None:
         """Druga kopija je bila zagnana (ikona, bliznjica): pokazi to okno in odpri zeleni razdelek."""
+        if getattr(self, "predvajalnik", False) and razdelek != "media":
+            self._zapusti_nacin_predvajalnika()
         if self.isMinimized() or not self.isVisible():
             if self.v_oknu:
                 self.showNormal()
@@ -1265,6 +1320,8 @@ class SafeerOsWindow(QMainWindow):
         # zunanje strani se odpirajo v ločenem zaščitenem profilu Safeer Browserja.
         port = _start_local_asset_server(assets_root)
         url = f"http://127.0.0.1:{port}/os/index.html"
+        if getattr(self, "predvajalnik", False):
+            url += "?" + urllib.parse.urlencode([("predvajalnik", "1"), ("jezik", _jezik_oken())])
 
         # Shrani port za morebitne kasnejše klice
         self._asset_server_port = port
@@ -1771,7 +1828,7 @@ class SafeerOsWindow(QMainWindow):
     def _zapri_media(self) -> None:
         self.media_player.stop()
         self.zaslon.setCurrentWidget(self.os_vsebnik)
-        self.setWindowTitle("Safeer OS")
+        self.setWindowTitle(_naslov_okna(self))
 
     def _media_v_ozadju(self) -> None:
         """Skrije predvajalnik, vendar pusti zvok teči; Ctrl+Shift+M vrne kontrole."""
@@ -1986,7 +2043,7 @@ class SafeerOsWindow(QMainWindow):
             f"window.safeerOsPojdi && window.safeerOsPojdi({json.dumps(razdelek)});"
         )
         self.view.page().runJavaScript(js)
-        self.setWindowTitle("Safeer OS")
+        self.setWindowTitle(_naslov_okna(self))
         self.poslji_dogodek("fokus", None)
 
     def _predvajaj_stran_v_predvajalniku(self, url: str) -> None:
@@ -2012,7 +2069,7 @@ class SafeerOsWindow(QMainWindow):
         self.webview2_media.stop()
         self._browser_media_active = False
         self.zaslon.setCurrentWidget(self.os_vsebnik)
-        self.setWindowTitle("Safeer OS")
+        self.setWindowTitle(_naslov_okna(self))
         self.poslji_dogodek("fokus", None)
 
     def _osvezi_media_v_ozadju(self) -> None:
@@ -2194,7 +2251,7 @@ class SafeerOsWindow(QMainWindow):
             elif self.zaslon.currentWidget() is not self.os_vsebnik:
                 # Predvajalnik VLC (glasba igra naprej v ozadju, Ctrl+Shift+M ga vrne) ali Naprave.
                 self.zaslon.setCurrentWidget(self.os_vsebnik)
-                self.setWindowTitle("Safeer OS")
+                self.setWindowTitle(_naslov_okna(self))
             self.poslji_dogodek("magnet", {"uri": m["uri"], "samodejno": samodejno})
         self.dispatcher.dispatch(_pokazi)
         return True
@@ -2591,7 +2648,7 @@ class SafeerOsWindow(QMainWindow):
         """Prijava/Control je koncan (zapri, uspesna povezava ali "nadaljuj brez") - nazaj na Safeer OS."""
         def _preklopi():
             self.zaslon.setCurrentWidget(self.os_vsebnik)
-            self.setWindowTitle("Safeer OS")
+            self.setWindowTitle(_naslov_okna(self))
             self.poslji_dogodek("fokus", None)
             prej, self._okno_pred_controlom = getattr(self, "_okno_pred_controlom", ""), ""
             if prej:
@@ -3682,8 +3739,10 @@ class SafeerOsWindow(QMainWindow):
             pass
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Safeer OS za Windows (z vgrajenim Safeer Controlom)")
+    parser.add_argument("--predvajalnik", "--player", action="store_true",
+                        help="Safeer Player: samo Medijski center v svojem oknu (kot na Linuxu)")
     parser.add_argument("--okno", action="store_true", help="Odpri v oknu namesto celozaslonsko")
     parser.add_argument("--control", "-c", action="store_true", help="Odpri neposredno v razdelku Naprave")
     parser.add_argument("--razdelek", type=str, default="", help="Zacetni razdelek (npr. control, daljinec, naprave, novaNaprava)")
@@ -3701,7 +3760,11 @@ def main(argv: Optional[List[str]] = None) -> int:
                         help=argparse.SUPPRESS)   # CI: nalozi Namizje.qml v zamrznjenem paketu in koncaj (0/1)
     parser.add_argument("--preveri-kodek", type=str, default="", metavar="POROCILO",
                         help=argparse.SUPPRESS)   # CI: zajem zaslona v H.264 in dekodiranje (PyAV, Pillow) v paketu
-    args = parser.parse_args(argv)
+    return parser
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    args = _parser().parse_args(argv)
     if args.preveri_qml:
         from . import namizje_qml
         return namizje_qml.preveri_nalaganje(args.preveri_qml)
@@ -3726,7 +3789,17 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     zacetni = ""
-    if args.control:
+    predvajalnik = bool(args.predvajalnik)
+    if predvajalnik and sys.platform == "win32":
+        # Svoja skupina v opravilni vrstici (bliznjica Safeer Player ima AppUserModelID Safeer.Player, installer.iss).
+        try:
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Safeer.Player")
+        except Exception:  # noqa: BLE001
+            pass
+    if predvajalnik:
+        zacetni = ""        # Player: vedno Medijski center (os.js ?predvajalnik=1), drugi razdelki niso zanj
+    elif args.control:
         zacetni = args.razdelek or "naprave"
     elif args.razdelek:
         zacetni = args.razdelek
@@ -3736,7 +3809,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     app = QApplication.instance() or QApplication(sys.argv)
     zaklep = en_primerek.zakleni()
     if zaklep is None:
-        izid = en_primerek.vprasaj_prvo(zacetni, bool(args.ozadje) and not magnet, magnet=magnet)
+        izid = en_primerek.vprasaj_prvo(zacetni, bool(args.ozadje) and not magnet, magnet=magnet,
+                                        predvajalnik=predvajalnik)
         if izid == "ok":
             print("[SafeerOS] Ze tece; razdelek predan prvi kopiji.", flush=True)
             return 0
@@ -3757,20 +3831,22 @@ def main(argv: Optional[List[str]] = None) -> int:
     print(f"[SafeerOS] DIAG main_start section={args.razdelek or 'home'} media_engine={args.media_engine}", flush=True)
 
     # Ce je izbran control razdelek ali --okno, odpri v oknu
-    v_oknu = True if (args.control or args.razdelek or args.okno) else False
+    v_oknu = True if (args.control or args.razdelek or args.okno or predvajalnik) else False
 
     window = SafeerOsWindow(v_oknu=v_oknu, zacetni_razdelek=zacetni, media_engine=args.media_engine,
-                            browser_settings=browser_settings, magnet=magnet)
+                            browser_settings=browser_settings, magnet=magnet, predvajalnik=predvajalnik)
     print("[SafeerOS] DIAG event_loop_start", flush=True)
     window._streznik_primerka = en_primerek.streznik(window)
     window._zaklep_primerka = zaklep
 
-    try:
-        # Samozagon iz starejse razlicice je klical python.exe neposredno (konzolno okno ob prijavi v Windows).
-        if os_backend_win.osvezi_samozagon():
-            print("[SafeerOS] Samozagon: vpis posodobljen (zagon prek zaganjalnika).", flush=True)
-    except Exception as e:  # noqa: BLE001
-        print(f"[SafeerOS] Samozagon: vpisa ni bilo mogoce preveriti ({e})", flush=True)
+    # Safeer Player ne pise samozagona Safeer OS (lahko je namescen brez Safeer OS, v svoji mapi).
+    if not predvajalnik:
+        try:
+            # Samozagon iz starejse razlicice je klical python.exe neposredno (konzolno okno ob prijavi v Windows).
+            if os_backend_win.osvezi_samozagon():
+                print("[SafeerOS] Samozagon: vpis posodobljen (zagon prek zaganjalnika).", flush=True)
+        except Exception as e:  # noqa: BLE001
+            print(f"[SafeerOS] Samozagon: vpisa ni bilo mogoce preveriti ({e})", flush=True)
     if args.ozadje and not magnet:
         window.hide()
     # Safeer Link: povezovanje se zacne ob zagonu programa, v svoji niti. Prej ga je sprozila sele nalozena zacetna
@@ -3781,10 +3857,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     threading.Thread(target=window.control_backend.uskladi_ozji_krog_ob_zagonu, name="safeer-ozji-krog",
                      daemon=True).start()
     # Namizje Safeer OS (po vzoru Linuxa): vklop/izklop se zapomni; ob vklopu glavno okno caka v ozadju.
-    if args.namizje or args.brez_namizja:
+    # Safeer Player namizja ne zazene in ne skrije svojega okna (samo Medijski center, naloga 39).
+    if (args.namizje or args.brez_namizja) and not predvajalnik:
         window.nastavi_namizje(bool(args.namizje))
     window.zacni_varnostna_vrata()
-    if window.namizje_vklopljeno():
+    if window.namizje_vklopljeno() and not predvajalnik:
         window.zacni_namizje_ob_zagonu()
         if window.namizje_vklopljeno() and not (args.razdelek or args.control or magnet or args.okno):
             window.hide()

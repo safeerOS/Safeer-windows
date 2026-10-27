@@ -1,6 +1,6 @@
 """Safeer Predvajalnik — samostojna aplikacija (isti pogon in isti widget kot Medijski center v Safeer OS).
 
-Zagon: python -m safeer_windows --predvajalnik [datoteka|URL ...]
+Zagon: python -m safeer_windows --datoteka [datoteka|URL ...] (--predvajalnik je od naloge 39 Safeer Player = Medijski center)
 Podpira: odpiranje datotek/URL-jev (meni, argumenti, povleci-in-spusti), seznam predvajanja (N/P),
 podnapise (sub-add prek pogona), celozaslon (F/dvoklik/Esc), tipke kot v Medijskem centru,
 nadaljuj tam, kjer si koncal, skok na cas (Ctrl+T), zamik podnapisov/zvoka, poglavja, hitrost,

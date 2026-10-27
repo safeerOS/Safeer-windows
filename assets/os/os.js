@@ -354,14 +354,22 @@
   // sistema odpre staro aplikacijo namesto elegantnega novega okna«): Nastavitve, Safeer Link, Zapiski in Sporocila se
   // z namizja odprejo vsak v svojem oknu - brez stranske vrstice in glave cele lupine (kot Linux, safeer_os.py
   // _odpri_okno_razdelka). Razdelek, ki ga to okno nima, odpre namizje oz. Safeer OS (klic »odpriRazdelek«).
-  var RAZDELEK = (location.search.match(/[?&]razdelek=(nastavitve|naprave|zapiski|sporocila)(?:&|$)/) || [])[1] || "";
+  // Safeer Player (SafeerOS.exe --predvajalnik, naloga 39, 27. 10. 2026): ista stran, samo Medijski center v svojem
+  // oknu - brez domacega zaslona, stranske vrstice in glave (kot Linux assets/os/os.js PREDVAJALNIK).
+  var PREDVAJALNIK = /[?&]predvajalnik=1(?:&|$)/.test(location.search);
+  var RAZDELEK = PREDVAJALNIK ? "media" :
+    (location.search.match(/[?&]razdelek=(nastavitve|naprave|zapiski|sporocila)(?:&|$)/) || [])[1] || "";
   var PODSTRANI_OKNA = { nastavitve: ["omrezje", "zvok"] };
   function vTemOknu(razdelek) {
     return !RAZDELEK || razdelek === RAZDELEK || (PODSTRANI_OKNA[RAZDELEK] || []).indexOf(razdelek) >= 0;
   }
   function pojdi(razdelek) {
     var osnova = String(razdelek || "").split("#")[0];
-    if (!vTemOknu(osnova)) { klic("odpriRazdelek", [razdelek]); return; }
+    if (!vTemOknu(osnova)) {
+      // Player drugih razdelkov nima in jih ne odpira (Safeer OS se zazene posebej).
+      if (!PREDVAJALNIK) klic("odpriRazdelek", [razdelek]);
+      return;
+    }
     if (osnova !== razdelek) {
       // »nastavitve#blokScit«: razdelek in nato blok v njem
       pojdi(osnova);
@@ -510,6 +518,8 @@
   };
   window.safeerOsPojdi = function (kam) {
     kam = String(kam || "");
+    // Safeer Player sprejme samo Medijski center; ukazi za glavno okno (zapiski, iskanje ...) niso zanj.
+    if (PREDVAJALNIK && kam.split("#")[0] !== "media") return;
     if (kam.indexOf("iskanje:") === 0) {
       pojdi("domov");
       $("iskanje").value = kam.slice(8);
@@ -4440,6 +4450,10 @@
 
   function zacni() {
     if (/[?&]namizje=1/.test(location.search)) document.body.classList.add("namizje");
+    if (PREDVAJALNIK) {
+      document.body.classList.add("predvajalnik");
+      document.title = "Safeer Player";
+    }
     if (RAZDELEK) {
       document.body.classList.add("en-razdelek", "razdelek-" + RAZDELEK);
       var jezikRazdelka = (location.search.match(/[?&]jezik=([a-z]{2})(?:&|$)/) || [])[1];
@@ -4487,7 +4501,7 @@
       if (RAZDELEK) {
         // Okno enega razdelka: ta razdelek (ali kar je Safeer OS poslal ob odprtju z »pojdi«), brez domacega zaslona.
         pojdi(S.razdelek && S.razdelek !== "domov" && vTemOknu(S.razdelek) ? S.razdelek : RAZDELEK);
-        document.title = t(RAZDELEK === "naprave" ? "safeerLink" : RAZDELEK) || document.title;
+        document.title = PREDVAJALNIK ? "Safeer Player" : (t(RAZDELEK === "naprave" ? "safeerLink" : RAZDELEK) || document.title);
         return;
       }
       osveziStanje();

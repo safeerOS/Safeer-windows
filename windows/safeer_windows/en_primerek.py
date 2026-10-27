@@ -54,10 +54,13 @@ def zakleni() -> Optional[QLockFile]:
     return None
 
 
-def vprasaj_prvo(razdelek: str, ozadje: bool, cakaj_ms: int = 4000, magnet: str = "") -> str:
+def vprasaj_prvo(razdelek: str, ozadje: bool, cakaj_ms: int = 4000, magnet: str = "",
+                 predvajalnik: bool = False) -> str:
     """Tece ze druga kopija: predamo ji razdelek (prva se lahko se zaganja, zato nekaj casa poskusamo).
 
     `magnet`: magnet povezava (brskalnik, druga naprava v Linku), ki jo prva kopija odpre v Medijskem centru.
+    `predvajalnik`: Safeer Player (--predvajalnik) zahteva okno Medijskega centra. Odtisa kode ne poslje: Player prve
+    kopije ne sme zapreti (»umikam«) - tudi starejsa kopija brez te zastavice ga takrat le prebudi v razdelku media.
 
     Vrne: "ok"             prva kopija je prevzela zagon;
           "umik"           prva kopija tece s starejso kodo in se zapira;
@@ -66,6 +69,8 @@ def vprasaj_prvo(razdelek: str, ozadje: bool, cakaj_ms: int = 4000, magnet: str 
     Pri vsem razen "ok" poklici odloci_brez_prevzema().
     """
     sporocilo = {"razdelek": razdelek, "ozadje": ozadje, "koda": ZAGNANA_KODA}
+    if predvajalnik:
+        sporocilo = {"razdelek": "media", "ozadje": False, "predvajalnik": True}
     if magnet:
         sporocilo["magnet"] = magnet
     surovo = json.dumps(sporocilo).encode("utf-8") + b"\n"
@@ -154,6 +159,15 @@ def streznik(okno) -> QLocalServer:
             sporocilo = {}
         if not isinstance(sporocilo, dict):
             sporocilo = {}
+        if sporocilo.get("predvajalnik"):
+            # Safeer Player (naloga 39, 27. 10. 2026): samo okno Medijskega centra - Safeer OS se ne umakne in
+            # domace okno se ne prebudi.
+            odgovori(v, b"ok\n")
+            if hasattr(okno, "odpri_predvajalnik"):
+                okno.odpri_predvajalnik()
+            else:
+                okno.prebudi("media")
+            return
         nova = str(sporocilo.get("koda") or "")
         if nova and ZAGNANA_KODA and nova != ZAGNANA_KODA:
             # Namescena je nova razlicica: umaknemo se, da uporabnik dobi posodobljen Safeer OS

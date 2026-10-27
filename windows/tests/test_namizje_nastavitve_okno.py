@@ -52,7 +52,8 @@ class OknoRazdelka(unittest.TestCase):
         self.assertIsNotNone(m)
         self.assertEqual(set(m.group(1).split("|")), set(okno_razdelka.RAZDELKI_V_OKNU))
         self.assertIn('document.body.classList.add("en-razdelek", "razdelek-" + RAZDELEK)', js)
-        self.assertIn('if (!vTemOknu(osnova)) { klic("odpriRazdelek", [razdelek]); return; }', js)
+        # Naloga 39: Safeer Player (?predvajalnik=1) drugih razdelkov ne odpira.
+        self.assertIn('if (!PREDVAJALNIK) klic("odpriRazdelek", [razdelek]);', js)
         css = beri(KOREN, "assets", "os", "os.css")
         self.assertIn("body.en-razdelek #stranska", css)
         self.assertIn("body.en-razdelek #vrh", css)

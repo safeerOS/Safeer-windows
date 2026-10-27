@@ -1106,9 +1106,10 @@ body.vrstica-skrita.nacin-splet .rocaj-vrstice { display: block; }
 .o-racunalniku-kartica .bliznjice { margin-bottom: 14px; }
 
 /* Okno enega razdelka na namizju (okno_razdelka.py): brez stranske vrstice in glave cele lupine, kot na Linuxu. */
+/* Safeer Player (?predvajalnik=1, naloga 39): isto okno enega razdelka (media), mini predvajalnik glasbe pa ostane. */
 body.en-razdelek #aplikacija { display: flex; }
 body.en-razdelek #glavno { flex: 1; }
-body.en-razdelek #stranska, body.en-razdelek #vrh, body.en-razdelek .rocaj-vrstice, body.en-razdelek #mediaMini,
+body.en-razdelek #stranska, body.en-razdelek #vrh, body.en-razdelek .rocaj-vrstice, body.en-razdelek:not(.predvajalnik) #mediaMini,
 body.en-razdelek .razdelek:not(.viden) { display: none !important; }
 body.en-razdelek #vsebina { padding-top: 30px; }
 

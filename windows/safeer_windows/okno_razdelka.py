@@ -23,15 +23,18 @@ RAZDELKI_V_OKNU = ("nastavitve", "naprave", "zapiski", "sporocila")
 ZAVRZI_PO_S = 120
 #: Okna, ki se ne zavrzejo (nezapisan zapisek mora ostati) - samo zamrznejo.
 NE_ZAVRZI = ("zapiski",)
+#: Safeer Player (naloga 39, 27. 10. 2026): ce Safeer OS ze tece, Player odpre to okno - samo Medijski center
+#: (os.js ?predvajalnik=1), domace okno ostane, kakor je. Kot na Linuxu (safeer_os.py _odpri_predvajalnik).
+PREDVAJALNIK = "predvajalnik"
 #: Podstrani Nastavitev (ploscici Omrezje in Zvok, vodnik ob prvem zagonu): pokazejo se v oknu Nastavitve.
 PODSTRANI = {"omrezje": "nastavitve", "zvok": "nastavitve", "vodnik": "nastavitve"}
 NASLOVI = {
-    "sl": {"nastavitve": "Nastavitve Safeer OS", "naprave": "Safeer Link", "zapiski": "Zapiski", "sporocila": "Sporočila"},
-    "en": {"nastavitve": "Safeer OS settings", "naprave": "Safeer Link", "zapiski": "Notes", "sporocila": "Messages"},
-    "de": {"nastavitve": "Safeer OS Einstellungen", "naprave": "Safeer Link", "zapiski": "Notizen", "sporocila": "Nachrichten"},
-    "es": {"nastavitve": "Ajustes de Safeer OS", "naprave": "Safeer Link", "zapiski": "Notas", "sporocila": "Mensajes"},
-    "fr": {"nastavitve": "Réglages de Safeer OS", "naprave": "Safeer Link", "zapiski": "Notes", "sporocila": "Messages"},
-    "it": {"nastavitve": "Impostazioni di Safeer OS", "naprave": "Safeer Link", "zapiski": "Note", "sporocila": "Messaggi"},
+    "sl": {"nastavitve": "Nastavitve Safeer OS", "naprave": "Safeer Link", "zapiski": "Zapiski", "sporocila": "Sporočila", "predvajalnik": "Safeer Player"},
+    "en": {"nastavitve": "Safeer OS settings", "naprave": "Safeer Link", "zapiski": "Notes", "sporocila": "Messages", "predvajalnik": "Safeer Player"},
+    "de": {"nastavitve": "Safeer OS Einstellungen", "naprave": "Safeer Link", "zapiski": "Notizen", "sporocila": "Nachrichten", "predvajalnik": "Safeer Player"},
+    "es": {"nastavitve": "Ajustes de Safeer OS", "naprave": "Safeer Link", "zapiski": "Notas", "sporocila": "Mensajes", "predvajalnik": "Safeer Player"},
+    "fr": {"nastavitve": "Réglages de Safeer OS", "naprave": "Safeer Link", "zapiski": "Notes", "sporocila": "Messages", "predvajalnik": "Safeer Player"},
+    "it": {"nastavitve": "Impostazioni di Safeer OS", "naprave": "Safeer Link", "zapiski": "Note", "sporocila": "Messaggi", "predvajalnik": "Safeer Player"},
 }
 
 
@@ -39,6 +42,8 @@ def okno_za(razdelek: str) -> Tuple[str, str]:
     """(okno, cilj): v katerem oknu razdelka se pokaze `razdelek` in kam v njem (npr. »nastavitve#blokScit«).
     Okno '' pomeni, da razdelek ostane v glavnem oknu Safeer OS (Medijski center, Splet, Datoteke ...)."""
     razdelek = str(razdelek or "")
+    if razdelek == PREDVAJALNIK:
+        return PREDVAJALNIK, "media"
     if razdelek.startswith("zapisek:"):
         return "zapiski", razdelek
     if razdelek.startswith(("pogovor:", "sporocila:", "kanal:")):
@@ -53,7 +58,10 @@ def okno_za(razdelek: str) -> Tuple[str, str]:
 
 def naslov_strani(ime: str, jezik: str) -> str:
     """Pot strani okna (glede na streznik vmesnika): os/index.html?razdelek=<ime>&jezik=<jezik>."""
-    return "os/index.html?" + urllib.parse.urlencode([("razdelek", ime), ("jezik", jezik if jezik in NASLOVI else "en")])
+    jezik = jezik if jezik in NASLOVI else "en"
+    if ime == PREDVAJALNIK:
+        return "os/index.html?" + urllib.parse.urlencode([("predvajalnik", "1"), ("jezik", jezik)])
+    return "os/index.html?" + urllib.parse.urlencode([("razdelek", ime), ("jezik", jezik)])
 
 
 def naslov_okna(ime: str, jezik: str) -> str:

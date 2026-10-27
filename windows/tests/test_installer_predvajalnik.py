@@ -111,17 +111,18 @@ def test_browser_ostane_nespremenjen():
 
 
 def test_main_preusmeri_predvajalnik():
-    # SafeerOS.exe --predvajalnik odpre samo predvajalnik (windows/safeer_windows/__main__.py); bliznjica je odvisna od tega.
+    # Naloga 39: SafeerOS.exe --predvajalnik = Safeer Player (samo Medijski center, os_app); samostojni predvajalnik
+    # datotek je pod --datoteka. Vedenje preverja test_predvajalnik_medijski_center.py.
     main = (ISS.parent / "safeer_windows" / "__main__.py").read_text(encoding="utf-8")
-    assert 'if "--predvajalnik" in sys.argv:' in main
+    assert 'if "--datoteka" in sys.argv:' in main
     assert "from safeer_windows.safeer_predvajalnik import main as predvajalnik_main" in main
 
 
 def test_safeeros_exe_pozna_zastavico_predvajalnik():
-    """CI 40371933757: bliznjica Safeer Player zazene SafeerOS.exe --predvajalnik; vstopna tocka SafeerOS.exe
-    (launcher_os.py) mora zastavico odstraniti in zagnati predvajalnik, sicer argparse os_app konca s kodo 2."""
+    """CI 40371933757: bliznjica Safeer Player zazene SafeerOS.exe --predvajalnik; os_app.main zastavico pozna
+    (naloga 39), launcher_os.py jo pusti v sys.argv. Samostojni predvajalnik datotek: --datoteka."""
     import pathlib
     vir = (pathlib.Path(__file__).resolve().parents[1] / "launcher_os.py").read_text(encoding="utf-8")
-    assert 'if "--predvajalnik" in sys.argv:' in vir
-    assert "sys.argv.remove(\"--predvajalnik\")" in vir
+    assert 'if "--datoteka" in sys.argv:' in vir
     assert "from safeer_windows.safeer_predvajalnik import main" in vir
+    assert 'sys.argv.remove("--predvajalnik")' not in vir

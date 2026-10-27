@@ -8,10 +8,10 @@ try:
 except Exception:
     pass
 
-# Safeer Player (namestitveni program SafeerPlayer, bliznjica »SafeerOS.exe --predvajalnik«): enako kot __main__.py.
-# CI 40371933757 (26. 10. 2026): os_app.main zastavice ne pozna - argparse je koncal s kodo 2 pred oknom.
-if "--predvajalnik" in sys.argv:
-    sys.argv.remove("--predvajalnik")
+# Safeer Player (bliznjica »SafeerOS.exe --predvajalnik«): os_app.main odpre samo Medijski center (naloga 39, 27. 10.
+# 2026 - prej je ta zastavica odprla samostojni predvajalnik datotek). Ta je zdaj pod »--datoteka [pot|URL ...]«.
+if "--datoteka" in sys.argv:
+    sys.argv.remove("--datoteka")
     from safeer_windows.safeer_predvajalnik import main  # noqa: E402
 else:
     from safeer_windows.os_app import main  # noqa: E402
