@@ -233,17 +233,43 @@
       if (BESEDILA_OS[koda]) Object.assign(BESEDILA_OS[koda], BESEDILA_WINDOWS[koda]);
     });
   }
+  // Besedila elementa in podrejenih: data-t (besedilo), data-ph (placeholder), data-naslov (title), data-aria (aria-label).
+  function prevediV(koren) {
+    koren.querySelectorAll("[data-t]").forEach(function (el) { el.textContent = t(el.getAttribute("data-t")); });
+    koren.querySelectorAll("[data-ph]").forEach(function (el) { el.placeholder = t(el.getAttribute("data-ph")); });
+    koren.querySelectorAll("[data-naslov]").forEach(function (el) { el.title = t(el.getAttribute("data-naslov")); });
+    koren.querySelectorAll("[data-aria]").forEach(function (el) { el.setAttribute("aria-label", t(el.getAttribute("data-aria"))); });
+  }
+  // Imena iz podatkov skupne kode (zvrsti, drzave, skupine), ki pridejo v slovenscini: kljuc pod_* z isto sl vrednostjo
+  // (besedila.js) -> besedilo v jeziku vmesnika; neznano ime ostane, kakor je (naloga 40).
+  var POD_SL = null;
+  function izPodatkov(ime) {
+    if (!ime) return ime;
+    if (!POD_SL) {
+      POD_SL = {};
+      Object.keys(BESEDILA_OS.sl).forEach(function (k) { if (k.indexOf("pod_") === 0) POD_SL[BESEDILA_OS.sl[k]] = k; });
+    }
+    return POD_SL[ime] ? t(POD_SL[ime]) : ime;
+  }
   function prevedi() {
     document.documentElement.lang = jezik;
-    document.querySelectorAll("[data-t]").forEach(function (el) { el.textContent = t(el.getAttribute("data-t")); });
-    document.querySelectorAll("[data-ph]").forEach(function (el) { el.placeholder = t(el.getAttribute("data-ph")); });
-    document.querySelectorAll("[data-naslov]").forEach(function (el) { el.title = t(el.getAttribute("data-naslov")); });
+    prevediV(document);
     if (typeof S !== "undefined" && S.povezava) narisiHeroLink();
     document.querySelectorAll("svg[data-ikona]").forEach(function (el) {
       el.setAttribute("viewBox", "0 0 24 24");
       el.innerHTML = '<path d="' + (IK[el.getAttribute("data-ikona")] || "") + '"/>';
     });
     vrsticaUredi();
+    // Naloga 40 (27. 10. 2026): deli, ki jih izrise os.js (gumb virov, filter virov, zvrsti, mreza), v novem jeziku -
+    // prej so po »zacetek« ostali v jeziku prvega izrisa (Medijski center mesan sl/en).
+    if (typeof media !== "undefined" && media) {
+      try {
+        osveziGumbViri();
+        narisiViriFilter();
+        if ($("mediaZanri")) prevediV($("mediaZanri"));      // brez ponovnega izrisa: izbrana zvrst ostane
+        if (media.katalog && media.katalog.length) narisiMedia();
+      } catch (e) {}
+    }
   }
 
   /* Zlozljiva stranska vrstica: gumb v glavi ali Ctrl+B, kot v brskalnikih. */
@@ -1015,7 +1041,7 @@
     if (!d.mapa && d.pot && S.povezava && S.povezava.stanje === "povezan") {
       // Poslji na drugo napravo v Safeer Linku (telefon, televizor, tablica).
       var p = el("span", "pozabi poslji-na", svg("poslji"));
-      p.title = "Pošlji na napravo";
+      p.title = t("magnetPoslji");
       p.addEventListener("click", function (e) { e.stopPropagation(); izberiNapravoZaPosiljanje(d); });
       b.appendChild(p);
     }
@@ -1053,14 +1079,14 @@
     var sloj = el("div", "sloj-koda-prijave");
     sloj.id = "slojPoslji";
     var okno = el("div", "koda-prijave-okno");
-    var h = el("h2"); h.textContent = "Pošlji " + d.ime;
+    var h = el("h2"); h.textContent = t("posljiIme", { ime: d.ime });
     okno.appendChild(h);
     naprave.forEach(function (n) {
       var g = el("button", "vrstica"); g.textContent = n.ime;
       g.addEventListener("click", function () { sloj.remove(); posljiNaNapravo(d, n); });
       okno.appendChild(g);
     });
-    var z = el("button", "koda-prijave-gumb"); z.textContent = "Prekliči";
+    var z = el("button", "koda-prijave-gumb"); z.textContent = t("preklici");
     z.addEventListener("click", function () { sloj.remove(); });
     okno.appendChild(z);
     sloj.addEventListener("click", function (e) { if (e.target === sloj) sloj.remove(); });
@@ -1935,7 +1961,7 @@
             '<button class="gumb majhen gumb-preimenuj">✎ ' + ubezi(t("preimenuj")) + '</button>';
           if (jeDaljinec) {
             htmlGumbi += '<button class="gumb majhen glavni gumb-daljinec" style="display:inline-flex;gap:4px;align-items:center;">' +
-              svg("daljinec") + '<span>' + ubezi(t("daljinec") || "Daljinec") + '</span></button>';
+              svg("daljinec") + '<span>' + ubezi(t("daljinec")) + '</span></button>';
           }
           if (jeRacunalnik) {
             htmlGumbi += '<button class="gumb majhen glavni gumb-oddaljeni-zaslon" style="display:inline-flex;gap:4px;align-items:center;">' +
@@ -1953,9 +1979,9 @@
           }
           var gDaljinec = li.querySelector(".gumb-daljinec");
           if (gDaljinec) {
-            gDaljinec.title = t("daljinec") || "Daljinec";
+            gDaljinec.title = t("daljinec");
             gDaljinec.addEventListener("click", function () {
-              obvesti(t("odpiram", { ime: n.ime || "Daljinec" }));
+              obvesti(t("odpiram", { ime: n.ime || t("daljinec") }));
               klic("daljinec", [n.id]);
             });
           }
@@ -3060,10 +3086,10 @@
     var sloj = el("div", "sloj-koda-prijave");
     sloj.id = "slojKodaPrijave";
     var okno = el("div", "koda-prijave-okno");
-    var h = el("h2"); h.textContent = "Nova naprava";
-    var o = el("p"); o.textContent = (p.ime || "Naprava") + " se želi pridružiti tvojemu Safeer Linku. Na njej vpiši to kodo:";
+    var h = el("h2"); h.textContent = t("kodaPrijaveNaslov");
+    var o = el("p"); o.textContent = t("kodaPrijaveOpis", { ime: p.ime || t("napravaSplosno") });
     var k = el("div", "koda-prijave"); k.textContent = koda.slice(0, 3) + " " + koda.slice(3);
-    var g = el("button", "koda-prijave-gumb"); g.textContent = "V redu";
+    var g = el("button", "koda-prijave-gumb"); g.textContent = t("vRedu");
     g.addEventListener("click", function () { sloj.remove(); });
     okno.appendChild(h); okno.appendChild(o); okno.appendChild(k); okno.appendChild(g);
     sloj.appendChild(okno);
@@ -3133,11 +3159,11 @@
       mesto.innerHTML = "";
       (seznam || []).forEach(function (z) {
         var b = el("button", "zapisek-vrstica" + (Z.aktivni && Z.aktivni.id === z.id ? " izbran" : ""));
-        b.innerHTML = "<b>" + (z.pripet ? "📌 " : "") + ubezi(z.naslov) + "</b><small>" + ubezi(z.odlomek || "Prazen zapisek") + "</small>";
+        b.innerHTML = "<b>" + (z.pripet ? "📌 " : "") + ubezi(z.naslov) + "</b><small>" + ubezi(z.odlomek || t("zapisekPrazen")) + "</small>";
         b.addEventListener("click", function () { odpriZapisek(z.id); });
         mesto.appendChild(b);
       });
-      if (!(seznam || []).length) mesto.appendChild(el("div", "prazno", Z.iskano ? "Ni zadetkov." : "Še nimaš zapiskov."));
+      if (!(seznam || []).length) mesto.appendChild(el("div", "prazno", Z.iskano ? t("niZadetkov") : t("zapiskiPrazni")));
       if (potem) potem(seznam || []);
     });
   }
@@ -3148,7 +3174,7 @@
       $("zapisekUrejevalnik").hidden = false;
       $("zapisekNaslov").value = z.naslov || "";
       $("zapisekBesedilo").value = z.besedilo || "";
-      $("zapisekPripni").textContent = z.pripet ? "Odpni" : "Pripni";
+      $("zapisekPripni").textContent = t(z.pripet ? "zapisekOdpni" : "zapisekPripni");
       $("zapisekStanje").textContent = "";
       narisiViriZapiska(z);
       if (Z.pogled) narisiPogledZapiska();
@@ -3169,8 +3195,8 @@
     viri.innerHTML = ""; povratne.innerHTML = "";
     (z.omembe || []).forEach(function (o) { viri.appendChild(cipOmembe(o.ime, o.cilj)); });
     (z.povratne || []).forEach(function (p) { povratne.appendChild(cipOmembe(p.naslov, "safeer:zapisek:" + p.id)); });
-    if (!viri.childNodes.length) viri.appendChild(el("span", "namig", "Z @ omeni vir."));
-    if (!povratne.childNodes.length) povratne.appendChild(el("span", "namig", "Noben drug zapisek."));
+    if (!viri.childNodes.length) viri.appendChild(el("span", "namig", t("zapisekBrezVirov")));
+    if (!povratne.childNodes.length) povratne.appendChild(el("span", "namig", t("zapisekBrezPovratnih")));
   }
   function odpriCiljZapiska(cilj) {
     if (/^https?:\/\//.test(cilj)) { otvoriSpletnoStran(cilj); return; }
@@ -3192,10 +3218,10 @@
     var naslov = $("zapisekNaslov").value, besedilo = $("zapisekBesedilo").value;
     klic("zapisekShrani", [Z.aktivni.id, naslov, besedilo, null]).then(function () {
       Z.aktivni.naslov = naslov; Z.aktivni.besedilo = besedilo;
-      $("zapisekStanje").textContent = "Shranjeno";
+      $("zapisekStanje").textContent = t("zapisekShranjeno");
       klic("zapisekDobi", [Z.aktivni.id]).then(function (z) { if (z && Z.aktivni && z.id === Z.aktivni.id) narisiViriZapiska(z); });
       naloziZapiske();
-    }, function () { $("zapisekStanje").textContent = "Ni shranjeno"; });
+    }, function () { $("zapisekStanje").textContent = t("zapisekNiShranjeno"); });
   }
   function narisiPogledZapiska() {
     var besedilo = $("zapisekBesedilo").value;
@@ -3222,7 +3248,7 @@
     Z.pogled = !Z.pogled;
     $("zapisekBesedilo").hidden = Z.pogled;
     $("zapisekPrikaz").hidden = !Z.pogled;
-    $("zapisekPogled").textContent = Z.pogled ? "Uredi" : "Pogled";
+    $("zapisekPogled").textContent = Z.pogled ? t("zapisekUredi") : t("zapisekPogled");
     if (Z.pogled) narisiPogledZapiska();
   }
 
@@ -3239,19 +3265,19 @@
     var niz = q.niz.trim().toLocaleLowerCase(), predlogi = [];
     function ujema(ime) { return !niz || String(ime || "").toLocaleLowerCase().indexOf(niz) >= 0; }
     (S.nedavneApp || []).forEach(function (v) {
-      if (v.url && ujema(v.ime)) predlogi.push({ ime: v.ime, cilj: v.url, vrsta: "Stran" });
-      else if (v.vrsta === "program" && !v.naprava && ujema(v.ime)) predlogi.push({ ime: v.ime, cilj: "safeer:program:" + v.id, vrsta: "Program" });
+      if (v.url && ujema(v.ime)) predlogi.push({ ime: v.ime, cilj: v.url, vrsta: t("vrstaStran") });
+      else if (v.vrsta === "program" && !v.naprava && ujema(v.ime)) predlogi.push({ ime: v.ime, cilj: "safeer:program:" + v.id, vrsta: t("vrstaProgram") });
     });
     (S.programi || []).filter(function (p) { return niz.length >= 2 && ujema(p.ime); }).slice(0, 5)
-      .forEach(function (p) { predlogi.push({ ime: p.ime, cilj: "safeer:program:" + p.id, vrsta: "Program" }); });
+      .forEach(function (p) { predlogi.push({ ime: p.ime, cilj: "safeer:program:" + p.id, vrsta: t("vrstaProgram") }); });
     var moj = (Z.omembeZahteva = (Z.omembeZahteva || 0) + 1);
     klic("zapiskiSeznam", [niz]).then(function (zapiski) {
       (zapiski || []).filter(function (z) { return !Z.aktivni || z.id !== Z.aktivni.id; }).slice(0, 5)
-        .forEach(function (z) { predlogi.push({ ime: z.naslov, cilj: "safeer:zapisek:" + z.id, vrsta: "Zapisek" }); });
+        .forEach(function (z) { predlogi.push({ ime: z.naslov, cilj: "safeer:zapisek:" + z.id, vrsta: t("vrstaZapisek") }); });
       var datoteke = niz.length >= 2 ? klic("isciDatoteke", [niz]) : Promise.resolve([]);
       return datoteke.then(function (seznam) {
         (seznam || []).filter(function (d) { return !d.mapa; }).slice(0, 6)
-          .forEach(function (d) { predlogi.push({ ime: d.ime, cilj: "safeer:datoteka:" + d.pot, vrsta: "Datoteka" }); });
+          .forEach(function (d) { predlogi.push({ ime: d.ime, cilj: "safeer:datoteka:" + d.pot, vrsta: t("magnetVrsta_drugo") }); });
       }, function () {});
     }).then(function () {
       if (moj !== Z.omembeZahteva) return;
@@ -3287,7 +3313,7 @@
   (function pripraviZapiske() {
     on("zapisekNov", "click", function () {
       Z.iskano = ""; $("zapiskiIskanje").value = "";
-      klic("zapisekShrani", ["", "Nov zapisek", "", null]).then(function (z) {
+      klic("zapisekShrani", ["", t("zapisekNovNaslov"), "", null]).then(function (z) {
         odpriZapisek(z.id);
         setTimeout(function () { var n = $("zapisekNaslov"); n.focus(); n.select(); }, 150);
       });
@@ -3312,19 +3338,19 @@
       if (!Z.aktivni) return;
       var novo = !Z.aktivni.pripet;
       klic("zapisekShrani", [Z.aktivni.id, $("zapisekNaslov").value, $("zapisekBesedilo").value, novo]).then(function () {
-        Z.aktivni.pripet = novo; $("zapisekPripni").textContent = novo ? "Odpni" : "Pripni"; naloziZapiske();
+        Z.aktivni.pripet = novo; $("zapisekPripni").textContent = t(novo ? "zapisekOdpni" : "zapisekPripni"); naloziZapiske();
       });
     });
     on("zapisekIzbrisi", "click", function () {
       if (!Z.aktivni) return;
       // Dvoklik varnost: prvi klik vpraša, drugi v 4 s izbriše (brez sistemskega okna).
       if (Date.now() - Z.izbrisPotrdi > 4000) {
-        Z.izbrisPotrdi = Date.now(); $("zapisekIzbrisi").textContent = "Res izbrišem?";
-        setTimeout(function () { $("zapisekIzbrisi").textContent = "Izbriši"; }, 4000);
+        Z.izbrisPotrdi = Date.now(); $("zapisekIzbrisi").textContent = t("zapisekIzbrisiPotrdi");
+        setTimeout(function () { $("zapisekIzbrisi").textContent = t("zapisekIzbrisi"); }, 4000);
         return;
       }
       klic("zapisekIzbrisi", [Z.aktivni.id]).then(function () {
-        Z.aktivni = null; Z.izbrisPotrdi = 0; $("zapisekIzbrisi").textContent = "Izbriši";
+        Z.aktivni = null; Z.izbrisPotrdi = 0; $("zapisekIzbrisi").textContent = t("zapisekIzbrisi");
         $("zapisekUrejevalnik").hidden = true; naloziZapiske();
       });
     });
@@ -4450,6 +4476,9 @@
 
   function zacni() {
     if (/[?&]namizje=1/.test(location.search)) document.body.classList.add("namizje");
+    // Jezik pove Safeer OS ze v naslovu strani (?jezik=): prvi izris je v pravem jeziku, ne sele po »zacetek« (naloga 40).
+    var jezikUrl = (location.search.match(/[?&]jezik=([a-z]{2})(?:&|$)/) || [])[1];
+    if (jezikUrl && BESEDILA_OS[jezikUrl]) jezik = jezikUrl;
     if (PREDVAJALNIK) {
       document.body.classList.add("predvajalnik");
       document.title = "Safeer Player";
@@ -4531,23 +4560,23 @@
   function mediaOznaka(vrsta) {
     if (vrsta === "glasba") return t("mediaGlasba");
     if (vrsta === "video") return "Video";
-    if (vrsta === "slika") return "Slika";
+    if (vrsta === "slika") return t("magnetVrsta_slika");
     if (vrsta === "podcast") return "Podcast";
     if (vrsta === "radio") return "Radio";
-    if (vrsta === "tv-v-zivo") return "TV v živo";
+    if (vrsta === "tv-v-zivo") return t("mediaTvVZivo");
     return t(vrsta === "serija" ? "mediaSerije" : "mediaFilmi");
   }
 
   function narisiStranjevanje() {
     var c = $("mediaStranjevanje"); if (!c) return; c.innerHTML = "";
     if (media.skupaj_strani <= 1) return;
-    var prev = el("button", "gumb", "◀ Prejšnja stran");
+    var prev = el("button", "gumb", t("mediaPrejsnjaStran"));
     prev.disabled = media.page <= 1;
     prev.onclick = function () {
       if (media.page > 1) { media.page--; naloziMedia(); $("mediaMreza").scrollIntoView({behavior:"smooth", block:"start"}); }
     };
-    var info = el("span", "stran-info", "Stran " + media.page + " od " + media.skupaj_strani);
-    var next = el("button", "gumb", "Naslednja stran ▶");
+    var info = el("span", "stran-info", t("mediaStranOd", { n: media.page, m: media.skupaj_strani }));
+    var next = el("button", "gumb", t("mediaNaslednjaStran"));
     next.disabled = media.page >= media.skupaj_strani;
     next.onclick = function () {
       if (media.page < media.skupaj_strani) { media.page++; naloziMedia(); $("mediaMreza").scrollIntoView({behavior:"smooth", block:"start"}); }
@@ -4574,7 +4603,7 @@
       return [x.naslov, x.izvajalec, x.opis].join(" ").toLocaleLowerCase().indexOf(iskano) >= 0;
     });
     $("mediaPrazno").hidden = !!list.length;
-    $("mediaPovzetek").textContent = izSeznama ? "" : t("mediaZadetkov", { n: media.skupaj != null ? media.skupaj : list.length }) + (media.skupaj_strani > 1 ? " · Stran " + media.page + " od " + media.skupaj_strani : "");
+    $("mediaPovzetek").textContent = izSeznama ? "" : t("mediaZadetkov", { n: media.skupaj != null ? media.skupaj : list.length }) + (media.skupaj_strani > 1 ? " · " + t("mediaStranOd", { n: media.page, m: media.skupaj_strani }) : "");
     var zdruzi = !izSeznama && !media.razvrsti && (media.filter === "radio" || media.filter === "video" || media.filter === "glasba");
     if (zdruzi) {
       // Naslov skupine ima smisel, ko skupine res združujejo. Kjer ima skoraj vsak izvajalec eno samo skladbo, bi
@@ -4592,11 +4621,11 @@
       var skupina = izSeznama ? "" : (x.skupina || (media.filter === "glasba" ? x.izvajalec : ""));
       if (zdruzi && skupina && skupina !== mediaZadnjaSkupina) {
         mediaZadnjaSkupina = skupina;
-        mreza.appendChild(el("h3", "media-skupina", ubezi(mediaZadnjaSkupina)));
+        mreza.appendChild(el("h3", "media-skupina", ubezi(izPodatkov(mediaZadnjaSkupina))));
       }
       var card = el("button", "media-kartica");
       if (iskano && mreza.querySelectorAll(".media-kartica").length === 0) card.classList.add("iskalni-zadetek");
-      card.setAttribute("aria-label", (x.naslov || "Medijski center") + " — " + mediaOznaka(x.vrsta));
+      card.setAttribute("aria-label", (x.naslov || t("mediaCenter")) + " — " + mediaOznaka(x.vrsta));
     if (x.slika) {
         var image = document.createElement("img"); image.alt = ""; image.loading = "lazy"; image.src = x.slika;
         image.onerror = function () { image.replaceWith(el("span", "media-brez-slike", svg(mediaIkona(x.vrsta)))); };
@@ -4606,7 +4635,7 @@
       data.appendChild(el("b", "", ubezi(x.naslov || "")));
       var meta = el("span", "media-meta");
       var metaOznaka = mediaOznaka(x.vrsta);
-      if (x.v_zivo) metaOznaka += " · V ŽIVO";
+      if (x.v_zivo) metaOznaka += " · " + t("katVZivo");
       if (x.codec || x.bitrate) metaOznaka += " · " + [x.codec, x.bitrate ? x.bitrate + " kb/s" : ""].filter(Boolean).join(" ");
       if (x.vrsta === "serija" && (x.sezona || x.epizoda)) {
         metaOznaka += " · S" + String(x.sezona || 1).padStart(2, "0") + "E" + String(x.epizoda || 1).padStart(2, "0");
@@ -4618,7 +4647,7 @@
       if (x.stevilo_razlicic > 1) meta.appendChild(el("span", "", ubezi(t("mediaRazlicic", { n: x.stevilo_razlicic }))));
       data.appendChild(meta); card.appendChild(data);
       // Kakovost pokazemo le, ce jo poznamo - "HD" na filmu iz leta 1938 bi bil zavajajoc.
-      var znacka = x.kakovost || (x.vrsta === "tv-v-zivo" ? "V živo" : x.vrsta === "radio" ? "Radio" : x.vrsta === "glasba" ? "Glasba" : "");
+      var znacka = x.kakovost || (x.vrsta === "tv-v-zivo" ? t("mediaVZivo") : x.vrsta === "radio" ? "Radio" : x.vrsta === "glasba" ? t("mediaGlasba") : "");
       if (znacka) card.appendChild(el("span", "media-kakovost", ubezi(znacka)));
       if (Number(x.ocena || 0) > 0) card.appendChild(el("span", "media-ocena", "★ " + Number(x.ocena).toFixed(1)));
       if (izSeznama) {
@@ -4893,9 +4922,9 @@
       var row = el("div", "media-vir"); row.innerHTML = svg("splet");
       var info = el("div"); info.appendChild(el("b", "", ubezi(source.ime || source.url)));
       var status = source.napaka ? source.napaka : (source.vrsta === "streznik"
-        ? "Osebni strežnik · " + (source.ponudnik || "")
+        ? t("katOsebniStreznik") + " · " + (source.ponudnik || "")
         : (source.tip === "predvajalni_vir"
-        ? "Predvajalni vir · " + t("mediaVirElementov", { n: source.stevilo || 0 })
+        ? t("mediaPredvajalniVir") + " · " + t("mediaVirElementov", { n: source.stevilo || 0 })
         : t("mediaVirElementov", { n: source.stevilo || 0 })));
       info.appendChild(el("small", source.napaka ? "media-vir-napaka" : "", ubezi(status + " · " + source.url)));
       row.appendChild(info);
@@ -4944,7 +4973,7 @@
     napakaEl.hidden = true;
     napakaEl.classList.remove("media-opozorilo");
     napakaEl.textContent = t("mediaNapaka");
-    $("mediaPredvajalnikNaslov").textContent = item.naslov || "Medijski center";
+    $("mediaPredvajalnikNaslov").textContent = item.naslov || t("mediaCenter");
 
     var metaSeznam = [item.izvajalec];
     if (item.vrsta === "serija" && (item.sezona || item.epizoda)) {
@@ -5001,7 +5030,7 @@
         player.play().catch(function () {});
         osveziMini();
         if (navigator.mediaSession) {
-          try { navigator.mediaSession.metadata = new MediaMetadata({title: item.naslov || "Medijski center", artist: item.izvajalec || item.vir || "Safeer OS", artwork: item.slika ? [{src: item.slika}] : []}); } catch (e) {}
+          try { navigator.mediaSession.metadata = new MediaMetadata({title: item.naslov || t("mediaCenter"), artist: item.izvajalec || item.vir || "Safeer OS", artwork: item.slika ? [{src: item.slika}] : []}); } catch (e) {}
         }
         media.timer = window.setTimeout(function () {
           media.timer = 0;
@@ -5036,16 +5065,7 @@
     $("vsebina").scrollTop = 0;
   }
   function mediaZunanjiStatus() {
-    var jezik = (document.documentElement.lang || "sl").toLowerCase().split("-")[0];
-    var sporocila = {
-      sl: "Safeer ne more preveriti stanja zunanjega predvajalnika. Če je zaslon še vedno črn, izberi drugo različico.",
-      en: "Safeer cannot inspect this external player. If the screen is still blank, try another version.",
-      de: "Safeer kann diesen externen Player nicht überprüfen. Wenn der Bildschirm noch schwarz ist, probiere eine andere Version.",
-      es: "Safeer no puede comprobar este reproductor externo. Si la pantalla sigue en negro, prueba otra versión.",
-      fr: "Safeer ne peut pas vérifier ce lecteur externe. Si l’écran est toujours noir, essayez une autre version.",
-      it: "Safeer non può verificare questo lettore esterno. Se lo schermo è ancora nero, prova un’altra versione."
-    };
-    return sporocila[jezik] || sporocila.sl;
+    return t("mediaZunanjiStatus");
   }
   // ------------------------------------------------------------------ glasba: cakalna vrsta
   // Ideja po Tauonu (koda je nasa): po koncu skladbe samodejno naslednja, premesaj, ponovi.
@@ -5232,6 +5252,7 @@
     vrstica.hidden = !skupina;
     if (skupina === "film") {
       vrstica.innerHTML = FILMSKI_ZANRI;
+      prevediV(vrstica);          // shranjeni HTML je v jeziku prvega izrisa
       vrstica.querySelectorAll("[data-media-genre]").forEach(function (b) {
         b.classList.toggle("izbran", !b.getAttribute("data-media-genre"));
         b.onclick = function () { izberiZanr(b); };
@@ -5241,13 +5262,14 @@
     if (!skupina) return;
     vrstica.innerHTML = "";
     var vse = el("button", "izbran"); vse.setAttribute("data-media-genre", "");
-    vse.textContent = skupina === "radio" ? "Vse postaje" : skupina === "tv-v-zivo" ? "Vse države" : "Vsa glasba";
+    vse.setAttribute("data-t", skupina === "radio" ? "katVsePostaje" : skupina === "tv-v-zivo" ? "katVseDrzave" : "katVsaGlasba");
+    vse.textContent = t(vse.getAttribute("data-t"));
     vse.onclick = function () { izberiZanr(vse); };
     vrstica.appendChild(vse);
     klic("mediaZvrsti", [skupina]).then(function (zvrsti) {
       if (media._skupinaZanrov !== skupina) return;
       (zvrsti || []).forEach(function (z) {
-        var b = el("button"); b.setAttribute("data-media-genre", z.id); b.textContent = z.ime;
+        var b = el("button"); b.setAttribute("data-media-genre", z.id); b.textContent = izPodatkov(z.ime);
         b.onclick = function () { izberiZanr(b); };
         vrstica.appendChild(b);
       });
@@ -5274,14 +5296,14 @@
   function osveziGumbViri() {
     var gumb = $("mediaViriFilterGumb"); if (!gumb) return;
     var n = Object.keys(media.izklopljeni).length + Object.keys(media.izklopljeniJeziki).length;
-    gumb.textContent = media.samoLokalno ? "Viri in jeziki: samo ta naprava" : (n ? "Viri in jeziki: " + n + " izklopljen" + (n === 1 ? "" : (n === 2 ? "a" : (n < 5 ? "i" : "ih"))) : "Viri in jeziki: vsi");
+    gumb.textContent = media.samoLokalno ? t("katViriJezikiLokalno") : (n ? t("katViriJezikiIzklopljeno", { n: n }) : t("katViriJezikiVsi"));
     gumb.classList.toggle("aktiven", media.samoLokalno || n > 0);
   }
   function narisiViriFilter() {
     var seznam = $("mediaViriFilterSeznam"); if (!seznam) return;
     seznam.innerHTML = "";
     var ids = Object.keys(media.znaniViri).sort(function (a, b) { return String(media.znaniViri[a]).localeCompare(String(media.znaniViri[b])); });
-    if (!ids.length) seznam.appendChild(el("small", "", "Viri se pokažejo, ko se katalog naloži."));
+    if (!ids.length) seznam.appendChild(el("small", "", t("katViriNamig")));
     ids.forEach(function (id) {
       var vrstica = el("label"), cb = el("input");
       cb.type = "checkbox"; cb.checked = !media.izklopljeni[id];
@@ -5298,7 +5320,7 @@
     if (jeziki) {
       jeziki.innerHTML = "";
       var kode = Object.keys(media.znaniJeziki).sort(function (a, b) { return imeJezika(a).localeCompare(imeJezika(b)); });
-      if (!kode.length) jeziki.appendChild(el("small", "", "Jeziki se pokažejo, ko se katalog naloži."));
+      if (!kode.length) jeziki.appendChild(el("small", "", t("katJezikiNamig")));
       kode.forEach(function (koda) {
         var vrstica = el("label"), cb = el("input");
         cb.type = "checkbox"; cb.checked = !media.izklopljeniJeziki[koda];
@@ -5332,7 +5354,7 @@
     naloziSeznamePredvajanja();
     naloziKnjiznico();
     var zahteva = ++media.zahteva;
-    $("mediaPovzetek").textContent = "Nalagam katalog …";
+    $("mediaPovzetek").textContent = t("katNalagam");
     return klic("mediaKatalog", [media.query, media.filter, media.genre, media.page || 1,
                           media.razvrsti, Object.keys(media.izklopljeni), media.samoLokalno,
                           Object.keys(media.izklopljeniJeziki)]).then(function (response) {
@@ -5400,26 +5422,26 @@
   }
   function naloziMediaSezono(item, season, button) {
     document.querySelectorAll("#mediaSezone button").forEach(function (b) { b.classList.toggle("izbran", b === button); });
-    $("mediaEpizode").innerHTML = '<div class="prazno">Nalagam epizode …</div>';
+    $("mediaEpizode").innerHTML = ""; $("mediaEpizode").appendChild(el("div", "prazno", t("katNalagamEpizode")));
     klic("mediaSezona", [item.tmdb_id, season]).then(function (response) {
       var cilj = $("mediaEpizode"); cilj.innerHTML = "";
       var episodes = (response && response.epizode) || [];
-      $("mediaEpizodeNaslov").textContent = "Epizode · " + (button ? button.textContent : "Sezona " + season);
+      $("mediaEpizodeNaslov").textContent = t("katEpizode") + " · " + (button ? button.textContent : t("katSezona", { n: season }));
       episodes.forEach(function (ep) {
         var row = el("article", "media-epizoda");
         if (ep.slika) { var img = document.createElement("img"); img.src = ep.slika; img.alt = ""; img.loading = "lazy"; row.appendChild(img); }
         var info = el("div", "media-epizoda-info");
-        info.appendChild(el("b", "", "E" + String(ep.stevilka).padStart(2, "0") + "  " + ubezi(ep.naslov || "Epizoda")));
+        info.appendChild(el("b", "", "E" + String(ep.stevilka).padStart(2, "0") + "  " + ubezi(ep.naslov || t("katEpizoda"))));
         info.appendChild(el("small", "", ubezi([ep.datum, ep.trajanje ? ep.trajanje + " min" : "", ep.ocena ? "★ " + ep.ocena : ""].filter(Boolean).join(" · "))));
         if (ep.opis) info.appendChild(el("p", "", ubezi(ep.opis))); row.appendChild(info);
-        var play = el("button", "gumb glavni", "▶ Predvajaj");
+        var play = el("button", "gumb glavni", t("katPredvajaj"));
         play.onclick = function () {
           klic("mediaEpizoda", [item.tmdb_id, season, ep.stevilka, item.naslov + " · " + ep.naslov]).then(function (entry) {
             if (entry && entry.id) { zapriMediaPodrobnosti(); odpriMedia(entry.id); }
           });
         }; row.appendChild(play); cilj.appendChild(row);
       });
-      if (!episodes.length) cilj.appendChild(el("div", "prazno", "Za to sezono ni podatkov."));
+      if (!episodes.length) cilj.appendChild(el("div", "prazno", t("katBrezEpizod")));
     });
   }
   function odpriMediaPodrobnosti(id) {
@@ -5429,7 +5451,7 @@
       var hero = $("mediaPodrobnostiJunak"); hero.innerHTML = "";
       if (item.slika) { var poster = document.createElement("img"); poster.src = item.slika; poster.alt = ""; hero.appendChild(poster); }
       var info = el("div"); info.appendChild(el("h2", "", ubezi(item.naslov || "")));
-      info.appendChild(el("p", "media-detail-meta", ubezi([item.leto, item.ocena ? "★ " + item.ocena : "", item.vrsta === "serija" ? "Serija" : "Film"].filter(Boolean).join(" · "))));
+      info.appendChild(el("p", "media-detail-meta", ubezi([item.leto, item.ocena ? "★ " + item.ocena : "", item.vrsta === "serija" ? t("katSerija") : t("katFilm")].filter(Boolean).join(" · "))));
       if (item.opis) info.appendChild(el("p", "", ubezi(item.opis))); hero.appendChild(info);
       narisiMediaWatchProviders(item);
       var seasons = $("mediaSezone"); seasons.innerHTML = "";
@@ -5438,8 +5460,8 @@
       if (item.vrsta !== "serija") {
         if ($("mediaSezoneNaslov")) $("mediaSezoneNaslov").hidden = true;
         if ($("mediaSezone")) $("mediaSezone").hidden = true;
-        $("mediaEpizodeNaslov").textContent = "Možnosti predvajanja";
-        var playBtn = el("button", "gumb glavni", "▶ Predvajaj film");
+        $("mediaEpizodeNaslov").textContent = t("mediaMoznostiPredvajanja");
+        var playBtn = el("button", "gumb glavni", t("mediaPredvajajFilm"));
         playBtn.style.padding = "14px 28px";
         playBtn.style.fontSize = "18px";
         playBtn.style.marginTop = "12px";
@@ -5458,13 +5480,13 @@
       } else {
         if ($("mediaSezoneNaslov")) $("mediaSezoneNaslov").hidden = false;
         if ($("mediaSezone")) $("mediaSezone").hidden = false;
-        $("mediaEpizodeNaslov").textContent = "Epizode";
+        $("mediaEpizodeNaslov").textContent = t("katEpizode");
         (item.sezone || []).forEach(function (season, index) {
-          var b = el("button", index === 0 ? "izbran" : "", ubezi(season.ime || "Sezona " + season.stevilka));
+          var b = el("button", index === 0 ? "izbran" : "", ubezi(season.ime || t("katSezona", { n: season.stevilka })));
           b.onclick = function () { naloziMediaSezono(item, season.stevilka, b); }; seasons.appendChild(b);
           if (index === 0) setTimeout(function () { naloziMediaSezono(item, season.stevilka, b); }, 0);
         });
-        if (!(item.sezone || []).length) episodes.innerHTML = '<div class="prazno">Sezone niso na voljo.</div>';
+        if (!(item.sezone || []).length) episodes.appendChild(el("div", "prazno", t("katSezoneNi")));
       }
       panel.scrollIntoView({behavior:"smooth", block:"start"});
     }, function () { obvesti(t("mediaVirNapaka")); });
@@ -5663,7 +5685,7 @@
     var pot = $("mediaMapaPot").value.trim();
     if (!pot) return;
     klic("mediaDodajMapo", [pot]).then(function (result) {
-      $("mediaVirSporocilo").textContent = result && result.ok ? "Mapa je dodana." : ((result && result.napaka) || t("mediaVirNapaka"));
+      $("mediaVirSporocilo").textContent = result && result.ok ? t("mediaMapaDodana") : ((result && result.napaka) || t("mediaVirNapaka"));
       if (result && result.ok) $("mediaMapaPot").value = "";
       naloziMedia();
     }, function () { $("mediaVirSporocilo").textContent = t("mediaVirNapaka"); });
@@ -5678,15 +5700,15 @@
     var potrebnaPrijava = { jellyfin: 1, emby: 1, navidrome: 1, plex: 1 };
     if (!url) return;
     if (potrebnaPrijava[provider] && !secret) {
-      $("mediaVirSporocilo").textContent = "Ta strežnik potrebuje geslo ali žeton.";
+      $("mediaVirSporocilo").textContent = t("katPotrebujeGeslo");
       return;
     }
-    $("mediaVirSporocilo").textContent = "Povezujem strežnik …";
+    $("mediaVirSporocilo").textContent = t("mediaPovezujemStreznik");
     klic("mediaDodajStreznik", [provider, name, url, username, secret]).then(function (result) {
       $("mediaStreznikSkrivnost").value = "";
       if (result && result.ok) {
         $("mediaStreznikUrl").value = ""; $("mediaStreznikIme").value = "";
-        $("mediaVirSporocilo").textContent = "Strežnik je varno povezan.";
+        $("mediaVirSporocilo").textContent = t("mediaStreznikPovezan");
       } else {
         $("mediaVirSporocilo").textContent = (result && result.napaka) || t("mediaVirNapaka");
         if (result && result.sporocilo) obvesti(result.sporocilo);
@@ -5702,17 +5724,17 @@
   // ponudimo za povezavo z enim klikom - uporabnik naslova opisa naprave ne pozna.
   on("mediaOdkrijDlna", "click", function () {
     var sporocilo = $("mediaVirSporocilo");
-    sporocilo.textContent = "Iščem medijske strežnike v domačem omrežju …";
+    sporocilo.textContent = t("katDlnaIscem");
     klic("mediaOdkrijDlna").then(function (najdeni) {
       var seznam = najdeni || [];
-      if (!seznam.length) { sporocilo.textContent = "V domačem omrežju ni najdenega strežnika DLNA/UPnP."; return; }
-      sporocilo.textContent = "Najdeni strežniki – klikni za povezavo:";
+      if (!seznam.length) { sporocilo.textContent = t("katDlnaNi"); return; }
+      sporocilo.textContent = t("katDlnaNajdeni") + ":";
       seznam.forEach(function (n) {
-        var g = el("button", "gumb"); g.type = "button"; g.textContent = "Poveži " + n.ime;
+        var g = el("button", "gumb"); g.type = "button"; g.textContent = t("poveziIme", { ime: n.ime });
         g.addEventListener("click", function () {
-          sporocilo.textContent = "Povezujem " + n.ime + " …";
+          sporocilo.textContent = t("povezujemIme", { ime: n.ime });
           klic("mediaDodajStreznik", ["dlna", n.ime, n.url, "", ""]).then(function (r) {
-            sporocilo.textContent = r && r.ok ? (n.ime + " je povezan.") : ((r && r.napaka) || t("mediaVirNapaka"));
+            sporocilo.textContent = r && r.ok ? t("jePovezanIme", { ime: n.ime }) : ((r && r.napaka) || t("mediaVirNapaka"));
             naloziMedia();
           });
         });
@@ -5838,7 +5860,7 @@
     $("mediaPrimerKodeGumb").addEventListener("click", function () {
       var primer = [
         {
-          "title": "Big Buck Bunny (Primer neposrednega MP4 videa)",
+          "title": t("mediaPrimerVidea"),
           "url": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
           "kind": "film",
           "year": 2008,
@@ -5855,7 +5877,7 @@
       ];
       $("mediaJsonKoda").value = JSON.stringify(primer, null, 2);
       if (!$("mediaJsonIme").value) {
-        $("mediaJsonIme").value = "Primer zbirke (Code Example)";
+        $("mediaJsonIme").value = t("mediaPrimerZbirke");
       }
       sporociloNastavitev(t("mediaPrimerVstavljen"), true);
       $("mediaJsonKoda").focus();

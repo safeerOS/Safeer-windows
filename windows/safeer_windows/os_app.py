@@ -1319,9 +1319,9 @@ class SafeerOsWindow(QMainWindow):
         # Lokalni HTTP izvor zagotovi predvidljivo nalaganje modulov in sredstev;
         # zunanje strani se odpirajo v ločenem zaščitenem profilu Safeer Browserja.
         port = _start_local_asset_server(assets_root)
-        url = f"http://127.0.0.1:{port}/os/index.html"
-        if getattr(self, "predvajalnik", False):
-            url += "?" + urllib.parse.urlencode([("predvajalnik", "1"), ("jezik", _jezik_oken())])
+        # Jezik ze v naslovu (naloga 40): prvi izris strani je v jeziku vmesnika, ne v slovenscini do »zacetek«.
+        parametri = [("predvajalnik", "1")] if getattr(self, "predvajalnik", False) else []
+        url = f"http://127.0.0.1:{port}/os/index.html?" + urllib.parse.urlencode(parametri + [("jezik", _jezik_oken())])
 
         # Shrani port za morebitne kasnejše klice
         self._asset_server_port = port
@@ -3833,6 +3833,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     # Ce je izbran control razdelek ali --okno, odpri v oknu
     v_oknu = True if (args.control or args.razdelek or args.okno or predvajalnik) else False
 
+    # Jezik oken (Player, okna razdelkov, naslov strani) pred prvim oknom - prej je bil do »zacetek« "sl" (naloga 40).
+    try:
+        _nastavi_jezik_oken(_jezik_vmesnika(os_backend_win.nalozi_shrambo()))
+    except Exception as e:  # noqa: BLE001
+        print(f"[SafeerOS] Jezik vmesnika ob zagonu: {e}", flush=True)
     window = SafeerOsWindow(v_oknu=v_oknu, zacetni_razdelek=zacetni, media_engine=args.media_engine,
                             browser_settings=browser_settings, magnet=magnet, predvajalnik=predvajalnik)
     print("[SafeerOS] DIAG event_loop_start", flush=True)

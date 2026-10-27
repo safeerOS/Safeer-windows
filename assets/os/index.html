@@ -30,8 +30,8 @@
     <div class="stranska-dno">
       <button class="skrij-vrstico" id="gumbSkrijVrstico"><svg data-ikona="vrstica"></svg><span data-t="vrsticaSkrij"></span></button>
       <div class="uporabnik">
-        <div class="zacetnica" id="zacetnica">U</div>
-        <div class="ime"><b id="imeUporabnika">User</b><span id="imeRacunalnika"><i class="pika zelena"></i> Povezan</span></div>
+        <div class="zacetnica" id="zacetnica"></div>
+        <div class="ime"><b id="imeUporabnika"></b><span id="imeRacunalnika"></span></div>
         <button class="gumb-ikona" id="gumbNapajanje" data-naslov="napajanje"><svg data-ikona="napajanje"></svg></button>
       </div>
     </div>
@@ -48,9 +48,9 @@
         <!-- Prostori (Safeer Link Spaces): zasloni povezanih naprav in navidezna namizja Windows, en klik ali bliznjica. -->
         <button class="gumb-ikona prostori-gumb" id="gumbProstori" type="button" data-naslov="prostoriNamig" aria-haspopup="dialog"
                 aria-controls="slojProstori"><svg data-ikona="prostori"></svg></button>
-        <span class="omrezje-znacka" id="stanjeOmrezje" title="Omrežje"><svg data-ikona="wifi"></svg><span>Povezano</span></span>
+        <span class="omrezje-znacka" id="stanjeOmrezje" title="Omrežje" data-naslov="omrezje"><svg data-ikona="wifi"></svg><span data-t="povezanKratko">Povezano</span></span>
       </div>
-      <div class="ura"><b id="ura">21:04</b><span id="datum">Sob, 26. sep. 2025</span></div>
+      <div class="ura"><b id="ura">21:04</b><span id="datum"></span></div>
     </header>
 
     <div id="vsebina">
@@ -59,7 +59,7 @@
         <!-- Hero Banner -->
         <div class="domov-hero">
           <div class="domov-hero-vsebina">
-            <h1 id="pozdrav">Dober večer, User!</h1>
+            <h1 id="pozdrav"></h1>
             <p data-t="pozdravPodWin">Vse tvoje naprave, mediji in programi – na enem mestu.</p>
             <div class="hitre" id="domPosodobitev" hidden>
               <button class="stikalo" id="domPosodobitevGumb"><svg data-ikona="ponovno"></svg><div><span id="domPosodobitevNaslov"></span><small data-t="posodobitevDomPod"></small></div></button>
@@ -131,21 +131,21 @@
         <div class="modal-dialog-ozadje" id="modalDodajApp" hidden>
           <div class="modal-dialog">
             <div class="modal-dialog-glava">
-              <h3>Dodaj spletno aplikacijo</h3>
+              <h3 data-t="dodajSpletno">Dodaj spletno aplikacijo</h3>
               <button class="gumb-ikona" id="zapriModalDodajApp" type="button"><svg data-ikona="x"></svg></button>
             </div>
             <form id="obrazecDodajApp">
               <label>
-                <span>Ime aplikacije</span>
-                <input type="text" id="vnosImeApp" placeholder="npr. ChatGPT, YouTube, RTV SLO, Netflix ..." required autocomplete="off">
+                <span data-t="appImeOznaka">Ime aplikacije</span>
+                <input type="text" id="vnosImeApp" placeholder="npr. ChatGPT, YouTube, RTV SLO, Netflix ..." data-ph="appImePrimer" required autocomplete="off">
               </label>
               <label>
-                <span>Spletni naslov (URL)</span>
+                <span data-t="appUrlOznaka">Spletni naslov (URL)</span>
                 <input type="url" id="vnosUrlApp" placeholder="https://..." required autocomplete="off">
               </label>
               <div class="modal-dialog-gumbi">
-                <button type="button" class="gumb" id="prekliciModalDodajApp">Prekliči</button>
-                <button type="submit" class="gumb glavni">Dodaj v Safeer OS</button>
+                <button type="button" class="gumb" id="prekliciModalDodajApp" data-t="preklici">Prekliči</button>
+                <button type="submit" class="gumb glavni" data-t="appDodajVOs">Dodaj v Safeer OS</button>
               </div>
             </form>
           </div>
@@ -221,10 +221,10 @@
               <button class="gumb-ikona" id="mediaNaslednja" data-naslov="mediaNaslednja" hidden><svg viewBox="0 0 24 24"><path d="M18 5v14M5 5l10 7-10 7z"/></svg></button>
               <button class="gumb-ikona" id="mediaPonovi" data-naslov="mediaPonovi" hidden><svg viewBox="0 0 24 24"><path d="M17 2l3 3-3 3M4 11V9a4 4 0 0 1 4-4h12M7 22l-3-3 3-3M20 13v2a4 4 0 0 1-4 4H4"/></svg></button>
               <button class="gumb" id="mediaNaSeznam" data-t="seznamDodaj" hidden>＋ Na seznam</button>
-              <button class="gumb" id="mediaNaKodi" title="Predvajaj na napravi s Kodijem" hidden>Na Kodi</button>
+              <button class="gumb" id="mediaNaKodi" title="Predvajaj na napravi s Kodijem" data-naslov="mediaNaKodiNaslov" data-t="mediaNaKodi" hidden>Na Kodi</button>
               <button class="gumb" id="mediaNaZvocnik" data-t="zvocnikNa" hidden>Na zvočnik</button>
               <button class="gumb" id="mediaPodnapisi" hidden>CC</button>
-              <button class="gumb-ikona" id="mediaKino" title="Kino način (celozaslonsko)"><svg data-ikona="celozaslonsko"></svg></button>
+              <button class="gumb-ikona" id="mediaKino" title="Kino način (celozaslonsko)" data-naslov="mediaKinoNaslov"><svg data-ikona="celozaslonsko"></svg></button>
               <button class="gumb-ikona" id="mediaZapri" data-naslov="zapri" title="Zapri"><svg data-ikona="x"></svg></button>
             </div>
           </div>
@@ -233,7 +233,7 @@
           <img id="mediaSlika" alt="" hidden>
           <audio id="mediaAudio" controls preload="metadata" hidden></audio>
           <!-- Lazji sandbox: predvajalnik tece, a ne sme odpirati novih oken ali preusmeriti Safeer OS. -->
-          <iframe id="mediaIframe" title="Predvajalnik medijskega centra"
+          <iframe id="mediaIframe" title="Predvajalnik medijskega centra" data-naslov="mediaIframeNaslov"
                   sandbox="allow-scripts allow-same-origin allow-presentation allow-forms"
                   allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
                   referrerpolicy="no-referrer" hidden></iframe>
@@ -242,15 +242,15 @@
         </div>
 
         <div class="media-orodja">
-          <label class="media-iskanje"><svg data-ikona="isci"></svg><input id="mediaIskanje" type="search" autocomplete="off" placeholder="Išči filme, serije, glasbo, radio ..."></label>
-          <label class="media-razvrsti" title="Razvrsti vsebine">
-            <span>Razvrsti</span>
+          <label class="media-iskanje"><svg data-ikona="isci"></svg><input id="mediaIskanje" type="search" autocomplete="off" placeholder="Išči filme, serije, glasbo, radio ..." data-ph="isciMedije"></label>
+          <label class="media-razvrsti" title="Razvrsti vsebine" data-naslov="katRazvrstiNaslov">
+            <span data-t="katRazvrsti">Razvrsti</span>
             <select id="mediaRazvrsti">
-              <option value="">Priporočeno</option>
-              <option value="novo">Leto izida: najnovejše</option>
-              <option value="staro">Leto izida: najstarejše</option>
-              <option value="az">Po abecedi A–Ž</option>
-              <option value="za">Po abecedi Ž–A</option>
+              <option value="" data-t="katRazPriporoceno">Priporočeno</option>
+              <option value="novo" data-t="katRazNovo">Leto izida: najnovejše</option>
+              <option value="staro" data-t="katRazStaro">Leto izida: najstarejše</option>
+              <option value="az" data-t="katRazAZ">Po abecedi A–Ž</option>
+              <option value="za" data-t="katRazZA">Po abecedi Ž–A</option>
             </select>
           </label>
           <label class="media-razvrsti" id="mediaDebridPolje" hidden>
@@ -258,25 +258,25 @@
             <select id="mediaDebrid"></select>
           </label>
           <div class="media-filter-viri">
-            <button class="gumb" id="mediaViriFilterGumb" type="button" aria-expanded="false" aria-controls="mediaViriFilter">Viri in jeziki: vsi</button>
+            <button class="gumb" id="mediaViriFilterGumb" type="button" aria-expanded="false" aria-controls="mediaViriFilter" data-t="katViriJezikiVsi">Viri in jeziki: vsi</button>
             <div class="media-viri-filter" id="mediaViriFilter" hidden>
-              <label class="media-viri-filter-lokalno"><input type="checkbox" id="mediaSamoLokalno"> <span><b>Samo ta naprava</b><small>Samo datoteke na tem računalniku, brez spleta.</small></span></label>
+              <label class="media-viri-filter-lokalno"><input type="checkbox" id="mediaSamoLokalno"> <span><b data-t="katSamoLokalno">Samo ta naprava</b><small data-t="katSamoLokalnoOpis">Samo datoteke na tem računalniku, brez spleta.</small></span></label>
               <div class="media-viri-filter-seznam" id="mediaViriFilterSeznam"></div>
-              <h4 class="media-viri-filter-naslov">Jeziki vsebine</h4>
+              <h4 class="media-viri-filter-naslov" data-t="katJezikiNaslov">Jeziki vsebine</h4>
               <div class="media-viri-filter-seznam" id="mediaJezikiFilterSeznam"></div>
               <div class="media-viri-filter-noga">
-                <small>Izklop je začasen: ob ponovnem zagonu so spet vklopljeni vsi viri.</small>
-                <button class="gumb" id="mediaViriFilterPonastavi" type="button">Vklopi vse</button>
+                <small data-t="katViriZacasno">Izklop je začasen: ob ponovnem zagonu so spet vklopljeni vsi viri.</small>
+                <button class="gumb" id="mediaViriFilterPonastavi" type="button" data-t="katVklopiVse">Vklopi vse</button>
               </div>
             </div>
           </div>
         </div>
-        <div class="media-zanri" id="mediaZanri" aria-label="Žanri">
-          <button class="izbran" data-media-genre="">Vse vsebine</button>
-          <button data-media-genre="28">Akcija</button><button data-media-genre="878">Sci-Fi</button>
-          <button data-media-genre="35">Komedija</button><button data-media-genre="27">Grozljivka</button>
-          <button data-media-genre="18">Drama</button><button data-media-genre="53">Triler</button>
-          <button data-media-genre="16">Animirani</button><button data-media-genre="10749">Romantika</button>
+        <div class="media-zanri" id="mediaZanri" aria-label="Žanri" data-aria="katZanriAria">
+          <button class="izbran" data-media-genre="" data-t="katVseVsebine">Vse vsebine</button>
+          <button data-media-genre="28" data-t="katZanr_akcija">Akcija</button><button data-media-genre="878" data-t="katZanr_scifi">Sci-Fi</button>
+          <button data-media-genre="35" data-t="katZanr_komedija">Komedija</button><button data-media-genre="27" data-t="katZanr_grozljivka">Grozljivka</button>
+          <button data-media-genre="18" data-t="katZanr_drama">Drama</button><button data-media-genre="53" data-t="katZanr_triler">Triler</button>
+          <button data-media-genre="16" data-t="katZanr_animirani">Animirani</button><button data-media-genre="10749" data-t="katZanr_romantika">Romantika</button>
         </div>
         <div class="media-seznami" id="mediaSeznami" hidden></div>
         <div class="media-knjiznica" id="mediaKnjiznica" hidden></div>
@@ -287,13 +287,13 @@
 
         <div class="media-podrobnosti" id="mediaPodrobnosti" hidden>
           <div class="media-podrobnosti-glava">
-            <button class="gumb" id="mediaPodrobnostiNazaj">← Nazaj</button>
-            <button class="gumb-ikona" id="mediaPodrobnostiZapri" title="Zapri"><svg data-ikona="x"></svg></button>
+            <button class="gumb" id="mediaPodrobnostiNazaj" data-t="mediaNazaj">← Nazaj</button>
+            <button class="gumb-ikona" id="mediaPodrobnostiZapri" title="Zapri" data-naslov="zapri"><svg data-ikona="x"></svg></button>
           </div>
           <div class="media-podrobnosti-junak" id="mediaPodrobnostiJunak"></div>
           <section class="media-kje-gledati" id="mediaWatchProviders" aria-live="polite"></section>
-          <h3 id="mediaSezoneNaslov">Sezone</h3><div class="media-sezone" id="mediaSezone"></div>
-          <h3 id="mediaEpizodeNaslov">Epizode</h3><div class="media-epizode" id="mediaEpizode"></div>
+          <h3 id="mediaSezoneNaslov" data-t="katSezone">Sezone</h3><div class="media-sezone" id="mediaSezone"></div>
+          <h3 id="mediaEpizodeNaslov"></h3><div class="media-epizode" id="mediaEpizode"></div>
         </div>
 
       </section>
@@ -379,27 +379,27 @@
 
       <!-- ZAPISKI (po zgledu Deta Surf): zapiski z @-omembami in izrezki s spleta z virom -->
       <section class="razdelek" id="r-zapiski">
-        <h1>Zapiski</h1>
-        <p>Zapiski z omembami tvojih datotek, strani, programov in drugih zapiskov. V Spletu z gumbom »V zapisek« dodaš izbrano besedilo z virom. Vse ostane na tem računalniku.</p>
+        <h1 data-t="zapiski">Zapiski</h1>
+        <p data-t="zapiskiOpis">Zapiski z omembami tvojih datotek, strani, programov in drugih zapiskov. V Spletu z gumbom »V zapisek« dodaš izbrano besedilo z virom. Vse ostane na tem računalniku.</p>
         <div class="zapiski-postavitev">
           <div class="zapiski-seznam">
-            <button class="gumb" id="zapisekNov">+ Nov zapisek</button>
-            <label class="media-iskanje"><svg data-ikona="isci"></svg><input id="zapiskiIskanje" type="search" placeholder="Išči po zapiskih …"></label>
+            <button class="gumb" id="zapisekNov" data-t="zapisekNov">+ Nov zapisek</button>
+            <label class="media-iskanje"><svg data-ikona="isci"></svg><input id="zapiskiIskanje" type="search" placeholder="Išči po zapiskih …" data-ph="zapiskiIsci"></label>
             <div id="zapiskiVrstice"></div>
           </div>
           <div class="zapisek-urejevalnik" id="zapisekUrejevalnik" hidden>
             <div class="zapisek-glava">
-              <input id="zapisekNaslov" type="text" maxlength="160" placeholder="Naslov">
-              <button class="gumb" id="zapisekPogled" type="button">Pogled</button>
-              <button class="gumb" id="zapisekPripni" type="button">Pripni</button>
-              <button class="gumb" id="zapisekIzbrisi" type="button">Izbriši</button>
+              <input id="zapisekNaslov" type="text" maxlength="160" placeholder="Naslov" data-ph="zapisekNaslov">
+              <button class="gumb" id="zapisekPogled" type="button" data-t="zapisekPogled">Pogled</button>
+              <button class="gumb" id="zapisekPripni" type="button" data-t="zapisekPripni">Pripni</button>
+              <button class="gumb" id="zapisekIzbrisi" type="button" data-t="zapisekIzbrisi">Izbriši</button>
             </div>
-            <textarea id="zapisekBesedilo" spellcheck="true" placeholder="Piši … Z @ omeniš datoteko, stran, program ali drug zapisek."></textarea>
+            <textarea id="zapisekBesedilo" spellcheck="true" placeholder="Piši … Z @ omeniš datoteko, stran, program ali drug zapisek." data-ph="zapisekPisi"></textarea>
             <div class="zapisek-prikaz" id="zapisekPrikaz" hidden></div>
             <div class="zapisek-omembe-okno" id="zapisekOmembeOkno" hidden></div>
             <div class="zapisek-noga">
-              <div><h3>Viri v zapisku</h3><div class="zapisek-cipi" id="zapisekViri"></div></div>
-              <div><h3>Omenjajo ga</h3><div class="zapisek-cipi" id="zapisekPovratne"></div></div>
+              <div><h3 data-t="zapisekViri">Viri v zapisku</h3><div class="zapisek-cipi" id="zapisekViri"></div></div>
+              <div><h3 data-t="zapisekPovratne">Omenjajo ga</h3><div class="zapisek-cipi" id="zapisekPovratne"></div></div>
               <span class="namig" id="zapisekStanje"></span>
             </div>
           </div>
@@ -445,7 +445,7 @@
         <h2 data-t="trenutnaPovezava"></h2>
         <div class="vrstice" id="omrezjeTrenutno"></div>
         <div class="hitre omrezje-stikala">
-          <button class="stikalo" id="stikaloWifiOmrezje" role="switch" aria-checked="false"><svg data-ikona="wifi"></svg><div><span>Wi-Fi</span><small id="omrezjeStanje"></small></div><i></i></button>
+          <button class="stikalo" id="stikaloWifiOmrezje" role="switch" aria-checked="false"><svg data-ikona="wifi"></svg><div><span data-t="wifi">Wi-Fi</span><small id="omrezjeStanje"></small></div><i></i></button>
         </div>
         <div id="blokWifi" hidden>
           <h2><span data-t="wifiOmrezja"></span><button class="dodatno" id="gumbOmrezjeOsvezi" data-t="osvezi"></button></h2>
@@ -493,7 +493,7 @@
           <form class="splet-iskalnik" id="spletIskalnik">
             <svg data-ikona="isci"></svg>
             <input id="spletVnos" type="text" autocomplete="off" spellcheck="false" data-ph="spletIsci" placeholder="Išči po spletu ali vnesi spletni naslov">
-            <button class="gumb glavni" type="submit">Išči</button>
+            <button class="gumb glavni" type="submit" data-t="spletIsci">Išči</button>
           </form>
           <div class="splet-hitro-glava"><h2 data-t="tvojeSpletne">Tvoje spletne aplikacije</h2><span data-t="odprejoVOknu">Odprejo se v tem oknu</span></div>
           <div class="splet-hitro" id="spletneAplikacije"></div>
@@ -526,7 +526,7 @@
         <h2 data-t="mediaWatchSettingsTitle">Media Center</h2>
         <div class="media-drzava-nastavitev">
           <label for="mediaWatchCountry" data-t="mediaWatchCountryLabel">Country for Where to watch</label>
-          <select id="mediaWatchCountry" aria-label="Country for Where to watch"></select>
+          <select id="mediaWatchCountry" aria-label="Country for Where to watch" data-aria="mediaWatchCountryLabel"></select>
         </div>
         <h2>Safeer OS</h2>
         <div class="hitre">
@@ -549,24 +549,24 @@
         <p class="namig" id="mediaVirSporocilo"></p>
         <div class="media-viri" id="mediaViri"></div>
         <form class="media-dodaj-vir" id="mediaDodajMapo">
-          <input id="mediaMapaPot" type="text" required placeholder="Pot mape, tudi \\strežnik\mapa (UNC)">
-          <button class="gumb" type="submit">Dodaj lokalno ali omrežno mapo</button>
+          <input id="mediaMapaPot" type="text" required placeholder="Pot mape, tudi \\strežnik\mapa (UNC)" data-ph="mediaMapaPotPh">
+          <button class="gumb" type="submit" data-t="mediaDodajMapoGumb">Dodaj lokalno ali omrežno mapo</button>
         </form>
         <form class="media-dodaj-vir" id="mediaDodajStreznik" autocomplete="off">
-          <select id="mediaStreznikVrsta" aria-label="Vrsta medijskega strežnika">
+          <select id="mediaStreznikVrsta" aria-label="Vrsta medijskega strežnika" data-aria="mediaStreznikVrstaAria">
             <option value="jellyfin">Jellyfin</option><option value="emby">Emby</option>
             <option value="navidrome">Navidrome</option><option value="plex">Plex</option>
-            <option value="kodi">Kodi (knjižnica prek JSON-RPC)</option><option value="tvheadend">TVHeadend (TV v živo)</option>
-            <option value="dlna">DLNA / UPnP (Gerbera, MiniDLNA, NAS)</option>
-            <option value="funkwhale">Funkwhale (glasba)</option><option value="azuracast">AzuraCast (radio)</option>
-            <option value="stremio">Stremio dodatek (naslov manifest.json)</option>
+            <option value="kodi" data-t="katVrstaKodi">Kodi (knjižnica)</option><option value="tvheadend">TVHeadend</option>
+            <option value="dlna">DLNA / UPnP</option>
+            <option value="funkwhale">Funkwhale</option><option value="azuracast">AzuraCast</option>
+            <option value="stremio" data-t="katVrstaStremio">Dodatek Stremio</option>
           </select>
-          <input id="mediaStreznikIme" type="text" maxlength="80" placeholder="Ime (neobvezno)">
-          <input id="mediaStreznikUrl" type="url" required placeholder="https://strežnik:vrata (doma tudi http://192.168.x.x:vrata)">
-          <input id="mediaStreznikUporabnik" type="text" autocomplete="username" placeholder="Uporabniško ime (Plex: neobvezno)">
-          <input id="mediaStreznikSkrivnost" type="password" autocomplete="new-password" placeholder="Geslo ali žeton (kjer je potreben)">
-          <button class="gumb" type="submit">Poveži medijski strežnik</button>
-          <button class="gumb" type="button" id="mediaOdkrijDlna">Poišči strežnike v domačem omrežju</button>
+          <input id="mediaStreznikIme" type="text" maxlength="80" placeholder="Ime (neobvezno)" data-ph="katImeNeobvezno">
+          <input id="mediaStreznikUrl" type="url" required placeholder="https://strežnik:vrata (doma tudi http://192.168.x.x:vrata)" data-ph="mediaStreznikUrlPh">
+          <input id="mediaStreznikUporabnik" type="text" autocomplete="username" placeholder="Uporabnik" data-ph="katUporabnik">
+          <input id="mediaStreznikSkrivnost" type="password" autocomplete="new-password" placeholder="Geslo ali žeton" data-ph="katGeslo">
+          <button class="gumb" type="submit" data-t="katPoveziStreznik">Poveži medijski strežnik</button>
+          <button class="gumb" type="button" id="mediaOdkrijDlna" data-t="katOdkrijDlna">Poišči strežnike v domačem omrežju</button>
         </form>
         <div id="mediaNastavitveMesto"></div>
         <div id="skupineNastavitev"></div>
@@ -576,13 +576,13 @@
 
 
     <!-- Glasba v ozadju: vidna povsod, dokler zvok igra in je plošča predvajalnika zaprta z »Nazaj«. -->
-    <div class="media-mini" id="mediaMini" hidden role="region" aria-label="Predvajanje">
-      <button class="media-mini-odpri" id="mediaMiniOdpri" type="button" title="Odpri predvajalnik">&#9835;</button>
+    <div class="media-mini" id="mediaMini" hidden role="region" aria-label="Predvajanje" data-aria="katPredvajanje">
+      <button class="media-mini-odpri" id="mediaMiniOdpri" type="button" title="Odpri predvajalnik" data-naslov="mediaOdpriVideo">&#9835;</button>
       <div class="media-mini-besedilo"><b id="mediaMiniNaslov"></b><small id="mediaMiniMeta"></small></div>
-      <button class="gumb-ikona" id="mediaMiniPrejsnja" type="button" title="Prejšnja"><svg viewBox="0 0 24 24"><path d="M6 5v14M19 5 9 12l10 7z"/></svg></button>
-      <button class="media-mini-premor" id="mediaMiniPremor" type="button" title="Predvajaj / premor">&#10074;&#10074;</button>
-      <button class="gumb-ikona" id="mediaMiniNaslednja" type="button" title="Naslednja"><svg viewBox="0 0 24 24"><path d="M18 5v14M5 5l10 7-10 7z"/></svg></button>
-      <button class="gumb-ikona" id="mediaMiniZapri" type="button" title="Ustavi"><svg data-ikona="x"></svg></button>
+      <button class="gumb-ikona" id="mediaMiniPrejsnja" type="button" title="Prejšnja" data-naslov="spNazaj"><svg viewBox="0 0 24 24"><path d="M6 5v14M19 5 9 12l10 7z"/></svg></button>
+      <button class="media-mini-premor" id="mediaMiniPremor" type="button" title="Predvajaj / premor" data-naslov="katPremor">&#10074;&#10074;</button>
+      <button class="gumb-ikona" id="mediaMiniNaslednja" type="button" title="Naslednja" data-naslov="spNaprej"><svg viewBox="0 0 24 24"><path d="M18 5v14M5 5l10 7-10 7z"/></svg></button>
+      <button class="gumb-ikona" id="mediaMiniZapri" type="button" title="Ustavi" data-naslov="ustavi"><svg data-ikona="x"></svg></button>
     </div>
   </main>
 </div>
@@ -709,10 +709,10 @@
 <div class="sloj" id="slojVecApp"><div class="tancica"></div>
   <div class="plosca" id="ploscaVecApp">
     <div class="kartica-glava"><b data-t="spletneAplikacije">Spletne aplikacije</b>
-      <span class="gumbi-glave"><button class="gumb-mini-dodaj" id="vecAppDodaj" type="button">+ Dodaj</button>
-      <button class="gumb-ikona" id="vecAppZapri" type="button" title="Zapri"><svg data-ikona="x"></svg></button></span>
+      <span class="gumbi-glave"><button class="gumb-mini-dodaj" id="vecAppDodaj" type="button" data-t="dodajPlus">+ Dodaj</button>
+      <button class="gumb-ikona" id="vecAppZapri" type="button" title="Zapri" data-naslov="zapri"><svg data-ikona="x"></svg></button></span>
     </div>
-    <p class="drobno">Povleci ploščico ali uporabi puščici, da spremeniš vrstni red. Prve aplikacije so vidne na domači strani.</p>
+    <p class="drobno" data-t="ploscaVecAppNamig">Povleci ploščico ali uporabi puščici, da spremeniš vrstni red. Prve aplikacije so vidne na domači strani.</p>
     <div class="spletne-mreza-vse" id="vseSpletneApp"></div>
   </div>
 </div>

@@ -422,7 +422,10 @@ class TestOsWindows(unittest.TestCase):
         self.assertIn("mediaZunanjiStatus()", iframe_logic)
         self.assertNotIn("poskusiNaslednjo()", iframe_logic)
         self.assertNotIn("iframe.hidden = true", iframe_logic)
-        self.assertIn("Safeer ne more preveriti stanja zunanjega predvajalnika", javascript)
+        # Naloga 40: besedilo je v besedila.js (kljuc mediaZunanjiStatus, 6 jezikov), os.js ga vzame s t().
+        self.assertIn('return t("mediaZunanjiStatus");', javascript)
+        self.assertIn("Safeer ne more preveriti stanja zunanjega predvajalnika",
+                      (koren / "assets" / "os" / "besedila.js").read_text(encoding="utf-8"))
 
     def test_clean_nadgradnja_ohrani_uporabnikove_media_vire(self):
         koren = Path(__file__).resolve().parents[2]
