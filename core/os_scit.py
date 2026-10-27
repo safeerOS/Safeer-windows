@@ -95,11 +95,16 @@ def je_posodobitev(ime: str) -> bool:
     return any(ime == d or ime.endswith("." + d) for d in POSODOBITVE)
 
 
+#: Windows: podprocesi brez konzolnega okna (lastnik 27. 10. 2026: Straza Scita je vsakih 20 s za trenutek odprla okno
+#: PowerShella, ker je SafeerOS.exe zgrajen brez konzole); drugod 0.
+_BREZ_OKNA = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+
 def _zazeni(ukaz: List[str], cas: float = 8.0) -> Tuple[int, str]:
     if not ukaz or shutil.which(ukaz[0]) is None:
         return 127, ""
     try:
-        r = subprocess.run(ukaz, capture_output=True, text=True, timeout=cas)
+        r = subprocess.run(ukaz, capture_output=True, text=True, timeout=cas, creationflags=_BREZ_OKNA)
         return r.returncode, r.stdout
     except Exception:
         return 1, ""
@@ -151,7 +156,7 @@ def upstream_strezniki_windows() -> List[str]:
     try:
         cmd = ["powershell", "-NoProfile", "-NonInteractive", "-Command",
                "(Get-DnsClientServerAddress -AddressFamily IPv4).ServerAddresses"]
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=5, creationflags=_BREZ_OKNA)
         if res.returncode == 0:
             for vrstica in res.stdout.splitlines():
                 v = vrstica.strip()
@@ -162,7 +167,7 @@ def upstream_strezniki_windows() -> List[str]:
         pass
     if not strezniki:
         try:
-            res = subprocess.run(["ipconfig", "/all"], capture_output=True, text=True, timeout=5)
+            res = subprocess.run(["ipconfig", "/all"], capture_output=True, text=True, timeout=5, creationflags=_BREZ_OKNA)
             if res.returncode == 0:
                 for match in re.finditer(r"DNS Servers[.\s:]+([\d.]+)", res.stdout):
                     ip = match.group(1).strip()
@@ -591,7 +596,7 @@ def vmesniki_povezani() -> List[str]:
         try:
             cmd = ["powershell", "-NoProfile", "-NonInteractive", "-Command",
                    "Get-NetAdapter | Where-Object Status -eq 'Up' | Select-Object -ExpandProperty Name"]
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=5, creationflags=_BREZ_OKNA)
             if r.returncode == 0:
                 for line in r.stdout.splitlines():
                     ime = line.strip()
@@ -616,7 +621,7 @@ def dns_vmesnika(vmesnik: str) -> str:
         try:
             cmd = ["powershell", "-NoProfile", "-NonInteractive", "-Command",
                    f"(Get-DnsClientServerAddress -InterfaceAlias '{vmesnik}' -AddressFamily IPv4).ServerAddresses"]
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=5, creationflags=_BREZ_OKNA)
             if r.returncode == 0:
                 return r.stdout.strip().replace("\r\n", " ")
         except Exception:
@@ -716,10 +721,10 @@ def povrni(vmesnik: str) -> bool:
         try:
             cmd = ["powershell", "-NoProfile", "-NonInteractive", "-Command",
                    f"Set-DnsClientServerAddress -InterfaceAlias '{vmesnik}' -ResetServerAddresses"]
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=8)
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=8, creationflags=_BREZ_OKNA)
             if r.returncode != 0:
                 subprocess.run(["netsh", "interface", "ip", "set", "dns", f"name={vmesnik}", "dhcp"],
-                               capture_output=True, text=True, timeout=5)
+                               capture_output=True, text=True, timeout=5, creationflags=_BREZ_OKNA)
             return True
         except Exception:
             return False

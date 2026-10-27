@@ -867,7 +867,8 @@ def pridobi_stanje_omrezja() -> dict:
     if sys.platform == "win32":
         try:
             out = subprocess.check_output(["netsh", "wlan", "show", "interfaces"],
-                                          text=True, errors="replace", timeout=1.5)
+                                          text=True, errors="replace", timeout=1.5,
+                                          creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))   # brez okna konzole
             for line in out.splitlines():
                 if "SSID" in line and "BSSID" not in line:
                     parts = line.split(":", 1)
