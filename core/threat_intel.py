@@ -32,15 +32,31 @@ RETRY_SECONDS = 3600
 FIRST_UPDATE_DELAY_SECONDS = 12  # after every start, once the first page is loading
 
 
+def _feed_paths():
+    yield Path(__file__).with_name("signed_feed.py")
+    # Zamrznjen Windows paket (27. 10. 2026, 1.0.52 se ni zagnal): core.threat_intel pride iz PYZ (uvozi ga
+    # core/os_scit), signed_feed.py pa je kot podatek v <paket>/shared/core.
+    bundle = getattr(sys, "_MEIPASS", None)
+    if bundle:
+        yield Path(bundle) / "shared" / "core" / "signed_feed.py"
+
+
 def _load_feed_module():
     module = sys.modules.get("safeer_signed_feed")
-    if module is not None:
+    if module is not None and hasattr(module, "SignedFeedStore"):
         return module
-    path = Path(__file__).with_name("signed_feed.py")
+    path = next((p for p in _feed_paths() if p.is_file()), None)
+    if path is None:
+        raise ImportError("signed_feed.py ni ne ob threat_intel.py ne v paketu")
     spec = importlib.util.spec_from_file_location("safeer_signed_feed", path)
     module = importlib.util.module_from_spec(spec)
-    sys.modules["safeer_signed_feed"] = module
-    spec.loader.exec_module(module)
+    sys.modules["safeer_signed_feed"] = module   # @dataclass ga isce med izvajanjem modula
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        # Prazen modul v sys.modules je 27. 10. 2026 podrl vsak naslednji zagon storitve (ni SignedFeedStore).
+        sys.modules.pop("safeer_signed_feed", None)
+        raise
     return module
 
 
