@@ -9,6 +9,9 @@ tudi po zaprtju povezave - za TV in mobilne podatke nesprejemljivo. Tu:
 - LRU v RAM z mejo po profilu naprave; zapri() ne caka na zahteve v teku (na Windows Bazen.zapri() zahteve v teku ne
   prekine - izmerjeno 26. 10. 2026, preizkusa test_zapiranje_prekine_* padeta) - niti so demonske in odvrzejo izid.
 - message-id in imena niso v repr, izjemi ali dnevniku.
+
+Naloga 76 (pregleda 71 L1 in 72 N1): ali izdaja gre v mejo prometa priprave, odloci preveri_izdajo PRED ponudbo (iz NZB
+brez omrezja in po prvem clanku); priprava rezervira promet pred vsakim zvezkom in ne bere zvezkov za koncem filma.
 """
 
 from __future__ import annotations
@@ -18,7 +21,6 @@ from bisect import bisect_right
 import itertools
 import logging
 import os
-import re
 import threading
 from collections import OrderedDict
 from concurrent.futures import FIRST_COMPLETED, CancelledError, Future, ThreadPoolExecutor, wait
@@ -328,14 +330,14 @@ class Bralnik:
 
 # ------------------------------------------------------------------ priprava iz NZB
 
-VIDEO = (".mkv", ".mp4", ".m4v", ".avi", ".ts", ".m2ts", ".webm", ".mov", ".wmv", ".mpg", ".mpeg")
-NI_VSEBINA = (".par2", ".nfo", ".sfv", ".nzb", ".jpg", ".jpeg", ".png", ".txt", ".srr", ".url", ".md5")
+VIDEO = R.VIDEO  # ista pravila za imena v NZB in v arhivu (N1)
+NI_VSEBINA = R.NI_VSEBINA
 NI_PODPRTO = "ni_podprto"  # 7z, zip, gnezden arhiv, vec zvezkov z zakritimi imeni ... (F2)
 NI_FILMA = "ni_filma"
 
 #: T3: napaka omrezja pri istem segmentu - po toliko poskusih se ne prenasa vec.
 NAJVEC_POSKUSOV = 2
-#: W3: zahtevano branje, ki ga okno drugega bralca prekliče, se ponovi najvec toliko krat.
+#: W3: zahtevano branje, ki ga okno drugega bralca preklice, se ponovi najvec toliko krat.
 NAJVEC_PREKLICEV = 3
 #: T4: priprava bere hkrati najvec toliko zvezkov in zacetek vsakega sprosti takoj po razclenitvi glav.
 PRIPRAVA_HKRATI = 4
@@ -344,14 +346,33 @@ NAJVEC_PRIPRAVE_BAJTOV = 512 * MiB
 #: T5: glave, ki niso v prvem segmentu zvezka: najvec toliko segmentov in bajtov na zvezek, sicer PREVEC.
 NAJVEC_GLAV_SEGMENTOV = 8
 NAJVEC_GLAV_BAJTOV = 16 * MiB
+#: L1: preverba pred ponudbo samo odloca, zato ima za glave prvega zvezka manjso mejo kot priprava.
+NAJVEC_PREVERBE_GLAV_BAJTOV = 8 * MiB
 
 #: T13: vzorec je samostojna beseda v imenu (»Film.Sample.mkv«, »sample-film.mkv«), ne podniz (»Samplers.2026.mkv«).
-_VZOREC = re.compile(r"(^|[._ \-\[(])(sample|vzorec)([._ \-\])]|$)", re.I)
+_VZOREC = R._VZOREC
 
 
 def je_vzorec(ime: str) -> bool:
     """Ali je datoteka vzorec (skupni primeri tok_vzorec)."""
-    return bool(_VZOREC.search(ime or ""))
+    return R.je_vzorec(ime)
+
+
+def _clen(clanek: int, najmanj: int) -> int:
+    # vsak clen omejen: ze en tak preseze mejo, vsota pa ne more narasti cez vse meje
+    return min(max(0, clanek, najmanj), NAJVEC_PRIPRAVE_BAJTOV + 1)
+
+
+def ocena_priprave(prebrano: int, clanki_nzb: List[int], najmanj: int) -> int:
+    """Promet priprave pred prvim bajtom (skupni primeri tok_priprava): [prebrano] + prvi clanek vsakega zvezka, ki se
+    ga se bere. Velikost clanka iz NZB napise posiljatelj, zato vsaj [najmanj] (prvi prebrani clanek - zvezki so enaki).
+    L1: prej je priprava to izvedela sele po do 512 MiB prometa in po ponudbi."""
+    return min(max(0, prebrano), NAJVEC_PRIPRAVE_BAJTOV + 1) + sum(_clen(b, najmanj) for b in clanki_nzb)
+
+
+def _clanek_nzb(d: Datoteka) -> int:
+    """Povprecen clanek datoteke po NZB (bytes v NZB ima najvec 9 stevk) - ocena prvega clanka brez omrezja."""
+    return max(0, d.bajtov_nzb) // max(1, len(d.segmenti))
 
 
 def _je_zvezek(ime: str) -> bool:
@@ -397,7 +418,8 @@ def _je_rar(zacetek: bytes) -> bool:
     return zacetek.startswith(R.PODPIS4) or zacetek.startswith(R.PODPIS5)
 
 
-def _glave(telo: Callable[[str], bytes], p: Preslikava, zacetek: bytes, celo: bool) -> Tuple[R.Zvezek, int]:
+def _glave(telo: Callable[[str], bytes], p: Preslikava, zacetek: bytes, celo: bool,
+           najvec_bajtov: int = NAJVEC_GLAV_BAJTOV) -> Tuple[R.Zvezek, int]:
     """Glave zvezka iz zacetka (prvi segment); ce segajo cez in jih rabimo ([celo] ali ni nobene datoteke), branje
     naprej prek bralnika brez okna vnaprej z mejo NAJVEC_GLAV_* (T5; prej brez meje - do 10 000 blokov). (zvezek,
     bajti z omrezja)."""
@@ -407,7 +429,7 @@ def _glave(telo: Callable[[str], bytes], p: Preslikava, zacetek: bytes, celo: bo
     b = Bralnik(telo, Vir([p], [KosVira(0, 0, p.velikost)]), Profil(0, 0, 8 * MiB, 1))
 
     def meja() -> None:
-        if b.segmentov > NAJVEC_GLAV_SEGMENTOV or b.z_omrezja > NAJVEC_GLAV_BAJTOV:
+        if b.segmentov > NAJVEC_GLAV_SEGMENTOV or b.z_omrezja > najvec_bajtov:
             raise NapakaToka(PREVEC)
 
     def beri(o: int, k: int) -> bytes:
@@ -423,12 +445,13 @@ def _glave(telo: Callable[[str], bytes], p: Preslikava, zacetek: bytes, celo: bo
         b.zapri()
 
 
-def _odloci_prvega(telo: Callable[[str], bytes], p: Preslikava, zacetek: bytes) -> Tuple[R.Zvezek, int]:
-    """Prvi zvezek: odlocitev store/stisnjen/sifriran na celem seznamu glav, ce prvi segment ne zadosca (T2)."""
+def _odloci_prvega(telo: Callable[[str], bytes], p: Preslikava, zacetek: bytes,
+                   najvec_glav: int = NAJVEC_GLAV_BAJTOV) -> Tuple[R.Zvezek, int]:
+    """Prvi zvezek: odlocitev store/stisnjen/sifriran na celem seznamu glav, ce prvi segment ne zadosca (T2, N1)."""
     izid = R.preveri(zacetek, p.velikost)
     bajtov = 0
     if izid == R.NEPOPOLNO:
-        z, bajtov = _glave(telo, p, zacetek, True)
+        z, bajtov = _glave(telo, p, zacetek, True, najvec_glav)
         izid = R.odloci(z, p.velikost)
     else:
         z = R.razcleni_zvezek(zacetek, p.velikost) if izid == R.OK else None
@@ -437,58 +460,87 @@ def _odloci_prvega(telo: Callable[[str], bytes], p: Preslikava, zacetek: bytes) 
     return z, bajtov
 
 
-def _prvi(nzb: Nzb, telo: Callable[[str], bytes]) -> tuple:
-    """Skupna odlocitev za preveri_izdajo in pripravi (T13): (vrsta, izbrane, preslikava, zvezek ali None, bajti).
-    Zakrito ime s podpisom RAR je RAR z enim zvezkom (vec zvezkov z zakritimi imeni ne znamo urediti: NI_PODPRTO)."""
+def _prvi(nzb: Nzb, telo: Callable[[str], bytes], najvec_glav: int = NAJVEC_GLAV_BAJTOV) -> tuple:
+    """Skupna odlocitev za preveri_izdajo in pripravi (T13): (vrsta, izbrane, preslikava, zvezek ali None, bajti,
+    bajti prvega clanka). Zakrito ime s podpisom RAR je RAR z enim zvezkom (vec zvezkov z zakritimi imeni ne znamo
+    urediti: NI_PODPRTO)."""
     vrsta, izbrane = izberi_datoteke(nzb)
     p, zacetek, bajtov = _prvi_segment(telo, nzb.datoteke[izbrane[0]])
     if vrsta == "video" and not _je_rar(zacetek):
-        return vrsta, izbrane, p, None, bajtov
-    z, b2 = _odloci_prvega(telo, p, zacetek)
+        return vrsta, izbrane, p, None, bajtov, bajtov
+    z, b2 = _odloci_prvega(telo, p, zacetek, najvec_glav)
     if vrsta == "video":
         if z.vec_zvezkov:
             raise NapakaToka(NI_PODPRTO)
         vrsta = "rar"
-    return vrsta, izbrane, p, z, bajtov + b2
+    return vrsta, izbrane, p, z, bajtov + b2, bajtov
+
+
+def _v_meji(nzb: Nzb, ostali: List[int], prebrano: int, najmanj: int, najvec_bajtov: int) -> None:
+    """L1: PREVEC, ce ocena priprave preseze mejo - pred prometom za ostale zvezke."""
+    if ocena_priprave(prebrano, [_clanek_nzb(nzb.datoteke[i]) for i in ostali], najmanj) > najvec_bajtov:
+        raise NapakaToka(PREVEC)
 
 
 def pripravi(nzb: Nzb, telo: Callable[[str], bytes], vzporedno: int = PRIPRAVA_HKRATI,
              najvec_bajtov: int = NAJVEC_PRIPRAVE_BAJTOV) -> Tuple[Vir, int]:
     """NZB -> (Vir filma, bajti z omrezja za pripravo). Prvi zvezek odloci (T2), ostali zvezki se berejo najvec
     [vzporedno] hkrati, zacetek se sprosti takoj po razclenitvi (T4), skupni promet najvec [najvec_bajtov] (PREVEC).
-    Stisnjen ali sifriran RAR = NapakaRar PRED ponudbo."""
-    vrsta, izbrane, p0, z0, bajtov = _prvi(nzb, telo)
+    Stisnjen ali sifriran RAR = NapakaRar PRED ponudbo.
+    L1: prevelika izdaja pade iz NZB brez prometa in po prvem clanku brez branja ostalih zvezkov (enako kot
+    preveri_izdajo); promet zvezka se rezervira PRED oddajo (prej je preverba po koncanem zvezku dovolila preseg za do
+    4 zvezke); zvezki za koncem filma se ne berejo (prej vsi)."""
+    _vrsta, izbrane = izberi_datoteke(nzb)
+    _v_meji(nzb, izbrane, 0, 0, najvec_bajtov)
+    vrsta, izbrane, p0, z0, bajtov, prvi_surovo = _prvi(nzb, telo)
     if vrsta == "video":
         return Vir([p0], [KosVira(0, 0, p0.velikost)], nzb.datoteke[izbrane[0]].ime), bajtov
+    _v_meji(nzb, izbrane[1:], bajtov, prvi_surovo, najvec_bajtov)
+    ocene = [0] + [_clen(_clanek_nzb(nzb.datoteke[i]), prvi_surovo) for i in izbrane[1:]]
     preslikave: list = [None] * len(izbrane)
     zvezki: list = [None] * len(izbrane)
     preslikave[0], zvezki[0] = p0, z0
+    v0 = R.glavni_vnos(z0)
+    # film, ki se ne nadaljuje, ne rabi naslednjih zvezkov; sicer se meja premakne, ko zvezek film konca
+    potrebnih = len(izbrane) if v0 is not None and v0.razdeljen_po else 1
 
     def obdelaj(n: int) -> tuple:
         p, zacetek, b = _prvi_segment(telo, nzb.datoteke[izbrane[n]])
         z, b2 = _glave(telo, p, zacetek, False)
         return p, z, b + b2  # zacetek gre stran tu
 
-    with ThreadPoolExecutor(max_workers=max(1, vzporedno)) as ex:
+    hkrati = max(1, vzporedno)
+    with ThreadPoolExecutor(max_workers=hkrati) as ex:
         tecejo: dict = {}
-        naslednji = 1
+        naslednji, preverjen, rezervirano = 1, 1, 0
         try:
-            while naslednji < len(izbrane) or tecejo:
-                while naslednji < len(izbrane) and len(tecejo) < max(1, vzporedno):
+            while naslednji < potrebnih or any(n < potrebnih for n in tecejo.values()):
+                while naslednji < potrebnih and len(tecejo) < hkrati:
+                    if bajtov + rezervirano + ocene[naslednji] > najvec_bajtov:
+                        raise NapakaToka(PREVEC)  # rezervacija pred oddajo: zvezki v teku ne gredo cez mejo
+                    rezervirano += ocene[naslednji]
                     tecejo[ex.submit(obdelaj, naslednji)] = naslednji
                     naslednji += 1
                 koncani, _ = wait(list(tecejo), return_when=FIRST_COMPLETED)
                 for f in koncani:
                     n = tecejo.pop(f)
+                    rezervirano -= ocene[n]
+                    if n >= potrebnih:
+                        continue  # zvezek za koncem filma: izid ni pomemben
                     preslikave[n], zvezki[n], b = f.result()
                     bajtov += b
-                if bajtov > najvec_bajtov:
+                if bajtov + rezervirano > najvec_bajtov:
                     raise NapakaToka(PREVEC)
+                while preverjen < potrebnih and zvezki[preverjen] is not None:
+                    x = R.nadaljevanje(zvezki[preverjen])
+                    if x is None or not x.razdeljen_po:
+                        potrebnih = preverjen + 1  # film se tu konca (ali sestavi javi NESKLADNO)
+                    preverjen += 1
         finally:
             for f in tecejo:
                 f.cancel()
-    ime, _velikost, kosi = R.sestavi(zvezki)
-    return Vir(preslikave, [KosVira(k.zvezek, k.odmik, k.dolzina) for k in kosi], ime), bajtov
+    ime, _velikost, kosi = R.sestavi(zvezki[:potrebnih])
+    return Vir(preslikave[:potrebnih], [KosVira(k.zvezek, k.odmik, k.dolzina) for k in kosi], ime), bajtov
 
 
 def _beri_vse(b: Bralnik, odmik: int, n: int) -> bytes:
@@ -503,19 +555,22 @@ def _beri_vse(b: Bralnik, odmik: int, n: int) -> bytes:
     return b"".join(deli)
 
 
-def preveri_izdajo(nzb: Nzb, telo: Callable[[str], bytes]) -> str:
+def preveri_izdajo(nzb: Nzb, telo: Callable[[str], bytes], najvec_bajtov: int = NAJVEC_PRIPRAVE_BAJTOV) -> str:
     """Pred ponudbo: ali izdajo lahko predvajamo. Prvi segment prve datoteke ali zvezka (in pri RAR, ce glave segajo
-    cez, se nekaj segmentov z mejo - T2/T5). OK ali izid (stisnjen, sifriran, sifrirane_glave, poskodovan, ni_podprto,
-    ni_filma, luknja, prevec ...). Izdaja brez segmenta 1 ali z luknjami v NZB ni ponujena (W6). STAT vzorca segmentov
-    je korak 3."""
+    cez, se nekaj segmentov z mejo NAJVEC_PREVERBE_GLAV_BAJTOV - T2/T5/L1). OK ali izid (stisnjen, sifriran,
+    sifrirane_glave, poskodovan, ni_podprto, ni_filma, luknja, prevec ...). Izdaja brez segmenta 1 ali z luknjami v NZB
+    ni ponujena (W6). L1: izdaja, katere priprava bi presegla [najvec_bajtov] (enako kot pripravi), je PREVEC tu - iz NZB
+    brez prometa ali po prvem clanku - in ne sele po ponudbi. STAT vzorca segmentov je korak 3."""
     try:
         vrsta, izbrane = izberi_datoteke(nzb)
         d = nzb.datoteke[izbrane[0]]
         if d.segmenti[0].stevilka != 1 or d.manjka:
             return LUKNJA
-        _vrsta, _izbrane, p, _z, _b = _prvi(nzb, telo)
+        _v_meji(nzb, izbrane, 0, 0, najvec_bajtov)
+        _vrsta, izbrane, p, _z, bajtov, prvi_surovo = _prvi(nzb, telo, NAJVEC_PREVERBE_GLAV_BAJTOV)
         if p.ima_luknje:
             return LUKNJA
+        _v_meji(nzb, izbrane[1:], bajtov, prvi_surovo, najvec_bajtov)
     except NapakaToka as e:
         return e.izid
     except R.NapakaRar as e:

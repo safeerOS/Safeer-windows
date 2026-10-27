@@ -12,6 +12,9 @@ WinRAR 7 RAR4 ne ustvarja vec, zato RAR4 preizkusi sestavijo glave po specifikac
 Skupni primeri z Android-tv: tests/skupni-primeri/usenet-pogon.json v5 (rar_glava, rar_zvezki, rar_sestavi).
 Varnost: glave pridejo od neznanega objavitelja - meje (stevilo blokov, velikost glave, vint), odmik vsakega naslednjega
 bloka mora rasti, ime gre skozi usenet_nzb.varno_ime, CRC glav se preveri.
+
+Naloga 76 (pregled 72 N1, skupni primeri v7): film se izbere po CELEM seznamu glav prvega zvezka - najvecja video
+datoteka, vzorec (samostojna beseda) izlocen. Delni seznam odloci samo, ce se izbira ne more vec spremeniti.
 """
 
 from __future__ import annotations
@@ -41,6 +44,12 @@ NAJVEC_GLAVA5 = 2 * 1024 * 1024  # RAR5: glava najvec 2 MiB (specifikacija)
 NAJVEC_IME = 4096
 NAJVEC_VINT = (1 << 63) - 1
 NAJVEC_ZVEZKOV = 1_000_000
+
+#: Imena v arhivu: ista pravila kot za imena v NZB (usenet_bralnik.izberi_datoteke), zato so tu - bralnik jih uvozi.
+VIDEO = (".mkv", ".mp4", ".m4v", ".avi", ".ts", ".m2ts", ".webm", ".mov", ".wmv", ".mpg", ".mpeg")
+NI_VSEBINA = (".par2", ".nfo", ".sfv", ".nzb", ".jpg", ".jpeg", ".png", ".txt", ".srr", ".url", ".md5")
+#: T13: vzorec je samostojna beseda v imenu (»Film.Sample.mkv«, »sample-film.mkv«), ne podniz (»Samplers.2026.mkv«).
+_VZOREC = re.compile(r"(^|[._ \-\[(])(sample|vzorec)([._ \-\])]|$)", re.I)
 
 _BeriT = Callable[[int, int], bytes]
 
@@ -286,18 +295,39 @@ def razcleni_zvezek(vir: Union[bytes, _BeriT], velikost: Optional[int] = None) -
     raise NapakaRar(NI_RAR)
 
 
+def je_vzorec(ime: Optional[str]) -> bool:
+    """Ali je datoteka vzorec (skupni primeri tok_vzorec)."""
+    return bool(_VZOREC.search(ime or ""))
+
+
+def _je_film(v: Vnos) -> bool:
+    ime = (v.ime or "").lower()
+    return ime.endswith(VIDEO) and not je_vzorec(ime)
+
+
 def glavni_vnos(z: Zvezek) -> Optional[Vnos]:
-    """Najvecja datoteka (ne mapa) - film; vzorci in .nfo so manjsi."""
+    """Film iz glav (skupni primeri rar_glavni): najvecja video datoteka brez vzorca; ce je ni, najvecja datoteka brez
+    vzorca in brez .nfo/.txt ...; sicer najvecja datoteka. Pri enaki velikosti prva.
+    N1: prej najvecja datoteka ne glede na ime - vzorec, vecji od filma, je bil izbran namesto filma."""
     datoteke = [v for v in z.vnosi if not v.mapa]
-    return max(datoteke, key=lambda v: (v.velikost, v.dolzina)) if datoteke else None
+    vsebina = [v for v in datoteke if not je_vzorec(v.ime) and not (v.ime or "").lower().endswith(NI_VSEBINA)]
+    for izbor in ([v for v in vsebina if _je_film(v)], vsebina, datoteke):
+        if izbor:
+            return max(izbor, key=lambda v: (v.velikost, v.dolzina))
+    return None
+
+
+def nadaljevanje(z: Zvezek) -> Optional[Vnos]:
+    """Datoteka, ki se v zvezku nadaljuje iz prejsnjega (sestavi; priprava ve, kdaj je film koncan)."""
+    return next((x for x in z.vnosi if x.razdeljen_pred and not x.mapa), None)
 
 
 def preveri(prvi_bajti: bytes, velikost: Optional[int] = None) -> str:
     """Odlocitev PRED ponudbo iz prvih bajtov prvega zvezka (prvi segment): ok, stisnjen, sifriran, sifrirane_glave,
     ni_rar, poskodovan, nepopolno, ni_datoteke. Skupni primeri rar_glava.
-    Pregled Grok 58 T2: ce glave segajo cez prebrane bajte, odloci samo datoteka, ki je ocitno film - razdeljena cez
-    zvezke ali vsaj pol zvezka [velikost]; sicer (npr. store vzorec pred filmom) NEPOPOLNO in klicatelj prebere naprej
-    glave (z mejo) - prej je manjsi store vzorec dal OK in stisnjen film za njim ni bil nikoli preverjen."""
+    Pregled Grok 58 T2: ce glave segajo cez prebrane bajte, odloci samo seznam, ki se ne more vec spremeniti (odloci);
+    sicer (npr. store vzorec pred filmom) NEPOPOLNO in klicatelj prebere naprej glave (z mejo) - prej je store vzorec
+    dal OK in stisnjen film za njim ni bil nikoli preverjen."""
     try:
         z = razcleni_zvezek(prvi_bajti, velikost if velikost is not None else 1 << 62)
     except NapakaRar as e:
@@ -306,17 +336,27 @@ def preveri(prvi_bajti: bytes, velikost: Optional[int] = None) -> str:
 
 
 def odloci(z: Zvezek, velikost: Optional[int] = None) -> str:
-    """Odlocitev iz razclenjenih glav (preveri; pri celem seznamu glav tudi bralnik po branju naprej)."""
+    """Odlocitev iz razclenjenih glav (preveri; pri celem seznamu glav tudi bralnik po branju naprej).
+    Delni seznam odloci samo, ce ga nobena kasnejsa glava ne more spremeniti (N1): datoteka razdeljena v naslednji
+    zvezek je zadnja v zvezku (seznam je cel), ali pa arhiv z enim zvezkom in film (video brez vzorca) vsaj pol zvezka.
+    V arhivu z vec zvezki pravilo pol zvezka ne velja: vzorec 60 MB v 100-MB zvezku je bil odlocen, film za njim pa ne."""
     v = glavni_vnos(z)
     if v is None:
         return NEPOPOLNO if z.nepopolno else NI_DATOTEKE
-    if z.nepopolno and not (v.razdeljen_po or (velikost is not None and v.velikost * 2 >= velikost)):
+    if z.nepopolno and not _odlocljivo(z, v, velikost):
         return NEPOPOLNO
     if v.sifriran:
         return SIFRIRAN
     if not v.store:
         return STISNJEN
     return OK
+
+
+def _odlocljivo(z: Zvezek, v: Vnos, velikost: Optional[int]) -> bool:
+    if any(x.razdeljen_po and not x.mapa for x in z.vnosi):
+        return True
+    return (not z.vec_zvezkov and velikost is not None and v.velikost >= 0 and _je_film(v)
+            and v.velikost * 2 >= velikost)
 
 
 _DEL = re.compile(r"\A(.*)\.part0*(\d{1,4})\.rar\Z", re.I)
@@ -376,7 +416,7 @@ def sestavi(zvezki: List[Zvezek]) -> tuple:
             raise NapakaRar(NESKLADNO)
         if z.stevilka is not None and zvezki[0].stevilka is not None and z.stevilka != zvezki[0].stevilka + n:
             raise NapakaRar(NESKLADNO)
-        nasl = next((x for x in z.vnosi if x.razdeljen_pred and not x.mapa), None)
+        nasl = nadaljevanje(z)
         if nasl is None or nasl.ime != v.ime or (v.velikost >= 0 and nasl.velikost != v.velikost):
             raise NapakaRar(NESKLADNO)
         if nasl.sifriran:
