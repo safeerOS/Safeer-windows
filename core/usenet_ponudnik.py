@@ -370,17 +370,18 @@ def _znano_zavrnjeno(p: "Ponudnik", geslo: str, pot_nastavitev: Optional[str]) -
         return any(o in _ZAVRNJENA for o in odtisi)
 
 
-def _geslo_ze_zavrnjeno(p: "Ponudnik", geslo: str, shranjeno: Optional[str], pot_nastavitev: str) -> bool:
-    """Ali bi vpis tega gesla pomenil, da streznik znova dobi geslo, ki ga je ze zavrnil."""
-    if _znano_zavrnjeno(p, geslo, pot_nastavitev):
-        return True
-    if not nntp.prijava_zavrnjena(p.gostitelj, p.uporabnik, geslo):
-        return False
-    if shranjeno is None or shranjeno == geslo:
-        return True
-    # Zapah kaze za to geslo. Ce kaze tudi za drugo, shranjeno geslo, je zapah na racunu (ne na geslu) in vpis
-    # drugega gesla je prav sprememba, ki sme odkleniti; sicer je ponudnik zavrnil prav to geslo.
-    return not nntp.prijava_zavrnjena(p.gostitelj, p.uporabnik, shranjeno)
+def _pozabi_zavrnjeno(p: "Ponudnik", geslo: str, pot_nastavitev: Optional[str]) -> None:
+    odtisi = {_odtis_zavrnjenega(p, geslo, pot_nastavitev), _odtis_zavrnjenega(p, geslo, None)}
+    with _ZAVRNJENA_ZAKLEP:
+        for o in odtisi:
+            _ZAVRNJENA.pop(o, None)
+
+
+def _odkleni_racun(p: "Ponudnik", geslo: str, pot_nastavitev: Optional[str]) -> None:
+    """Izrecno dejanje uporabnika (Shrani ali Preveri): en nov poskus prijave. Lastnik 28. 10. 2026, enotno na vseh
+    izdajah (Android, Linux, Windows) - prej je zapah odklenil samo vpis drugega gesla (pregled 77 G1)."""
+    _pozabi_zavrnjeno(p, geslo, pot_nastavitev)
+    nntp.dovoli_prijavo_znova(p.gostitelj, p.uporabnik, geslo)
 
 
 # ------------------------------------------------------------------ javne funkcije nastavitev
@@ -388,8 +389,8 @@ def _geslo_ze_zavrnjeno(p: "Ponudnik", geslo: str, shranjeno: Optional[str], pot
 def shrani_ponudnika(ponudnik: Ponudnik, geslo: str, pot_nastavitev: str) -> bool:
     """Izrecni vpis uporabnika. Vrne True, ce je geslo v sistemski zbirki (False = samo do konca procesa).
 
-    Zapah racuna odklene samo vpis DRUGEGA gesla ali racuna (dovoli_prijavo_znova). Geslo, ki ga je ponudnik ze
-    zavrnil: NapakaPonudnika(GESLO_ZAVRNJENO), nic se ne spremeni. Enako geslo ne ponastavi omejitve 1/min.
+    Vsak izrecni vpis (tudi istega gesla, npr. po podaljsanju narocnine) odklene zapah racuna za en nov poskus
+    (lastnik 28. 10. 2026). Omejitev 1/min ponastavi samo sprememba gesla ali racuna.
     Ime in stevilo povezav brez gesla: posodobi_nastavitve."""
     if not isinstance(ponudnik, Ponudnik):
         raise ValueError("usenet ponudnik: pricakovan Ponudnik")
@@ -399,10 +400,7 @@ def shrani_ponudnika(ponudnik: Ponudnik, geslo: str, pot_nastavitev: str) -> boo
         star = _ponudnik_iz(_beri_json(pot_nastavitev))
         nov_kljuc = ponudnik.kljuc_gesla
         shranjeno = _preberi_geslo(nov_kljuc)
-        if _geslo_ze_zavrnjeno(ponudnik, geslo, shranjeno, pot_nastavitev):
-            _log.info("usenet ponudnik: vpis zavrnjen, ponudnik je to geslo ze zavrnil")
-            raise NapakaPonudnika(GESLO_ZAVRNJENO)
-        # Samo dejanska sprememba gesla ali racuna sme odkleniti zapah in ponastaviti minuto (pregled 77 G1).
+        # Samo dejanska sprememba gesla ali racuna ponastavi minuto; zapah odklene vsak vpis (spodaj).
         spremenjen = shranjeno != geslo or (star is not None and _kljuc_racuna(star) != _kljuc_racuna(ponudnik))
         stari_kljuci = _beri_kljuce(pot_nastavitev)
         if star is not None:
@@ -422,8 +420,8 @@ def shrani_ponudnika(ponudnik: Ponudnik, geslo: str, pot_nastavitev: str) -> boo
             _pisi_kljuce(pot_nastavitev, ostali | {nov_kljuc})
         except OSError as e:
             _log.info("usenet ponudnik: seznama kljucev ni mogoce shraniti (%s)", type(e).__name__)
+        _odkleni_racun(ponudnik, geslo, pot_nastavitev)
         if spremenjen:
-            nntp.dovoli_prijavo_znova(ponudnik.gostitelj, ponudnik.uporabnik, geslo)
             with _PREVERBE_ZAKLEP:
                 _PREVERBE.pop(_kljuc_racuna(ponudnik), None)  # novo geslo sme takoj na »Preveri«
     return trajno
@@ -513,7 +511,7 @@ def preveri_shranjenega(pot_nastavitev: str, *, kontekst: Optional[ssl.SSLContex
     geslo = _preberi_geslo(p.kljuc_gesla)
     if geslo is None:
         raise NapakaPonudnika(NI_GESLA)
-    return preveri_ponudnika(p, geslo, pot_nastavitev=pot_nastavitev, kontekst=kontekst)
+    return preveri_ponudnika(p, geslo, pot_nastavitev=pot_nastavitev, kontekst=kontekst, odkleni=True)
 
 
 def preberi_ponudnika(pot_nastavitev: str) -> Optional[Ponudnik]:
@@ -607,11 +605,12 @@ def _samo_tls(p: Ponudnik) -> None:
 
 
 def preveri_ponudnika(ponudnik: Ponudnik, geslo: str, *, pot_nastavitev: Optional[str] = None,
-                      kontekst: Optional[ssl.SSLContext] = None) -> str:
+                      kontekst: Optional[ssl.SSLContext] = None, odkleni: bool = False) -> str:
     """ENA povezava, ena prijava, QUIT. Samo na uporabnikov klik, nikoli na glavni niti ali v ozadju.
 
     Izid: VELJA, NE_VELJA, ZAKLENJEN, NI_ODGOVORA, PREVEC_POVEZAV ali PREPOGOSTO (manj kot minuta od zadnje).
-    Zapah racuna NE odklene (to naredi samo nov vpis): po NE_VELJA je naslednja preverba ZAKLENJEN brez omrezja."""
+    Brez [odkleni] je po NE_VELJA naslednja preverba ZAKLENJEN brez omrezja. Z odkleni=True (izrecni klik »Preveri«,
+    lastnik 28. 10. 2026) se zapah sprosti za EN nov poskus, a sele ko omejitev 1/min dovoli preverbo."""
     if not isinstance(ponudnik, Ponudnik):
         raise ValueError("usenet ponudnik: pricakovan Ponudnik")
     if not nntp.varna_poverilnica(geslo):
@@ -619,8 +618,9 @@ def preveri_ponudnika(ponudnik: Ponudnik, geslo: str, *, pot_nastavitev: Optiona
     _ne_na_glavni_niti()
     _samo_tls(ponudnik)
     kontekst = nntp.varen_kontekst(kontekst)  # brez preverbe potrdila: ValueError pred omrezjem
-    if (nntp.prijava_zavrnjena(ponudnik.gostitelj, ponudnik.uporabnik, geslo)
-            or _znano_zavrnjeno(ponudnik, geslo, pot_nastavitev)):  # tudi ko zapah usenet_nntp vmes izgine, G1
+    zavrnjen = (nntp.prijava_zavrnjena(ponudnik.gostitelj, ponudnik.uporabnik, geslo)
+                or _znano_zavrnjeno(ponudnik, geslo, pot_nastavitev))  # tudi ko zapah usenet_nntp vmes izgine, G1
+    if zavrnjen and not odkleni:
         izid = ZAKLENJEN
     elif not _zacni_preverbo(ponudnik):
         # Zivi bazen racuna ima vse povezave do trde meje; preverba bi odprla eno cez (pregled 77 G4).
@@ -630,7 +630,9 @@ def preveri_ponudnika(ponudnik: Ponudnik, geslo: str, *, pot_nastavitev: Optiona
     else:
         try:
             if not _rezerviraj_preverbo(ponudnik):
-                return PREPOGOSTO
+                return PREPOGOSTO  # zapaha ne sprosti: geslo ni poslano
+            if zavrnjen:
+                _odkleni_racun(ponudnik, geslo, pot_nastavitev)
             izid = _preveri_z_omrezjem(ponudnik, geslo, kontekst, pot_nastavitev)
         finally:
             _koncaj_preverbo(ponudnik)
