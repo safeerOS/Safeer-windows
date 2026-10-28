@@ -3699,11 +3699,18 @@
       (seznam || []).forEach(function (s) {
         var m = el("div", "mehurcek " + (s.smer === "ven" ? "ven" : "noter"));
         m.textContent = s.besedilo || ""; m.appendChild(el("time", "", ubezi(kratekCas(s.cas)))); cilj.appendChild(m);
-        if (pogovor.kanal_id === "safeer-link") m.addEventListener("contextmenu", function (e) {
-          // Izbran del besedila: obicajni meni (Kopiraj); sicer izbris sporocila.
-          if (String(window.getSelection ? window.getSelection() : "").trim()) return;
+        m._besedilo = s.besedilo || ""; m.tabIndex = 0;
+        // Kopiranje (lastnik 28. 10. 2026, kot Safeer-linux 1.0.108): desni klik, tipka Meni ali Shift+F10 na mehurcku
+        // odpre meni Kopiraj izbrano / Kopiraj sporocilo / Odpri povezavo, pri Safeer Linku se izbris.
+        m.addEventListener("contextmenu", function (e) {
           e.preventDefault(); e.stopPropagation();
-          pokaziMeniSporocila(pogovor, s, e.clientX, e.clientY);
+          pokaziMeniSporocila(pogovor, s, m, e.clientX, e.clientY, false);
+        });
+        m.addEventListener("keydown", function (e) {
+          if (e.key !== "ContextMenu" && !(e.key === "F10" && e.shiftKey)) return;
+          e.preventDefault(); e.stopPropagation();
+          var r = m.getBoundingClientRect();
+          pokaziMeniSporocila(pogovor, s, m, r.left + 12, r.bottom - 4, true);
         });
         // zadetek-iskanja, ne zadetek: .zadetek je vrstica iskalnika (flex, ozadje) in je mehurcek razlezla (kot Linux).
         if (S.sporocilaOznaciId && s.id === S.sporocilaOznaciId) { m.classList.add("zadetek-iskanja"); oznacen = m; }
@@ -3718,22 +3725,78 @@
   // core/sporocila/izbris_linka.py) in izbris celega pogovora (samo tukaj). Prvi klik vprasa, drugi izvede.
   var SKUPNI_ID_POSLANEGA = /^chat:ven:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   function zapriMeniSporocila() { var m = $("sporocilaMeni"); if (m) m.remove(); }
-  function pokaziMeniSporocila(pogovor, s, x, y) {
+  /* SPOROCILA_KOPIRANJE_ZACETEK - prenos iz Safeer-linux assets/os/os.js (1.0.108, kopiranje108) */
+  // Sporocilo je ena sama spletna povezava: meni ponudi se »Odpri povezavo« (kot Safeer OS na telefonu).
+  // Besedilo pride od drugod (e-posta, klepet, druga naprava), zato ponudimo samo naslov, pri katerem uporabnik vidi,
+  // kam vodi - meni ob postavki pokaze gostitelja, kot ga razume brskalnik:
+  //   - samo http in https (velikost crk v shemi ni pomembna: telefonske tipkovnice pisejo »Https://«);
+  //   - brez uporabniskega imena ali gesla pred gostiteljem (https://banka.example@drugje.example/ vodi na drugje.example);
+  //   - brez posevnice nazaj, nevidnih znakov in znakov za smer pisanja (naslov bi se bral drugace, kot ga razume brskalnik).
+  // Vrne { naslov, gostitelj } - naslov v obliki, kot ga je razclenil brskalnik - ali null.
+  var SPOR_NEVIDNI_ZNAKI = /[\u0000-\u0020\u007f-\u00a0\u00ad\u034f\u061c\u115f\u1160\u17b4\u17b5\u180b-\u180f\u2000-\u200f\u2028-\u202f\u205f-\u206f\u3000\u3164\ufe00-\ufe0f\ufeff\uffa0\ufff0-\uffff]|\ud834[\udd73-\udd7a]|\udb40[\udc00-\uddef]/;
+  function povezavaSporocila(besedilo) {
+    var b = String(besedilo == null ? "" : besedilo).trim(), u;
+    if (!b || b.length > 2048 || !/^https?:\/\/[^\s<>"'`\\]+$/i.test(b) || SPOR_NEVIDNI_ZNAKI.test(b)) return null;
+    try { u = new URL(b); } catch (e) { return null; }
+    if ((u.protocol !== "http:" && u.protocol !== "https:") || !u.hostname || u.username || u.password) return null;
+    return { naslov: u.href, gostitelj: u.host };
+  }
+  // Gostitelj za napis v meniju: pri zelo dolgem ostane viden konec (domena), ne zacetek, ki ga doloca posiljatelj.
+  function gostiteljZaNapis(g) {
+    g = String(g || "");
+    return g.length > 48 ? "…" + g.slice(g.length - 47) : g;
+  }
+  // Postavke menija mehurcka: [kljuc besedila, dejanje, podatek, dodatek k napisu].
+  function postavkeMenijaSporocila(besedilo, izbrano) {
+    var p = [], url = povezavaSporocila(besedilo);
+    if (izbrano && izbrano !== besedilo) p.push(["sporKopirajIzbrano", "kopiraj", izbrano]);
+    if (besedilo) p.push(["sporKopiraj", "kopiraj", besedilo]);
+    if (url) p.push(["sporOdpriPovezavo", "odpri", url.naslov, gostiteljZaNapis(url.gostitelj)]);
+    return p;
+  }
+  // Besedilo, oznaceno znotraj pogovora ("" = nic ali izbor drugje na strani).
+  function izbranoVSporocilih() {
+    var izbor = window.getSelection ? window.getSelection() : null, cilj = $("sporocilaVsebina");
+    if (!izbor || izbor.isCollapsed || !izbor.rangeCount || !cilj) return "";
+    if (!cilj.contains(izbor.anchorNode) || !cilj.contains(izbor.focusNode)) return "";
+    var b = String(izbor);
+    return b.trim() ? b : "";
+  }
+  function kopirajBesedilo(besedilo) {
+    if (!besedilo) return;
+    klic("kopiraj", [besedilo]).then(function (ok) { obvesti(t(ok === false ? "sporNiKopirano" : "sporKopirano")); },
+      function () { obvesti(t("sporNiKopirano")); });
+  }
+  /* SPOROCILA_KOPIRANJE_KONEC */
+  function pokaziMeniSporocila(pogovor, s, mehurcek, x, y, sTipkovnico) {
     zapriMeniSporocila();
     var m = el("div", "meni-polja spor-meni"); m.id = "sporocilaMeni"; m.setAttribute("role", "menu");
-    var postavke = [["sporIzbrisiPriMeni", function () { izbrisiSporocilo(pogovor, s.id, false); }]];
-    if (s.smer === "ven" && SKUPNI_ID_POSLANEGA.test(s.id || "")) postavke.push(["sporIzbrisiNaVseh", function () { izbrisiSporocilo(pogovor, s.id, true); }]);
-    postavke.push(["dejanjeIzbrisiPogovor", function () { izbrisiPogovor(pogovor); }]);
+    var postavke = [];
+    postavkeMenijaSporocila((mehurcek && mehurcek._besedilo) || s.besedilo || "", izbranoVSporocilih()).forEach(function (p) {
+      var napis = t(p[0]) + (p[3] ? " · " + p[3] : "");
+      if (p[1] === "odpri") postavke.push([napis, function () { klic("splet", [p[2]]).catch(function () { obvesti(t("niUspelo")); }); }, false]);
+      else postavke.push([napis, function () { kopirajBesedilo(p[2]); }, false]);
+    });
+    if (pogovor.kanal_id === "safeer-link") {
+      postavke.push([t("sporIzbrisiPriMeni"), function () { izbrisiSporocilo(pogovor, s.id, false); }, true]);
+      if (s.smer === "ven" && SKUPNI_ID_POSLANEGA.test(s.id || "")) postavke.push([t("sporIzbrisiNaVseh"), function () { izbrisiSporocilo(pogovor, s.id, true); }, true]);
+      postavke.push([t("dejanjeIzbrisiPogovor"), function () { izbrisiPogovor(pogovor); }, true]);
+    }
+    if (!postavke.length) return;
     postavke.forEach(function (p) {
-      var g = el("button"); g.type = "button"; g.textContent = t(p[0]); g.setAttribute("role", "menuitem");
+      var g = el("button"); g.type = "button"; g.textContent = p[0]; g.setAttribute("role", "menuitem");
+      // Pritisk na postavko ne sme podreti izbora v sporocilu, dokler dejanje ni izvedeno.
+      g.addEventListener("mousedown", function (e) { e.preventDefault(); });
       g.addEventListener("click", function (e) {
         e.stopPropagation();
-        if (!g.classList.contains("potrdi")) {
+        // Izbris je dokoncen: prvi klik vprasa, drugi izvede. Kopiranje in povezava takoj.
+        if (p[2] && !g.classList.contains("potrdi")) {
           Array.prototype.forEach.call(m.querySelectorAll("button.potrdi"), function (b) { b.classList.remove("potrdi"); b.textContent = b._prej; });
           g._prej = g.textContent; g.textContent = t("sporIzbrisiPotrdi"); g.classList.add("potrdi");
           return;
         }
         zapriMeniSporocila(); p[1]();
+        if (sTipkovnico && mehurcek && mehurcek.focus) mehurcek.focus({ preventScroll: true });
       });
       m.appendChild(g);
     });
@@ -3741,7 +3804,7 @@
     var r = m.getBoundingClientRect();
     m.style.left = Math.max(4, Math.min(x, window.innerWidth - r.width - 4)) + "px";
     m.style.top = Math.max(4, Math.min(y, window.innerHeight - r.height - 4)) + "px";
-    m.querySelector("button").focus();
+    if (sTipkovnico) m.querySelector("button").focus();
   }
   document.addEventListener("click", function (e) { var m = $("sporocilaMeni"); if (m && !m.contains(e.target)) zapriMeniSporocila(); });
   document.addEventListener("keydown", function (e) { if (e.key === "Escape") zapriMeniSporocila(); });
