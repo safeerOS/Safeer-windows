@@ -174,8 +174,16 @@ def _ocisti_element(star, nov_stars, je_koren=False):
         return None
     oznaka = "{%s}%s" % (SVG_NS, ime)
     nov = ET.Element(oznaka, atributi) if nov_stars is None else ET.SubElement(nov_stars, oznaka, atributi)
+    if ime == "style":
+        # Pregled 1.0.134 (B1): <style> nima otrok - vse besedilo (tudi za vgnezdenim elementom) gre skozi ocisti_css;
+        # prej je besedilo za otrokom (tail) obdrzalo npr. zunanji url().
+        nov.text = ocisti_css("".join(star.itertext()))
+        if not (nov.text or "").strip() and nov_stars is not None:
+            nov_stars.remove(nov)
+            return None
+        return nov
     if ime in Z_BESEDILOM and star.text:
-        nov.text = ocisti_css(star.text) if ime == "style" else star.text
+        nov.text = star.text
     for otrok in list(star):
         ociscen = _ocisti_element(otrok, nov)
         if ociscen is not None and ime in Z_BESEDILOM and otrok.tail:

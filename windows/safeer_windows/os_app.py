@@ -610,6 +610,16 @@ PRED_CONTROL = "control:"
 _ROCAJ_SIRINA = 22  # sirina ozkega rocaja, ko je stranska vrstica skrita v nacinu Splet
 
 
+#: Metode kanalov Sporocil -> (metoda KanaliSporocilWin, ali potrebuje pogled strani)
+METODE_KANALOV = {
+    "kanaliSeznam": ("seznam", False), "kanaliKatalog": ("katalog", False), "kanalDodaj": ("dodaj", False),
+    "kanalOdstrani": ("odstrani", False), "kanalPreklici": ("preklici", False), "kanalPreimenuj": ("preimenuj", False),
+    "kanalPremakni": ("premakni", False), "kanalVklopi": ("vklopi", False), "kanalIzbrisiPodatke": ("izbrisi_podatke", False),
+    "kanalUkaz": ("ukaz", False), "kanalPokazi": ("pokazi", True), "kanalPolozaj": ("polozaj", True),
+    "kanalSkrij": ("skrij", True),
+}
+
+
 class GuiDispatcher(QObject):
 
     signal_run = Signal(object)
@@ -2784,21 +2794,14 @@ class SafeerOsWindow(QMainWindow):
 
         threading.Thread(target=delo, daemon=True).start()
 
-    #: Metode kanalov Sporocil -> (metoda KanaliSporocilWin, ali potrebuje pogled strani)
-    _METODE_KANALOV = {
-        "kanaliSeznam": ("seznam", False), "kanaliKatalog": ("katalog", False), "kanalDodaj": ("dodaj", False),
-        "kanalOdstrani": ("odstrani", False), "kanalPreklici": ("preklici", False), "kanalPreimenuj": ("preimenuj", False),
-        "kanalPremakni": ("premakni", False), "kanalVklopi": ("vklopi", False), "kanalIzbrisiPodatke": ("izbrisi_podatke", False),
-        "kanalUkaz": ("ukaz", False), "kanalPokazi": ("pokazi", True), "kanalPolozaj": ("polozaj", True),
-        "kanalSkrij": ("skrij", True),
-    }
+    _METODE_KANALOV = METODE_KANALOV
 
     def izvedi_kanal(self, metoda: str, a: list, pogled=None) -> Any:
         """Klic kanala Sporocil iz mostu (nit) -> glavna nit Qt. pogled: QWebEngineView strani, ki je klicala."""
         k = self.kanali_sporocil
         if k is None:
             raise ValueError("kanali")
-        ime = self._METODE_KANALOV[metoda][0]
+        ime = METODE_KANALOV[metoda][0]
         a = list(a or [])
 
         def s(i: int) -> str:
@@ -2844,7 +2847,7 @@ class SafeerOsWindow(QMainWindow):
             pass
 
     def _izvedi_metodo(self, metoda: str, a: list) -> Any:
-        if metoda in self._METODE_KANALOV:
+        if metoda in METODE_KANALOV:
             return self.izvedi_kanal(metoda, a)
         if metoda.startswith("sporocila"):
             return self._sporocila(metoda, a)

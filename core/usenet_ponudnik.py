@@ -400,8 +400,12 @@ def shrani_ponudnika(ponudnik: Ponudnik, geslo: str, pot_nastavitev: str) -> boo
         star = _ponudnik_iz(_beri_json(pot_nastavitev))
         nov_kljuc = ponudnik.kljuc_gesla
         shranjeno = _preberi_geslo(nov_kljuc)
+        # Pregled 1.0.134 (A2): prejsnje geslo istega racuna je pod kljucem STAREGA ponudnika (drugo ime streznika
+        # istega ponudnika, npr. eu.news.x.com namesto news.x.com) - sicer bi menjava imena ponastavila minuto.
+        prejsnje = _preberi_geslo(star.kljuc_gesla) if star is not None else None
         # Samo dejanska sprememba gesla ali racuna ponastavi minuto; zapah odklene vsak vpis (spodaj).
-        spremenjen = shranjeno != geslo or (star is not None and _kljuc_racuna(star) != _kljuc_racuna(ponudnik))
+        spremenjen = (star is not None and _kljuc_racuna(star) == _kljuc_racuna(ponudnik)
+                      and prejsnje is not None and prejsnje != geslo)
         stari_kljuci = _beri_kljuce(pot_nastavitev)
         if star is not None:
             stari_kljuci.add(star.kljuc_gesla)
@@ -537,8 +541,7 @@ def pozabi_ponudnika(pot_nastavitev: str) -> None:
             kljuci.add(p.kljuc_gesla)
             geslo = _preberi_geslo(p.kljuc_gesla)
             nntp.dovoli_prijavo_znova(p.gostitelj, p.uporabnik, geslo)  # zapah v procesu in na disku
-            with _PREVERBE_ZAKLEP:
-                _PREVERBE.pop(_kljuc_racuna(p), None)
+            # Minuta (PREVERBA_NA_S) ostane: »Pozabi« in nov vpis istega gesla je ne obideta (pregled 1.0.134, A2).
         ostali = _pozabi_kljuce(kljuci)
         with _POMNILNIK_ZAKLEP:
             _V_POMNILNIKU.clear()  # gesla samo v pomnilniku ne smejo preziveti »Pozabi«, tudi brez kljuca
@@ -578,6 +581,13 @@ _ura = time.monotonic  # preizkusi jo zamenjajo
 def _kljuc_racuna(p: Ponudnik) -> str:
     # Racun pri ponudniku (kot vrata prijave v usenet_nntp): drugo ime streznika ne da nove preverbe.
     return hashlib.sha256(("%s\x00%s" % (nntp.ponudnik(p.gostitelj), p.uporabnik)).encode("utf-8")).hexdigest()
+
+
+def _prezgodaj(p: Ponudnik) -> bool:
+    """Brez rezervacije: ali je od zadnje preverbe racuna minilo manj kot PREVERBA_NA_S."""
+    with _PREVERBE_ZAKLEP:
+        zadnja = _PREVERBE.get(_kljuc_racuna(p))
+    return zadnja is not None and _ura() - zadnja < PREVERBA_NA_S
 
 
 def _rezerviraj_preverbo(p: Ponudnik) -> bool:
@@ -622,6 +632,9 @@ def preveri_ponudnika(ponudnik: Ponudnik, geslo: str, *, pot_nastavitev: Optiona
                 or _znano_zavrnjeno(ponudnik, geslo, pot_nastavitev))  # tudi ko zapah usenet_nntp vmes izgine, G1
     if zavrnjen and not odkleni:
         izid = ZAKLENJEN
+    elif _prezgodaj(ponudnik):
+        # Pregled 1.0.134 (A6): prezgodnji klik ne skrci zivega bazena (ne zapre proste povezave) - samo PREPOGOSTO.
+        return PREPOGOSTO
     elif not _zacni_preverbo(ponudnik):
         # Zivi bazen racuna ima vse povezave do trde meje; preverba bi odprla eno cez (pregled 77 G4).
         # Minuta se ne porabi, ker gesla nismo poslali.
@@ -802,6 +815,12 @@ def ustvari_bazen(ponudnik: Ponudnik, *, kontekst: Optional[ssl.SSLContext] = No
     podpis = _odtis_gesla(ponudnik, "%s\x00%d\x00%s" % (ponudnik.gostitelj.lower(), ponudnik.vrata, geslo))
     with _RACUNI_ZAKLEP:
         b = _zivi_bazen(_racun(k))
+        if b is not None and getattr(b, "_ustavljen", None) is not None:
+            # Pregled 1.0.134 (A1): bazen, ustavljen po zavrnjeni prijavi ali brez dostopa, ne dobi novih zahtev; ko
+            # racun ni vec zaklenjen (izrecni Shrani ali Preveri), dobi predvajanje nov bazen.
+            _racun(k)["bazen"] = None
+            b.zapri()
+            b = None
         if b is not None and b._podpis == podpis:
             b._meja_polna = meja
             b._nastavi_mejo(meja - _racun(k)["preverbe"])
@@ -858,8 +877,11 @@ def stanje_za_vmesnik(pot_nastavitev: str) -> dict:
     pr = d.get("preverba") if isinstance(d.get("preverba"), dict) else {}
     zadnji = pr.get("izid") if pr.get("izid") in (VELJA, NE_VELJA, ZAKLENJEN) else None
     geslo = _preberi_geslo(p.kljuc_gesla)
-    if geslo is not None and nntp.prijava_zavrnjena(p.gostitelj, p.uporabnik, geslo):
+    if geslo is not None and (nntp.prijava_zavrnjena(p.gostitelj, p.uporabnik, geslo)
+                              or _znano_zavrnjeno(p, geslo, pot_nastavitev)):
         stanje = NE_VELJA if zadnji == NE_VELJA else ZAKLENJEN  # zapah ima prednost pred staro VELJA
+    elif geslo is None:
+        stanje = NEPREVERJEN   # pregled 1.0.134 (A5): brez gesla ni »deluje«, tudi ce je bila zadnja preverba VELJA
     elif zadnji == VELJA:
         stanje = VELJA
     else:

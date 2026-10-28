@@ -1,6 +1,6 @@
 {
   "vir": "safeerOS/Safeer-linux",
-  "ref": "fd1dfc601a09ff23310ff6a71aeab4a1ccfcd72c",
+  "ref": "b7c06907d73207fa4e157fa624a1d926390778a3",
   "skupne": [
     "core/adblock.py",
     "core/bank_guard.py",

@@ -3517,6 +3517,7 @@
   var VK = { kanali: [], aktivni: "", katalog: null, skrit: false, opazovalec: null, urejan: null, prej: null, iskanje: "" };
   IK.smeti = IK.smeti || "M4 7h16 M9 7V4h6v3 M6 7l1 13h10l1-13 M10 11v6 M14 11v6";
   IK.uredi = IK.uredi || "M12 20h9 M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z";
+  function vkNabiralnik() { var r = $("r-sporocila"); return r ? r.querySelector(".nabiralnik") : null; }
   function vkKanal(id) { return VK.kanali.find(function (k) { return k.id === id; }) || null; }
   // Dejanje s kanalom: ce Safeer OS ne odgovori v 20 s, je to napaka - nikoli tisina.
   var VK_ROK_MS = 20000;
@@ -3574,7 +3575,7 @@
     var k = vkKanal(id); if (!k) return;
     if (S.razdelek !== "sporocila") pojdi("sporocila");
     VK.aktivni = id;
-    var n = document.querySelector("#r-sporocila .nabiralnik"); if (n) n.classList.add("kanal-odprt");
+    var n = vkNabiralnik(); if (n) n.classList.add("kanal-odprt");
     $("vgrajenKanal").hidden = false;
     $("vgrajenKanalIme").textContent = k.ime;
     var znak = vkZnak(k, "kanal-znak"); znak.id = "vgrajenKanalZnak"; $("vgrajenKanalZnak").replaceWith(znak);
@@ -3598,7 +3599,7 @@
   function zapriVgrajenKanal(brezSkrij) {
     if (!VK.aktivni) return;
     VK.aktivni = "";
-    var n = document.querySelector("#r-sporocila .nabiralnik"); if (n) n.classList.remove("kanal-odprt");
+    var n = vkNabiralnik(); if (n) n.classList.remove("kanal-odprt");
     if ($("vgrajenKanal")) $("vgrajenKanal").hidden = true;
     if (brezSkrij !== true) klic("kanalSkrij").catch(function () {});
     narisiKanale();
@@ -3693,13 +3694,15 @@
     // Lasten klepet: Mattermost, Rocket.Chat, Zulip, lasten Element … (samo https, brez gesla v naslovu)
     a.appendChild(el("b", "aplikacije-skupina", ubezi(t("kanalSvojKlepet"))));
     var f = el("div", "svoj-klepet");
-    f.innerHTML = '<p class="drobno">' + ubezi(t("kanalSvojKlepetOpis")) + '</p><input class="svoj-url" type="url" aria-label="' + ubezi(t("kanalSvojKlepet")) + '" ' +
-      'inputmode="url" autocomplete="off" maxlength="2048" placeholder="https://chat.example.org"><input class="svoj-ime" ' +
-      'type="text" maxlength="60" placeholder="' + ubezi(t("kanalSvojIme")) + '"><button type="button" class="gumb glavni" ' +
-      'data-svoj="dodaj">' + ubezi(t("kanalDodajVSporocila")) + '</button>';
+    f.appendChild(el("p", "drobno", ubezi(t("kanalSvojKlepetOpis"))));
+    var url = el("input", "svoj-url"); url.type = "url"; url.setAttribute("inputmode", "url"); url.autocomplete = "off";
+    url.maxLength = 2048; url.placeholder = "https://chat.example.org"; url.setAttribute("aria-label", t("kanalSvojKlepet"));
+    var ime = el("input", "svoj-ime"); ime.type = "text"; ime.maxLength = 60; ime.placeholder = t("kanalSvojIme");
+    var gumbSvoj = el("button", "gumb glavni", ubezi(t("kanalDodajVSporocila"))); gumbSvoj.type = "button";
+    f.appendChild(url); f.appendChild(ime); f.appendChild(gumbSvoj);
     a.appendChild(f);
-    f.querySelector("[data-svoj]").addEventListener("click", function () {
-      dodajVgrajeni({ url: f.querySelector(".svoj-url").value.trim(), ime: f.querySelector(".svoj-ime").value.trim() }, this);
+    gumbSvoj.addEventListener("click", function () {
+      dodajVgrajeni({ url: url.value.trim(), ime: ime.value.trim() }, gumbSvoj);
     });
   }
   var NAPAKE_KANALA = { prazno: "kanalNapakaNaslov", https: "kanalNapakaHttps", poverilnice: "kanalNapakaGeslo",
