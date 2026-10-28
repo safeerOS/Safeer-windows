@@ -826,6 +826,17 @@ class SafeerOsWindow(QMainWindow):
         self._straza_izrisa.start()
 
         _korak("view")
+        # Vgrajeni spletni klepeti v Sporocilih (kanali_sporocil_win, kot Linux core/os_kanali_sporocil.py): pogledi
+        # nastanejo v glavni niti; vklopljeni kanali se nalozijo nekaj sekund po zagonu, ko je vmesnik ze izrisan.
+        self.kanali_sporocil = None
+        try:
+            from . import kanali_sporocil_win
+            self.kanali_sporocil = kanali_sporocil_win.KanaliSporocilWin(
+                kanali_sporocil_win.QtPogledi(lambda u: self.odpri_splet(u), self._obvestilo_kanala),
+                ShrambaWrapper(), _jezik_oken, self.poslji_dogodek)
+            QTimer.singleShot(8000, self.kanali_sporocil.zazeni_vse)
+        except Exception as e:  # noqa: BLE001 - brez QtWebEngine ali ob napaki ostanejo Sporocila brez spletnih klepetov
+            print(f"[SafeerOS] kanali Sporocil: {e}", flush=True)
         self.zaslon = QStackedWidget(self)
         # Glavni OS pogled in vgrajeni brskalnik sta na isti strani sklada. V
         # nacinu Splet ostane levi del QWebEngineViewa (stranska vrstica) viden,
@@ -2773,7 +2784,68 @@ class SafeerOsWindow(QMainWindow):
 
         threading.Thread(target=delo, daemon=True).start()
 
+    #: Metode kanalov Sporocil -> (metoda KanaliSporocilWin, ali potrebuje pogled strani)
+    _METODE_KANALOV = {
+        "kanaliSeznam": ("seznam", False), "kanaliKatalog": ("katalog", False), "kanalDodaj": ("dodaj", False),
+        "kanalOdstrani": ("odstrani", False), "kanalPreklici": ("preklici", False), "kanalPreimenuj": ("preimenuj", False),
+        "kanalPremakni": ("premakni", False), "kanalVklopi": ("vklopi", False), "kanalIzbrisiPodatke": ("izbrisi_podatke", False),
+        "kanalUkaz": ("ukaz", False), "kanalPokazi": ("pokazi", True), "kanalPolozaj": ("polozaj", True),
+        "kanalSkrij": ("skrij", True),
+    }
+
+    def izvedi_kanal(self, metoda: str, a: list, pogled=None) -> Any:
+        """Klic kanala Sporocil iz mostu (nit) -> glavna nit Qt. pogled: QWebEngineView strani, ki je klicala."""
+        k = self.kanali_sporocil
+        if k is None:
+            raise ValueError("kanali")
+        ime = self._METODE_KANALOV[metoda][0]
+        a = list(a or [])
+
+        def s(i: int) -> str:
+            return str(a[i]) if len(a) > i and a[i] is not None else ""
+
+        def delo() -> Any:
+            if ime in ("seznam", "katalog"):
+                return getattr(k, ime)()
+            if ime == "dodaj":
+                return k.dodaj(s(0), s(1), s(2), s(3))
+            if ime == "odstrani":
+                return k.odstrani(s(0), len(a) > 1 and a[1] is True)
+            if ime == "preimenuj":
+                return k.preimenuj(s(0), s(1))
+            if ime == "premakni":
+                return k.premakni(s(0), int(a[1]) if len(a) > 1 and isinstance(a[1], (int, float)) else 1)
+            if ime == "vklopi":
+                return k.vklopi(s(0), len(a) < 2 or a[1] is True)
+            if ime == "ukaz":
+                return k.ukaz(s(0), s(1))
+            if ime in ("preklici", "izbrisi_podatke"):
+                return getattr(k, ime)(s(0))
+            gost = pogled if pogled is not None else self.view
+            if ime == "pokazi":
+                return k.pokazi(gost, s(0), a[1] if len(a) > 1 and isinstance(a[1], dict) else {})
+            if ime == "polozaj":
+                return k.polozaj(gost, a[0] if a and isinstance(a[0], dict) else {})
+            return k.skrij(gost)
+        return self._na_glavni_niti(delo, cakaj=20.0)
+
+    def _obvestilo_kanala(self, kid: str, naslov: str, besedilo: str) -> None:
+        """Spletno obvestilo kanala (Notification API) -> obvestilo Windows; ime kanala pred naslovom."""
+        k = self.kanali_sporocil.kanali.najdi(kid) if self.kanali_sporocil is not None else None
+        if k is None or not k.get("vklopljen"):
+            return
+        ime = str(k.get("ime") or "")
+        glava = naslov if (not ime or ime.casefold() in str(naslov).casefold()) else "%s · %s" % (ime, naslov)
+        ikona = getattr(self, "pladenj", None) or getattr(self, "tray", None)
+        try:
+            if ikona is not None and hasattr(ikona, "showMessage"):
+                ikona.showMessage(glava or ime, str(besedilo or "")[:300])
+        except Exception:  # noqa: BLE001
+            pass
+
     def _izvedi_metodo(self, metoda: str, a: list) -> Any:
+        if metoda in self._METODE_KANALOV:
+            return self.izvedi_kanal(metoda, a)
         if metoda.startswith("sporocila"):
             return self._sporocila(metoda, a)
         if metoda.startswith("magnet"):

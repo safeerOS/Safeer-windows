@@ -417,6 +417,7 @@
       klic("zapriSplet", [razdelek]);
     }
     S.razdelek = razdelek;
+    if (razdelek !== "sporocila") zapriVgrajenKanal(); else naloziVgrajeneKanale();   // vgrajeni kanali Sporocil
     document.querySelectorAll("#meni button").forEach(function (b) {
       b.classList.toggle("izbran", b.getAttribute("data-razdelek") === razdelek);
     });
@@ -3391,6 +3392,9 @@
 
   // ------------------------------------------------------------------ dogodki iz safeer_os.py
   window.safeerOsDogodek = function (vrsta, podatki) {
+    // Vgrajeni kanali Sporocil (kanali_sporocil_win): seznam z neprebranimi, Esc med dodajanjem.
+    if (vrsta === "kanaliSporocil") vkPosodobi(podatki);
+    if (vrsta === "kanalPreklici") vkPrekliciDodajanje(String(podatki || ""));
     // Bliznjica Prostorov (os_app: sistemska bliznjica) ali gumb na namizju: preklopnik se odpre ali gre naprej.
     if (vrsta === "prostori") odpriProstore(podatki && podatki.smer < 0 ? -1 : 1);
     if (vrsta === "stanje") narisiStanje(podatki);
@@ -3517,7 +3521,301 @@
       b.addEventListener("click", function () { if (k.vrsta === "safeer") odpriPisiNapravi(); else odpriUrejanjeKanala(k); });
       cilj.appendChild(b);
     });
+    narisiVgrajeneKanale(cilj);       // spletni klepeti (blok »Vgrajeni kanali Sporocil«)
   }
+  /* ==== Vgrajeni kanali Sporocil: spletni klepeti (Windows; prenos iz Safeer-linux assets/os/os.js) ==============
+     Lastnik 27. in 28. 10. 2026: Windows naj ima Sporocila kot Linux. Spletni klepet (WhatsApp, Telegram, Messenger …)
+     je pogled QtWebEngine z lastnim profilom; Safeer OS ga postavi nad to stran na mesto #vgrajenKanalVsebina
+     (windows/safeer_windows/kanali_sporocil_win.py). Ta stran pove le pravokotnik in kdaj ga skriti (sloj, meni,
+     drug kanal ali razdelek). Katalog je core/spletni_klepeti.py (namiznih programov na Windows ne vstavljamo). */
+  var VK = { kanali: [], aktivni: "", katalog: null, skrit: false, opazovalec: null, urejan: null, prej: null, iskanje: "" };
+  IK.smeti = IK.smeti || "M4 7h16 M9 7V4h6v3 M6 7l1 13h10l1-13 M10 11v6 M14 11v6";
+  IK.uredi = IK.uredi || "M12 20h9 M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z";
+  function vkKanal(id) { return VK.kanali.find(function (k) { return k.id === id; }) || null; }
+  // Dejanje s kanalom: ce Safeer OS ne odgovori v 20 s, je to napaka - nikoli tisina.
+  var VK_ROK_MS = 20000;
+  function klicKanala(metoda, argumenti) {
+    return new Promise(function (res, rej) {
+      var rok = setTimeout(function () { rej("rok"); }, VK_ROK_MS);
+      klic(metoda, argumenti).then(function (v) { clearTimeout(rok); res(v); },
+        function (e) { clearTimeout(rok); rej(e); });
+    });
+  }
+  function vkNapaka(e) { obvesti(t(String(e) === "rok" ? "kanalNapakaRok" : "kanalNapakaDejanje")); }
+  function vkBarva(s) {
+    var h = 0; s = String(s || "");
+    for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360;
+    return h;
+  }
+  function vkZnak(k, razred) {
+    // Ikona iz kataloga (core/katalog_storitev, SVG ociscen v core/varna_svg, samo v <img>) ali ploscica z zacetnico.
+    var z = el("span", razred || "kanal-znak");
+    if (k.ikona) { var i = document.createElement("img"); i.src = k.ikona; i.alt = ""; z.appendChild(i); }
+    else {
+      z.textContent = zacetnice(k.ime); z.classList.add("crka");
+      z.style.background = "hsl(" + vkBarva(k.katalog || k.id || k.ime) + ", 45%, 36%)";
+    }
+    return z;
+  }
+  function naloziVgrajeneKanale() {
+    if (!imaMost()) return;
+    klic("kanaliSeznam").then(function (s) { VK.kanali = s || []; narisiKanale(); osveziVgrajenKanal(); }).catch(function () {});
+  }
+  function narisiVgrajeneKanale(cilj) {
+    VK.kanali.forEach(function (k) {
+      var b = el("button", "kanal-cip vgrajen" + (k.vklopljen ? "" : " izklopljen") + (VK.aktivni === k.id ? " izbran" : ""));
+      b.type = "button"; b.setAttribute("data-kanal", k.id);
+      b.appendChild(vkZnak(k));
+      b.appendChild(el("span", "kanal-ime", ubezi(k.ime)));
+      if (!k.vklopljen) b.appendChild(el("small", "", ubezi(t("kanalIzklopljen"))));
+      else if (k.neprebrano) b.appendChild(el("b", "kanal-znacka", ubezi(k.neprebrano > 99 ? "99+" : String(k.neprebrano))));
+      b.title = k.ime + (k.neprebrano ? " · " + t("kanalNeprebranih", { n: k.neprebrano }) : "");
+      b.addEventListener("click", function () { if (k.vklopljen) odpriVgrajenKanal(k.id); else odpriUrejanjeVgrajenega(k); });
+      b.addEventListener("contextmenu", function (e) { e.preventDefault(); odpriUrejanjeVgrajenega(k); });
+      b.addEventListener("keydown", function (e) {
+        if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) { e.preventDefault(); odpriUrejanjeVgrajenega(k); }
+      });
+      cilj.appendChild(b);
+    });
+  }
+  function vkPravokotnik() {
+    var v = $("vgrajenKanalVsebina"); if (!v) return null;
+    var r = v.getBoundingClientRect();
+    return { x: r.left, y: r.top, w: r.width, h: r.height, vw: window.innerWidth, vh: window.innerHeight,
+      dpr: window.devicePixelRatio || 1 };
+  }
+  function odpriVgrajenKanal(id) {
+    var k = vkKanal(id); if (!k) return;
+    if (S.razdelek !== "sporocila") pojdi("sporocila");
+    VK.aktivni = id;
+    var n = document.querySelector("#r-sporocila .nabiralnik"); if (n) n.classList.add("kanal-odprt");
+    $("vgrajenKanal").hidden = false;
+    $("vgrajenKanalIme").textContent = k.ime;
+    var znak = vkZnak(k, "kanal-znak"); znak.id = "vgrajenKanalZnak"; $("vgrajenKanalZnak").replaceWith(znak);
+    vkPonastaviOdstrani();
+    $("vgrajenKanalPreklici").hidden = !k.caka;
+    narisiKanale();
+    vkSporocilo("");
+    vkPokazi();
+  }
+  function vkPokazi() {
+    if (!VK.aktivni || VK.skrit || S.razdelek !== "sporocila") return;
+    klicKanala("kanalPokazi", [VK.aktivni, vkPravokotnik()]).then(function (r) {
+      if (!r || r.ok === false) { vkSporocilo(t("kanalNiMogoce", { ime: (vkKanal(VK.aktivni) || {}).ime || "" })); return; }
+      vkSporocilo("");
+    }).catch(function (e) { vkSporocilo(t(String(e) === "rok" ? "kanalNapakaRok" : "kanalNiMogoce", { ime: (vkKanal(VK.aktivni) || {}).ime || "" })); });
+  }
+  function vkSporocilo(besedilo) {
+    var p = $("vgrajenKanalSporocilo"); if (!p) return;
+    p.textContent = besedilo; p.hidden = !besedilo;
+  }
+  function zapriVgrajenKanal(brezSkrij) {
+    if (!VK.aktivni) return;
+    VK.aktivni = "";
+    var n = document.querySelector("#r-sporocila .nabiralnik"); if (n) n.classList.remove("kanal-odprt");
+    if ($("vgrajenKanal")) $("vgrajenKanal").hidden = true;
+    if (brezSkrij !== true) klic("kanalSkrij").catch(function () {});
+    narisiKanale();
+  }
+  function osveziVgrajenKanal() {
+    if (!VK.aktivni) return;
+    var k = vkKanal(VK.aktivni);
+    if (!k || !k.vklopljen) { zapriVgrajenKanal(); return; }
+    $("vgrajenKanalIme").textContent = k.ime;
+    $("vgrajenKanalPreklici").hidden = !k.caka;
+  }
+  // »Preklici dodajanje«: kanal, ki se ni v uporabi (prijava ni koncana), gre stran; uporabnik je spet tam, kjer je bil.
+  function vkPrekliciDodajanje(id) {
+    var k = vkKanal(id || VK.aktivni);
+    if (!k || !k.caka) return false;
+    var prej = VK.prej || {}; VK.prej = null;
+    if (VK.aktivni === k.id) zapriVgrajenKanal(true);
+    klicKanala("kanalPreklici", [k.id]).then(function (s) {
+      vkPosodobi(s);
+      obvesti(t("kanalDodajanjePreklicano", { ime: k.ime }));
+      if (prej.kanal && prej.kanal !== k.id && vkKanal(prej.kanal)) odpriVgrajenKanal(prej.kanal);
+      else if (prej.razdelek && prej.razdelek !== S.razdelek) pojdi(prej.razdelek);
+    }).catch(vkNapaka);
+    return true;
+  }
+  // »Odstrani kanal« v orodni vrstici kanala: ena potrditev (drugi klik v 5 s), brez brisanja podatkov strani.
+  var vkOdstraniRok = 0;
+  function vkPonastaviOdstrani() {
+    var b = $("vgrajenKanalOdstrani"); if (!b) return;
+    clearTimeout(vkOdstraniRok); b.classList.remove("potrdi"); b.title = t("odstraniKanal");
+  }
+  function vkOdstraniAktivni() {
+    var b = $("vgrajenKanalOdstrani"), k = vkKanal(VK.aktivni); if (!k) return;
+    if (!b.classList.contains("potrdi")) {
+      b.classList.add("potrdi"); b.title = t("odstraniKanalPotrdi"); obvesti(t("odstraniKanalPotrdi"));
+      vkOdstraniRok = setTimeout(vkPonastaviOdstrani, 5000);
+      return;
+    }
+    vkPonastaviOdstrani();
+    zapriVgrajenKanal();
+    klicKanala("kanalOdstrani", [k.id, false]).then(vkPosodobi).catch(vkNapaka);
+  }
+  // Sloj (pogovorno okno) ali meni nad vsebino: kanal je nad stranjo, zato se med tem skrije.
+  function vkUskladiSloje() {
+    var odprto = !!document.querySelector(".sloj.viden") || !!$("sporocilaMeni");
+    if (odprto === VK.skrit) return;
+    VK.skrit = odprto;
+    if (!VK.aktivni) return;
+    if (odprto) klic("kanalSkrij").catch(function () {}); else vkPokazi();
+  }
+  function vkPolozaj() {
+    if (VK.aktivni && !VK.skrit) klic("kanalPolozaj", [vkPravokotnik()]).catch(function () {});
+  }
+  /* Carovnik »Dodaj kanal« › Aplikacije: katalog spletnih klepetov in poste (en klik, iskanje po imenu) in lasten
+     klepet z naslovom https. */
+  function narisiKatalogKanalov(a) {
+    a.textContent = "";
+    var katalog = VK.katalog || [];
+    var dodani = {}; VK.kanali.forEach(function (k) { if (k.katalog) dodani[k.katalog] = true; });
+    var isci = el("input", "katalog-iskanje"); isci.type = "search"; isci.autocomplete = "off";
+    isci.placeholder = t("kanalIsciKatalog"); isci.setAttribute("aria-label", t("kanalIsciKatalog")); isci.value = VK.iskanje;
+    a.appendChild(isci);
+    var seznamEl = el("div", "katalog-seznam"); a.appendChild(seznamEl);
+    function narisi() {
+      seznamEl.textContent = "";
+      var niz = VK.iskanje.trim().toLowerCase();
+      [["klepet", "kanalAppKlepet"], ["posta", "kanalAppPosta"]].forEach(function (sk) {
+        var seznam = katalog.filter(function (x) {
+          return x.vrsta === sk[0] && x.splet && (!niz || String(x.ime || "").toLowerCase().indexOf(niz) >= 0);
+        });
+        if (!seznam.length) return;
+        seznamEl.appendChild(el("b", "aplikacije-skupina", ubezi(t(sk[1]))));
+        seznam.forEach(function (x) {
+          var v = el("div", "aplikacije-vrsta");
+          v.appendChild(vkZnak({ ime: x.ime, katalog: x.id, ikona: x.ikona || "" }, "kanal-znak"));
+          var ime = el("div", "ime", ubezi(x.ime));
+          ime.appendChild(el("small", "", ubezi(String(x.splet || "").replace(/^https?:\/\//, "").split("/")[0])));
+          v.appendChild(ime);
+          if (dodani[x.id]) v.appendChild(el("span", "oznaka-dodano", ubezi(t("kanalDodano"))));
+          else {
+            var g = el("button", "gumb glavni", ubezi(t("kanalDodajVSporocila"))); g.type = "button";
+            g.addEventListener("click", function () { dodajVgrajeni({ katalog: x.id }, g); });
+            v.appendChild(g);
+          }
+          seznamEl.appendChild(v);
+        });
+      });
+      if (!seznamEl.children.length) seznamEl.appendChild(el("p", "drobno", ubezi(t("kanalKatalogPrazen"))));
+    }
+    isci.addEventListener("input", function () { VK.iskanje = isci.value; narisi(); });
+    narisi();
+    // Lasten klepet: Mattermost, Rocket.Chat, Zulip, lasten Element … (samo https, brez gesla v naslovu)
+    a.appendChild(el("b", "aplikacije-skupina", ubezi(t("kanalSvojKlepet"))));
+    var f = el("div", "svoj-klepet");
+    f.innerHTML = '<p class="drobno">' + ubezi(t("kanalSvojKlepetOpis")) + '</p><input class="svoj-url" type="url" aria-label="' + ubezi(t("kanalSvojKlepet")) + '" ' +
+      'inputmode="url" autocomplete="off" maxlength="2048" placeholder="https://chat.example.org"><input class="svoj-ime" ' +
+      'type="text" maxlength="60" placeholder="' + ubezi(t("kanalSvojIme")) + '"><button type="button" class="gumb glavni" ' +
+      'data-svoj="dodaj">' + ubezi(t("kanalDodajVSporocila")) + '</button>';
+    a.appendChild(f);
+    f.querySelector("[data-svoj]").addEventListener("click", function () {
+      dodajVgrajeni({ url: f.querySelector(".svoj-url").value.trim(), ime: f.querySelector(".svoj-ime").value.trim() }, this);
+    });
+  }
+  var NAPAKE_KANALA = { prazno: "kanalNapakaNaslov", https: "kanalNapakaHttps", poverilnice: "kanalNapakaGeslo",
+    gostitelj: "kanalNapakaNaslov", dolzina: "kanalNapakaNaslov", najvec: "kanalNapakaNajvec", program: "kanalNiMogoceProgram" };
+  function vkNapakaCarovnika(e) {
+    var n = $("kanalNapaka");
+    n.textContent = t(String(e) === "rok" ? "kanalNapakaRok" : (NAPAKE_KANALA[String(e)] || "kanalNapakaDejanje"));
+    n.hidden = false;
+    if (n.scrollIntoView) n.scrollIntoView({ block: "nearest" });
+  }
+  function dodajVgrajeni(p, gumb) {
+    $("kanalNapaka").hidden = true;
+    VK.prej = { razdelek: S.razdelek, kanal: VK.aktivni };
+    if (gumb) gumb.disabled = true;          // med cakanjem: brez dvojnega dodajanja
+    klicKanala("kanalDodaj", [p.katalog || "", p.url || "", p.ime || "", ""]).then(function (s) {
+      if (gumb) gumb.disabled = false;
+      VK.kanali = s || [];
+      zapriSloje();
+      var nov = p.katalog ? VK.kanali.find(function (k) { return k.katalog === p.katalog; }) : VK.kanali[VK.kanali.length - 1];
+      narisiKanale();
+      if (nov) odpriVgrajenKanal(nov.id);
+    }).catch(function (e) {
+      if (gumb) gumb.disabled = false;
+      vkNapakaCarovnika(e);
+    });
+  }
+  // Urejanje kanala: ime, vklop, vrstni red, podatki strani, odstranitev (desni klik ali klik na izklopljen kanal).
+  function odpriUrejanjeVgrajenega(k) {
+    zapriSloje(); VK.urejan = k.id;
+    $("vgrajenUrediNaslov").textContent = k.ime;
+    $("vgrajenUrediIme").value = k.ime;
+    $("vgrajenUrediVklop").setAttribute("aria-checked", k.vklopljen ? "true" : "false");
+    $("vgrajenUrediPodatkeTudi").checked = false;
+    $("vgrajenUrediOdstrani").removeAttribute("data-potrdi"); $("vgrajenUrediOdstrani").textContent = t("odstraniKanal");
+    $("vgrajenUrediPodatki").removeAttribute("data-potrdi"); $("vgrajenUrediPodatki").textContent = t("kanalIzbrisiPodatke");
+    var i = VK.kanali.findIndex(function (x) { return x.id === k.id; });
+    $("vgrajenUrediGor").hidden = i <= 0; $("vgrajenUrediDol").hidden = i < 0 || i >= VK.kanali.length - 1;
+    $("vgrajenUrediOpis").textContent = k.url || "";
+    $("slojVgrajenUredi").classList.add("viden");
+    $("vgrajenUrediIme").focus();
+  }
+  function vkPosodobi(s) { VK.kanali = s || []; narisiKanale(); osveziVgrajenKanal(); }
+  function vkOsveziKatalog() {
+    klic("kanaliKatalog").then(function (k) {
+      if (!Array.isArray(k)) return;
+      VK.katalog = k;
+      if ($("slojKanal").classList.contains("viden") && $("kanalAplikacijeMreza")) narisiKatalogKanalov($("kanalAplikacijeMreza"));
+    }).catch(function () {});
+  }
+  function poveziVgrajeneKanale() {
+    if (!$("slojVgrajenUredi")) return;
+    $("vgrajenUrediPreklici").addEventListener("click", zapriSloje);
+    $("vgrajenUrediVklop").addEventListener("click", function () {
+      var b = $("vgrajenUrediVklop"), nov = b.getAttribute("aria-checked") !== "true";
+      b.setAttribute("aria-checked", nov ? "true" : "false");
+      klicKanala("kanalVklopi", [VK.urejan, nov]).then(vkPosodobi).catch(function (e) { b.setAttribute("aria-checked", nov ? "false" : "true"); vkNapaka(e); });
+    });
+    $("vgrajenUrediGor").addEventListener("click", function () { klicKanala("kanalPremakni", [VK.urejan, -1]).then(function (s) { vkPosodobi(s); odpriUrejanjeVgrajenega(vkKanal(VK.urejan)); }).catch(vkNapaka); });
+    $("vgrajenUrediDol").addEventListener("click", function () { klicKanala("kanalPremakni", [VK.urejan, 1]).then(function (s) { vkPosodobi(s); odpriUrejanjeVgrajenega(vkKanal(VK.urejan)); }).catch(vkNapaka); });
+    $("vgrajenUrediPodatki").addEventListener("click", function () {
+      var b = $("vgrajenUrediPodatki");
+      if (b.getAttribute("data-potrdi") !== VK.urejan) { b.setAttribute("data-potrdi", VK.urejan); b.textContent = t("kanalIzbrisiPodatkePotrdi"); return; }
+      b.removeAttribute("data-potrdi"); b.textContent = t("kanalIzbrisiPodatke");
+      klicKanala("kanalIzbrisiPodatke", [VK.urejan]).then(function (s) { vkPosodobi(s); zapriSloje(); obvesti(t("kanalPodatkiIzbrisani")); })
+        .catch(vkNapaka);
+    });
+    $("vgrajenUrediOdstrani").addEventListener("click", function () {
+      var b = $("vgrajenUrediOdstrani");
+      if (b.getAttribute("data-potrdi") !== VK.urejan) { b.setAttribute("data-potrdi", VK.urejan); b.textContent = t("odstraniKanalPotrdi"); return; }
+      var id = VK.urejan;
+      if (VK.aktivni === id) zapriVgrajenKanal();
+      klicKanala("kanalOdstrani", [id, $("vgrajenUrediPodatkeTudi").checked === true]).then(function (s) { vkPosodobi(s); zapriSloje(); })
+        .catch(vkNapaka);
+    });
+    $("obrazecVgrajenUredi").addEventListener("submit", function (e) {
+      e.preventDefault();
+      var ime = $("vgrajenUrediIme").value.trim(), k = vkKanal(VK.urejan);
+      if (!k || !ime || ime === k.ime) { zapriSloje(); return; }
+      klicKanala("kanalPreimenuj", [VK.urejan, ime]).then(function (s) { vkPosodobi(s); zapriSloje(); }).catch(vkNapaka);
+    });
+    ["nazaj", "osvezi", "domov", "splet"].forEach(function (ukaz) {
+      var id = { nazaj: "vgrajenKanalNazaj", osvezi: "vgrajenKanalOsvezi", domov: "vgrajenKanalDomov", splet: "vgrajenKanalSplet" }[ukaz];
+      $(id).addEventListener("click", function () {
+        klicKanala("kanalUkaz", [VK.aktivni, ukaz]).then(function (ok) { if (ok === false) vkNapaka(""); }).catch(vkNapaka);
+      });
+    });
+    $("vgrajenKanalUredi").addEventListener("click", function () { var k = vkKanal(VK.aktivni); if (k) odpriUrejanjeVgrajenega(k); });
+    $("vgrajenKanalPreklici").addEventListener("click", function () { vkPrekliciDodajanje(VK.aktivni); });
+    $("vgrajenKanalOdstrani").addEventListener("click", vkOdstraniAktivni);
+    // Esc na strani (fokus ni v kanalu): enako kot »Preklici dodajanje«, ce je odprt kanal se v cakanju.
+    document.addEventListener("keydown", function (e) {
+      if ((e.key !== "Escape" && e.key !== "BrowserBack") || !VK.aktivni || document.querySelector(".sloj.viden")) return;
+      if (vkPrekliciDodajanje(VK.aktivni)) { e.preventDefault(); e.stopImmediatePropagation(); }
+    }, true);
+    // Sloji in meni nad vsebino skrijejo kanal (je nad stranjo); velikost okna mu sledi.
+    VK.opazovalec = new MutationObserver(vkUskladiSloje);
+    document.querySelectorAll(".sloj").forEach(function (s) { VK.opazovalec.observe(s, { attributes: true, attributeFilter: ["class"] }); });
+    VK.opazovalec.observe(document.body, { childList: true });       // meni sporocila (#sporocilaMeni) je otrok telesa
+    if (window.ResizeObserver) new ResizeObserver(vkPolozaj).observe($("vgrajenKanalVsebina"));
+    window.addEventListener("resize", vkPolozaj);
+  }
+  /* ==== konec: vgrajeni kanali Sporocil ========================================================================== */
   /* Safeer Chat: napisi napravi v Linku (telefon, tablica, TV, drug racunalnik). */
   function odpriPisiNapravi() {
     zapriSloje();
@@ -3649,6 +3947,7 @@
     narisiSporocila();
   }
   function odpriPogovor(oseba, pogovor) {
+    zapriVgrajenKanal();
     S.sporocilaAktivni = pogovor; S.sporocilaOseba = oseba; narisiSporocila();
     $("sporocilaNaslov").textContent = oseba.ime;
     $("sporocilaPodnaslov").textContent = ((pogovor.kanal || {}).ime || "") + (pogovor.zadeva ? " · " + pogovor.zadeva : "");
@@ -3856,6 +4155,7 @@
     $("kanalVrsta").value = "email";
     $("kanalVrstaIzbira").querySelectorAll("button").forEach(function (x) { x.classList.toggle("izbran", x.getAttribute("data-vrsta") === "email"); });
     preklopiKanalPolja(); $("slojKanal").classList.add("viden");
+    vkOsveziKatalog();
     if (kanalPonudnikiPodatki) { narisiPonudnike(); return; }
     klic("sporocilaPonudniki").then(function (p) { kanalPonudnikiPodatki = p || { ponudniki: [], aplikacije: [] }; narisiPonudnike(); })
       .catch(function () { kanalPonudnikiPodatki = { ponudniki: [{ id: "drug", ime: "", domene: [], geslo: "navadno", navodila: "drug" }], aplikacije: [] }; narisiPonudnike(); });
@@ -3878,6 +4178,8 @@
       m.appendChild(b);
     });
     var a = $("kanalAplikacijeMreza"); a.textContent = "";
+    // Katalog spletnih klepetov (kanaliKatalog): storitev se doda v Sporocila; brez kataloga stari seznam povezav.
+    if (VK.katalog) { narisiKatalogKanalov(a); return; }
     [["posta", "kanalAppPosta"], ["klepet", "kanalAppKlepet"]].forEach(function (sk) {
       var seznam = (kanalPonudnikiPodatki.aplikacije || []).filter(function (x) { return x.vrsta === sk[0]; });
       if (!seznam.length) return;
@@ -4591,6 +4893,7 @@
     poveziDogodke();
     poveziProstore();
     poveziMeniPolja();
+    poveziVgrajeneKanale();
     osveziUro();
     setInterval(osveziUro, 1000);
     narisiDomov();

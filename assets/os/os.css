@@ -1180,3 +1180,33 @@ body.en-razdelek #vsebina { padding-top: 30px; }
 .unp-stanje.dobro { color: var(--ok); }
 .unp-obrazec .gumb.potrdi { background: var(--rdeca); color: var(--zelena-temna); }
 @media (max-width: 720px) { .unp-obrazec { grid-template-columns: 1fr; } }
+
+/* ==== Vgrajeni kanali Sporocil (spletni klepeti) - windows/safeer_windows/kanali_sporocil_win.py (kot Linux os.css) ====
+   Kanal je nad stranjo na mestu #vgrajenKanalVsebina (Safeer OS ga tja postavi); stran pusti prostor prazen. */
+.nabiralnik.kanal-odprt .pogovor-okno { display:none; }
+.vgrajen-kanal { display:flex; flex-direction:column; min-width:0; min-height:0; }
+.vgrajen-kanal[hidden] { display:none; }
+.vgrajen-kanal-glava { display:flex; align-items:center; gap:8px; padding:8px 12px; border-bottom:1px solid var(--rob); }
+.vgrajen-kanal-glava b { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.vgrajen-kanal-glava .presledek { flex:1; }
+.vgrajen-kanal-glava .gumb-ikona[hidden], .vgrajen-kanal-glava .kanal-preklici[hidden] { display:none; }
+.vgrajen-kanal-glava .kanal-preklici { border-color:var(--zelena); }
+.vgrajen-kanal-vsebina { flex:1; min-height:0; position:relative; display:grid; place-items:center; background:rgba(0,0,0,.18); }
+.vgrajen-kanal-vsebina p { max-width:36em; padding:0 18px; text-align:center; color:var(--medlo); }
+.kanal-znak { flex:none; width:24px; height:24px; border-radius:7px; display:grid; place-items:center; overflow:hidden;
+  font-size:11px; font-weight:700; color:var(--besedilo); background:var(--izbrano); }
+.kanal-znak img { width:100%; height:100%; object-fit:contain; }
+.aplikacije-vrsta .kanal-znak { width:32px; height:32px; border-radius:9px; font-size:13px; }
+.kanal-cip.vgrajen { padding-left:6px; }
+.kanal-cip.vgrajen .kanal-ime { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:left; }
+.kanal-cip.izbran { border-color:var(--zelena); background:var(--izbrano); }
+.kanal-cip.izklopljen { opacity:.55; }
+.kanal-znacka { min-width:20px; padding:1px 6px; border-radius:999px; background:var(--zelena); color:var(--zelena-temna);
+  font-size:12px; text-align:center; }
+.oznaka-dodano { color:var(--ok); font-size:13px; white-space:nowrap; }
+.svoj-klepet { display:flex; flex-direction:column; gap:8px; padding:10px; border:1px solid var(--rob); border-radius:12px; }
+.svoj-klepet .gumb { align-self:flex-end; }
+.katalog-iskanje { width:100%; margin:4px 0 8px; }
+.kanal-carovnik .gumbi.levo { justify-content:flex-start; flex-wrap:wrap; }
+.kanal-carovnik .potrditev { display:flex; align-items:center; gap:8px; }
+#vgrajenKanalOdstrani.potrdi { color:var(--opozorilo); background:rgba(255, 120, 90, .14); }

@@ -157,7 +157,9 @@ class NamizjeQml(QQuickView):
         if metoda == "besedilaProstorov":
             return besedila_prostorov(_beri_besedila_os(), self._jezik())
         if metoda == "sporocilaNeprebrana":
-            return stevilo_neprebranih(self.os_okno._izvedi_metodo("sporocilaSeznam", [""]))
+            n = stevilo_neprebranih(self.os_okno._izvedi_metodo("sporocilaSeznam", [""]))
+            k = getattr(self.os_okno, "kanali_sporocil", None)       # spletni klepeti (naslov strani), kot Linux
+            return n + (k.neprebrano_skupaj() if k is not None else 0)
         if metoda == "bliznjice":
             from . import varnostna_vrata as vv
             return dict(vv.STANJE)
