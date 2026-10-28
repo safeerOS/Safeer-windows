@@ -141,6 +141,9 @@ class OknoRazdelka(QMainWindow):  # type: ignore[misc]
                     cilj = str(a[0]) if a else ""
                     self.os_okno.dispatcher.dispatch(lambda: self.os_okno.odpri_razdelek_namizja(cilj))
                     izid: Any = True
+                elif metoda in getattr(self.os_okno, "_METODE_KANALOV", {}):
+                    # Kanal Sporocil se pokaze nad TEM oknom (pravokotnik je v njegovi strani).
+                    izid = self.os_okno.izvedi_kanal(metoda, a, self.view)
                 else:
                     izid = self.os_okno._izvedi_metodo(metoda, a)
                 self._odgovor(klic_id, True, izid)

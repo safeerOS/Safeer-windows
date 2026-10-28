@@ -350,6 +350,21 @@
               <button class="gumb glavni" type="submit" disabled><svg data-ikona="poslji"></svg><span data-t="posljiSporocilo"></span></button>
             </form>
           </div>
+          <!-- Vgrajeni kanal (spletni klepet): Safeer OS ga postavi nad #vgrajenKanalVsebina (kanali_sporocil_win.py) -->
+          <section class="vgrajen-kanal" id="vgrajenKanal" hidden>
+            <div class="vgrajen-kanal-glava">
+              <span class="kanal-znak" id="vgrajenKanalZnak"></span><b id="vgrajenKanalIme"></b>
+              <button type="button" class="gumb kanal-preklici" id="vgrajenKanalPreklici" data-t="kanalPrekliciDodajanje" data-naslov="kanalPrekliciNamig" hidden></button>
+              <span class="presledek"></span>
+              <button type="button" class="gumb-ikona" id="vgrajenKanalNazaj" data-naslov="kanalNazaj"><svg data-ikona="nazaj"></svg></button>
+              <button type="button" class="gumb-ikona" id="vgrajenKanalOsvezi" data-naslov="kanalOsvezi"><svg data-ikona="ponovno"></svg></button>
+              <button type="button" class="gumb-ikona" id="vgrajenKanalDomov" data-naslov="kanalDomov"><svg data-ikona="domov"></svg></button>
+              <button type="button" class="gumb-ikona" id="vgrajenKanalSplet" data-naslov="kanalVSpletu"><svg data-ikona="splet"></svg></button>
+              <button type="button" class="gumb-ikona" id="vgrajenKanalUredi" data-naslov="kanalUredi"><svg data-ikona="uredi"></svg></button>
+              <button type="button" class="gumb-ikona" id="vgrajenKanalOdstrani" data-naslov="odstraniKanal"><svg data-ikona="smeti"></svg></button>
+            </div>
+            <div class="vgrajen-kanal-vsebina" id="vgrajenKanalVsebina"><p class="drobno" id="vgrajenKanalSporocilo" hidden></p></div>
+          </section>
         </div>
       </section>
 
@@ -677,6 +692,18 @@
 </div>
 
 <!-- Dodaj komunikacijski kanal -->
+<!-- Vgrajeni kanal: ime, vklop, vrstni red, podatki strani, odstranitev -->
+<div class="sloj" id="slojVgrajenUredi"><div class="tancica"></div>
+  <form class="plosca kanal-carovnik" id="obrazecVgrajenUredi">
+    <h3 id="vgrajenUrediNaslov"></h3>
+    <p class="drobno" id="vgrajenUrediOpis"></p>
+    <label class="drobno"><span data-t="kanalIme"></span><input id="vgrajenUrediIme" type="text" maxlength="60" autocomplete="off"></label>
+    <button type="button" class="stikalo" id="vgrajenUrediVklop" role="switch" aria-checked="true"><div><span data-t="kanalVklopljen"></span><small data-t="kanalVklopljenPod"></small></div><i></i></button>
+    <div class="gumbi levo"><button type="button" class="gumb" id="vgrajenUrediGor" data-t="kanalGor"></button><button type="button" class="gumb" id="vgrajenUrediDol" data-t="kanalDol"></button><button type="button" class="gumb" id="vgrajenUrediPodatki" data-t="kanalIzbrisiPodatke"></button></div>
+    <label class="drobno potrditev"><input type="checkbox" id="vgrajenUrediPodatkeTudi"><span data-t="kanalOdstraniPodatke"></span></label>
+    <div class="gumbi"><button type="button" class="gumb" id="vgrajenUrediOdstrani" data-t="odstraniKanal"></button><button type="button" class="gumb" id="vgrajenUrediPreklici" data-t="preklici"></button><button class="gumb glavni" type="submit" data-t="shrani"></button></div>
+  </form>
+</div>
 <div class="sloj" id="slojKanal"><div class="tancica"></div>
   <form class="plosca kanal-carovnik" id="obrazecKanal">
     <h3 data-t="dodajKanal"></h3>
