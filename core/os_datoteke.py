@@ -971,6 +971,12 @@ def lastnosti(pot: str) -> dict:
 MEJA_BESEDILA = 200 * 1024
 #: Slika vecja od tega se v predogledu ne nalozi (QML bi jo dekodiral v pomnilnik); pokazemo podatke in »Odpri«.
 MEJA_SLIKE = 80 * 1024 * 1024
+#: Zapisi slik, za katere Qt v Safeerju (PySide6 Essentials: imageformats brez HEIF/AVIF/JXL/RAW) nima dekodirnika.
+#: QML Image bi jih poskusil nalozit in koncal z Image.Error (»Predogleda ni mogoce pokazati«), RAW (.dng ...) pa
+#: mimetypes sploh ne pozna kot sliko. Predogled zato pove razlog in ponudi »Odpri« (zunanji ogled slik).
+BREZ_DEKODIRNIKA = (".heic", ".heif", ".hif", ".avif", ".jxl", ".dng", ".cr2", ".cr3", ".crw", ".nef", ".nrw", ".arw",
+                    ".srf", ".sr2", ".raf", ".orf", ".rw2", ".pef", ".srw", ".x3f", ".3fr", ".iiq", ".erf", ".mrw",
+                    ".kdc", ".dcr", ".mos", ".raw", ".rwl")
 #: Koncnice, ki so besedilo, ceprav jih mimetypes ne pozna kot text/* (koda, nastavitve, dnevniki).
 BESEDILNE = (".txt", ".md", ".py", ".js", ".mjs", ".ts", ".qml", ".json", ".csv", ".tsv", ".xml", ".html", ".htm", ".css",
              ".sh", ".bash", ".zsh", ".c", ".h", ".cpp", ".hpp", ".cc", ".rs", ".go", ".java", ".kt", ".rb", ".php", ".pl",
@@ -1100,6 +1106,9 @@ def predogled(pot: str, najdi=shutil.which) -> dict:
     izid = {"ok": True, "nacin": "podatki", "ime": ime, "pot": pot, "vrsta": vrsta, "mime": mime,
             "velikost": st.st_size, "spremenjeno": st.st_mtime}
     konc = os.path.splitext(ime)[1].lower() or ime.lower()
+    if konc in BREZ_DEKODIRNIKA:
+        izid["brezDekodirnika"] = True
+        return izid
     if vrsta == "slika" and konc != ".svg":
         if st.st_size <= MEJA_SLIKE:
             izid["nacin"] = "slika"
