@@ -9,7 +9,7 @@ ponudnikov. Uporabnik vir shrani in nanj pozabi; vprasa se ga samo ob resni spre
   _po_prijavi, _ustavi) - novih pravil tu ni. Zavrnjeno geslo gre k strezniku enkrat; nov poskus odklene samo vpis
   DRUGEGA gesla ali racuna (shrani_ponudnika). Ponovni vpis istega zavrnjenega gesla zapaha ne odklene in ne ponastavi
   omejitve 1/min; ime in stevilo povezav se spremenita brez gesla (posodobi_nastavitve).
-- Brez omrezja na glavni niti in nic v ozadju: preverba je samo uporabnikov gumb, najvec 1 na minuto na racun.
+- Brez omrezja na glavni niti in nic v ozadju: preverba je samo uporabnikov gumb, najvec 1 na 10 s na racun (lastnik 28. 10. 2026; prej 1/min).
 - Trda meja racuna je najvec_povezav (vpise jo uporabnik); naprava, ki predvaja, dobi vse, delitve po napravah ni.
   Meja velja na RACUN: en zivi bazen na racun, preverba med predvajanjem ne odpre dodatne povezave.
 - TLS privzeto. Brez TLS samo z izrecnim nevarno_brez_tls=True in naslovom IP v domacem omrezju; usenet_nntp zna
@@ -42,7 +42,7 @@ VRATA = nntp.VRATA
 PRIVZETO_POVEZAV = nntp.PRIVZETO_POVEZAV
 NAJVEC_POVEZAV_RACUNA = 100  # meja vnosa; Bazen sam ne gre cez nntp.NAJVEC_POVEZAV
 NAJVEC_IME = 80
-PREVERBA_NA_S = 60.0  # 1 preverba na minuto na racun (gumb »Preveri«)
+PREVERBA_NA_S = 10.0  # 1 preverba na 10 s na racun (gumb »Preveri«; lastnik 28. 10. 2026, prej 60 s)
 NAJVEC_NASTAVITEV_BAJTOV = 64 * 1024  # datoteka nastavitev je majhna - vec je tuja ali pokvarjena
 _VERZIJA = 1
 _PREDPONA_KLJUCA = "usenet-ponudnik-"
@@ -53,7 +53,7 @@ NE_VELJA = "NE_VELJA"
 ZAKLENJEN = "ZAKLENJEN"
 NI_ODGOVORA = "NI_ODGOVORA"
 PREVEC_POVEZAV = "PREVEC_POVEZAV"
-PREPOGOSTO = "PREPOGOSTO"  # gumb znova pred iztekom minute: brez omrezja
+PREPOGOSTO = "PREPOGOSTO"  # gumb znova pred iztekom PREVERBA_NA_S: brez omrezja
 V_UPORABI = "V_UPORABI"  # racun ima zivi bazen: nova povezava bi presegla trdo mejo racuna, brez omrezja
 NEPREVERJEN = "NEPREVERJEN"  # samo stanje_za_vmesnik
 
@@ -608,7 +608,7 @@ def preveri_ponudnika(ponudnik: Ponudnik, geslo: str, *, pot_nastavitev: Optiona
                       kontekst: Optional[ssl.SSLContext] = None, odkleni: bool = False) -> str:
     """ENA povezava, ena prijava, QUIT. Samo na uporabnikov klik, nikoli na glavni niti ali v ozadju.
 
-    Izid: VELJA, NE_VELJA, ZAKLENJEN, NI_ODGOVORA, PREVEC_POVEZAV ali PREPOGOSTO (manj kot minuta od zadnje).
+    Izid: VELJA, NE_VELJA, ZAKLENJEN, NI_ODGOVORA, PREVEC_POVEZAV ali PREPOGOSTO (manj kot PREVERBA_NA_S od zadnje).
     Brez [odkleni] je po NE_VELJA naslednja preverba ZAKLENJEN brez omrezja. Z odkleni=True (izrecni klik »Preveri«,
     lastnik 28. 10. 2026) se zapah sprosti za EN nov poskus, a sele ko omejitev 1/min dovoli preverbo."""
     if not isinstance(ponudnik, Ponudnik):
