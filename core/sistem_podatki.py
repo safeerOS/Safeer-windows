@@ -591,6 +591,10 @@ def velikosti_map(pot: str, rok: float = ROK_MAP, najvec: int = NAJVEC_VNOSOV, k
     izid = []
     for m in mape:
         skupaj, datotek, sklad = 0, 0, [m.path]
+        try:   # blok same mape (kot du; pregled naloge 45: prej le vsebina in gnezdene mape)
+            skupaj = velikost_vnosa(m.stat(follow_symlinks=False))
+        except OSError:
+            pass
         while sklad and not ustavljeno:
             mapa = sklad.pop()
             try:
