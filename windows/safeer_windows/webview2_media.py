@@ -213,12 +213,17 @@ class WebView2MediaWidget(QWidget):
         if not self.uporablja_drm or not self.state_path:
             return
         try:
-            with open(self.state_path, "r", encoding="utf-8") as datoteka:
+            with open(self.state_path, "rb") as datoteka:
                 datoteka.seek(self._dogodki_odmik)
-                novo = datoteka.read()
-                self._dogodki_odmik = datoteka.tell()
+                surovo = datoteka.read()
         except OSError:
             return
+        # Samo do zadnje cele vrstice: nedokoncan rep (Safeer DRM ga ravno pise) pocaka na naslednje branje.
+        konec = surovo.rfind(b"\n") + 1
+        if konec <= 0:
+            return
+        self._dogodki_odmik += konec
+        novo = surovo[:konec].decode("utf-8", "replace")
         for vrstica in novo.splitlines():
             try:
                 dogodek = json.loads(vrstica)

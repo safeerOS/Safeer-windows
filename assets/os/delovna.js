@@ -684,6 +684,7 @@
       }
       nastaviVidez(z.videz);
       VL.sistemsko = !!z.vlecenjeDatotek;
+      odpriZSistemsko = !!z.odpriZSistemsko;
       Z.mape = z.mape || []; Z.dom = (Z.mape[0] && Z.mape[0].pot) || "";
       Z.zaznamki = Array.isArray(z.zaznamki) ? z.zaznamki : [];
       Z.spletne = Array.isArray(z.spletne) ? z.spletne : [];
@@ -1557,8 +1558,14 @@
 
   // »Odpri z ...«: programi, ki so se v namizju prijavili za to vrsto datoteke (privzeti prvi), »Drug program ...«
   // pokaze vse iz menija. Kljukica nastavi izbrani program za privzetega - v vsem namizju, ne samo v Safeer OS.
+  // Windows (odpriZSistemsko): seznama programov ni, odpre se sistemsko okno »Odpri z« (brez praznega seznama).
+  var odpriZSistemsko = false;
   function odpriZ(e, poti) {
     poti = poti && poti.length ? poti : [e.pot];
+    if (odpriZSistemsko) {
+      klic("odpriZ", [poti]).then(function (o) { if (!o) obvesti(t("niUspelo")); }).catch(function () { obvesti(t("niUspelo")); });
+      return;
+    }
     klic("programiZaDatoteko", [poti[0]]).then(function (r) {
       if (!r || !r.ok) { obvesti(t("niUspelo")); return; }
       var ovoj = el("div", "meni lastnosti odpri-z"); ovoj.setAttribute("role", "dialog"); ovoj.setAttribute("aria-label", t("odpriZ"));

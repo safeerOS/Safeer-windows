@@ -129,7 +129,9 @@ class OknoRazdelka(QMainWindow):  # type: ignore[misc]
         return isinstance(zeton, str) and hmac.compare_digest(zeton.encode(), self._zeton.encode())
 
     def zavrnjen_klic_mostu(self) -> None:
-        pass
+        if not getattr(self, "_zavrnjen_zabelezen", False):
+            self._zavrnjen_zabelezen = True
+            print(f"[SafeerOS {self.ime}] klic mostu z napacnim zetonom zavrnjen", flush=True)
 
     def obdelaj_klic(self, sporocilo: dict) -> None:
         klic_id, metoda, a = sporocilo.get("id", 0), str(sporocilo.get("m", "")), list(sporocilo.get("a") or [])

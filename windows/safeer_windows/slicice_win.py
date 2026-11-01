@@ -397,6 +397,12 @@ PREMOR_MRTVEGA_S = 60.0
 _mrtvi: dict = {}
 
 
+def je_slika(podatki: bytes) -> bool:
+    """Magicni bajti JPEG, PNG ali WebP - drugega z naprave ne shranimo kot slicico."""
+    return (podatki[:3] == b"\xff\xd8\xff" or podatki[:8] == b"\x89PNG\r\n\x1a\n"
+            or (podatki[:4] == b"RIFF" and podatki[8:12] == b"WEBP"))
+
+
 def _prenesi_z_naprave(streznik: dict, oznaka: str) -> Optional[bytes]:
     from core import link_tls
     u = urllib.parse.urlparse(streznik["base_url"])
@@ -412,10 +418,10 @@ def _prenesi_z_naprave(streznik: dict, oznaka: str) -> Optional[bytes]:
             return b""                               # naprava slicice nima: v tej seji ne sprasujemo znova
         if odgovor.status != 200:
             return None
-        if "image/" not in str(odgovor.getheader("Content-Type") or "image/jpeg"):
+        if not str(odgovor.getheader("Content-Type") or "").lower().startswith("image/"):
             return None
         telo = odgovor.read(NAJVEC_ODGOVORA_B + 1)
-        return telo if 0 < len(telo) <= NAJVEC_ODGOVORA_B else None
+        return telo if 0 < len(telo) <= NAJVEC_ODGOVORA_B and je_slika(telo) else None
     except OSError:                                  # ni povezave (tudi rok): streznik za nekaj casa izpustimo
         _mrtvi[streznik["base_url"]] = time.monotonic() + PREMOR_MRTVEGA_S
         return None

@@ -273,7 +273,9 @@ class NamizjeOkno(QWidget):  # type: ignore[misc]
         return isinstance(zeton, str) and hmac.compare_digest(zeton.encode(), self._zeton.encode())
 
     def zavrnjen_klic_mostu(self) -> None:
-        pass
+        if not getattr(self, "_zavrnjen_zabelezen", False):
+            self._zavrnjen_zabelezen = True
+            print("[SafeerOS namizje] klic mostu z napacnim zetonom zavrnjen", flush=True)
 
     def obdelaj_klic(self, sporocilo: dict) -> None:
         klic_id, metoda, a = sporocilo.get("id", 0), str(sporocilo.get("m", "")), list(sporocilo.get("a") or [])
@@ -302,7 +304,8 @@ class NamizjeOkno(QWidget):  # type: ignore[misc]
     # ------------------------------------------------------------------ metode namizja
     def zacetek(self) -> dict:
         z = dict(self.os_okno._izvedi_metodo("zacetek", []) or {})
-        z.update({"mape": uporabniske_mape(), "zaznamki": [], "vlecenjeDatotek": False, "videz": z.get("videz") or {},
+        z.update({"mape": uporabniske_mape(), "zaznamki": [], "vlecenjeDatotek": False,
+                  "odpriZSistemsko": True, "videz": z.get("videz") or {},
                   "ozadje": ozadje_windows()})
         return z
 

@@ -24,6 +24,8 @@ URL = ("https://github.com/safeerOS/Safeer-windows/releases/download/"
        f"safeer-drm-v{VERZIJA}/SafeerDRM-{VERZIJA}-win-x64.zip")
 SHA256 = "8863f6ac8c39e67fc32aaca724baa3d1b29dab92d810b89b239e1007dce5e618"
 OZNAKA = ".preverjeno"
+#: Zgornja meja prenosa (paket je nekaj sto MB): vec ne zapisemo na disk, tudi ce streznik posilja naprej.
+NAJVEC_PRENOSA_B = 1024 * 1024 * 1024
 _zaklep = threading.Lock()
 
 
@@ -78,11 +80,23 @@ def prenesi(url: str = URL, sha256: str = SHA256) -> bool:
         try:
             odtis = hashlib.sha256()
             zahteva = urllib.request.Request(url, headers={"User-Agent": "SafeerOS"})
+            preneseno = 0
             with urllib.request.urlopen(zahteva, timeout=60) as odziv, open(zacasno, "wb") as izhod:
+                try:
+                    dolzina = int(odziv.headers.get("Content-Length") or 0)
+                except ValueError:
+                    dolzina = 0
+                if dolzina > NAJVEC_PRENOSA_B:
+                    print("[SafeerDRM] paket je prevelik, prenos ustavljen", flush=True)
+                    return False
                 while True:
                     kos = odziv.read(1 << 20)
                     if not kos:
                         break
+                    preneseno += len(kos)
+                    if preneseno > NAJVEC_PRENOSA_B:
+                        print("[SafeerDRM] paket je prevelik, prenos ustavljen", flush=True)
+                        return False
                     odtis.update(kos)
                     izhod.write(kos)
             if odtis.hexdigest() != sha256:

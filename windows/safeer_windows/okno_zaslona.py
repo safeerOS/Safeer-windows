@@ -33,7 +33,7 @@ PREDPONA = "__safeer_vnos__:"
 try:  # Qt je na Windows vedno; preizkusi brez QtWebEngine uvozijo samo ciste dele.
     from PySide6.QtCore import QPoint, QRect, Qt, QUrl
     from PySide6.QtGui import QColor, QGuiApplication, QKeySequence, QShortcut
-    from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineScript
+    from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineScript
     from PySide6.QtWebEngineWidgets import QWebEngineView
     from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget
     _QT = True
@@ -102,9 +102,9 @@ class _StranZaslona(QWebEnginePage):  # type: ignore[misc]
         return None
 
     def acceptNavigationRequest(self, url, _vrsta, glavni) -> bool:  # noqa: N802 - Qt
-        if not glavni:
-            return True
         u = url.toString()
+        if not glavni and u.startswith("data:"):
+            return True                              # podokvir: samo isti izvor, about:blank ali data:
         return u == "about:blank" or self._okno.isti_izvor(u)
 
     def javaScriptConsoleMessage(self, _raven, sporocilo: str, _vrstica: int, _vir: str) -> None:  # noqa: N802
@@ -229,7 +229,20 @@ class OknoZaslona(QWidget):  # type: ignore[misc]
         postavitev.addWidget(self.vrstica_namiga)
         self.pogled = QWebEngineView(self)
         self.pogled.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
-        self.stran = _StranZaslona(self.os_okno.profile, self)
+        self.stran = None
+        self._profil = None
+        self._nova_stran()
+        postavitev.addWidget(self.pogled, 1)
+        QShortcut(QKeySequence(Qt.Key.Key_F11), self, activated=self.preklopi_celozaslonsko,
+                  context=Qt.ShortcutContext.WindowShortcut)
+
+    def _nova_stran(self) -> None:
+        """Stran gledalca v svojem profilu brez imena (off-the-record, samo v spominu): brez piskotkov in shrambe
+        vmesnika Safeer OS, sprejeta izjema potrdila (pripeti odtis) ne ostane v skupnem profilu. Ob zaprtju okna
+        se stari profil zavrze, naslednje deljenje dobi novega."""
+        stara, star_profil = self.stran, self._profil
+        self._profil = QWebEngineProfile(self)
+        self.stran = _StranZaslona(self._profil, self)
         skripta = QWebEngineScript()
         skripta.setName("SafeerVnosZaslona")
         skripta.setSourceCode(gv.skripta(poslji_js(self.zeton)))
@@ -238,9 +251,10 @@ class OknoZaslona(QWidget):  # type: ignore[misc]
         skripta.setRunsOnSubFrames(False)
         self.stran.scripts().insert(skripta)
         self.pogled.setPage(self.stran)
-        postavitev.addWidget(self.pogled, 1)
-        QShortcut(QKeySequence(Qt.Key.Key_F11), self, activated=self.preklopi_celozaslonsko,
-                  context=Qt.ShortcutContext.WindowShortcut)
+        if stara is not None:
+            stara.deleteLater()                      # najprej stran, nato njen profil
+        if star_profil is not None:
+            star_profil.deleteLater()
 
     # ------------------------------------------------------------------ deljenje
     def isti_izvor(self, url: str) -> bool:
@@ -297,7 +311,7 @@ class OknoZaslona(QWidget):  # type: ignore[misc]
             except Exception as napaka:  # noqa: BLE001
                 print(f"[SafeerOS zaslon] konec gledanja: {napaka}", flush=True)
         self.naprava = ""
-        self.stran.load(QUrl("about:blank"))
+        self._nova_stran()                           # zavrze profil strani druge naprave
         if self.isFullScreen():
             self.showNormal()
         e.accept()

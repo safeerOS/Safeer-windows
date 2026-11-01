@@ -706,8 +706,30 @@ def _pot_programa(pot: str) -> str:
     return pot
 
 
+#: Datoteke, ki jih zazeni_program sme odpreti (program iz seznama ali uporabnikova izbira), ne poljuben niz.
+KONCNICE_PROGRAMOV = (".exe", ".lnk", ".bat")
+
+
+def _dovoljen_program(pot: str) -> bool:
+    """Id iz kataloga (cli:..., shell:AppsFolder\\<AppID>, pot iz seznama programov) ali obstojeca .exe/.lnk/.bat."""
+    pot = str(pot or "")
+    if pot.startswith(CLI_PREDPONA):
+        return bool(_ukazni_program(pot[len(CLI_PREDPONA):]))
+    if pot.lower().startswith("shell:appsfolder\\"):
+        return bool(_PAKET_ID.match(pot[len("shell:AppsFolder\\"):]))
+    if pot.lower().endswith(KONCNICE_PROGRAMOV) and os.path.isfile(pot):
+        return True
+    try:                                             # sistemski programi iz seznama (npr. »control.exe«)
+        return any(p.get("pot") == pot for p in poisci_start_menu_programe(z_ikonami=False))
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def zazeni_program(pot: str) -> bool:
     pot = _pot_programa(pot)
+    if not _dovoljen_program(pot):
+        print(f"[SafeerOS] Zagon zavrnjen (ni program iz seznama): {pot!r}", flush=True)
+        return False
     try:
         shramba = nalozi_shrambo()
         pogosti = shramba.setdefault("pogosti", {})
