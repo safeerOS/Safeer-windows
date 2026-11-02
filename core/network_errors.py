@@ -221,8 +221,10 @@ class NetworkErrorHandler:
             if kind == WebKit2.PolicyDecisionType.NAVIGATION_ACTION:
                 zahteva = decision.get_navigation_action().get_request()
                 uri, metoda = zahteva.get_uri(), zahteva.get_http_method() or 'GET'
-                self.requests.pop(uri, None)
-                self.requests[uri] = metoda
+                # Pregled Gemini 2. 11. 2026: GET iframa na ISTI naslov ne sme prepisati POST glavne navigacije -
+                # ne-GET za naslov ostane (ponovitev obrazca bi sicer oddala podatke se enkrat).
+                prej = self.requests.pop(uri, None)
+                self.requests[uri] = prej if (prej and prej != 'GET' and metoda == 'GET') else metoda
                 while len(self.requests) > NAJVEC_ZAHTEV:
                     self.requests.pop(next(iter(self.requests)))
         except Exception:  # noqa: BLE001

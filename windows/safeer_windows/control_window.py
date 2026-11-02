@@ -134,6 +134,10 @@ class SafeerControlPage(QWebEnginePage):
         super().__init__(profile, window)
         self.window_ref = window
 
+    def createWindow(self, _vrsta):  # noqa: N802 - Qt ime
+        """Stran Linka nikoli ne odpre novega okna (pregled Gemini 2. 11. 2026)."""
+        return None
+
     def javaScriptConsoleMessage(self, level, message: str, line: int, source: str) -> None:
         if message.startswith(BRIDGE_PREFIX):
             try:
@@ -182,6 +186,9 @@ class SafeerControlWindow(QWidget):
         settings.setAttribute(attr.LocalContentCanAccessRemoteUrls, True)
         settings.setAttribute(attr.LocalContentCanAccessFileUrls, True)
         settings.setAttribute(attr.ScrollAnimatorEnabled, True)
+        # Pregled Gemini 2. 11. 2026: stran Linka (lokalna, z dostopom do oddaljenih naslovov) ne sme odpirati oken -
+        # ce bi ime naprave kdaj prineslo skript, ne more odpreti novega okna s tem profilom.
+        settings.setAttribute(attr.JavascriptCanOpenWindows, False)
 
         # Skripta mostu na STRANI, ne na profilu: skript profila QtWebEngine po koncu procesa strani v nov proces
         # ne prenese (glej os_app.py); stran bi po ponovnem nalaganju ostala brez window.SafeerLink.
