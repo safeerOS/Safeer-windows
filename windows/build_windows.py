@@ -351,8 +351,9 @@ def zamenjaj_msvc_runtime(app_dir: str, vendor: str = "", podpis=None, razlicica
             shutil.copy2(vir, cilj)
             zamenjane.append(ime.lower())
     if druzina:
-        print("::warning::MSVC runtime: v paketu ostanejo clani druzine, ki jih vendor/mpv ne prinese (starejsa "
-              "razlicica ob novejsem msvcp140): " + ", ".join(sorted(druzina)))
+        # Ni opozorilo: poenoti_msvc_druzino jih takoj zamenja iz VC_redist in gradnjo ustavi, ce ostane mesana
+        # druzina (CI 41461886218: opozorilo je ostalo, ceprav je bilo vseh 14 clanov 14.51 - laziven alarm).
+        print("MSVC runtime: clane druzine, ki jih vendor/mpv ne prinese, poenoti VC_redist: " + ", ".join(sorted(druzina)))
     return zamenjane
 
 
