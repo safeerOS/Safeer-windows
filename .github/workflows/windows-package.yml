@@ -118,6 +118,9 @@ jobs:
         run: python windows/build_windows.py smoke-source --online --report build/windows/out/smoke-source.json --screenshot build/windows/out/start-page.png
       - name: Fetch pinned libmpv (Safeer LGPL build, SHA-256 verified)
         run: python windows/fetch_libmpv.py
+      - name: Fetch pinned MSVC runtime family (VC_redist 14.51.36247, SHA-256 and Authenticode verified, not installed)
+        # Paket 1.0.53 je mesal msvcp140 14.51 (libmpv) in msvcp140_1/_2 14.44 (PySide6); VS 2022 na runnerju ima 14.44.
+        run: python windows/fetch_msvc_runtime.py
       - name: Build SafeerBrowser.exe
         run: python windows/build_windows.py pyinstaller
       - name: PE hardening of every .exe/.dll/.pyd we ship (ASLR, HEVA, DEP; ours also CFG, /GS, CET)

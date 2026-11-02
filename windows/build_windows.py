@@ -120,6 +120,8 @@ def shared_imports() -> list:
 #: libmpv: kamor ga razpakira windows/fetch_libmpv.py (CILJ). Prej je gradnja iskala windows/vendor/mpv in uradni paket
 #: je bil BREZ libmpv (CI 25. 10. 2026: »windows/vendor/mpv ni prisoten«; pomocnik na testnem PC, naloga 13).
 VENDOR_MPV = os.path.join(WINDOWS, "safeer_windows", "vendor", "mpv")
+#: Cela druzina runtime MSVC iz pripetega VC_redist (windows/fetch_msvc_runtime.py, brez namestitve).
+VENDOR_MSVC = os.path.join(WINDOWS, "safeer_windows", "vendor", "msvc")
 #: MSVC runtime, ki ga libmpv potrebuje (manifest.json: novejsi od tistega, ki ga prinese PySide6).
 MSVC_RUNTIME = ("msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll")
 _MPV_OBVEZNO = ("libmpv-2.dll", "libEGL.dll", "libGLESv2.dll", "manifest.json", "safeer-capabilities.json",
@@ -226,23 +228,37 @@ def pyinstaller() -> None:
     zamenjane = zamenjaj_msvc_runtime(APP_DIR)
     if zamenjane:
         print(f"MSVC runtime iz vendor/mpv/runtime: {len(zamenjane)} kopij ({', '.join(sorted(set(zamenjane)))})")
+    poenotene = poenoti_msvc_druzino(APP_DIR)
+    if poenotene:
+        print(f"MSVC runtime iz vendor/msvc (VC_redist): {len(poenotene)} kopij poenotenih")
     # Na koncu, ko je v _internal vse za oba exe: neuporabljeni moduli Qt in QML (QML namizja ostane).
     prune_bundle()
 
 
 #: Vsa druzina runtime MSVC (VC_redist; Microsoft: v procesu iste razlicice). vendor/mpv prinese samo MSVC_RUNTIME.
 MSVC_DRUZINA = re.compile(r"^(msvcp140(_\d|_atomic_wait|_codecvt_ids)?|vcruntime140(_1|_threads)?|concrt140|"
-                          r"vccorlib140|vcomp140)\.dll$", re.I)
+                          r"vccorlib140|vcomp140|vcamp140)\.dll$", re.I)
 #: Podpisnik runtime MSVC (izmerjeno 25. 10. 2026 na 14.51.36247: »CN=Microsoft Windows Software Compatibility
 #: Publisher, O=Microsoft Corporation«, stanje Valid).
 PODPISNIK_MSVC = "O=Microsoft Corporation"
 #: SHA-256 runtime MSVC 14.51.36247 iz nase izdaje milutv-libmpv safeer-av1-dash-snapshot-r1 (zip pripet v fetch_libmpv,
 #: podpis na testnem PC 25. 10. 2026 »Valid«). CI 40361223511 (26. 10. 2026): na runnerju Get-AuthenticodeSignature
 #: istih datotek ne potrdi (podpisnik Microsoft Windows Software Compatibility Publisher) - pripeta vsota je enako stroga.
+#: Ostali clani so iz VC_redist.x64 14.51.36247.0 (fetch_msvc_runtime, izmerjeno 2. 11. 2026; v njem so tudi zgornji
+#: trije z ISTO vsoto, torej libmpv in VC_redist prineseta isto gradnjo).
 PRIPETI_MSVC = {
     "7c26614e1d733892c2deac7e245ce115504b1d80592dd0a01b08e3e5a55f89ca": "msvcp140.dll",
     "d1f4225df2cd877dbf130d5668a021dce3f94118455ff5ec952061c30afc9ce7": "vcruntime140.dll",
     "a7146c08f89fe5b04541ab507cdb59ff7b44534d4ba3c668a426c6450a03434e": "vcruntime140_1.dll",
+    "206c931bf90fdad8816de3b5e2ef80b2bcaa9406c89ecc05fe6fddffe251e982": "msvcp140_1.dll",
+    "d50d7883f20d1dc6191768d3746f52dd9cac89c346ffaed5be1f110c2f34a838": "msvcp140_2.dll",
+    "3d0cbfaa1bf3eecf5a3f4491d2960ee803cb994f30292c6adc4a07c498f60e2b": "msvcp140_atomic_wait.dll",
+    "8a65c7596ef2e6938731f5a1058e7e40145b6d97967cc649231a076b9a608d78": "msvcp140_codecvt_ids.dll",
+    "40f39e8cee5f5a531b4010e18b807e8fe265b908dc58f959ecb7ebc6ea6cb11a": "vcruntime140_threads.dll",
+    "54716f0738af891f283d213b5c8d11b25896bb8ee3097d301eae718560cf974e": "concrt140.dll",
+    "09f93d5ff96ae09767f3e1af3cdd43a5a58f2598654fc63089429bb6f9f4737f": "vccorlib140.dll",
+    "95d4ce4a6802d1e18b5e0e1722cc30ea72ca7e033f83828f05c0b7b993fe7cbf": "vcomp140.dll",
+    "dc283ffb87e9b82e687ed4e899ae062a209aa338207abfc9a89d61407d678bd4": "vcamp140.dll",
 }
 
 
@@ -337,6 +353,69 @@ def zamenjaj_msvc_runtime(app_dir: str, vendor: str = "", podpis=None, razlicica
     if druzina:
         print("::warning::MSVC runtime: v paketu ostanejo clani druzine, ki jih vendor/mpv ne prinese (starejsa "
               "razlicica ob novejsem msvcp140): " + ", ".join(sorted(druzina)))
+    return zamenjane
+
+
+def vir_msvc_druzine(vir: str = "", podpis=None, razlicica=None) -> tuple:
+    """({ime: pot}, razlicica) cele druzine iz vendor/msvc; ({}, ()) brez nje. Vir mora biti podpisan (ali pripet)
+    in ENE razlicice, sicer ustavi gradnjo."""
+    vir = vir or VENDOR_MSVC
+    viri = {ime.lower(): os.path.join(vir, ime) for ime in (os.listdir(vir) if os.path.isdir(vir) else [])
+            if MSVC_DRUZINA.match(ime)}
+    if not viri:
+        return {}, ()
+    razlicice = preveri_vir_runtime(viri, podpis, razlicica)
+    if len(set(razlicice.values())) != 1:
+        raise SystemExit("MSVC runtime: vendor/msvc ni ena razlicica: " + ", ".join(
+            f"{ime} {'.'.join(map(str, r))}" for ime, r in sorted(razlicice.items())))
+    return viri, next(iter(razlicice.values()))
+
+
+def ena_razlicica_druzine(razlicice: dict, najmanj: tuple = ()) -> tuple:
+    """{pot: razlicica} clanov druzine v paketu -> skupna razlicica; razlicni ali starejsi od libmpv ustavi gradnjo
+    (Microsoft: app-local runtime MSVC v procesu vsi iste razlicice; 1.0.53 je imel 14.51 ob 14.44, 2. 11. 2026)."""
+    po_razlicici = {}
+    for pot, r in razlicice.items():
+        po_razlicici.setdefault(tuple(r), []).append(pot)
+    if len(po_razlicici) > 1:
+        raise SystemExit("MSVC runtime: v paketu so razlicne razlicice druzine: " + "; ".join(
+            f"{'.'.join(map(str, r)) or 'brez razlicice'}: {', '.join(sorted(p))}"
+            for r, p in sorted(po_razlicici.items())))
+    skupna = next(iter(po_razlicici), ())
+    if razlicice and skupna < tuple(najmanj):
+        raise SystemExit(f"MSVC runtime: druzina {'.'.join(map(str, skupna))} je starejsa od libmpv "
+                         f"{'.'.join(map(str, najmanj))}")
+    return skupna
+
+
+def poenoti_msvc_druzino(app_dir: str, vir: str = "", mpv: str = "", podpis=None, razlicica=None) -> list:
+    """Vse clane druzine MSVC v paketu (tudi msvcp140_1/_2, ki jih vendor/mpv ne prinese) zamenja z enimi iz
+    vendor/msvc, nato preveri, da je v paketu ena sama razlicica, vsaj taka kot runtime libmpv. Kopije numpy.libs
+    (msvcp140-<vsota>.dll) niso clani: drugo ime, nalozi jih samo numpy. Vrne relativne poti zamenjanih."""
+    razlicica = razlicica or razlicica_pe
+    mpv_rt = os.path.join(mpv or VENDOR_MPV, "runtime")
+    libmpv = all(os.path.isfile(os.path.join(mpv_rt, ime)) for ime in MSVC_RUNTIME)
+    najmanj = max(razlicica(os.path.join(mpv_rt, ime)) for ime in MSVC_RUNTIME) if libmpv else ()
+    viri, skupna = vir_msvc_druzine(vir, podpis, razlicica)
+    if libmpv and not viri:
+        raise SystemExit("MSVC runtime: libmpv je v paketu, cele druzine MSVC pa ni (python windows/fetch_msvc_runtime.py)")
+    if viri and skupna < najmanj:
+        raise SystemExit(f"MSVC runtime: vendor/msvc {'.'.join(map(str, skupna))} je starejsi od libmpv "
+                         f"{'.'.join(map(str, najmanj))}")
+    zamenjane, clani = [], {}
+    for mapa, _podmape, datoteke in os.walk(app_dir):
+        for ime in datoteke:
+            if not MSVC_DRUZINA.match(ime):
+                continue
+            cilj = os.path.join(mapa, ime)
+            vir_dll = viri.get(ime.lower())
+            if vir_dll and razlicica(cilj) <= skupna:   # nikoli starejsi od kopije v paketu
+                shutil.copy2(vir_dll, cilj)
+                zamenjane.append(os.path.relpath(cilj, app_dir))
+            clani[os.path.relpath(cilj, app_dir)] = razlicica(cilj)
+    koncna = ena_razlicica_druzine(clani, najmanj)
+    if clani:
+        print(f"MSVC runtime: {len(clani)} clanov druzine v paketu, vsi {'.'.join(map(str, koncna))}")
     return zamenjane
 
 

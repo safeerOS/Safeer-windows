@@ -95,6 +95,27 @@ def _runtime_za(cilj, vir):
 a.binaries = [(cilj, _runtime_za(cilj, vir), vrsta) for cilj, vir, vrsta in a.binaries]
 print("MSVC runtime iz vendor/mpv/runtime:", sorted(c for c, v, _t in a.binaries if v in _RUNTIME.values()))
 
+# Cela druzina MSVC (tudi msvcp140_1/_2 iz PySide6) iz vendor/msvc, ena razlicica, vsaj taka kot libmpv - enako kot
+# build_windows.poenoti_msvc_druzino (1.0.53 je imel 14.51 ob 14.44, 2. 11. 2026).
+_DRUZINA, _SKUPNA = _gradnja.vir_msvc_druzine()
+if not _DRUZINA:
+    raise SystemExit("MSVC runtime: cele druzine ni (python windows/fetch_msvc_runtime.py)")
+if _SKUPNA < max(_NOVE.values()):
+    raise SystemExit("MSVC runtime: vendor/msvc je starejsi od runtime libmpv")
+
+
+def _druzina_za(cilj, vir):
+    vir_dll = _DRUZINA.get(os.path.basename(cilj).lower())
+    if vir_dll and _gradnja.razlicica_pe(vir) <= _SKUPNA:
+        return vir_dll
+    return vir
+
+
+a.binaries = [(cilj, _druzina_za(cilj, vir), vrsta) for cilj, vir, vrsta in a.binaries]
+_gradnja.ena_razlicica_druzine({cilj: _gradnja.razlicica_pe(vir) for cilj, vir, _t in a.binaries
+                                if _gradnja.MSVC_DRUZINA.match(os.path.basename(cilj))}, max(_NOVE.values()))
+print("MSVC druzina iz vendor/msvc:", sorted(c for c, v, _t in a.binaries if v in _DRUZINA.values()))
+
 pyz = PYZ(a.pure)  # noqa: F821
 exe = EXE(  # noqa: F821
     pyz,

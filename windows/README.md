@@ -47,6 +47,8 @@ Lokalno na Windows (Python 3.12 x64):
 python -m pip install -r windows/requirements.txt
 python -m unittest discover -s windows/tests
 python windows/build_windows.py smoke-source --online
+python windows/fetch_libmpv.py
+python windows/fetch_msvc_runtime.py   # cela druzina runtime MSVC (pripeti VC_redist, brez namestitve)
 python windows/build_windows.py pyinstaller
 python windows/build_windows.py package   # potrebuje Inno Setup 6
 ```

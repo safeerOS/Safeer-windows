@@ -450,6 +450,108 @@ class LibmpvVPaketu(unittest.TestCase):
         self.assertIn("_gradnja.preveri_vir_runtime(_RUNTIME)", spec)
         self.assertIn("_gradnja.razlicica_pe(vir) <= _NOVE[ime]", spec)
 
+    # Cela druzina MSVC (2. 11. 2026: paket 1.0.53 je imel msvcp140 14.51 iz libmpv ob msvcp140_1/_2 14.44 iz PySide6;
+    # gradnja je izpisala le ::warning:: in ostala zelena).
+    NUMPY = "msvcp140-a4c2229bdc2a2a630acdc095b4d86008.dll"
+
+    def _druzina(self, m, vir_vsebina=b"novi", clani=None, z_libmpv=True, paket=("MSVCP140.dll", "MSVCP140_1.dll",
+                                                                                     "MSVCP140_2.dll", "VCRUNTIME140.dll")):
+        vir = os.path.join(m, "msvc")
+        os.makedirs(vir)
+        for ime in clani or ("msvcp140.dll", "msvcp140_1.dll", "msvcp140_2.dll", "vcruntime140.dll",
+                             "vcruntime140_1.dll", "concrt140.dll"):
+            with open(os.path.join(vir, ime), "wb") as f:
+                f.write(vir_vsebina + b" " + ime.encode())
+        mpv = os.path.join(m, "mpv")
+        os.makedirs(os.path.join(mpv, "runtime"))
+        if z_libmpv:
+            for ime in self.b.MSVC_RUNTIME:
+                with open(os.path.join(mpv, "runtime", ime), "wb") as f:
+                    f.write(b"novi " + ime.encode())
+        app = os.path.join(m, "app")
+        for mapa in (os.path.join("_internal", "PySide6"), os.path.join("_internal", "numpy.libs")):
+            os.makedirs(os.path.join(app, mapa))
+        for ime in paket:
+            with open(os.path.join(app, "_internal", "PySide6", ime), "wb") as f:
+                f.write(b"stari")
+        with open(os.path.join(app, "_internal", "numpy.libs", self.NUMPY), "wb") as f:
+            f.write(b"stari numpy")
+        return vir, mpv, app
+
+    def test_msvc_mesana_druzina_ustavi_gradnjo(self):
+        with self.assertRaises(SystemExit) as e:
+            self.b.ena_razlicica_druzine({"PySide6/MSVCP140.dll": (14, 51, 36247, 0),
+                                          "PySide6/MSVCP140_1.dll": (14, 44, 35211, 0)})
+        self.assertIn("MSVCP140_1.dll", str(e.exception))
+        self.assertEqual(self.b.ena_razlicica_druzine({"a/msvcp140.dll": (14, 51, 36247, 0),
+                                                       "b/msvcp140_2.dll": (14, 51, 36247, 0)}, (14, 51, 36247, 0)),
+                         (14, 51, 36247, 0))
+        with self.assertRaises(SystemExit):   # skladna, a starejsa od runtime libmpv
+            self.b.ena_razlicica_druzine({"a/msvcp140.dll": (14, 44, 35211, 0)}, (14, 51, 36247, 0))
+
+    def test_msvc_poenoti_celo_druzino_numpy_ostane(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as m:
+            vir, mpv, app = self._druzina(m)
+            zamenjane = self.b.poenoti_msvc_druzino(app, vir, mpv, podpis=_podpisano, razlicica=_razlicica)
+            self.assertEqual(len(zamenjane), 4)
+            with open(os.path.join(app, "_internal", "PySide6", "MSVCP140_2.dll"), "rb") as f:
+                self.assertEqual(f.read(), b"novi msvcp140_2.dll")
+            with open(os.path.join(app, "_internal", "numpy.libs", self.NUMPY), "rb") as f:
+                self.assertEqual(f.read(), b"stari numpy")                       # zasebna kopija numpy ni clan
+        self.assertIsNone(self.b.MSVC_DRUZINA.match(self.NUMPY))
+
+    def test_msvc_clan_brez_vira_ustavi_gradnjo(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as m:   # vir brez msvcp140_2 -> v paketu ostane 14.44 ob 14.51
+            vir, mpv, app = self._druzina(m, clani=("msvcp140.dll", "msvcp140_1.dll", "vcruntime140.dll"))
+            with self.assertRaises(SystemExit) as e:
+                self.b.poenoti_msvc_druzino(app, vir, mpv, podpis=_podpisano, razlicica=_razlicica)
+            self.assertIn("MSVCP140_2.dll", str(e.exception))
+
+    def test_msvc_libmpv_brez_druzine_ustavi_gradnjo(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as m:
+            vir, mpv, app = self._druzina(m)
+            with self.assertRaises(SystemExit):
+                self.b.poenoti_msvc_druzino(app, os.path.join(m, "ni"), mpv, podpis=_podpisano, razlicica=_razlicica)
+            # brez libmpv in brez vira: samo preverba skladnosti (PySide6 sam je ene razlicice)
+            self.assertEqual(self.b.poenoti_msvc_druzino(app, os.path.join(m, "ni"), os.path.join(m, "ni"),
+                                                         podpis=_podpisano, razlicica=_razlicica), [])
+
+    def test_msvc_vir_starejsi_od_libmpv_ali_mesan_ustavi_gradnjo(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as m:
+            vir, mpv, app = self._druzina(m, vir_vsebina=b"stari")
+            with self.assertRaises(SystemExit):
+                self.b.poenoti_msvc_druzino(app, vir, mpv, podpis=_podpisano, razlicica=_razlicica)
+            with open(os.path.join(vir, "msvcp140_1.dll"), "wb") as f:
+                f.write(b"novi")                                                    # vir sam ni ene razlicice
+            with self.assertRaises(SystemExit):
+                self.b.vir_msvc_druzine(vir, podpis=_podpisano, razlicica=_razlicica)
+
+    def test_msvc_druzina_v_predvajalniku_in_ci(self):
+        spec = (KOREN / "windows" / "SafeerPredvajalnik.spec").read_text(encoding="utf-8")
+        self.assertIn("_gradnja.vir_msvc_druzine()", spec)
+        self.assertIn("_gradnja.ena_razlicica_druzine(", spec)
+        gradnja = (KOREN / "windows" / "build_windows.py").read_text(encoding="utf-8")
+        self.assertIn("poenoti_msvc_druzino(APP_DIR)", gradnja)
+        ci = (KOREN / ".github" / "workflows" / "windows-package.yml").read_text(encoding="utf-8")
+        self.assertLess(ci.index("python windows/fetch_msvc_runtime.py"),
+                        ci.index("python windows/build_windows.py pyinstaller"))
+
+    def test_msvc_fetch_pripete_vsote_cele_druzine(self):
+        sys.path.insert(0, str(KOREN / "windows"))
+        import fetch_msvc_runtime as fm
+        imena = set(self.b.PRIPETI_MSVC.values())
+        self.assertEqual(len(imena), len(self.b.PRIPETI_MSVC))
+        self.assertTrue(all(self.b.MSVC_DRUZINA.match(i) for i in imena))
+        self.assertTrue({"msvcp140_1.dll", "msvcp140_2.dll"} | set(self.b.MSVC_RUNTIME) <= imena)
+        cab = b"MSCF\0\0\0\0" + (20).to_bytes(4, "little") + b"x" * 8
+        self.assertEqual(fm.kabineti(b"exe" + cab + b"odvecno"), [cab])   # velikost iz glave, brez odvecnih bajtov
+        self.assertTrue(fm.REDIST_URL.startswith("https://download.visualstudio.microsoft.com/"))
+        self.assertIn(fm.REDIST_SHA256.upper(), fm.REDIST_URL)
+
     def test_ffmpeg_pyside_brez_vticnika_multimedia(self):
         import tempfile
         with tempfile.TemporaryDirectory() as pyside:
