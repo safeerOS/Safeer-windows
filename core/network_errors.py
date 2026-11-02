@@ -187,6 +187,14 @@ def _ima_vire(view):
         return True
 
 
+def _zastavica(dejanje, ime: str) -> bool:
+    """Bool lastnost WebKitNavigationAction (is_redirect, is_user_gesture); brez metode ali ob napaki False."""
+    try:
+        return bool(getattr(dejanje, ime)())
+    except Exception:  # noqa: BLE001
+        return False
+
+
 class NetworkErrorHandler:
     def __init__(self, view, jezik=None, posrednik=None):
         self.view = view
@@ -219,12 +227,15 @@ class NetworkErrorHandler:
         # POST glavne navigacije in neuspel POST bi se ponovil kot GET (pomocnik, pregled popravkov 2812b8b).
         try:
             if kind == WebKit2.PolicyDecisionType.NAVIGATION_ACTION:
-                zahteva = decision.get_navigation_action().get_request()
+                dejanje = decision.get_navigation_action()
+                zahteva = dejanje.get_request()
                 uri, metoda = zahteva.get_uri(), zahteva.get_http_method() or 'GET'
-                # Pregled Gemini 2. 11. 2026: GET iframa na ISTI naslov ne sme prepisati POST glavne navigacije -
-                # ne-GET za naslov ostane (ponovitev obrazca bi sicer oddala podatke se enkrat).
+                # Pregled Gemini 2. 11. 2026: GET iframa na ISTI naslov ne prepise POST glavne navigacije (neuspel POST
+                # se ne sme pokazati kot GET s »Poskusi znova«, ki bi podatke obrazca izgubil). Pregled Grok 2. 11. 2026:
+                # preusmeritev (POST->GET 303) in navigacija uporabnika pa sta nova glavna zahteva - ta GET velja.
+                nova = _zastavica(dejanje, 'is_redirect') or _zastavica(dejanje, 'is_user_gesture')
                 prej = self.requests.pop(uri, None)
-                self.requests[uri] = prej if (prej and prej != 'GET' and metoda == 'GET') else metoda
+                self.requests[uri] = prej if (prej and prej != 'GET' and metoda == 'GET' and not nova) else metoda
                 while len(self.requests) > NAJVEC_ZAHTEV:
                     self.requests.pop(next(iter(self.requests)))
         except Exception:  # noqa: BLE001

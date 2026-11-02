@@ -445,3 +445,20 @@ class ZivoVQtWebEngine(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_link_glavni_okvir_samo_lokalni_vmesnik(tmp_path):
+    """Pregled Grok 2. 11. 2026: most SafeerLink se vbrizga v vsak dokument glavnega okvirja - tuja stran ga ne sme dobiti."""
+    from PySide6.QtCore import QUrl
+    link = tmp_path / "assets" / "link" / "index.html"
+    link.parent.mkdir(parents=True)
+    link.write_text("<html></html>", encoding="utf-8")
+    stran = types.SimpleNamespace(window_ref=types.SimpleNamespace(link_html=str(link)))
+    sprejmi = control_window.SafeerControlPage.acceptNavigationRequest
+    assert sprejmi(stran, QUrl.fromLocalFile(str(link)), 0, True)
+    assert sprejmi(stran, QUrl(QUrl.fromLocalFile(str(link)).toString() + "#naprave"), 0, True)
+    with redirect_stdout(io.StringIO()):
+        assert not sprejmi(stran, QUrl("https://tuja.example/"), 0, True)
+        assert not sprejmi(stran, QUrl.fromLocalFile(str(tmp_path / "drugo.html")), 0, True)
+        assert not sprejmi(types.SimpleNamespace(window_ref=types.SimpleNamespace()), QUrl.fromLocalFile(str(link)), 0, True)
+    assert sprejmi(stran, QUrl("https://tuja.example/okvir"), 0, False)      # okvirji ostanejo

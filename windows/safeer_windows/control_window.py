@@ -129,6 +129,18 @@ def most_js(zeton: str) -> str:
     return _MOST_JS_PREDLOGA.replace("__ZETON__", zeton)
 
 
+def dovoljena_navigacija_linka(url: QUrl, link_html: str) -> bool:
+    """Glavni okvir okna Linka sme naloziti samo lokalni assets/link/index.html (pregled Grok 2. 11. 2026: most
+    window.SafeerLink je skripta strani in se vbrizga v vsak nov dokument - tudi v tujo stran, ce bi ime naprave ali
+    drug vnos preusmeril glavni okvir; createWindow -> None tega ne ustavi)."""
+    try:
+        if not link_html or not url.isLocalFile():
+            return False
+        return os.path.normcase(os.path.abspath(url.toLocalFile())) == os.path.normcase(os.path.abspath(link_html))
+    except Exception:  # noqa: BLE001
+        return False
+
+
 class SafeerControlPage(QWebEnginePage):
     def __init__(self, profile: QWebEngineProfile, window: "SafeerControlWindow"):
         super().__init__(profile, window)
@@ -137,6 +149,15 @@ class SafeerControlPage(QWebEnginePage):
     def createWindow(self, _vrsta):  # noqa: N802 - Qt ime
         """Stran Linka nikoli ne odpre novega okna (pregled Gemini 2. 11. 2026)."""
         return None
+
+    def acceptNavigationRequest(self, url, nav_type, is_main_frame):  # noqa: N802 - Qt ime
+        # Kot SafeerOsPage: glavni okvir samo lokalni vmesnik Linka; okvirji (slicice, predogledi) ostanejo.
+        if not is_main_frame:
+            return True
+        if dovoljena_navigacija_linka(url, getattr(self.window_ref, "link_html", "")):
+            return True
+        print("[SafeerControl] Blokirana navigacija glavnega okna Linka")
+        return False
 
     def javaScriptConsoleMessage(self, level, message: str, line: int, source: str) -> None:
         if message.startswith(BRIDGE_PREFIX):
@@ -225,6 +246,7 @@ class SafeerControlWindow(QWidget):
         except Exception:
             link_html = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "assets", "link", "index.html"))
 
+        self.link_html = link_html
         if os.path.exists(link_html):
             self.view.load(QUrl.fromLocalFile(link_html))
         else:
