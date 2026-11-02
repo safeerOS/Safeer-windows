@@ -204,11 +204,11 @@ class VabiloLastnegaHuba(unittest.TestCase):
         from unittest import mock
         from core import link_hub as lh
         odgovor = {"qr_id": "q1", "secret": "s1", "fp": "ab", "pin": "123456",
-                   "address": "192.168.0.135:8990", "expires_in_seconds": 300, "web_port": 0}
+                   "address": "192.168.50.135:8990", "expires_in_seconds": 300, "web_port": 0}
         with mock.patch.object(lh, "_zahteva", return_value=(200, odgovor)):
             v = lh.povabi("wss://127.0.0.1:8990/cast/ws", "z", "ab")
         self.assertEqual(v["pin"], "123456")
-        self.assertIn("a=192.168.0.135:8990", v["povezava"])
+        self.assertIn("a=192.168.50.135:8990", v["povezava"])
         self.assertNotIn("127.0.0.1", v["povezava"])
 
     def test_tuj_hub_ohrani_svoj_naslov(self):
@@ -216,5 +216,5 @@ class VabiloLastnegaHuba(unittest.TestCase):
         from core import link_hub as lh
         odgovor = {"qr_id": "q1", "secret": "s1", "fp": "ab", "address": "10.0.0.9:1", "web_port": 0}
         with mock.patch.object(lh, "_zahteva", return_value=(200, odgovor)):
-            v = lh.povabi("wss://192.168.0.107:8990/cast/ws", "z", "ab")
-        self.assertIn("a=192.168.0.107:8990", v["povezava"])
+            v = lh.povabi("wss://192.168.50.107:8990/cast/ws", "z", "ab")
+        self.assertIn("a=192.168.50.107:8990", v["povezava"])

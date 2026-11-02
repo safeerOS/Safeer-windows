@@ -26,11 +26,11 @@ def _poti(privzeta: str, **posebne):
 
 class VrstniRed(unittest.TestCase):
     def test_domaci_racunalnik_z_vsebniki(self):
-        vmesniki = [("lo", "127.0.0.1", UP | ZANKA), ("enp1s0", "192.168.0.135", UP),
+        vmesniki = [("lo", "127.0.0.1", UP | ZANKA), ("enp1s0", "192.168.50.135", UP),
                     ("br-61befd3fbbaf", "10.83.1.1", UP), ("docker0", "172.17.0.1", UP),
                     ("veth6a3bf73", "169.254.3.4", UP), ("virbr0", "192.168.122.1", UP)]
-        naslovi = link_zvok.lastni_naslovi(HUB_TU, lambda: vmesniki, _poti("192.168.0.135", **{"127_0_0_1": "127.0.0.1"}))
-        self.assertEqual(naslovi, ["192.168.0.135"])
+        naslovi = link_zvok.lastni_naslovi(HUB_TU, lambda: vmesniki, _poti("192.168.50.135", **{"127_0_0_1": "127.0.0.1"}))
+        self.assertEqual(naslovi, ["192.168.50.135"])
 
     def test_ves_promet_skozi_vpn_krajevni_naslov_je_prvi(self):
         vmesniki = [("lo", "127.0.0.1", UP | ZANKA), ("wlp2s0", "192.168.1.50", UP), ("wg0", "10.8.0.2", UP | PREDOR)]
@@ -92,9 +92,9 @@ class BrezVmesnikov(unittest.TestCase):
         self.assertEqual(naslovi, ["192.168.5.20", "192.168.0.20", "10.0.0.4"])
 
     def test_windows_naslovi_brez_imen(self):
-        vmesniki = [("", "192.168.0.120", UP), ("", "172.28.96.1", UP)]
-        naslovi = link_zvok.lastni_naslovi(HUB_TU, lambda: vmesniki, _poti("192.168.0.120"))
-        self.assertEqual(naslovi, ["192.168.0.120", "172.28.96.1"])
+        vmesniki = [("", "192.168.50.120", UP), ("", "172.28.96.1", UP)]
+        naslovi = link_zvok.lastni_naslovi(HUB_TU, lambda: vmesniki, _poti("192.168.50.120"))
+        self.assertEqual(naslovi, ["192.168.50.120", "172.28.96.1"])
 
 
 class HubZImenom(unittest.TestCase):

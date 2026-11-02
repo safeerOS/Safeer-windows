@@ -727,7 +727,7 @@ class TestOsWindows(unittest.TestCase):
             self.assertTrue(res_odpri["ok"])
 
     def test_link_qr_svg_generation(self):
-        svg = link_hub.qr_svg("safeer-link://join?a=192.168.0.135:8990")
+        svg = link_hub.qr_svg("safeer-link://join?a=192.168.50.135:8990")
         self.assertIn("<svg", svg)
         self.assertIn("</svg>", svg)
 
@@ -760,7 +760,7 @@ class TestOsWindows(unittest.TestCase):
                         "capabilities": ["remote", "apps"],
                         "platform": "tv",
                         "kind": "screen",
-                        "ip": "192.168.0.107",
+                        "ip": "192.168.50.107",
                         "busy_by": "phone-1",
                         "busy_by_name": "Galaxy S25"
                     }
@@ -769,8 +769,8 @@ class TestOsWindows(unittest.TestCase):
             backend._na_sporocilo(msg)
             self.assertEqual(len(backend.naprave), 1)
             tv = backend.naprave[0]
-            self.assertEqual(tv["naslov"], "192.168.0.107")
-            self.assertEqual(tv["ip"], "192.168.0.107")
+            self.assertEqual(tv["naslov"], "192.168.50.107")
+            self.assertEqual(tv["ip"], "192.168.50.107")
             self.assertEqual(tv["zasedenaOd"], "phone-1")
             self.assertEqual(tv["zasedenaOdIme"], "Galaxy S25")
             self.assertIn("remote", tv["zmoznosti"])

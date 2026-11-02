@@ -10,7 +10,7 @@ from safeer_windows import control_backend
 
 SEZNAM = {"type": "cast.devices", "devices": [
     {"id": "tablica", "name": "Tablica", "ip": "127.0.0.1", "capabilities": ["remote"]},
-    {"id": "pc-2", "name": "Pisarna", "ip": "192.168.0.135", "capabilities": ["desktop"]},
+    {"id": "pc-2", "name": "Pisarna", "ip": "192.168.50.135", "capabilities": ["desktop"]},
     {"id": "dalec", "name": "Telefon", "ip": "", "capabilities": ["remote"]},
 ]}
 
@@ -24,13 +24,13 @@ def _naslovi(hub):
 
 
 def test_zanka_od_huba_drugje_je_naslov_tistega_huba():
-    naslovi = _naslovi("wss://192.168.0.108:8990/cast/ws")
-    assert naslovi["tablica"] == ("192.168.0.108", "192.168.0.108")
-    assert naslovi["pc-2"] == ("192.168.0.135", "192.168.0.135")
+    naslovi = _naslovi("wss://192.168.50.108:8990/cast/ws")
+    assert naslovi["tablica"] == ("192.168.50.108", "192.168.50.108")
+    assert naslovi["pc-2"] == ("192.168.50.135", "192.168.50.135")
     assert naslovi["dalec"] == ("", "")
 
 
 def test_zanka_od_svojega_huba_ostane():
     naslovi = _naslovi("wss://127.0.0.1:8990/cast/ws")
     assert naslovi["tablica"] == ("127.0.0.1", "127.0.0.1")
-    assert naslovi["pc-2"] == ("192.168.0.135", "192.168.0.135")
+    assert naslovi["pc-2"] == ("192.168.50.135", "192.168.50.135")

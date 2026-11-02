@@ -29,12 +29,12 @@ ODTIS = "ab" * 32
 
 class Kandidati(unittest.TestCase):
     def test_najprej_naslov_iz_seznama_nato_nasteti(self):
-        self.assertEqual(kandidati_naslovov("192.168.0.135", ["192.168.0.135", "10.0.0.7"]),
-                         ["192.168.0.135", "10.0.0.7"])
+        self.assertEqual(kandidati_naslovov("192.168.50.135", ["192.168.50.135", "10.0.0.7"]),
+                         ["192.168.50.135", "10.0.0.7"])
 
     def test_brez_nastetih_ostane_samo_naslov_iz_seznama(self):
         for hosts in (None, [], "192.168.0.9", {"a": 1}, 7):
-            self.assertEqual(kandidati_naslovov("192.168.0.135", hosts), ["192.168.0.135"], hosts)
+            self.assertEqual(kandidati_naslovov("192.168.50.135", hosts), ["192.168.50.135"], hosts)
 
     def test_nasteti_naslovi_morajo_biti_stevilcni_in_dosegljivi_od_drugod(self):
         slabi = ["127.0.0.1", "127.8.9.1", "0.0.0.0", "0.1.2.3", "224.0.0.251", "240.0.0.1", "255.255.255.255",
@@ -42,12 +42,12 @@ class Kandidati(unittest.TestCase):
                  "racunalnik.local", "192.168.0.300", "192.168.01.5", "1.2.3", "1.2.3.4.5", "192.168.0.-5",
                  "\u0661\u0669\u0662.168.0.5", "192.168.0.5:8080", "http://192.168.0.5", "", None, 5,
                  ["192.168.0.5"], "192.168.0.5 "]
-        self.assertEqual(kandidati_naslovov("192.168.0.135", slabi), ["192.168.0.135", "192.168.0.5"])
+        self.assertEqual(kandidati_naslovov("192.168.50.135", slabi), ["192.168.50.135", "192.168.0.5"])
 
     def test_najvec_stirje(self):
         hosts = ["10.0.0.%d" % i for i in range(1, 20)]
-        self.assertEqual(kandidati_naslovov("192.168.0.135", hosts),
-                         ["192.168.0.135", "10.0.0.1", "10.0.0.2", "10.0.0.3"])
+        self.assertEqual(kandidati_naslovov("192.168.50.135", hosts),
+                         ["192.168.50.135", "10.0.0.1", "10.0.0.2", "10.0.0.3"])
         self.assertEqual(len(kandidati_naslovov("", hosts)), NAJVEC_KANDIDATOV)
 
 
@@ -55,19 +55,19 @@ class Odgovor(unittest.TestCase):
     PODATKI = {"port": 40123, "fp": ODTIS, "token": "zeton-zeton-zeton", "v": 2}
 
     def test_naslov_iz_seznama_in_nasteti(self):
-        seja = razcleni_odgovor({"ok": True, "data": dict(self.PODATKI, hosts=["192.168.0.135", "10.8.0.2"])},
-                                {"naslov": "192.168.0.108"})
-        self.assertEqual(seja.naslov, "192.168.0.108")
-        self.assertEqual(seja.naslovi, ("192.168.0.108", "192.168.0.135", "10.8.0.2"))
+        seja = razcleni_odgovor({"ok": True, "data": dict(self.PODATKI, hosts=["192.168.50.135", "10.8.0.2"])},
+                                {"naslov": "192.168.50.108"})
+        self.assertEqual(seja.naslov, "192.168.50.108")
+        self.assertEqual(seja.naslovi, ("192.168.50.108", "192.168.50.135", "10.8.0.2"))
         self.assertEqual((seja.vrata, seja.odtis, seja.zeton), (40123, ODTIS, "zeton-zeton-zeton"))
 
     def test_star_racunalnik_brez_nastetih(self):
-        seja = razcleni_odgovor({"ok": True, "data": dict(self.PODATKI)}, {"naslov": "192.168.0.135"})
-        self.assertEqual(seja.naslovi, ("192.168.0.135",))
+        seja = razcleni_odgovor({"ok": True, "data": dict(self.PODATKI)}, {"naslov": "192.168.50.135"})
+        self.assertEqual(seja.naslovi, ("192.168.50.135",))
 
     def test_brez_naslova_v_seznamu_veljajo_nasteti(self):
-        seja = razcleni_odgovor({"ok": True, "data": dict(self.PODATKI, hosts=["192.168.0.135"])}, {"naslov": ""})
-        self.assertEqual((seja.naslov, seja.naslovi), ("192.168.0.135", ("192.168.0.135",)))
+        seja = razcleni_odgovor({"ok": True, "data": dict(self.PODATKI, hosts=["192.168.50.135"])}, {"naslov": ""})
+        self.assertEqual((seja.naslov, seja.naslovi), ("192.168.50.135", ("192.168.50.135",)))
 
     def test_brez_vsakega_naslova_je_napaka(self):
         for hosts in (None, [], ["127.0.0.1"], ["ni-naslov"]):
@@ -75,7 +75,7 @@ class Odgovor(unittest.TestCase):
                 razcleni_odgovor({"ok": True, "data": dict(self.PODATKI, hosts=hosts)}, {"naslov": ""})
 
     def test_seja_po_starem_ima_en_sam_naslov(self):
-        seja = Seja("192.168.0.135", 40123, ODTIS, "zeton")
+        seja = Seja("192.168.50.135", 40123, ODTIS, "zeton")
         self.assertEqual(seja.naslovi, ())
         self.assertEqual(seja.razlicica, 2)
 
@@ -109,16 +109,16 @@ class OdgovorRacunalnika(unittest.TestCase):
         return b.povezava.poslano[-1]["payload"]
 
     def test_screen_start_nasteje_naslove(self):
-        with mock.patch("core.link_zvok.lastni_naslovi", return_value=["192.168.0.120", "172.28.96.1"]) as klic:
+        with mock.patch("core.link_zvok.lastni_naslovi", return_value=["192.168.50.120", "172.28.96.1"]) as klic:
             odgovor = self._start()
         self.assertTrue(odgovor["ok"], odgovor)
-        self.assertEqual(odgovor["data"]["hosts"], ["192.168.0.120", "172.28.96.1"])
+        self.assertEqual(odgovor["data"]["hosts"], ["192.168.50.120", "172.28.96.1"])
         self.assertEqual(klic.call_args[0][0], "wss://127.0.0.1:8990/cast/ws")
         self.assertEqual((odgovor["data"]["port"], odgovor["data"]["fp"], odgovor["data"]["token"]),
                          (40123, ODTIS, "zeton-zeton-zeton"))
         # Gledalec iz tega odgovora sestavi kandidate: naslov iz seznama naprav in nastete.
-        seja = razcleni_odgovor(odgovor, {"naslov": "192.168.0.120"})
-        self.assertEqual(seja.naslovi, ("192.168.0.120", "172.28.96.1"))
+        seja = razcleni_odgovor(odgovor, {"naslov": "192.168.50.120"})
+        self.assertEqual(seja.naslovi, ("192.168.50.120", "172.28.96.1"))
 
     def test_najvec_stirje_naslovi(self):
         with mock.patch("core.link_zvok.lastni_naslovi", return_value=["10.0.0.%d" % i for i in range(1, 9)]):
