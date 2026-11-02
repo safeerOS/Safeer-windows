@@ -100,8 +100,11 @@ def main() -> int:
             with open(exe, "wb") as f:
                 f.write(data)
             if not all(_gradnja.podpis_microsoft([exe]).values()):
-                print("MSVC runtime: VC_redist nima veljavnega podpisa Microsoft Corporation", file=sys.stderr)
-                return 4
+                # CI 41459814885 (2. 11. 2026): runner windows-2022 podpisa ne potrdi (enako kot DLL runtime v CI
+                # 40361223511, PODPISNIK_MSVC), na testnem PC je »Valid«. Odloca pripeta SHA-256 zgoraj (strozja od
+                # podpisa) in pripete vsote vsakega DLL spodaj; stanje podpisa izpisemo za sled.
+                print("::notice::MSVC runtime: Get-AuthenticodeSignature VC_redist ni Valid na tem stroju - velja "
+                      "pripeta SHA-256 " + REDIST_SHA256, flush=True)
         druzina = druzina_iz_paketa(data, delo)
     napacne = sorted(ime for ime, vsebina in druzina.items()
                      if hashlib.sha256(vsebina).hexdigest() != pricakovano.get(ime))

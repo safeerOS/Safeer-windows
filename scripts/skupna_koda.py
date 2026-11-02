@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import difflib
 import json
+import subprocess
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -37,6 +39,8 @@ def _datoteke_core() -> set:
 def preveri(linux: Path) -> int:
     s = _beri()
     napake = []
+    if not re.fullmatch(r"[0-9a-f]{40}", str(s.get("ref", ""))):
+        napake.append("skupna-koda.json: ref mora biti poln SHA (40 znakov), ne kratek ali ime veje")
     for f in s["skupne"]:
         a, b = KOREN / f, linux / f
         if not b.is_file():
@@ -60,6 +64,10 @@ def prenesi(linux: Path, ref: str) -> int:
     for f in s["skupne"]:
         (KOREN / f).parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(linux / f, KOREN / f)
+    # CI 41459814885 (2. 11. 2026): kratek SHA je actions/checkout bral kot ime veje - shranimo poln SHA.
+    if not re.fullmatch(r"[0-9a-f]{40}", ref):
+        ref = subprocess.run(["git", "-C", str(linux), "rev-parse", "--verify", ref + "^{commit}"],
+                             capture_output=True, text=True, check=True).stdout.strip()
     s["ref"] = ref
     SEZNAM.write_text(json.dumps(s, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print("prenesenih %d datotek iz %s" % (len(s["skupne"]), ref))
