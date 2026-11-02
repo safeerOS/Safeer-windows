@@ -1213,7 +1213,6 @@ class SafeerControlBackend:
         streznik = link_hub_streznik.HubStreznik()
         # Deljene mape tudi prek Huba (/cast/d/): po Global Linku pride samo povezava do vrat Huba.
         streznik.datoteke = lambda: [x.streznik for x in list((getattr(self, "_datoteke", None) or {}).values())]
-        streznik.zaslon = lambda: self.navidezni_zaslon
         if not self._zazeni_sredisce(streznik) or streznik.hub is None:
             return None
         self._lokalni_hub = streznik
@@ -2112,7 +2111,7 @@ class SafeerControlBackend:
                 kakovost = str(params.get("quality") or "najvisja")
                 # Upravljanje (vnos) samo z ozjim krogom (»Vse«); »Samo ogled zaslona« dobi sliko brez vnosa.
                 seja = dict(self.navidezni_zaslon.zacni_sejo(posiljatelj, kakovost=kakovost,
-                                                             vnos=self._sme_upravljati(posiljatelj), prek_huba=bool(params.get("relay"))))
+                                                             vnos=self._sme_upravljati(posiljatelj)))
                 # Nasi naslovi: gledalec jih poskusi poleg naslova iz seznama naprav (docs/LINK-MESH.md, pravilo 8).
                 seja["hosts"] = self._lastni_naslovi()
                 izid = {"ok": True, "message": "Navidezni zaslon se deli", "data": seja}

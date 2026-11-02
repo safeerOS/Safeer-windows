@@ -74,8 +74,6 @@ POT_PREVZEM = "/cast/file/"
 POT_ZASLON_START = "/cast/share/screen/start"
 POT_ZASLON_STOP = "/cast/share/screen/stop"
 POT_ZASLON = "/cast/screen/"
-#: Slika zaslona tega racunalnika prek Huba (zdoma).
-POT_NAMIZJE = "/cast/desktop"
 #: Toliko neprebranega telesa se preberemo in zavrzemo, da odjemalec dobi odgovor z napako; pri vecjem zapremo.
 NAJVEC_ZAVRZENEGA = 64 * 1024 * 1024
 
@@ -1995,9 +1993,6 @@ class _Obravnava(http.server.BaseHTTPRequestHandler):
         if pot.startswith(POT_PREVZEM):
             self._prevzem_datoteke(pot)
             return
-        if pot == POT_NAMIZJE:
-            self._namizje()
-            return
         if pot.startswith(POT_ZASLON):
             self._gledalec_zaslona(pot)
             return
@@ -2115,35 +2110,6 @@ class _Obravnava(http.server.BaseHTTPRequestHandler):
             self.wfile.write(podatki)
         except Exception:
             pass
-
-
-    # ------------------------------------------------------------------ zaslon tega racunalnika prek Huba
-    def _namizje(self) -> None:
-        """GET /cast/desktop (Upgrade: safeer-desktop): slika zaslona TEGA racunalnika za gledalca, ki je zdoma.
-
-        Po Global Linku rele pripelje samo do vrat Huba; do vrat seje zaslona zdoma ni poti.
-        Gledalec zato pride sem z zetonom seje iz odgovora na `screen.start` (glava X-Safeer-Desktop). Po odgovoru
-        101 povezavo prevzame seja zaslona: po njej tece isti pretok kot po neposredni povezavi (glava JSON,
-        okvirji, vnos nazaj). Rele vidi samo sifrirane bajte - TLS je do tega Huba, s pripetim odtisom.
-        """
-        dobi = getattr(self.server, "zaslon", None)
-        zaslon = dobi() if callable(dobi) else getattr(self.server, "zaslon", None)
-        zeton = (self.headers.get("X-Safeer-Desktop") or "").strip()
-        if zaslon is None or not hasattr(zaslon, "prevzemi") or not zeton or not zaslon.caka(zeton):
-            self._napaka(404, "Seje zaslona s tem žetonom ni.", "ni_seje")
-            return
-        if (self.headers.get("Upgrade") or "").strip().lower() != "safeer-desktop":
-            self._napaka(400, "Manjka nadgradnja povezave.", "ni_nadgradnje")
-            return
-        self._zaupaj()
-        try:
-            self.wfile.write(b"HTTP/1.1 101 Switching Protocols\r\nUpgrade: safeer-desktop\r\n"
-                             b"Connection: Upgrade\r\n\r\n")
-            self.wfile.flush()
-        except Exception:
-            return
-        self.close_connection = True          # po seji te povezave ni mogoce uporabiti znova
-        zaslon.prevzemi(self.connection, zeton)
 
     def _gledalec_zaslona(self, pot: str) -> None:
         """GET /cast/screen/<id>/view|stream|state?k=<kljuc>: stran gledalca, tok MJPEG in stanje deljenja.
@@ -2325,9 +2291,6 @@ class _Obravnava(http.server.BaseHTTPRequestHandler):
             telo = self._telo()
             koda, odgovor = self._hub.koncaj_zaslon(self.headers.get("X-Safeer-Token") or "", str(telo.get("id") or ""))
             self._odgovori(koda, odgovor)
-            return
-        if pot == POT_NAMIZJE:
-            self._namizje()
             return
         if pot.startswith(POT_ZASLON):
             self._tok_zaslona(pot)

@@ -1081,33 +1081,6 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
             self.assertEqual(stanje_l.get("sifriranje"), "TLS 1.2+ (ECDHE/AEAD)")
             self.assertTrue(stanje_l.get("navidezni_zaslon"))
 
-    def test_dohodni_ukaz_screen_start_relay(self):
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
-            cfg = os.path.join(td, "link.json")
-            backend = control_backend.SafeerControlBackend(config_pot=cfg)
-
-            poslana = []
-            class MockPovezava:
-                tece = True
-                def poslji(self, sporocilo):
-                    poslana.append(sporocilo)
-                    return True
-
-            backend.povezava = MockPovezava()
-
-            cmd_screen = {
-                "id": "ukaz-scr-1",
-                "type": "control.command",
-                "sender": "tv-dnevna",
-                "payload": {"action": "screen.start", "params": {"relay": True}}
-            }
-            backend._na_sporocilo(cmd_screen)
-            self.assertEqual(len(poslana), 1)
-            res = poslana[0]
-            self.assertTrue(res["payload"]["ok"])
-            seja = res["payload"]["data"]
-            self.assertTrue(seja["relay"])
-
     def test_dohodni_ukaz_screen_start_privzeto_najvisja(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             cfg = os.path.join(td, "link.json")

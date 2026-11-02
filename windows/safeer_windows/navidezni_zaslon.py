@@ -161,7 +161,6 @@ class NavidezniZaslon:
         #: Seje, ki jih je prevzela druga naprava: njihova nit gledalcu pred koncem pove, zakaj (glej zacni_sejo).
         self._prevzete: dict = {}
         self._kljuc = threading.RLock()
-        self._prevzeti = []
 
         self.vnos = NavidezniVnos(self)
 
@@ -648,7 +647,7 @@ class NavidezniZaslon:
         )
 
     # ------------------------------------------------------------------ Pretočna seja (Screen Stream)
-    def zacni_sejo(self, posiljatelj: str, kakovost: str = PRIVZETA_KAKOVOST, vnos: bool = False, prek_huba: bool = False) -> dict:
+    def zacni_sejo(self, posiljatelj: str, kakovost: str = PRIVZETA_KAKOVOST, vnos: bool = False) -> dict:
         """Začne visoko kakovosten pretočni strežnik za navidezni ločeni zaslon (skladno s core/link_zaslon.py).
         `vnos=False`: naprava sme samo gledati - vnos iz seje se zavrze (glava »vnos«: false)."""
         with self._kljuc:
@@ -710,7 +709,6 @@ class NavidezniZaslon:
                 "audio": ({"hz": zajem_zaslona.ZVOK_HZ, "channels": zajem_zaslona.ZVOK_KANALI, "format": "s16le"}
                           if zajem_zaslona.zvok_na_voljo() else None),
                 "input": True,
-                "relay": bool(prek_huba),
                 "gamepad": True,
                 "screen": "desktop",
                 "secure": True,
@@ -720,68 +718,14 @@ class NavidezniZaslon:
                 "media": False,
             }
 
-
-    # ------------------------------------------------------------------ gledalec prek Huba (Global Link)
-
-    def caka(self, zeton: str) -> bool:
-        """Ali seja s tem zetonom caka gledalca. Hub vprasa, preden povezavo nadgradi."""
-        z = self._zeton
-        if not z or not zeton or self._posluh is None or self._odjemalec is not None:
-            return False
-        import hmac
-        return hmac.compare_digest(str(zeton).encode("utf-8"), z.encode("utf-8"))
-
-    def prevzemi(self, odjemalec, zeton: str) -> bool:
-        """Povezavo gledalca, ki je prisla do Huba (Global Link), preda cakajoci seji in se vrne, ko se seja konca."""
-        if not self.caka(zeton):
-            return False
-        import time
-        import threading
-        from core.link_zaslon import CAKANJE_S
-        konec = threading.Event()
-        with self._kljuc:
-            self._prevzeti.append((odjemalec, konec, self._seja_st))
-        rok = time.monotonic() + CAKANJE_S + 5
-        while not konec.wait(0.5):
-            with self._kljuc:
-                se_caka = any(p[0] is odjemalec for p in self._prevzeti)
-                if se_caka and (self._posluh is None or self._odjemalec is not None or time.monotonic() > rok):
-                    self._prevzeti = [p for p in self._prevzeti if p[0] is not odjemalec]
-                    return False
-        return True
-
-    def _vzemi_prevzetega(self):
-        """Povezava, ki jo je Hub predal tej seji: (vticnica, dogodek konca) ali None."""
-        with self._kljuc:
-            while self._prevzeti:
-                odjemalec, konec, seja = self._prevzeti.pop(0)
-                if seja == self._seja_st:
-                    return odjemalec, konec
-                konec.set()
-        return None
-
     def _sprejmi(self, posluh: socket.socket, ctx: ssl.SSLContext):
-        """Caka napravo s pravim zetonom (neposredno ali prek Huba). Kdor pride z napacnim (ali brez TLS), ne dobi nicesar in
-        seje tudi ne podre - naprava, ki ji je zaslon namenjen, se lahko se vedno poveze."""
-        import time
-        from core.link_zaslon import CAKANJE_S, ROKOVANJE_S
-        from core import link_vticnik
-        import hmac
+        """Caka napravo s pravim zetonom. Kdor pride z napacnim (ali brez TLS), ne dobi nicesar in seje tudi
+        ne podre - naprava, ki ji je zaslon namenjen, se lahko se vedno poveze. (Prej je prva tuja povezava
+        sejo koncala: kdorkoli v omrezju je lahko deljenje zaslona preprecil.)"""
         konec = time.monotonic() + CAKANJE_S
         while time.monotonic() < konec:
-            prevzet = self._vzemi_prevzetega()
-            if prevzet is not None:
-                try:
-                    link_vticnik.brez_zamika(prevzet[0])
-                except Exception:
-                    pass
-                # Povezava gledalca prek Huba (Global Link): TLS je ze vzpostavil Hub (pripet odtis), seja jo samo prevzame.
-                return prevzet
             posluh.settimeout(max(0.1, konec - time.monotonic()))
-            try:
-                surov, _ = posluh.accept()
-            except (socket.timeout, OSError):
-                continue
+            surov, _ = posluh.accept()
             odjemalec = None
             try:
                 surov.settimeout(ROKOVANJE_S)
@@ -799,21 +743,18 @@ class NavidezniZaslon:
                 # Primerjamo bajte: compare_digest z nizom, ki ni cisti ASCII, vrze TypeError.
                 if zeton and len(deli) == 2 and deli[0] == "SAFEER-ZASLON" and hmac.compare_digest(
                         deli[1].encode("utf-8"), zeton.encode("utf-8")):
-                    return odjemalec, None
+                    return odjemalec
             except (OSError, ssl.SSLError, ValueError):
                 pass
-            from core.link_zaslon import _zapri
             _zapri(odjemalec if odjemalec is not None else surov)
         return None
 
     def _streci_sejo(self, posluh: socket.socket, ctx: ssl.SSLContext, fps: int = 60, seja: int = 0) -> None:
         odjemalec = None
-        konec_prevzete = None
         try:
-            sprejet = self._sprejmi(posluh, ctx)
-            if sprejet is None:
+            odjemalec = self._sprejmi(posluh, ctx)
+            if odjemalec is None:
                 return
-            odjemalec, konec_prevzete = sprejet
 
             try:
                 zajem = zajem_zaslona.H264Zajem(fps=fps)
