@@ -2790,9 +2790,17 @@ class SafeerOsWindow(QMainWindow):
             return self._predvajaj_disk(str(a[0]) if a else "")
         if metoda == "podnapisVtt":
             return self._podnapis_vtt(str(a[0]) if a else "")
+        if metoda == "odpriPredvajalnik":
+            self.dispatcher.dispatch(self.odpri_predvajalnik)
+            return True
+        if metoda == "odpriOknoRazdelka":
+            cilj = str(a[0]) if a else ""
+            self.dispatcher.dispatch(lambda: self.odpri_razdelek_namizja(cilj))
+            return True
         if metoda == "zacetek":
             shramba = os_backend_win.nalozi_shrambo()
             return {
+                "mostOkna": True,
                 "jezik": _nastavi_jezik_oken(_jezik_vmesnika(shramba)),
                 "ime": os.environ.get("USERNAME", "Uporabnik"),
                 "racunalnik": platform.node(),
@@ -3775,6 +3783,8 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Safeer OS za Windows (z vgrajenim Safeer Controlom)")
     parser.add_argument("--predvajalnik", "--player", action="store_true",
                         help="Safeer Player: samo Medijski center v svojem oknu (kot na Linuxu)")
+    parser.add_argument("--sporocila", action="store_true",
+                        help="Safeer Sporočila: samo sporočila v svojem oknu")
     parser.add_argument("--okno", action="store_true", help="Odpri v oknu namesto celozaslonsko")
     parser.add_argument("--control", "-c", action="store_true", help="Odpri neposredno v razdelku Naprave")
     parser.add_argument("--razdelek", type=str, default="", help="Zacetni razdelek (npr. control, daljinec, naprave, novaNaprava)")
@@ -3822,6 +3832,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     zacetni = ""
     predvajalnik = bool(args.predvajalnik)
+    sporocila = bool(args.sporocila)
     if predvajalnik and sys.platform == "win32":
         # Svoja skupina v opravilni vrstici (bliznjica Safeer Player ima AppUserModelID Safeer.Player, installer.iss).
         try:
@@ -3829,8 +3840,17 @@ def main(argv: Optional[List[str]] = None) -> int:
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Safeer.Player")
         except Exception:  # noqa: BLE001
             pass
+    elif sporocila and sys.platform == "win32":
+        try:
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Safeer.Sporocila")
+        except Exception:  # noqa: BLE001
+            pass
+
     if predvajalnik:
         zacetni = ""        # Player: vedno Medijski center (os.js ?predvajalnik=1), drugi razdelki niso zanj
+    elif sporocila:
+        zacetni = "sporocila"
     elif args.control:
         zacetni = args.razdelek or "naprave"
     elif args.razdelek:
@@ -3842,7 +3862,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     zaklep = en_primerek.zakleni()
     if zaklep is None:
         izid = en_primerek.vprasaj_prvo(zacetni, bool(args.ozadje) and not magnet, magnet=magnet,
-                                        predvajalnik=predvajalnik)
+                                        predvajalnik=predvajalnik, sporocila=sporocila)
         if izid == "ok":
             print("[SafeerOS] Ze tece; razdelek predan prvi kopiji.", flush=True)
             return 0

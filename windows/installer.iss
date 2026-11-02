@@ -95,6 +95,9 @@ Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"; AppUserModelID: 
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon; AppUserModelID: "Safeer.Browser"
 Name: "{autoprograms}\Safeer OS"; Filename: "{app}\SafeerOS.exe"; AppUserModelID: "Safeer.OS"
 Name: "{autodesktop}\Safeer OS"; Filename: "{app}\SafeerOS.exe"; Tasks: desktopicon; AppUserModelID: "Safeer.OS"
+Name: "{autoprograms}\Safeer Player"; Filename: "{app}\SafeerOS.exe"; Parameters: "--predvajalnik"; AppUserModelID: "Safeer.Player"
+Name: "{autodesktop}\Safeer Player"; Filename: "{app}\SafeerOS.exe"; Parameters: "--predvajalnik"; Tasks: desktopicon; AppUserModelID: "Safeer.Player"
+Name: "{autoprograms}\Sporočila"; Filename: "{app}\SafeerOS.exe"; Parameters: "--sporocila"; AppUserModelID: "Safeer.Sporocila"
 #endif
 
 #ifndef Predvajalnik

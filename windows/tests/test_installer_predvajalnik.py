@@ -105,7 +105,7 @@ def test_browser_ostane_nespremenjen():
     assert s["OutputBaseFilename"] == "SafeerBrowser-1.0.0-windows-x64-setup"
     assert s["AppSupportURL"] == "https://safeer.si/browser/"
     assert s["ChangesAssociations"] == "yes"
-    assert len(r["Icons"]) == 4 and not any("--predvajalnik" in i for i in r["Icons"])
+    assert len(r["Icons"]) == 7 and not any("--predvajalnik" in i for i in r["Icons"][:4])
     assert any("StartMenuInternet" in v for v in r["Registry"])
     assert r["Run"] == [r'Filename: "{app}\SafeerBrowser.exe"; Description: "{cm:LaunchProgram,Safeer Browser}"; Flags: nowait postinstall skipifsilent']
 

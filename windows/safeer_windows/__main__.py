@@ -15,7 +15,7 @@ if "--datoteka" in sys.argv:
     sys.argv.remove("--datoteka")
     from safeer_windows.safeer_predvajalnik import main as predvajalnik_main
     sys.exit(predvajalnik_main())
-elif "--os" in sys.argv or "--predvajalnik" in sys.argv:
+elif "--os" in sys.argv or "--predvajalnik" in sys.argv or "--sporocila" in sys.argv:
     if "--os" in sys.argv:
         sys.argv.remove("--os")
     from safeer_windows.os_app import main as os_main

@@ -403,6 +403,16 @@
       if (blok) setTimeout(function () { blok.scrollIntoView({ block: "start", behavior: "smooth" }); }, 120);
       return;
     }
+    if (S.zacetek && S.zacetek.mostOkna && !RAZDELEK) {
+      if (razdelek === "media") {
+        klic("odpriPredvajalnik", []).catch(function () {});
+        return;
+      }
+      if (razdelek === "zapiski" || razdelek === "sporocila" || razdelek === "nastavitve" || razdelek === "scit") {
+        klic("odpriOknoRazdelka", [razdelek]).catch(function () {});
+        return;
+      }
+    }
     if (document.body.classList.contains("nacin-splet") && razdelek !== "splet") {
       klic("zapriSplet", [razdelek]);
     }
@@ -3011,6 +3021,10 @@
     izbira.innerHTML = "";
     if (!z.length) izbira.add(new Option(t("debridDodaj"), ""));
     z.forEach(function (x) { izbira.add(new Option((s.oznaka || "⚡") + " " + x.ime, x.id)); });
+    var u_idx = (s.usenet && s.usenet.gostitelj) ? t("usenetIme") : "";
+    var u_unp = (unp.stanje && unp.stanje.vpisan) ? (unp.stanje.ime || unp.stanje.gostitelj) : "";
+    var u_text = u_idx && u_unp ? u_unp + " + " + u_idx : u_idx || u_unp || t("dodajPonudnikaUsenet");
+    izbira.add(new Option(u_text, "usenet"));
     if (z.length) izbira.add(new Option(t("debridBrez"), "brez"));
     izbira.add(new Option(t("debridNastavitve"), "nastavitve"));
     izbira.value = z.length ? (s.aktivna || "brez") : "";

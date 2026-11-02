@@ -244,6 +244,63 @@ class SafeerControlBackend:
         self.ob_odzivu_vnosa: Optional[Callable[[dict], None]] = None
         self._opozorjena_dovoljenja: set[str] = set()
         self._lokalni_hub: Optional[link_hub_streznik.HubStreznik] = None
+        self._zacni_uskladitev_kljucev()
+
+    def _besedilo_kljucev(self, kljuc: str) -> str:
+        # Enako kot Linux safeer_control.py (sl/en).
+        sl = {"vprasaj": "Naprava v ožjem krogu želi uskladiti ključe", "sprejmi": "Sprejmi", "zavrni": "Zavrni",
+              "spremenjeno": "Ključi spremenjeni z druge naprave", "razveljavi": "Razveljavi", "vredu": "V redu"}
+        en = {"vprasaj": "A device in your inner circle wants to sync keys", "sprejmi": "Accept", "zavrni": "Decline",
+              "spremenjeno": "Keys changed from another device", "razveljavi": "Undo", "vredu": "OK"}
+        import locale
+        jezik = str(getattr(self, "_jezik", "") or (locale.getlocale()[0] or "sl"))[:2].lower()
+        return (sl if jezik == "sl" else en)[kljuc]
+
+    def _vprasaj_za_kljuce(self, usk, c) -> None:
+        from core import obvestila
+        b = self._besedilo_kljucev
+        opis = ", ".join(usk.opis_zapisov(c)) or "-"
+        obvestila.poslji(b("vprasaj"), "%s: %s" % (c.ime or c.id, opis), "kljuci-sinh-" + c.kljuc,
+                         gumbi=[("da", b("sprejmi"), lambda: usk.potrdi(c.kljuc, True)),
+                                ("ne", b("zavrni"), lambda: usk.potrdi(c.kljuc, False))],
+                         prioriteta="high")
+
+    def _sprememba_kljucev(self, usk, s) -> None:
+        from core import obvestila
+        b = self._besedilo_kljucev
+        obvestila.poslji(b("spremenjeno"), "%s: %s" % (s.ime or s.id, ", ".join(usk.opis_spremembe(s)) or "-"),
+                         "kljuci-sprememba-" + s.kljuc,
+                         gumbi=[("razveljavi", b("razveljavi"), lambda: usk.potrdi_spremembo(s, True)),
+                                ("vredu", b("vredu"), lambda: usk.potrdi_spremembo(s, False))])
+
+    def _zacni_uskladitev_kljucev(self) -> None:
+        """secrets.sync (lastnik 28. 10. 2026): debrid kljuci, indeksator Usenet in dodatki s poverilnico gredo sami na
+        naprave v ozjem krogu (in z njih sem). Nova naprava se potrdi
+        enkrat z obvestilom (Sprejmi / Zavrni); zamenjavo z druge naprave se da razveljaviti."""
+        try:
+            from core import os_programi, uskladitev_kljucev as UK, uskladitev_kljucev_mediji as UM
+            import os
+            mapa = os.path.join(os_programi.MAPA_NASTAVITEV, "media")
+            lastni: list = []
+
+            def dobi_mc():
+                from core import en_proces
+                app = en_proces.os_app()
+                kat = getattr(app, "_katalog", None) if app is not None else None
+                if kat is not None:
+                    return kat.mc
+                if not lastni:
+                    from core import os_katalog, os_media
+                    lastni.append(os_media.MediaCenter(mapa, roots=[], secret_encryptor=os_katalog.skrij,
+                                                       secret_decryptor=os_katalog.razkrij, secret_forget=os_katalog.pozabi))
+                return lastni[0]
+            usk = UK.Uskladitev(UK.Shramba(os.path.join(mapa, "kljuci-sinh.json")), UM.VirMedijev(dobi_mc),
+                                UM.LinkSafeer(self))
+            usk.ob_vprasanju = lambda c: self._vprasaj_za_kljuce(usk, c)
+            usk.ob_spremembi = lambda s: self._sprememba_kljucev(usk, s)
+            UK.nastavi(usk)
+        except Exception as e:
+            print(f"[ControlBackend] Napaka pri _zacni_uskladitev_kljucev: {e}")
 
     def nova_lokalna_koda(self) -> str:
         self.lokalna_koda = str(100000 + secrets.randbelow(900000))
@@ -1156,6 +1213,7 @@ class SafeerControlBackend:
         streznik = link_hub_streznik.HubStreznik()
         # Deljene mape tudi prek Huba (/cast/d/): po Global Linku pride samo povezava do vrat Huba.
         streznik.datoteke = lambda: [x.streznik for x in list((getattr(self, "_datoteke", None) or {}).values())]
+        streznik.zaslon = lambda: self.navidezni_zaslon
         if not self._zazeni_sredisce(streznik) or streznik.hub is None:
             return None
         self._lokalni_hub = streznik
@@ -1628,7 +1686,7 @@ class SafeerControlBackend:
                 odtis=odtis or None,
                 # chat.delete: zna zahtevo za izbris sporocila (payload.delete) - Android in Linux sicer »Izbrisi na
                 # vseh« do tega racunalnika zadrzita (core/sporocila/izbris_linka.py, kot Linux 25. 10. 2026).
-                dodatne_zmoznosti=["files", "remote", "desktop", "screen", "apps", "chat", "chat.delete", "lists"]
+                dodatne_zmoznosti=["files", "remote", "desktop", "screen", "apps", "chat", "chat.delete", "lists", "secrets"]
                 # Magnet povezave z drugih naprav odpre Safeer OS na tem racunalniku.
                 + (["magnet"] if self.magnet_na_voljo() or self.tok_torrenta_na_voljo() else []),
                 katalog=self.navidezni_zaslon.katalog_aplikacij,
@@ -2054,7 +2112,7 @@ class SafeerControlBackend:
                 kakovost = str(params.get("quality") or "najvisja")
                 # Upravljanje (vnos) samo z ozjim krogom (»Vse«); »Samo ogled zaslona« dobi sliko brez vnosa.
                 seja = dict(self.navidezni_zaslon.zacni_sejo(posiljatelj, kakovost=kakovost,
-                                                             vnos=self._sme_upravljati(posiljatelj)))
+                                                             vnos=self._sme_upravljati(posiljatelj), prek_huba=bool(params.get("relay"))))
                 # Nasi naslovi: gledalec jih poskusi poleg naslova iz seznama naprav (docs/LINK-MESH.md, pravilo 8).
                 seja["hosts"] = self._lastni_naslovi()
                 izid = {"ok": True, "message": "Navidezni zaslon se deli", "data": seja}
@@ -2131,6 +2189,25 @@ class SafeerControlBackend:
                     izid = {"ok": True, "message": f"{len(podatki.get('items', []))} zadetkov", "data": podatki}
                 except Exception as e:
                     izid = {"ok": False, "message": str(e)}
+
+            elif akcija == "secrets.sync":
+                import threading
+                from core import uskladitev_kljucev
+                usk = uskladitev_kljucev.storitev()
+                if usk is None:
+                    izid = {"ok": False, "message": "Usklajevanje ključev tu ni na voljo", "code": "neznano_dejanje"}
+                else:
+                    zascita = str(sporocilo.get("security") or sporocilo.get("zascita") or "")
+                    # Kot Linux (core/link_daljinec.py): preverba v svoji niti.
+                    def kljuci(id_ukaza_nit=id_ukaza, posiljatelj_nit=posiljatelj, params_nit=params, zascita_nit=zascita):
+                        try:
+                            izid_niti = {"ok": True, "message": "Usklajevanje ključev",
+                                         "data": usk.prejmi(posiljatelj_nit, "", params_nit, zascita=zascita_nit)}
+                        except Exception as e:
+                            izid_niti = {"ok": False, "message": "Usklajevanje ključev ni uspelo: " + str(e), "code": "napaka"}
+                        self._odgovori_na_ukaz(posiljatelj_nit, id_ukaza_nit, "secrets.sync", izid_niti)
+                    threading.Thread(target=kljuci, name="safeer-kljuci-ukaz", daemon=True).start()
+                    return  # odgovori iz niti
 
             else:
                 izid = {"ok": False, "message": f"Neznano dejanje: {akcija}", "code": "neznano_dejanje"}
@@ -2365,6 +2442,10 @@ class SafeerControlBackend:
         cas = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
         return self.poslji_klepet(id_naprave, izbris_linka.BESEDILO_IZBRISA, cas, cakaj=cakaj, ident=str(uuid.uuid4()),
                                   izbrisi=skupni)
+
+    def _id(self) -> str:
+        """Id te naprave v Linku (vmesnik, ki ga pricakuje core/uskladitev_kljucev_mediji.LinkSafeer kot pri Linux SafeerLink)."""
+        return str(getattr(self, "device_id", "") or "")
 
     def ukaz_pocakaj(self, id_naprave: str, dejanje: str, parametri: Optional[dict] = None, cas: float = 12.0) -> dict:
         if not self.je_povezan():

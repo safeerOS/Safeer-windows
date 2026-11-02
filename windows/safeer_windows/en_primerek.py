@@ -55,7 +55,7 @@ def zakleni() -> Optional[QLockFile]:
 
 
 def vprasaj_prvo(razdelek: str, ozadje: bool, cakaj_ms: int = 4000, magnet: str = "",
-                 predvajalnik: bool = False) -> str:
+                 predvajalnik: bool = False, sporocila: bool = False) -> str:
     """Tece ze druga kopija: predamo ji razdelek (prva se lahko se zaganja, zato nekaj casa poskusamo).
 
     `magnet`: magnet povezava (brskalnik, druga naprava v Linku), ki jo prva kopija odpre v Medijskem centru.
@@ -68,12 +68,14 @@ def vprasaj_prvo(razdelek: str, ozadje: bool, cakaj_ms: int = 4000, magnet: str 
           "ni"             ni je mogoce doseci.
     Pri vsem razen "ok" poklici odloci_brez_prevzema().
     """
-    sporocilo = {"razdelek": razdelek, "ozadje": ozadje, "koda": ZAGNANA_KODA}
+    sporocilo_dict = {"razdelek": razdelek, "ozadje": ozadje, "koda": ZAGNANA_KODA}
     if predvajalnik:
-        sporocilo = {"razdelek": "media", "ozadje": False, "predvajalnik": True}
+        sporocilo_dict = {"razdelek": "media", "ozadje": False, "predvajalnik": True}
+    elif sporocila:
+        sporocilo_dict = {"razdelek": "sporocila", "ozadje": False, "sporocila": True}
     if magnet:
-        sporocilo["magnet"] = magnet
-    surovo = json.dumps(sporocilo).encode("utf-8") + b"\n"
+        sporocilo_dict["magnet"] = magnet
+    surovo = json.dumps(sporocilo_dict).encode("utf-8") + b"\n"
     konec = time.monotonic() + cakaj_ms / 1000.0
     while True:
         # Brez QLocalSocket: njegova blokirajoca cakanja se na Windows lahko zataknejo za vedno (krajevna_povezava.py).
@@ -167,6 +169,13 @@ def streznik(okno) -> QLocalServer:
                 okno.odpri_predvajalnik()
             else:
                 okno.prebudi("media")
+            return
+        if sporocilo.get("sporocila"):
+            odgovori(v, b"ok\n")
+            if hasattr(okno, "odpri_razdelek_namizja"):
+                okno.odpri_razdelek_namizja("sporocila")
+            else:
+                okno.prebudi("sporocila")
             return
         nova = str(sporocilo.get("koda") or "")
         if nova and ZAGNANA_KODA and nova != ZAGNANA_KODA:

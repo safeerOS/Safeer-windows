@@ -98,11 +98,13 @@ DEJANJA_DATOTEKE = ["files.list", "files.open", "files.search"]
 DEJANJA_PROGRAMI = ["apps.list", "apps.launch", "apps.close", "apps.running"]
 DEJANJA_HOST = ["host.info"]
 DEJANJA_ZASLON = ["screen.start", "screen.stop", "screen.status"]
+#: Usklajevanje kljucev in dodatkov v ozjem krogu (core/uskladitev_kljucev.py); samo zasciteno in samo ozji krog.
+DEJANJA_KLJUCI = ["secrets.sync"]
 
 
 def izvedi_control(dejanje: str, parametri: dict, odpri_naslov: Callable[[str], None],
                    koncaj: Callable[[dict], None], datoteke=None, posiljatelj: str = "",
-                   hub_url: str = "", programi=None, zaslon=None) -> None:
+                   hub_url: str = "", programi=None, zaslon=None, zascita: str = "") -> None:
     """Safeer Control (namizna aplikacija brez brskalnika): kar zna racunalnik brez brskalnika --
     glasnost, odpiranje strani v sistemskem brskalniku, stanje in seznam deljenih map
     (`files.list`, core/link_datoteke.py, ce je `datoteke` podan). Vse drugo vrne razumljivo napako."""
@@ -170,6 +172,20 @@ def izvedi_control(dejanje: str, parametri: dict, odpri_naslov: Callable[[str], 
                 koncaj(izid(False, str(e), koda="ni_programa" if type(e).__name__ == "ProgramaNi" else "ni_zajema"))
                 return
             koncaj(izid(True, "Zaslon se deli", seja))
+        elif d in DEJANJA_KLJUCI:
+            import threading
+            from core import uskladitev_kljucev
+            usk = uskladitev_kljucev.storitev()
+            if usk is None:
+                koncaj(izid(False, "Usklajevanje ključev tu ni na voljo", koda="neznano_dejanje"))
+                return
+
+            def kljuci() -> None:
+                try:
+                    koncaj(izid(True, "Usklajevanje ključev", usk.prejmi(posiljatelj, "", parametri, zascita=zascita)))
+                except Exception as e:  # noqa: BLE001
+                    koncaj(izid(False, "Usklajevanje ključev ni uspelo: " + str(e), koda="napaka"))
+            threading.Thread(target=kljuci, name="safeer-kljuci-ukaz", daemon=True).start()
         elif d == "host.info":
             # Kaj ima ta racunalnik (host): procesor, pomnilnik, prostor. Samo stevilke o zmogljivosti,
             # nic o vsebini - televizor mora vedeti, koliko moci ima na voljo.
