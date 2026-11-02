@@ -449,6 +449,22 @@ class CelaZica(unittest.TestCase):
         self.assertTrue(_pocakaj(lambda: self.cilj.zasloni("start")), "cilj mora izvedeti za deljenje")
         return self.cilj.zasloni("start")[-1]["payload"]
 
+    def test_odgovor_screen_start_relay_in_pot_desktop(self):
+        # 1. Start a session as if control_backend.py started it
+        from core import link_zaslon
+        zaslon = mock.MagicMock()
+        zaslon.caka.return_value = True
+        self.s.streznik.zaslon = lambda: zaslon
+
+        p = link_tls._PripetaHttps("127.0.0.1", self.s.vrata, self.s.odtis, 5.0)
+        p.request("GET", "/cast/desktop", headers={"X-Safeer-Desktop": "ZETON", "Upgrade": "safeer-desktop"})
+        o = p.getresponse()
+        self.assertEqual(o.status, 101)
+        self.assertEqual(o.getheader("Upgrade"), "safeer-desktop")
+        zaslon.prevzemi.assert_called_once()
+        self.assertEqual(zaslon.prevzemi.call_args[0][1], "ZETON")
+        p.close()
+
     def test_zaslon_od_posiljatelja_do_gledalca_in_konec(self):
         d = self._deli()
         tovor = self._zacetek()
