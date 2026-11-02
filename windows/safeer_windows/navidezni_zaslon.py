@@ -761,7 +761,8 @@ class NavidezniZaslon:
         return None
 
     def _sprejmi(self, posluh: socket.socket, ctx: ssl.SSLContext):
-        """Caka televizor s pravim zetonom."""
+        """Caka napravo s pravim zetonom (neposredno ali prek Huba). Kdor pride z napacnim (ali brez TLS), ne dobi nicesar in
+        seje tudi ne podre - naprava, ki ji je zaslon namenjen, se lahko se vedno poveze."""
         import time
         from core.link_zaslon import CAKANJE_S, ROKOVANJE_S
         from core import link_vticnik
@@ -774,9 +775,7 @@ class NavidezniZaslon:
                     link_vticnik.brez_zamika(prevzet[0])
                 except Exception:
                     pass
-                # Wrap the connection? No, Hub already does TLS. So we return the socket directly, but
-                # in our code we expect odjemalec to be an SSLSocket? The Hub passed the connection which is an SSLSocket!
-                # Wait, Hub's `self.connection` is a standard socket wrapped in TLS by the HTTP server!
+                # Povezava gledalca prek Huba (Global Link): TLS je ze vzpostavil Hub (pripet odtis), seja jo samo prevzame.
                 return prevzet
             posluh.settimeout(max(0.1, konec - time.monotonic()))
             try:
