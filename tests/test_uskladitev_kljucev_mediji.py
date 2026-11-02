@@ -92,6 +92,10 @@ class Vir(unittest.TestCase):
 
 
 class Dejanje(unittest.TestCase):
+    def setUp(self):
+        # Drug preizkus v istem procesu (npr. zagon Control) je lahko storitev ze nastavil.
+        uskladitev_kljucev.nastavi(None)
+
     def tearDown(self):
         uskladitev_kljucev.nastavi(None)
 

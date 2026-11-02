@@ -2191,7 +2191,7 @@ class SafeerControlBackend:
                     izid = {"ok": False, "message": str(e)}
 
             elif akcija == "secrets.sync":
-                import threading
+                # Brez lokalnega `import threading`: v tej funkciji bi zasencil modul za vse veje (magnet je padal).
                 from core import uskladitev_kljucev
                 usk = uskladitev_kljucev.storitev()
                 if usk is None:
