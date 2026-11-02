@@ -215,6 +215,25 @@ begin
   end;
 end;
 
+// Izmerjeno na testnem PC 2. 11. 2026: Safeer OS ostane v ozadju (Link, Sporocila) in se na WM_CLOSE ne konca, zato ga
+// Restart Manager ne zapre in namestitev pade (SafeerOS.exe v rabi -> razveljavitev). Pred kopiranjem ga ustavimo sami:
+// najprej prijazno, po 3 s se na silo (tudi QtWebEngine otroci).
+procedure UstaviTeceSafeer(const Ime: String);
+var Koda: Integer;
+begin
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/IM ' + Ime, '', SW_HIDE, ewWaitUntilTerminated, Koda);
+  Sleep(3000);
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /T /IM ' + Ime, '', SW_HIDE, ewWaitUntilTerminated, Koda);
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  UstaviTeceSafeer('SafeerOS.exe');
+  UstaviTeceSafeer('SafeerBrowser.exe');
+  UstaviTeceSafeer('SafeerControl.exe');
+  Result := '';
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if (CurStep <> ssPostInstall) or not JeStaraNamestitev then

@@ -126,3 +126,13 @@ def test_safeeros_exe_pozna_zastavico_predvajalnik():
     assert 'if "--datoteka" in sys.argv:' in vir
     assert "from safeer_windows.safeer_predvajalnik import main" in vir
     assert 'sys.argv.remove("--predvajalnik")' not in vir
+
+
+def test_namestitev_ustavi_safeer_v_ozadju():
+    """Testni PC 2. 11. 2026: Safeer OS v ozadju se na WM_CLOSE ne konca, Restart Manager ga ne zapre in namestitev
+    pade (SafeerOS.exe v rabi). Namestitveni program ga mora pred kopiranjem ustaviti sam."""
+    import pathlib
+    iss = (pathlib.Path(__file__).resolve().parents[1] / "installer.iss").read_text(encoding="utf-8")
+    assert "function PrepareToInstall(" in iss
+    assert "UstaviTeceSafeer('SafeerOS.exe')" in iss
+    assert "/F /T /IM " in iss
