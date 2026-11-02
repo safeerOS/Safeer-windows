@@ -1,6 +1,6 @@
 {
   "vir": "safeerOS/Safeer-linux",
-  "ref": "00cf5b55d5f743f3e7d47571f11ae97d02ad92a3",
+  "ref": "3398175235e9d756bb86cc46f43afb4cb6fe2722",
   "skupne": [
     "core/adblock.py",
     "core/bank_guard.py",
@@ -115,6 +115,9 @@
     "core/usenet_tok.py",
     "core/usenet_vezava.py",
     "core/usenet_yenc.py",
+    "core/uskladitev_kljucev.py",
+    "core/uskladitev_kljucev_mediji.py",
+    "core/uskladitev_kljucev_pravila.py",
     "core/uvoz_seznama.py",
     "core/varuh_procesov.py",
     "core/viri_sink.py",
