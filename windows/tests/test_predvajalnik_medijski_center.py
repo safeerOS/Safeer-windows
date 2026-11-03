@@ -64,7 +64,73 @@ def test_okno_predvajalnika_samo_medijski_center():
     assert o.okno_za("predvajalnik") == ("predvajalnik", "media")
     assert o.naslov_strani("predvajalnik", "sl") == "os/index.html?predvajalnik=1&jezik=sl"
     assert all(o.naslov_okna("predvajalnik", j) == "Safeer Player" for j in o.NASLOVI)
-    assert o.okno_za("media") == ("", "media")          # Medijski center iz Safeer OS ostane v glavnem oknu
+    # Medijski center z namizja ali iz okna razdelka: samo okno Safeer Player (3. 11. 2026: prej glavno okno + Player)
+    assert o.okno_za("media") == ("predvajalnik", "media")
+    assert o.okno_za("mediji:Sintel") == ("predvajalnik", "media")
+    assert o.okno_za("splet")[0] == "" and o.okno_za("")[0] == ""
+
+
+def _okno_za_prebudi(os_app, odprto: bool):
+    """Glavno okno Safeer OS (ne Player) brez Qt: belezi, ali se je pokazalo in ali je bilo odprto okno Player."""
+    import types
+    dogodki = []
+    okno = types.SimpleNamespace(
+        predvajalnik=False, v_oknu=False, namizje=object(),
+        _pokazi_okno_predvajalnika=lambda: dogodki.append("player") or odprto,
+        isMinimized=lambda: False, isVisible=lambda: False,
+        showNormal=lambda: dogodki.append("glavno"), showMaximized=lambda: dogodki.append("glavno"),
+        raise_=lambda: None, activateWindow=lambda: None,
+        view=types.SimpleNamespace(page=lambda: types.SimpleNamespace(runJavaScript=lambda js: dogodki.append(js))))
+    return okno, dogodki
+
+
+@pytest.mark.parametrize("razdelek", ["media", "mediji:Sintel"])
+def test_prebudi_medijski_center_ne_pokaze_glavnega_okna(razdelek):
+    """Testni PC 3. 11. 2026: »Odpri Medijski center« z namizja je dal dve ikoni (Safeer OS in Safeer Player)."""
+    pytest.importorskip("PySide6.QtWebEngineWidgets")
+    from safeer_windows import os_app
+    okno, dogodki = _okno_za_prebudi(os_app, True)
+    os_app.SafeerOsWindow.prebudi(okno, razdelek)
+    assert dogodki == ["player"], dogodki
+
+
+def test_prebudi_brez_okna_player_pokaze_glavno_okno():
+    """Ce okna Player ni mogoce odpreti (streznik vmesnika se ni pripravljen), uporabnik vsaj dobi Medijski center."""
+    pytest.importorskip("PySide6.QtWebEngineWidgets")
+    from safeer_windows import os_app
+    okno, dogodki = _okno_za_prebudi(os_app, False)
+    os_app.SafeerOsWindow.prebudi(okno, "media")
+    assert dogodki[:2] == ["player", "glavno"] and "safeerOsPojdi('media')" in dogodki[-1], dogodki
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="AppUserModelID okna je samo na Windows")
+def test_okno_player_ima_svoj_appusermodelid():
+    """Pravo okno Windows: AppUserModelID Safeer.Player ostane na oknu (opravilna vrstica ga loci od Safeer OS)."""
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication, QWidget
+    from safeer_windows import okno_razdelka as o
+    app = QApplication.instance() or QApplication([])
+    if app.platformName() != "windows":
+        # Drug preizkus je ze ustvaril QApplication z offscreen: winId tam ni okno Windows.
+        pytest.skip("QApplication ni na platformi windows (%s)" % app.platformName())
+    okno = QWidget()
+    try:
+        hwnd = int(okno.winId())
+        assert o.aumid_okna(hwnd) == ""
+        assert o.nastavi_aumid_okna(hwnd, o.AUMID_PREDVAJALNIKA) is True
+        assert o.aumid_okna(hwnd) == "Safeer.Player"
+    finally:
+        okno.close()
+        okno.deleteLater()
+        app.processEvents()
+
+
+def test_okno_player_dobi_ikono_in_aumid_pred_prikazom():
+    vir = (KOREN / "safeer_windows" / "okno_razdelka.py").read_text(encoding="utf-8")
+    init = vir.split("def __init__(self, os_okno, ime", 1)[1].split("\n    def ", 1)[0]
+    assert "os_okno.ikona_predvajalnika()" in init
+    assert "nastavi_aumid_okna(int(self.winId()), AUMID_PREDVAJALNIKA)" in init
+    assert init.index("nastavi_aumid_okna(") < init.index("self.view.load(")
 
 
 def test_os_js_nacin_predvajalnika():

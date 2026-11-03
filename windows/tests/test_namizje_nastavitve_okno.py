@@ -35,7 +35,7 @@ class OknoRazdelka(unittest.TestCase):
         self.assertEqual(okno_razdelka.okno_za("naprave"), ("naprave", "naprave"))
         self.assertEqual(okno_razdelka.okno_za("zapisek:abc"), ("zapiski", "zapisek:abc"))
         self.assertEqual(okno_razdelka.okno_za("pogovor:k1:p1"), ("sporocila", "pogovor:k1:p1"))
-        for ostane in ("media", "splet", "datoteke", "control", "", "domov"):
+        for ostane in ("splet", "datoteke", "control", "", "domov"):
             self.assertEqual(okno_razdelka.okno_za(ostane)[0], "", ostane)
 
     def test_stran_in_naslov(self):

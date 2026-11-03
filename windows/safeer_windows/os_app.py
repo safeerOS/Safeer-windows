@@ -1286,13 +1286,22 @@ class SafeerOsWindow(QMainWindow):
         if self.predvajalnik:
             self.prebudi("media")      # ta proces je ze Safeer Player
             return
+        if not self._pokazi_okno_predvajalnika():
+            self.prebudi("media")
+
+    def _pokazi_okno_predvajalnika(self) -> bool:
+        """Okno Safeer Player v tem procesu (samo Medijski center); glavnega okna ne pokaze. False, ce ga ni bilo mogoce
+        odpreti (npr. streznik vmesnika se ni pripravljen) - klicatelj takrat pokaze glavno okno."""
         try:
             from . import okno_razdelka
-            if okno_razdelka.odpri(self, okno_razdelka.PREDVAJALNIK, SafeerOsPage, most_js, _jezik_oken()):
-                return
+            return bool(okno_razdelka.odpri(self, okno_razdelka.PREDVAJALNIK, SafeerOsPage, most_js, _jezik_oken()))
         except Exception as e:  # noqa: BLE001
             print(f"[SafeerOS] Okno Safeer Player: {e}", flush=True)
-        self.prebudi("media")
+            return False
+
+    def ikona_predvajalnika(self) -> QIcon:
+        """Ikona okna Safeer Player (tudi okna v procesu Safeer OS), da se v opravilni vrstici loci od Safeer OS."""
+        return _ikona_predvajalnika(policy.shared_path("assets/icon.png"))
 
     def _zapusti_nacin_predvajalnika(self) -> None:
         """Tece Safeer Player, uporabnik pa odpre Safeer OS: isto okno postane cel Safeer OS (en proces, en Link)."""
@@ -1308,6 +1317,12 @@ class SafeerOsWindow(QMainWindow):
 
     def prebudi(self, razdelek: str = "") -> None:
         """Druga kopija je bila zagnana (ikona, bliznjica): pokazi to okno in odpri zeleni razdelek."""
+        if not getattr(self, "predvajalnik", False):
+            # Medijski center (namizje, --razdelek media, Link) samo v oknu Safeer Player: prej se je pokazalo glavno
+            # okno in njegova stran je nato odprla se Player - dve ikoni v opravilni vrstici (testni PC, 3. 11. 2026).
+            from . import okno_razdelka
+            if okno_razdelka.je_medijski_center(razdelek) and self._pokazi_okno_predvajalnika():
+                return
         if getattr(self, "predvajalnik", False) and razdelek != "media":
             self._zapusti_nacin_predvajalnika()
         # Lastnik 27. 10. 2026: ikona Safeer OS brez razdelka odpre namizje Safeer (tudi ce je bilo izbrano prvotno

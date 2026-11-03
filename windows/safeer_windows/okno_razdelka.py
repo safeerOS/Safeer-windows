@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import secrets
+import sys
 import threading
 import urllib.parse
 from typing import Any, Optional, Tuple
@@ -26,6 +27,9 @@ NE_ZAVRZI = ("zapiski",)
 #: Safeer Player (naloga 39, 27. 10. 2026): ce Safeer OS ze tece, Player odpre to okno - samo Medijski center
 #: (os.js ?predvajalnik=1), domace okno ostane, kakor je. Kot na Linuxu (safeer_os.py _odpri_predvajalnik).
 PREDVAJALNIK = "predvajalnik"
+#: Okno Safeer Player v procesu Safeer OS ima svoj AppUserModelID - isti kot bliznjica Safeer Player (installer.iss),
+#: sicer ga Windows prikaze z ikono in v skupini Safeer OS (lastnik, 3. 11. 2026: »dve ikoni v opravilni vrstici«).
+AUMID_PREDVAJALNIKA = "Safeer.Player"
 #: Podstrani Nastavitev (ploscici Omrezje in Zvok, vodnik ob prvem zagonu): pokazejo se v oknu Nastavitve.
 PODSTRANI = {"omrezje": "nastavitve", "zvok": "nastavitve", "vodnik": "nastavitve"}
 NASLOVI = {
@@ -38,11 +42,104 @@ NASLOVI = {
 }
 
 
+def je_medijski_center(razdelek: str) -> bool:
+    """»media« in »mediji:<iskanje>« z namizja ali iz drugega okna: Medijski center se odpre v oknu Safeer Player, ne v
+    glavnem oknu Safeer OS (kot Linux safeer_os.razdelek_predvajalnika). Izmerjeno 3. 11. 2026 na testnem PC: prej je
+    prebudi("media") pokazal glavno okno, njegova stran pa je nato odprla se Player - dve okni, dve ikoni."""
+    razdelek = str(razdelek or "")
+    return razdelek in (PREDVAJALNIK, "media") or razdelek.startswith("mediji:")
+
+
+def nastavi_aumid_okna(hwnd: int, aumid: str) -> bool:
+    """AppUserModelID enega okna (IPropertyStore okna, PKEY_AppUserModel_ID): okno dobi svojo skupino in ikono v
+    opravilni vrstici, ceprav tece v procesu Safeer OS (en proces, core/en_proces.py). Nastavi se pred prvim prikazom.
+    False zunaj Windows ali ob napaki - okno se odpre tudi brez tega."""
+    if sys.platform != "win32" or not hwnd:
+        return False
+    try:
+        import ctypes
+        lastnost, ps = _shramba_lastnosti_okna(hwnd)
+        if not ps:
+            return False
+        try:
+            vrednost = _PropVariant()
+            vrednost.vt = 31                              # VT_LPWSTR; SetValue niz prekopira
+            besedilo = ctypes.c_wchar_p(str(aumid))
+            vrednost.niz = besedilo
+            hr = _metoda(ps, 6, ctypes.c_void_p, ctypes.POINTER(_KljucLastnosti),
+                         ctypes.POINTER(_PropVariant))(ps, ctypes.byref(lastnost), ctypes.byref(vrednost))
+            if hr == 0:
+                hr = _metoda(ps, 7, ctypes.c_void_p)(ps)                   # Commit
+            return hr == 0
+        finally:
+            _metoda(ps, 2, ctypes.c_void_p, vrnjeno=ctypes.c_ulong)(ps)    # Release
+    except Exception as e:  # noqa: BLE001
+        print(f"[SafeerOS] AppUserModelID okna: {e}", flush=True)
+        return False
+
+
+def aumid_okna(hwnd: int) -> str:
+    """AppUserModelID okna, kot ga vidi opravilna vrstica ('' brez lastnega ali zunaj Windows) - za preizkus."""
+    if sys.platform != "win32" or not hwnd:
+        return ""
+    import ctypes
+    lastnost, ps = _shramba_lastnosti_okna(hwnd)
+    if not ps:
+        return ""
+    try:
+        vrednost = _PropVariant()
+        hr = _metoda(ps, 5, ctypes.c_void_p, ctypes.POINTER(_KljucLastnosti),
+                     ctypes.POINTER(_PropVariant))(ps, ctypes.byref(lastnost), ctypes.byref(vrednost))
+        izid = (vrednost.niz or "") if hr == 0 and vrednost.vt == 31 else ""
+        ctypes.windll.ole32.PropVariantClear(ctypes.byref(vrednost))
+        return izid
+    finally:
+        _metoda(ps, 2, ctypes.c_void_p, vrnjeno=ctypes.c_ulong)(ps)
+
+
+if sys.platform == "win32":
+    import ctypes as _c
+    import uuid as _uuid
+
+    class _Guid(_c.Structure):
+        _fields_ = [("d1", _c.c_uint32), ("d2", _c.c_uint16), ("d3", _c.c_uint16), ("d4", _c.c_ubyte * 8)]
+
+    class _KljucLastnosti(_c.Structure):
+        _fields_ = [("fmtid", _Guid), ("pid", _c.c_uint32)]
+
+    class _PropVariant(_c.Structure):
+        # vt + trije rezervirani WORD, nato unija (na x64 16 B): skupaj 24 B kot PROPVARIANT
+        _fields_ = [("vt", _c.c_ushort), ("r1", _c.c_ushort), ("r2", _c.c_ushort), ("r3", _c.c_ushort),
+                    ("niz", _c.c_wchar_p), ("rezerva", _c.c_void_p)]
+
+    def _guid(niz: str) -> "_Guid":
+        u = _uuid.UUID(niz)
+        g = _Guid(u.fields[0], u.fields[1], u.fields[2])
+        g.d4[:] = list(u.bytes[8:])
+        return g
+
+    def _metoda(ps, indeks: int, *vrste, vrnjeno=_c.c_long):
+        """Metoda COM iz tabele vmesnika IPropertyStore (0-2 IUnknown, 5 GetValue, 6 SetValue, 7 Commit)."""
+        tabela = _c.cast(ps, _c.POINTER(_c.POINTER(_c.c_void_p))).contents
+        return _c.WINFUNCTYPE(vrnjeno, *vrste)(tabela[indeks])
+
+    def _shramba_lastnosti_okna(hwnd: int):
+        iid = _guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99")              # IID_IPropertyStore
+        kljuc = _KljucLastnosti(_guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), 5)   # PKEY_AppUserModel_ID
+        ps = _c.c_void_p()
+        f = _c.windll.shell32.SHGetPropertyStoreForWindow
+        f.argtypes = [_c.c_void_p, _c.POINTER(_Guid), _c.POINTER(_c.c_void_p)]
+        f.restype = _c.c_long
+        if f(_c.c_void_p(int(hwnd)), _c.byref(iid), _c.byref(ps)) != 0:
+            return kljuc, None
+        return kljuc, ps
+
+
 def okno_za(razdelek: str) -> Tuple[str, str]:
     """(okno, cilj): v katerem oknu razdelka se pokaze `razdelek` in kam v njem (npr. »nastavitve#blokScit«).
     Okno '' pomeni, da razdelek ostane v glavnem oknu Safeer OS (Medijski center, Splet, Datoteke ...)."""
     razdelek = str(razdelek or "")
-    if razdelek == PREDVAJALNIK:
+    if je_medijski_center(razdelek):
         return PREDVAJALNIK, "media"
     if razdelek.startswith("zapisek:"):
         return "zapiski", razdelek
@@ -93,9 +190,15 @@ class OknoRazdelka(QMainWindow):  # type: ignore[misc]
         self._cakajoci_cilj = ""
         self.setWindowTitle(naslov_okna(ime, jezik))
         try:
-            self.setWindowIcon(os_okno.windowIcon())
+            ikona = os_okno.windowIcon()
+            if ime == PREDVAJALNIK and hasattr(os_okno, "ikona_predvajalnika"):
+                ikona = os_okno.ikona_predvajalnika()      # znak Safeer z oznako predvajanja, ne ikona Safeer OS
+            self.setWindowIcon(ikona)
         except Exception:  # noqa: BLE001
             pass
+        if ime == PREDVAJALNIK:
+            # Pred prvim prikazom (winId ustvari okno Windows): opravilna vrstica ga uvrsti pod Safeer Player.
+            nastavi_aumid_okna(int(self.winId()), AUMID_PREDVAJALNIKA)
         self.setStyleSheet("background:#0b1220;")
         self.view = QWebEngineView(self)
         self.view.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
