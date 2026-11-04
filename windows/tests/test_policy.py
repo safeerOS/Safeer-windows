@@ -25,7 +25,8 @@ class SettingsTests(unittest.TestCase):
     def test_defaults_and_round_trip(self):
         store = policy.SettingsStore(self.path)
         self.assertTrue(store.get("adblock_enabled"))
-        self.assertEqual(store.get("doh_provider"), "cloudflare")
+        # Privzeto sistemski DNS - skozi Scit, ko tece (4. 11. 2026; prej Cloudflare DoH mimo Scita).
+        self.assertEqual(store.get("doh_provider"), "off")
         store.set("search_engine", "google")
         store.set("future_key", {"kept": True})
         again = policy.SettingsStore(self.path)
@@ -51,11 +52,34 @@ class SettingsTests(unittest.TestCase):
 
     def test_dns_and_gpu_flags(self):
         store = policy.SettingsStore(self.path)
+        self.assertIsNone(policy.doh_template(store))           # sistemski DNS (Scit)
+        store.set("doh_provider", "cloudflare")
         self.assertEqual(policy.doh_template(store), "https://cloudflare-dns.com/dns-query")
         store.set("doh_provider", "off")
         self.assertIsNone(policy.doh_template(store))
         store.set("hardware_acceleration", False)
         self.assertEqual(policy.chromium_flags("--foo", store), "--foo --disable-gpu")
+
+    def test_selitev_privzetega_cloudflare_na_sistemski_dns(self):
+        # settings.json do 1.0.153 je zapisal vse privzete vrednosti: »cloudflare« ni bil uporabnikova izbira.
+        with open(self.path, "w", encoding="utf-8") as handle:
+            json.dump({"doh_provider": "cloudflare", "search_engine": "google"}, handle)
+        store = policy.SettingsStore(self.path)
+        self.assertEqual(store.get("doh_provider"), "off")
+        self.assertIsNone(policy.doh_template(store))
+        store.save()
+        self.assertEqual(policy.SettingsStore(self.path).get("doh_provider"), "off")
+
+    def test_izrecna_izbira_dns_ostane(self):
+        store = policy.SettingsStore(self.path)
+        policy.oznaci_izbiro_dns(store, "quad9")
+        store.set("doh_provider", "quad9")
+        with open(self.path, encoding="utf-8") as handle:
+            shranjeno = json.load(handle)
+        shranjeno.pop("dns_krajevni_selitev")                   # tudi ob ponovni selitvi
+        with open(self.path, "w", encoding="utf-8") as handle:
+            json.dump(shranjeno, handle)
+        self.assertEqual(policy.SettingsStore(self.path).get("doh_provider"), "quad9")
 
     def test_custom_doh_requires_valid_https_endpoint(self):
         self.assertTrue(policy.valid_doh_url("https://dns.example/dns-query"))

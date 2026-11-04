@@ -2517,8 +2517,9 @@ class SettingsDialog(QDialog):
             form.addRow(box)
 
         self.dns = QComboBox(self)
-        for key, label in (("cloudflare", "Cloudflare (1.1.1.1)"), ("quad9", "Quad9 (9.9.9.9)"),
-                           ("google", "Google (8.8.8.8)"), ("off", tr(app, "dns_off"))):
+        # Sistemski DNS prvi (privzeto, 4. 11. 2026): ko Scit tece, gredo imena skozenj.
+        for key, label in (("off", tr(app, "dns_off")), ("cloudflare", "Cloudflare (1.1.1.1)"), ("quad9", "Quad9 (9.9.9.9)"),
+                           ("google", "Google (8.8.8.8)")):
             self.dns.addItem(label, key)
         self._select(self.dns, settings.get("doh_provider"))
         form.addRow(tr(app, "dns"), self.dns)
@@ -2551,6 +2552,7 @@ class SettingsDialog(QDialog):
         settings.set("language", self.language.currentData(), save=False)
         settings.set("search_engine", self.engine.currentData(), save=False)
         settings.set("startup", self.startup.currentData(), save=False)
+        policy.oznaci_izbiro_dns(settings, self.dns.currentData())
         settings.set("doh_provider", self.dns.currentData(), save=False)
         for key, box in self.checks.items():
             settings.set(key, box.isChecked(), save=False)

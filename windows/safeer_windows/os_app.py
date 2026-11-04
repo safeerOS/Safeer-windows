@@ -2970,12 +2970,15 @@ class SafeerOsWindow(QMainWindow):
                 if value not in ("home", "restore"):
                     raise ValueError("Neznana možnost zagona.")
             elif key == "doh_provider":
-                if value not in (*policy.DOH_TEMPLATES.keys(), "custom"):
+                # "off" = sistemski DNS (privzeto; ko Scit tece, gredo imena skozenj).
+                if value not in (*policy.DOH_TEMPLATES.keys(), "custom", "off"):
                     raise ValueError("Neznan ponudnik varnega DNS.")
+                policy.oznaci_izbiro_dns(settings, value)
             elif key == "custom_doh_url":
                 value = str(value or "").strip()
                 if value and not policy.valid_doh_url(value):
                     raise ValueError("Naslov ponudnika DNS mora biti veljaven HTTPS URL.")
+                policy.oznaci_izbiro_dns(settings, settings.get("doh_provider"), value)
             elif key in boolean_keys:
                 if not isinstance(value, bool):
                     raise ValueError("Nastavitev mora biti vklopljena ali izklopljena.")
@@ -3080,6 +3083,14 @@ class SafeerOsWindow(QMainWindow):
         if metoda == "scitVklop":
             vklop = bool(a[0]) if a else False
             return self.scit.nastavi(vklop)
+
+        if metoda == "scitNaprej":
+            # Kam Scit poslje dovoljena imena (kot na Linuxu): privzeto krajevni DNS, uporabnik izbere sam.
+            return self.scit.nastavi_naprej(str(a[0]) if a else "", str(a[1]) if len(a) > 1 else "")
+
+        if metoda == "scitDovoli":
+            # Izjema 30 dni za NATANKO nazadnje ustavljeno ime; groznje nikoli (preveri core/os_scit.Scit.dovoli).
+            return self.scit.dovoli(str(a[0]) if a else "", bool(a[1]) if len(a) > 1 else True)
 
         # Safeer Link & Safeer Control metode
         if metoda == "povezava":

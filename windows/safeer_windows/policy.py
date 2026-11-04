@@ -160,8 +160,12 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "tracking_protection_enabled": True,
     "gpc_dnt_enabled": True,
     "block_third_party_cookies": True,
-    "doh_provider": "cloudflare",
+    # Privzeto sistemski DNS (lastnik 4. 11. 2026): ko Scit tece, gredo imena brskalnika skozi Scit in krajevni DNS;
+    # prej Cloudflare DoH naravnost - mimo Scita. Uporabnikova izrecna izbira DoH ostane (dns_izbira_uporabnika).
+    "doh_provider": "off",
     "custom_doh_url": "",
+    "dns_izbira_uporabnika": False,
+    "dns_krajevni_selitev": True,
     "force_dark_mode": False,
     "hardware_acceleration": True,
     "ask_download_location": False,
@@ -216,6 +220,7 @@ class SettingsStore:
         self.load()
 
     def load(self) -> None:
+        stored: Any = {}
         try:
             with open(self.path, encoding="utf-8") as handle:
                 stored = json.load(handle)
@@ -223,6 +228,7 @@ class SettingsStore:
                 self.values.update(stored)
         except (OSError, ValueError):
             pass
+        preseli_dns_na_sistemski(self.values, stored if isinstance(stored, dict) else {})
         if not isinstance(self.values.get("custom_portals"), list):
             self.values["custom_portals"] = copy.deepcopy(DEFAULT_PORTALS)
         if self.values.get("search_engine") not in search_engines():
@@ -272,6 +278,24 @@ def home_language(setting: str) -> str:
     if setting in ("sl", "en", "de", "es", "fr", "it"):
         return setting
     return ui_language(setting)
+
+
+def preseli_dns_na_sistemski(values: Dict[str, Any], stored: Dict[str, Any]) -> bool:
+    """Enkratna selitev (lastnik 4. 11. 2026, kot preseli_dns_na_krajevni v Safeer-linux): kdor DNS ni izbral sam, preide
+    s Cloudflare DoH na sistemski DNS - torej na Scit, ko tece. settings.json hrani tudi privzete vrednosti, zato
+    shranjen »cloudflare« brez oznake izbire ni uporabnikova izbira. Nove namestitve oznako ze imajo."""
+    if not stored or stored.get("dns_krajevni_selitev"):
+        return False
+    values["dns_krajevni_selitev"] = True
+    if not stored.get("dns_izbira_uporabnika"):
+        values["doh_provider"] = "off"
+    return True
+
+
+def oznaci_izbiro_dns(settings: "SettingsStore", provider: Any, custom_url: Any = None) -> None:
+    """Uporabnik je DNS izbral sam: prihodnje spremembe privzetega je ne povozijo."""
+    if provider != settings.get("doh_provider") or (custom_url is not None and custom_url != settings.get("custom_doh_url")):
+        settings.set("dns_izbira_uporabnika", True, save=False)
 
 
 def doh_template(settings: SettingsStore) -> Optional[str]:
