@@ -3571,15 +3571,21 @@ class SafeerOsWindow(QMainWindow):
         """Nov zavihek v ze odprtem samostojnem oknu brskalnika ali novo okno (ne vdelani Splet Safeer OS)."""
         app = self.browser_app
         okno = next((w for w in reversed(app.windows) if getattr(w, "sistemsko", False) and w.isVisible()), None)
+        # Naslov druge naprave je vedno »od zunaj« (zunanji=True): brez UNC/file://gostitelj in skozi Scit (stran
+        # groznje dobi stran z opozorilom) - prej je novo okno naslov nalozilo z new_tab mimo resolve_input (4. 11. 2026).
         if okno is None:
             okno = self._sistemsko_okno_brskalnika()
-            drm = os_backend_win.je_drm_storitev(url)
-            okno.new_tab(okno.home_url if drm else url)
-            okno.show()
-            if drm and not okno.odpri_drm(url):
-                okno.open_input(url, new_tab=True)
+            if os_backend_win.je_drm_storitev(url):
+                okno.new_tab(okno.home_url)
+                okno.show()
+                okno.open_input(url, new_tab=True, zunanji=True)   # open_input odpre Safeer DRM v tem oknu
+            else:
+                okno.open_input(url, new_tab=True, zunanji=True)
+                if okno.tabs.count() == 0:
+                    okno.new_tab(okno.home_url)
+                okno.show()
         else:
-            okno.open_input(url, new_tab=True)      # storitev z DRM odpre Safeer DRM v tem oknu (open_input)
+            okno.open_input(url, new_tab=True, zunanji=True)  # storitev z DRM odpre Safeer DRM v tem oknu (open_input)
         if okno.isMinimized():
             okno.showNormal()
         okno.raise_()
@@ -3595,7 +3601,7 @@ class SafeerOsWindow(QMainWindow):
             self.dispatcher.dispatch(lambda: self.namizje.isci_od_drugod(niz))
             return True
         self.dispatcher.dispatch(self.prebudi)
-        return self.odpri_spletno_iskanje(niz)
+        return self.odpri_spletno_iskanje(niz, zunanji=True)
 
     def splet_na_namizju(self, niz: str) -> bool:
         """Iskanje ali naslov iz lupe namizja QML (lastnik, 25. 10. 2026 11:44: »claude« + Enter je polje izpraznil, nic
@@ -3605,10 +3611,12 @@ class SafeerOsWindow(QMainWindow):
         niz = str(niz or "").strip()
         if not niz:
             return False
+        # Lupa namizja je lahko vpisana z druge naprave (namizje.isci_od_drugod, search.query iz Linka): Enter na njej
+        # zato velja kot vhod od zunaj (zunanji=True) - brez UNC/file://gostitelj, ki bi odprl SMB (4. 11. 2026).
         if self.isVisible() and not self.isMinimized():
             if niz.lower().startswith(("http://", "https://")):
                 return bool(self.odpri_splet(niz, vedno_notri=True))
-            return self.odpri_spletno_iskanje(niz)
+            return self.odpri_spletno_iskanje(niz, zunanji=True)
         self.dispatcher.dispatch(lambda: self._splet_nad_namizjem(niz))
         return True
 
@@ -3617,25 +3625,26 @@ class SafeerOsWindow(QMainWindow):
         if okno is None or okno not in getattr(self.browser_app, "windows", []):
             okno = self._sistemsko_okno_brskalnika()
             self._okno_spleta_namizja = okno
-        okno.open_input(niz, new_tab=True)
+        okno.open_input(niz, new_tab=True, zunanji=True)
         print("[SafeerOS] Splet nad namizjem: %s" % ("naslov" if "://" in niz else "iskanje"), flush=True)
         okno.showMaximized()
         okno.raise_()
         okno.activateWindow()
 
-    def odpri_spletno_iskanje(self, poizvedba: str) -> bool:
+    def odpri_spletno_iskanje(self, poizvedba: str, zunanji: bool = False) -> bool:
+        """zunanji=True: niz z druge naprave ali iz lupe namizja (glej splet_na_namizju), ne vpis v Safeer OS."""
         poizvedba = str(poizvedba or "").strip()
         if not poizvedba:
             return False
-        self.dispatcher.dispatch(lambda: self._odpri_spletno_iskanje(poizvedba))
+        self.dispatcher.dispatch(lambda: self._odpri_spletno_iskanje(poizvedba, zunanji))
         return True
 
-    def _odpri_spletno_iskanje(self, poizvedba: str) -> None:
+    def _odpri_spletno_iskanje(self, poizvedba: str, zunanji: bool = False) -> None:
         # Uporabi isti resolver/nastavljeni iskalnik kot Safeer Browser, ne ločenega
         # iskalnega URL-ja. S tem ostanejo aktivni tudi njegova pravila za naslove.
         self.browser_window.set_media_mode(False)
         self.browser_window.set_safeer_os_web_mode(True)
-        self.browser_window.open_input(poizvedba)
+        self.browser_window.open_input(poizvedba, zunanji=zunanji)
         self._spletna_stran_odprta = True
         self._pokazi_spletni_nacin()
         self.browser_window.set_safeer_os_web_mode(True)

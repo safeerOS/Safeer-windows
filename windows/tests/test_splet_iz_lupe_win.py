@@ -41,7 +41,7 @@ class _Okno:
     def isMinimized(self):  # noqa: N802
         return False
 
-    def odpri_spletno_iskanje(self, q):
+    def odpri_spletno_iskanje(self, q, zunanji=False):
         self.klici.append(("skrito okno", q))
         return True
 
@@ -51,7 +51,7 @@ class _Okno:
 
     def _sistemsko_okno_brskalnika(self):
         okno = types.SimpleNamespace(odprto=[], prikazano=[])
-        okno.open_input = lambda t, new_tab=False: okno.odprto.append((t, new_tab))
+        okno.open_input = lambda t, new_tab=False, zunanji=False: okno.odprto.append((t, new_tab))
         okno.showMaximized = lambda: okno.prikazano.append("max")
         okno.raise_ = lambda: okno.prikazano.append("raise")
         okno.activateWindow = lambda: okno.prikazano.append("aktivno")
