@@ -451,6 +451,20 @@ def resolve_external_input(text: str, engine: str = "duckduckgo", tracking_prote
     return kind, url
 
 
+#: Najdaljse cakanje zunanjega naslova na podpisani seznam grozenj ob zagonu (s). Paket se preveri v cistem Pythonu,
+#: ~1-2 s na PC z 2 jedroma (core/threat_intel._run); po roku se naslov odpre z vgrajenim seznamom, da okno ne caka.
+ROK_VIRA_GROZENJ = 2.0
+
+
+def vir_grozenj_pripravljen(storitev: Any) -> bool:
+    """True, ko je podpisani seznam grozenj nalozen ali ga ni (izklopljen, ni zagnan - npr. smoke)."""
+    if storitev is None or not getattr(storitev, "enabled", False):
+        return True
+    if getattr(storitev, "_thread", None) is None:
+        return True
+    return storitev.loaded.is_set()
+
+
 def display_url(url: str) -> str:
     if not url or url.startswith(HOME_URL.rstrip("/")) and "blocked" not in url:
         return ""

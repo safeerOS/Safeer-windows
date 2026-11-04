@@ -761,10 +761,14 @@ class SafeerBrowserApp(QObject):
                 if isinstance(url, str) and url.startswith(("http://", "https://")):
                     window.new_tab(url, switch=not opened)
                     opened = True
-        for url in urls or []:
-            window.open_input(url, new_tab=True, zunanji=True)
-        if window.tabs.count() == 0:  # tudi ko je bil zunanji naslov zavrnjen: okno brez zavihka ni uporabno
-            window.new_tab(policy.HOME_URL)
+        urls = list(urls or [])
+        if urls and not policy.vir_grozenj_pripravljen(self.threat_intel):
+            # Hladni zagon (revizija 4. 11. 2026): podpisani seznam grozenj se se nalaga, request_decision bi prvo stran
+            # preveril s praznim virom. Okno pride takoj (prazen zavihek), naslovi pocakajo na vir, najvec ROK_VIRA_GROZENJ.
+            cakalni = window.new_tab("about:blank") if window.tabs.count() == 0 else None
+            self.po_viru_grozenj(lambda: self._odpri_zunanje(window, urls, cakalni))
+        else:
+            self._odpri_zunanje(window, urls, None)
         geometry = self.settings.get("window_geometry")
         if geometry and not private and len(self.windows) == 1:
             window.restoreGeometry(QByteArray.fromBase64(geometry.encode("ascii")))
@@ -772,6 +776,40 @@ class SafeerBrowserApp(QObject):
             window.resize(1280, 820)
         window.show()
         return window
+
+    def po_viru_grozenj(self, opravilo: Callable[[], None]) -> None:
+        """Pozene opravilo, ko je seznam grozenj nalozen (ali po ROK_VIRA_GROZENJ). Brez cakanja v glavni niti:
+        enkratni QTimer.singleShot (s self kot kontekstom) preverja vsakih 50 ms, vmesnik ostane odziven."""
+        if policy.vir_grozenj_pripravljen(self.threat_intel):
+            opravilo()
+            return
+        rok = time.monotonic() + policy.ROK_VIRA_GROZENJ
+
+        def preveri() -> None:
+            if policy.vir_grozenj_pripravljen(self.threat_intel) or time.monotonic() >= rok:
+                opravilo()
+            else:
+                QTimer.singleShot(50, self, preveri)
+
+        QTimer.singleShot(50, self, preveri)
+
+    def _odpri_zunanje(self, window: "BrowserWindow", urls: List[str], cakalni: Optional[QWebEngineView]) -> None:
+        """Naslovi od zunaj (argv, drugi zagon) v zavihke; prazen cakalni zavihek se zapre ali dobi zacetno stran."""
+        if window not in self.windows:
+            window = self.active_window()
+            if window is None:
+                return
+            cakalni = None
+        for url in urls:
+            window.open_input(url, new_tab=True, zunanji=True)
+        if cakalni is not None:
+            indeks = window.tabs.indexOf(cakalni)
+            if indeks >= 0 and window.tabs.count() > 1:
+                window.close_tab(indeks)
+            elif indeks >= 0:
+                cakalni.load(QUrl(policy.HOME_URL))
+        if window.tabs.count() == 0:  # tudi ko je bil zunanji naslov zavrnjen: okno brez zavihka ni uporabno
+            window.new_tab(policy.HOME_URL)
 
     def window_closed(self, window: "BrowserWindow") -> None:
         if window in self.windows:
@@ -822,13 +860,14 @@ class SafeerBrowserApp(QObject):
             urls = json.loads(raw.strip().splitlines()[0]).get("urls", [])
         except (ValueError, IndexError, AttributeError):
             urls = []
+        urls = [u for u in urls if isinstance(u, str)] if isinstance(urls, list) else []
         window = self.active_window()
         if window is None:
             self.new_window(urls)
             return
-        for url in urls:
-            window.open_input(url, new_tab=True, zunanji=True)
-        if not urls:
+        if urls:
+            self.po_viru_grozenj(lambda: self._odpri_zunanje(window, list(urls), None))
+        else:
             window.new_tab(policy.HOME_URL)
         window.setWindowState((window.windowState() & ~Qt.WindowState.WindowMinimized) | Qt.WindowState.WindowActive)
         window.raise_()

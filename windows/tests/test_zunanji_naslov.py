@@ -76,9 +76,8 @@ class ZunanjiNaslov(unittest.TestCase):
 
     def test_argv_in_drugi_zagon_sta_zunanja(self):
         import inspect
-        src_okno = inspect.getsource(browser.SafeerBrowserApp.new_window)
-        src_drugi = inspect.getsource(browser.SafeerBrowserApp.on_instance_data)
-        for src in (src_okno, src_drugi):
+        for metoda in ("new_window", "on_instance_data", "_odpri_zunanje"):
+            src = inspect.getsource(getattr(browser.SafeerBrowserApp, metoda))
             for vrstica in src.splitlines():
                 if "open_input(" in vrstica:
                     self.assertIn("zunanji=True", vrstica)
