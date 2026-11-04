@@ -10,6 +10,7 @@ import unittest
 from unittest import mock
 
 from PySide6.QtCore import QCoreApplication, QObject
+from PySide6.QtWidgets import QApplication
 
 from safeer_windows import browser, policy
 
@@ -41,7 +42,8 @@ def _vrti(pogoj, rok):
 class VirGrozenjObZagonu(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.qt = QCoreApplication.instance() or QCoreApplication([])
+        # QApplication, ne QCoreApplication: drugi preizkusi v istem procesu rabijo QtGui (ikone - access violation)
+        cls.qt = QApplication.instance() or QApplication([])
 
     def test_pripravljenost(self):
         self.assertTrue(policy.vir_grozenj_pripravljen(None))
