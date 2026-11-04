@@ -1,0 +1,61 @@
+{
+  "opis": "Skupni primeri odlocanja Safeer Scita (filter DNS) - ISTA datoteka v Android-tv (tests/ScitSkupniPrimeriTest.kt, tests/run_scit_tests.sh; koda ScitOdlocitev.kt) in Safeer-linux (tests/test_scit_skupni_primeri.py; koda core/os_scit.py). Lastnik 4. 11. 2026: en Scit za vse OS. Samo cista logika odlocanja; prestrezanje DNS je po OS razlicno in ni tu. Ime se zapise v poizvedbo DNS, kot jo poslje aplikacija: oznake med pikami (prazne izpuscene), bajti UTF-8. Seznami: oglasi in groznje; seznam grozenj ima prednost pred vsako izjemo in pred zascitenimi gostitelji, krajevna imena se ne ustavijo nikoli. izid: ustavljeno (NXDOMAIN) ali spuscen (gre naprej). Izjeme: uporabnik spusti ime, ki je bilo pravkar ustavljeno; dan = dni po dodajanju. Primer z \"neujemanje\" je znana razlika: platforma iz \"razlicno_na\" ga preskoci z izpisom; ce se razlika odpravi, preizkus pade, da se oznaka umakne.",
+  "verzija": 2,
+  "krajevna": ["localhost"],
+  "krajevne_koncnice": [".localhost", ".local", ".lan", ".home", ".internal", ".arpa"],
+  "kanarek_doh": "use-application-dns.net",
+  "zasciteni": ["archive.ubuntu.com", "security.ubuntu.com", "ports.ubuntu.com", "ppa.launchpadcontent.net", "packages.linuxmint.com", "deb.debian.org", "security.debian.org", "flathub.org", "github.com", "api.github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com", "cloudflare.com", "hcaptcha.com", "recaptcha.net", "www.google.com", "www.gstatic.com", "safeer.si"],
+  "izjema_dni": 30,
+  "seznami": {
+    "oglasi": ["ads.example", "Track.Example.", "xn--bcher-kva.example", "printer.lan", "localhost", "github.com", "cloudflare.com", "safeer.si", "cosmic-crab.buzz", "webtor.io"],
+    "groznje": ["zlo.example", "api.webtor.io", "nas.local", "objects.githubusercontent.com", "zlo.safeer.si"]
+  },
+  "ustavljeno": [
+    {"opis": "tocno ime s seznama oglasov", "ime": "ads.example", "izid": "ustavljeno"},
+    {"opis": "poddomena imena s seznama", "ime": "x.y.ads.example", "izid": "ustavljeno"},
+    {"opis": "ime, ki se samo konca enako, ni poddomena", "ime": "notads.example", "izid": "spuscen"},
+    {"opis": "nadrejena domena imena s seznama ni ustavljena", "ime": "example", "izid": "spuscen"},
+    {"opis": "velike crke v poizvedbi (DNS 0x20)", "ime": "ADS.EXAMPLE", "izid": "ustavljeno"},
+    {"opis": "mesane crke in koncna pika", "ime": "Ads.Example.", "izid": "ustavljeno"},
+    {"opis": "vnos seznama z velikimi crkami in koncno piko", "ime": "track.example", "izid": "ustavljeno"},
+    {"opis": "IDN: punycode s seznama", "ime": "xn--bcher-kva.example", "izid": "ustavljeno"},
+    {"opis": "IDN: punycode z velikimi crkami", "ime": "XN--BCHER-KVA.EXAMPLE", "izid": "ustavljeno"},
+    {"opis": "IDN: Unicode na zici ni veljavno ime DNS; Scit ga ne pretvarja v punycode in ga ne ustavi (razresevalnik naprej ga zavrne)", "ime": "bücher.example", "izid": "spuscen"},
+    {"opis": "prazno ime (vprasanje za koren)", "ime": "", "izid": "spuscen"},
+    {"opis": "ime s seznama grozenj", "ime": "zlo.example", "izid": "ustavljeno"},
+    {"opis": "poddomena imena s seznama grozenj", "ime": "a.zlo.example", "izid": "ustavljeno"},
+    {"opis": "Webtor: stalna izjema (gostitelj toka) na seznamu oglasov", "ime": "abra--abc123.api.cosmic-crab.buzz", "izid": "spuscen"},
+    {"opis": "Webtor: druga poddomena iste domene ni izjema", "ime": "x.cosmic-crab.buzz", "izid": "ustavljeno"},
+    {"opis": "Webtor: stalna izjema na seznamu oglasov", "ime": "webtor.io", "izid": "spuscen"},
+    {"opis": "Webtor: stalna izjema na seznamu GROZENJ ostane ustavljena", "ime": "api.webtor.io", "izid": "ustavljeno"},
+    {"opis": "krajevno ime (.lan) na seznamu oglasov se ne ustavi", "ime": "printer.lan", "izid": "spuscen"},
+    {"opis": "localhost na seznamu se ne ustavi", "ime": "localhost", "izid": "spuscen"},
+    {"opis": "krajevno ime (.local) na seznamu GROZENJ se ne ustavi (ga ni v javnem DNS)", "ime": "nas.local", "izid": "spuscen"},
+    {"opis": "krajevno ime (.home.arpa) se ne ustavi", "ime": "router.home.arpa", "izid": "spuscen"},
+    {"opis": "kanarcek Firefoxa za DoH: vedno NXDOMAIN, da ne vklopi DoH mimo Scita", "ime": "use-application-dns.net", "izid": "ustavljeno"},
+    {"opis": "kanarcek z velikimi crkami", "ime": "Use-Application-DNS.net", "izid": "ustavljeno"},
+    {"opis": "zascitena pot do posodobitev (github.com) na seznamu oglasov se ne ustavi", "ime": "github.com", "izid": "spuscen"},
+    {"opis": "poddomena zascitenega gostitelja na seznamu oglasov se ne ustavi", "ime": "codeload.github.com", "izid": "spuscen"},
+    {"opis": "zasciten gostitelj na seznamu GROZENJ se ustavi", "ime": "objects.githubusercontent.com", "izid": "ustavljeno"},
+    {"opis": "preverjanje cloveka (Cloudflare Turnstile) na seznamu oglasov se ne ustavi", "ime": "challenges.cloudflare.com", "izid": "spuscen"},
+    {"opis": "Safeer na seznamu oglasov se ne ustavi", "ime": "safeer.si", "izid": "spuscen"},
+    {"opis": "poddomena Safeerja na seznamu GROZENJ se ustavi", "ime": "zlo.safeer.si", "izid": "ustavljeno"}
+  ],
+  "izjeme": [
+    {"opis": "uporabnik spusti ime s seznama oglasov", "izjema": "ads.example", "poizvedba": "ads.example", "dan": 1, "sprejeta": true, "izid": "spuscen"},
+    {"opis": "izjema velja se 29. dan", "izjema": "ads.example", "poizvedba": "ads.example", "dan": 29, "sprejeta": true, "izid": "spuscen"},
+    {"opis": "izjema potece po 30 dneh", "izjema": "ads.example", "poizvedba": "ads.example", "dan": 30, "sprejeta": true, "izid": "ustavljeno"},
+    {"opis": "izjema velja NATANKO za to ime, ne za poddomene", "izjema": "ads.example", "poizvedba": "sub.ads.example", "dan": 1, "sprejeta": true, "izid": "ustavljeno"},
+    {"opis": "izjema za poddomeno ne spusti nadrejene domene", "izjema": "x.ads.example", "poizvedba": "ads.example", "dan": 1, "sprejeta": true, "izid": "ustavljeno"},
+    {"opis": "izjema za poddomeno spusti to poddomeno", "izjema": "x.ads.example", "poizvedba": "x.ads.example", "dan": 1, "sprejeta": true, "izid": "spuscen"},
+    {"opis": "ime s seznama grozenj se ne sme spustiti (Nevarno)", "izjema": "zlo.example", "poizvedba": "zlo.example", "dan": 1, "sprejeta": false, "izid": "ustavljeno"},
+    {"opis": "poddomena imena s seznama grozenj se ne sme spustiti", "izjema": "a.zlo.example", "poizvedba": "a.zlo.example", "dan": 1, "sprejeta": false, "izid": "ustavljeno"},
+    {"opis": "izjema z velikimi crkami in koncno piko velja za cisto ime", "izjema": "Ads.Example.", "poizvedba": "ads.example", "dan": 1, "sprejeta": true, "izid": "spuscen"},
+    {"opis": "Unicode ime ni veljavna izjema", "izjema": "bücher.example", "poizvedba": "xn--bcher-kva.example", "dan": 1, "sprejeta": false, "izid": "ustavljeno"},
+    {"opis": "prazno ime ni izjema", "izjema": "", "poizvedba": "ads.example", "dan": 1, "sprejeta": false, "izid": "ustavljeno"}
+  ],
+  "razresevalci_naprej": [
+    {"opis": "privzeto (uporabnik se ni izbral) in ni krajevnega DNS: SERVFAIL takoj, nikoli tuj razresevalnik (1.1.1.1, 9.9.9.9)", "krajevni": [], "izid": "servfail"},
+    {"opis": "privzeto in krajevni DNS iz omrezja: samo ta, brez tujega", "krajevni": ["192.0.2.53", "2001:db8::53"], "izid": "krajevni"}
+  ]
+}
