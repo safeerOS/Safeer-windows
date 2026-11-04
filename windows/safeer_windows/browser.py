@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import hmac
 import json
 import threading
 import os
@@ -330,6 +331,19 @@ class ShieldInterceptor(QWebEngineUrlRequestInterceptor):
 ZAUPANA_POTRDILA: set = set()
 
 
+def odtis_zaupan(odtis: str) -> bool:
+    """Odtis je med pripetimi; vsak element s hmac.compare_digest (ne `in set`: cas primerjave ne izda odtisa,
+    revizija 4. 11. 2026). Kopija (tuple), ker drug del kode set lahko spremeni med primerjavo."""
+    if not isinstance(odtis, str) or not odtis:
+        return False
+    surov = odtis.lower().encode("ascii", "replace")
+    zadetek = False
+    for zaupan in tuple(ZAUPANA_POTRDILA):
+        if isinstance(zaupan, str) and hmac.compare_digest(surov, zaupan.lower().encode("ascii", "replace")):
+            zadetek = True
+    return zadetek
+
+
 class SafeerPage(QWebEnginePage):
     def __init__(self, profile: QWebEngineProfile, window: "BrowserWindow", parent: QObject):
         super().__init__(profile, parent)
@@ -350,7 +364,7 @@ class SafeerPage(QWebEnginePage):
             if veriga and ZAUPANA_POTRDILA:
                 import hashlib
                 odtis = hashlib.sha256(bytes(veriga[0].toDer())).hexdigest()
-                if odtis in ZAUPANA_POTRDILA:
+                if odtis_zaupan(odtis):
                     napaka.acceptCertificate()
                     return
             napaka.rejectCertificate()
