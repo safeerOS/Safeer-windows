@@ -29,6 +29,7 @@ DOVOLJENI_LITERALI = {
     "#meni button.izbran", "#meni button", "pozabi poslji-na", "#vsebinaMape .vrstica", "@iskanje", "magnetVrsta_drugo",
     "magnetVrsta_slika", "mediaNapaka_ni_toka", "naročnina", "brezplačno", "RTV 365",
     "brez mosta",       # razlog Promise.reject, ki ga primerja obvescanje (prikaze t("brezMostu"))
+    "scitKdo_ponudnik", ".scit-naprej select",      # kljuc besedila in izbirnik CSS Scita (kot v Safeer-linux)
 }
 BREZ = {"script", "style", "svg", "path", "code", "kbd", "template", "title"}
 PRAZNI = {"br", "img", "input", "meta", "link", "hr", "source", "wbr"}
@@ -106,8 +107,9 @@ def slovar():
     QApplication.instance() or QApplication(sys.argv)
     vir = (OS / "os.js").read_text(encoding="utf-8")
     koda = (OS / "besedila.js").read_text(encoding="utf-8") + "\n" + "\n".join(
-        _blok(vir, ime) for ime in ("BESEDILA_WINDOWS", "BESEDILA_VRATA", "BESEDILA_MEDIA")) + """
+        _blok(vir, ime) for ime in ("BESEDILA_WINDOWS", "BESEDILA_VRATA", "BESEDILA_SCIT", "BESEDILA_MEDIA")) + """
 Object.keys(BESEDILA_VRATA).forEach(function (k) { Object.assign(BESEDILA_WINDOWS[k], BESEDILA_VRATA[k]); });
+Object.keys(BESEDILA_SCIT).forEach(function (k) { Object.assign(BESEDILA_WINDOWS[k], BESEDILA_SCIT[k]); });
 Object.keys(BESEDILA_MEDIA).forEach(function (k) { if (BESEDILA_OS[k]) Object.assign(BESEDILA_OS[k], BESEDILA_MEDIA[k]); });
 Object.keys(BESEDILA_WINDOWS).forEach(function (k) { if (BESEDILA_OS[k]) Object.assign(BESEDILA_OS[k], BESEDILA_WINDOWS[k]); });
 JSON.stringify(BESEDILA_OS)"""
