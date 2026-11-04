@@ -762,9 +762,8 @@ class SafeerBrowserApp(QObject):
                     window.new_tab(url, switch=not opened)
                     opened = True
         for url in urls or []:
-            window.open_input(url, new_tab=True)
-            opened = True
-        if not opened:
+            window.open_input(url, new_tab=True, zunanji=True)
+        if window.tabs.count() == 0:  # tudi ko je bil zunanji naslov zavrnjen: okno brez zavihka ni uporabno
             window.new_tab(policy.HOME_URL)
         geometry = self.settings.get("window_geometry")
         if geometry and not private and len(self.windows) == 1:
@@ -828,7 +827,7 @@ class SafeerBrowserApp(QObject):
             self.new_window(urls)
             return
         for url in urls:
-            window.open_input(url, new_tab=True)
+            window.open_input(url, new_tab=True, zunanji=True)
         if not urls:
             window.new_tab(policy.HOME_URL)
         window.setWindowState((window.windowState() & ~Qt.WindowState.WindowMinimized) | Qt.WindowState.WindowActive)
@@ -1599,14 +1598,20 @@ class BrowserWindow(QMainWindow):
         return [v.url().toString() for v in self.views() if v.url().scheme() in ("http", "https")]
 
     # -- navigation -----------------------------------------------------------
-    def open_input(self, text: str, new_tab: bool = False, page: Optional[QWebEnginePage] = None) -> None:
+    def open_input(self, text: str, new_tab: bool = False, page: Optional[QWebEnginePage] = None,
+                   zunanji: bool = False) -> None:
+        """zunanji=True: naslov iz druge aplikacije (argv, drugi zagon) - samo http(s) in pot na pogonu s crko.
+        Ze os.path.exists(\\\\streznik\\...) bi na Windows odprl SMB, zato zunanji vhod ne gre skozi to vejo."""
         settings = self.app.settings
-        if os.path.isabs(text or "") and os.path.exists(text):
+        if zunanji:
+            kind, target = policy.resolve_external_input(text, settings.get("search_engine"),
+                                                         bool(settings.get("tracking_protection_enabled")))
+        elif os.path.isabs(text or "") and os.path.exists(text):
             target, kind = QUrl.fromLocalFile(text).toString(), "url"
         else:
             kind, target = policy.resolve_input(text, settings.get("search_engine"),
                                                 bool(settings.get("tracking_protection_enabled")))
-        if kind == "empty":
+        if kind in ("empty", "denied"):
             return
         if self.odpri_drm(target):
             return

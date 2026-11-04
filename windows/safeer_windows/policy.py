@@ -417,6 +417,40 @@ def resolve_input(text: str, engine: str = "duckduckgo", tracking_protection: bo
     return "url", url
 
 
+_DRIVE_PATH = re.compile(r"^[a-zA-Z]:[\\/]")
+_DVOJNA_POSEVNICA = re.compile(r"^[\\/]{2}")
+
+
+def resolve_external_input(text: str, engine: str = "duckduckgo", tracking_protection: bool = True) -> Tuple[str, str]:
+    """Naslov, ki pride OD ZUNAJ (argv, drugi zagon prek QLocalServer, privzeti brskalnik): (kind, url).
+
+    Druga aplikacija lahko poda povezavo, ki jo uporabnik ni vpisal. Pot \\\\streznik\\deljeno, //streznik ali
+    file://streznik/... bi Windows odprl prek SMB in strezniku poslal NTLM uporabnika (revizija 4. 11. 2026). Od zunaj
+    zato velja samo http(s), naslov ali iskanje in krajevna pot na pogonu s crko; vse drugo je kind "denied".
+    Vpis v naslovno vrstico ostane resolve_input (uporabnik ve, kaj je vpisal).
+    """
+    value = (text or "").strip()
+    if not value:
+        return "empty", ""
+    if _DVOJNA_POSEVNICA.match(value):
+        return "denied", ""
+    if _DRIVE_PATH.match(value):
+        return resolve_input(value, engine, tracking_protection)
+    scheme_match = _SCHEME.match(value)
+    if scheme_match and scheme_match.group(1).lower() == "file":
+        parts = urllib.parse.urlsplit(value)
+        if (parts.netloc or "").lower() not in ("", "localhost"):
+            return "denied", ""
+        path = urllib.parse.unquote(parts.path or "")
+        if not path.startswith("/") or _DVOJNA_POSEVNICA.match(path[1:]) or not _DRIVE_PATH.match(path[1:]):
+            return "denied", ""
+        return resolve_input(path[1:], engine, tracking_protection)
+    kind, url = resolve_input(value, engine, tracking_protection)
+    if kind == "url" and not url.startswith(("http://", "https://")) and url != "about:blank":
+        return "denied", ""
+    return kind, url
+
+
 def display_url(url: str) -> str:
     if not url or url.startswith(HOME_URL.rstrip("/")) and "blocked" not in url:
         return ""
