@@ -515,11 +515,19 @@ GOOGLE_AUTH_HOSTS = (
 WINDOWS_AUTH_FIREFOX_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0"
 
 
+#: accounts.google.<drzava> (accounts.google.si, .co.uk, .com.au) - samo koncnica drzave, ne poljubna domena za piko.
+_GOOGLE_ACCOUNTS_CC = re.compile(r"^accounts\.google\.(?:com|[a-z]{2}|co\.[a-z]{2}|com\.[a-z]{2})$")
+
+
 def is_google_auth_url(url: str) -> bool:
     try:
         parsed = urllib.parse.urlparse(url)
-        host = (parsed.netloc or "").lower().split(":")[0]
-        if any(host == h or host.endswith("." + h) or host.startswith("accounts.google.") for h in GOOGLE_AUTH_HOSTS):
+        # hostname brez userinfo in vrat: netloc "accounts.google.com@zlo.com" je gostitelj zlo.com; startswith
+        # "accounts.google." je sprejel tudi accounts.google.zlo.com (revizija 4. 11. 2026).
+        host = (parsed.hostname or "").lower().rstrip(".")
+        if not host:
+            return False
+        if any(host == h or host.endswith("." + h) for h in GOOGLE_AUTH_HOSTS) or _GOOGLE_ACCOUNTS_CC.match(host):
             return True
         if host in ("google.com", "www.google.com", "google.si", "www.google.si"):
             path = (parsed.path or "").lower()
