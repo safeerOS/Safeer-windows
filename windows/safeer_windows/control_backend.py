@@ -24,6 +24,7 @@ if CORE_DIR not in sys.path:
 from core import link_deljenje, link_hub, link_hub_streznik, link_tls
 from safeer_windows import os_backend_win
 from safeer_windows.navidezni_zaslon import NavidezniZaslon
+from safeer_windows import zapis_atomski
 
 CONFIG_DIR = os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~/.config"), "SafeerControl")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "link.json")
@@ -324,16 +325,8 @@ class SafeerControlBackend:
 
     def shrani_nastavitve(self) -> bool:
         try:
-            os.makedirs(os.path.dirname(self.config_pot), exist_ok=True)
-            zacasna = self.config_pot + ".tmp"
-            with open(zacasna, "w", encoding="utf-8") as f:
-                json.dump(self.nastavitve, f, ensure_ascii=False, indent=2)
-            if sys.platform != "win32":
-                try:
-                    os.chmod(zacasna, 0o600)
-                except OSError:
-                    pass
-            os.replace(zacasna, self.config_pot)
+            # mkstemp ustvari zacasno datoteko z 0600 (prej rocni chmod izven Windows)
+            zapis_atomski.zapisi_json(self.config_pot, self.nastavitve, indent=2)
             return True
         except Exception as e:
             print(f"[ControlBackend] Napaka pri shranjevanju {self.config_pot}: {e}")

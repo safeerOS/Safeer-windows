@@ -13,6 +13,7 @@ import sys
 import threading
 import time
 from typing import List, Optional
+from . import zapis_atomski
 
 CONFIG_DIR = os.path.join(os.environ.get("APPDATA") or os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "SafeerOS")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "os.json")
@@ -57,10 +58,7 @@ def nalozi_shrambo() -> dict:
 def shrani_shrambo(podatki: dict) -> bool:
     try:
         os.makedirs(CONFIG_DIR, exist_ok=True)
-        tmp = CONFIG_FILE + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(podatki, f, ensure_ascii=False, indent=2)
-        os.replace(tmp, CONFIG_FILE)
+        zapis_atomski.zapisi_json(CONFIG_FILE, podatki, indent=2)
         return True
     except Exception:
         return False

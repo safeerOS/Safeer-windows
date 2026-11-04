@@ -13,6 +13,7 @@ import time
 from typing import Optional
 
 from . import predvajalnik_nastavitve as N
+from . import zapis_atomski
 
 MIN_SEKUND = 10.0
 KONEC_SEKUND = 30.0
@@ -35,10 +36,7 @@ def nalozi(p: Optional[str] = None) -> dict:
 def shrani(d: dict, p: Optional[str] = None) -> bool:
     p = p or pot()
     try:
-        os.makedirs(os.path.dirname(p), exist_ok=True)
-        with open(p + ".tmp", "w", encoding="utf-8") as f:
-            json.dump(d, f, ensure_ascii=False)
-        os.replace(p + ".tmp", p)
+        zapis_atomski.zapisi_json(p, d)
         return True
     except OSError:
         return False

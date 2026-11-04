@@ -27,6 +27,7 @@ import time
 import urllib.parse
 import uuid
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from . import zapis_atomski
 
 APP_NAME = "Safeer Browser"
 APP_ID = "SafeerBrowser"
@@ -236,11 +237,7 @@ class SettingsStore:
 
     def save(self) -> bool:
         try:
-            os.makedirs(os.path.dirname(self.path), exist_ok=True)
-            temporary = self.path + ".tmp"
-            with open(temporary, "w", encoding="utf-8") as handle:
-                json.dump(self.values, handle, indent=2, ensure_ascii=False)
-            os.replace(temporary, self.path)
+            zapis_atomski.zapisi_json(self.path, self.values, indent=2)
             return True
         except OSError:
             return False

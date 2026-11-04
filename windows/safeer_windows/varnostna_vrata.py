@@ -21,6 +21,7 @@ import sys
 import threading
 import time
 from typing import Callable, Optional, Tuple
+from . import zapis_atomski
 
 NAJVEC_ZAGONOV = 3          # toliko zagonov brez stabilnega delovanja -> obicajno namizje Windows
 OKNO_S = 15 * 60            # steti se samo zagoni v zadnjih 15 minutah
@@ -85,9 +86,7 @@ def beri() -> dict:
 def pisi(zapis: dict) -> None:
     pot = _pot()
     try:
-        with open(pot + ".tmp", "w", encoding="utf-8") as f:
-            json.dump(zapis, f)
-        os.replace(pot + ".tmp", pot)
+        zapis_atomski.zapisi_json(pot, zapis, ensure_ascii=True)
     except OSError:
         pass
 
