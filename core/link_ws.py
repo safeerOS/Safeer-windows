@@ -37,11 +37,16 @@ OPKODA_ZAPRI = 0x8
 OPKODA_PING = 0x9
 OPKODA_PONG = 0xA
 
-#: Najvecje sporocilo, ki ga sprejmemo (naprava nam ne sme napolniti pomnilnika).
-NAJVECJE_SPOROCILO = 1024 * 1024
+#: Najvecje sporocilo, ki ga sprejmemo (naprava nam ne sme napolniti pomnilnika). Do 19. 11. 2026 1 MiB: kategorija
+#: sinhronizacije (zapiski Line, do 1 MiB podatkov) z ovojnico (id, tip, kategorija) te meje ni dosegla. Enaka meja je v
+#: link_hub.NAJVECJE_SPOROCILO, link_hub_streznik.NAJVEC_MESH_SPOROCILO in v Android Hubu (HubStreznik.NAJVECJE_SPOROCILO);
+#: tests/test_ws_odpornost.py drzi meje skladne.
+NAJVECJE_SPOROCILO = 1024 * 1024 + 128 * 1024
 #: Koliko okvirjev sme cakati v izhodni vrsti, preden napravo razglasimo za gluho.
 NAJVEC_V_VRSTI = 64
-NAJVEC_BAJTOV_V_VRSTI = 512 * 1024
+#: Do 19. 11. 2026 512 KB: eno vecje sporocilo je napravo razglasilo za gluho in zaprlo povezavo. Zdaj gre vanjo eno
+#: najvecje sporocilo in se 512 KB navadnih; stevilo okvirjev (NAJVEC_V_VRSTI) in izmet pocasnih ostaneta.
+NAJVEC_BAJTOV_V_VRSTI = NAJVECJE_SPOROCILO + 512 * 1024
 #: Tisina, po kateri posljemo ping; po treh brez odziva povezavo zapremo.
 PING_VSAKIH_S = 25.0
 NAJVEC_TIHIH_KROGOV = 3

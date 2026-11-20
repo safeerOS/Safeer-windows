@@ -46,7 +46,7 @@ POT_ZDRAVJA = "/cast/health"
 
 # Zgornja meja sporocila s Huba. Brez nje lahko streznik (ali kdor se zanj izdaja)
 # napove 4 GiB in nam napolni pomnilnik.
-NAJVECJE_SPOROCILO = 1024 * 1024
+NAJVECJE_SPOROCILO = 1024 * 1024 + 128 * 1024   # skladno z link_ws.NAJVECJE_SPOROCILO (kategorija sinhronizacije do 1 MiB + ovojnica)
 
 # Koliko tisine prenesemo, preden povezavo razglasimo za mrtvo. Sami posiljamo
 # ping pogosteje od tega, zato tisina pomeni, da Huba res ni vec.
