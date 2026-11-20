@@ -15,6 +15,14 @@ from safeer_windows import control_backend, os_backend_win, policy, media_diagno
 from core import link_datoteke, link_hub, os_media, os_scit
 
 
+
+def _medijski_center_brez_omrezja(td):
+    """MediaCenter brez zivih omrezij (Internet Archive, TV v zivo): katalog vsebuje samo, kar doda test."""
+    center = os_media.MediaCenter(td, roots=[])
+    center._zakoniti_viri = mock.Mock()
+    center._zakoniti_viri.get.return_value = []
+    return center
+
 class TestOsWindows(unittest.TestCase):
     def test_webview2_prepozna_zavrnitve_ponudnika_brez_zapisovanja_poti(self):
         zavrnitev = json.dumps({
@@ -202,7 +210,7 @@ class TestOsWindows(unittest.TestCase):
 
     def test_media_zdruzi_enako_vsebino_in_izbere_najboljso(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
-            center = os_media.MediaCenter(td, roots=[])
+            center = _medijski_center_brez_omrezja(td)
             responses = {
                 "https://a.test/catalog": json.dumps({"items": [{"title": "Moj film", "url": "https://a.test/film-720p.mp4", "type": "movie", "year": 2025}]}).encode(),
                 "https://b.test/catalog": json.dumps({"items": [{"title": "Moj film 1080p", "url": "https://b.test/film-1080p.mp4", "type": "movie"}]}).encode(),
@@ -246,7 +254,7 @@ class TestOsWindows(unittest.TestCase):
 
     def test_neposredni_medijski_viri_se_ne_prenesejo_kot_katalog(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
-            center = os_media.MediaCenter(td, roots=[])
+            center = _medijski_center_brez_omrezja(td)
             with mock.patch.object(center, "_download", side_effect=AssertionError("stream must not download")) as download:
                 music = center.add_source("https://media.example/song.mp3", "Test glasba")
                 live = center.add_source("https://tv.example/live/channel.m3u8", "Test TV v živo")
@@ -1105,7 +1113,7 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
 
     def test_media_center_import_and_export_json(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
-            mc = os_media.MediaCenter(td, roots=[])
+            mc = _medijski_center_brez_omrezja(td)
             izvoz = mc.export_json()
             self.assertEqual(izvoz.get("razlicica"), 1)
             self.assertEqual(izvoz.get("aplikacija"), "Safeer Media")
@@ -1144,7 +1152,7 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
 
     def test_media_center_import_full_export_structure(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
-            mc = os_media.MediaCenter(td, roots=[])
+            mc = _medijski_center_brez_omrezja(td)
             izvozen_paket = {
                 "razlicica": 1,
                 "viri": [

@@ -11,6 +11,14 @@ from core.os_media import MediaCenter, parse_payload
 from core import media_servers
 
 
+
+def _medijski_center_brez_omrezja(config_dir):
+    """MediaCenter brez zivih omrezij (Internet Archive, TV v zivo): katalog vsebuje samo, kar doda test."""
+    center = MediaCenter(config_dir, roots=[])
+    center._zakoniti_viri = mock.Mock()
+    center._zakoniti_viri.get.return_value = []
+    return center
+
 class Response:
     status = 200
 
@@ -122,7 +130,7 @@ class TestZakonitiViri(unittest.TestCase):
             tagged.tags.add(TDRC(encoding=3, text="2020"))
             tagged.tags.add(APIC(encoding=3, mime="image/png", type=3, desc="Cover", data=b"png-data"))
             tagged.save()
-            center = MediaCenter(directory + "/config", roots=[])
+            center = _medijski_center_brez_omrezja(directory + "/config")
             result = center.add_local_root(directory)
             self.assertTrue(result["ok"])
             items = center.catalog()["vnosi"]
@@ -194,7 +202,7 @@ class TestZakonitiViri(unittest.TestCase):
 
     def test_soundcloud_uses_official_player_without_reading_the_page(self):
         with tempfile.TemporaryDirectory() as directory:
-            center = MediaCenter(directory, roots=[])
+            center = _medijski_center_brez_omrezja(directory)
             center._izmeri_ping = lambda _url: None
             center._download = mock.Mock(side_effect=AssertionError("SoundCloud page must not be fetched"))
             added = center.add_source("https://soundcloud.com/artist/public-track", "Public track")
