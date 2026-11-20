@@ -1,7 +1,7 @@
 # Safeer Browser for Windows - build and runtime dependencies (Python 3.12, x64)
 PySide6>=6.8.1,<6.12
 pyinstaller>=6.11,<7
-Pillow>=10.4,<12
+Pillow>=13.0.0,<14  # GHSA-xvh5-g6gv-559v, GHSA-xcvg-w56q-r89m, GHSA-wqgw-9xfh-qf2g (TIFF); popravek od 13.0.0
 cryptography>=43,<47
 python-vlc>=3.0.21203,<4
 mutagen>=1.47,<2
