@@ -24,6 +24,9 @@ class MeshUbeganjeTests(unittest.TestCase):
         self.assertLess(len(sporocilo), hs.NAJVEC_MESH_SPOROCILO)   # vhodni limit ga sprejme
         self.assertFalse(n.poslji(sporocilo))
         self.assertEqual(povezava.poslano, [])
+        # Zavrnitev vsebine ni napaka povezave: isti posrednik takoj nato normalno posreduje (CodeRabbit st6).
+        self.assertTrue(n.poslji(json.dumps({"type": "sync.data", "payload": {"data": "x" * 100000}})))
+        self.assertEqual(len(povezava.poslano), 1)
 
     def test_navadno_sporocilo_se_poslje(self):
         from core import link_hub_streznik as hs
