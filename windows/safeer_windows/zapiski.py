@@ -13,12 +13,12 @@ Omemba je v besedilu navadna povezava Markdown ``[@ime](cilj)``:
 from __future__ import annotations
 
 import json
-import os
 import re
 import secrets
 import threading
 import time
 from typing import Optional
+from . import zapis_atomski
 
 NAJVEC_ZAPISKOV = 2000
 NAJVEC_BESEDILA = 200_000
@@ -61,11 +61,7 @@ class Zapiski:
         return {"zapiski": [], "zadnji": ""}
 
     def _shrani(self, data: dict) -> None:
-        os.makedirs(os.path.dirname(self.pot) or ".", exist_ok=True)
-        zacasna = self.pot + ".tmp"
-        with open(zacasna, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=1)
-        os.replace(zacasna, self.pot)
+        zapis_atomski.zapisi_json(self.pot, data, indent=1)
 
     @staticmethod
     def _povzetek(z: dict) -> dict:

@@ -14,6 +14,7 @@ import os
 import sys
 from typing import Optional
 from urllib.parse import urlsplit, urlunsplit
+from . import zapis_atomski
 
 PRIVZETO: dict = {
     "stremio_dodatki": [],   # [{"naslov": "https://.../manifest.json", "ime": "..."}]
@@ -54,11 +55,7 @@ def nalozi(p: Optional[str] = None) -> dict:
 def shrani(n: dict, p: Optional[str] = None) -> bool:
     p = p or pot()
     try:
-        os.makedirs(os.path.dirname(p), exist_ok=True)
-        zacasna = p + ".tmp"
-        with open(zacasna, "w", encoding="utf-8") as f:
-            json.dump({k: n.get(k, PRIVZETO[k]) for k in PRIVZETO}, f, ensure_ascii=False, indent=1)
-        os.replace(zacasna, p)
+        zapis_atomski.zapisi_json(p, {k: n.get(k, PRIVZETO[k]) for k in PRIVZETO}, indent=1)
         return True
     except OSError:
         return False

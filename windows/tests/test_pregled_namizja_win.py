@@ -432,7 +432,10 @@ class LibmpvVPaketu(unittest.TestCase):
             with open(os.path.join(app, "_internal", "PySide6", "MSVCP140.dll"), "rb") as f:
                 self.assertEqual(f.read(), b"novi")
 
-    def test_x3_druzina_brez_vira_je_obvestilo_brez_opozorila(self):
+    def test_x3_druzina_brez_vira_poenoti_vc_redist(self):
+        # cc024eb: clani druzine brez vira v vendor/mpv niso vec opozorilo (CI 41461886218: lazni alarm, ceprav je bila
+        # vsa druzina 14.51) - poenoti jih poenoti_msvc_druzino iz VC_redist, mesana druzina USTAVI gradnjo
+        # (test_msvc_mesana_druzina_ustavi_gradnjo, test_msvc_libmpv_brez_druzine_ustavi_gradnjo).
         import contextlib
         import io
         import tempfile
@@ -442,8 +445,6 @@ class LibmpvVPaketu(unittest.TestCase):
             with contextlib.redirect_stdout(izpis):
                 self.assertEqual(len(self.b.zamenjaj_msvc_runtime(app, vendor, podpis=_podpisano,
                                                                   razlicica=_razlicica)), 3)
-        # cc024eb2: to ni vec opozorilo (laziven alarm v CI 41461886218) - clane poenoti VC_redist, mesana druzina
-        # ustavi gradnjo. Izpis clane se vedno nasteje, a brez oznake ::warning::.
         self.assertNotIn("::warning::", izpis.getvalue())
         self.assertIn("poenoti VC_redist", izpis.getvalue())
         self.assertIn("msvcp140_1.dll", izpis.getvalue())

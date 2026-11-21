@@ -551,6 +551,13 @@ div.vrstica { cursor: default; }
 .scit-zadnje { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 2px 8px; font-size: 14px; color: var(--medlo); }
 .scit-zadnje b { width: 100%; font-weight: 600; }
 .scit-zadnje i { font-style: normal; opacity: .65; }
+/* Scit kot na Linuxu (4. 11. 2026): gumbi Dovoli / Blokiraj spet in izbira streznika naprej; barve iz tem (--rob,
+   --kartica-poudarek, --vnos), fokus s tipkovnico ostane viden (globalni :focus-visible). */
+.scit-zadnje button { margin-left: 4px; padding: 1px 9px; border-radius: 8px; border: 1px solid var(--rob); background: transparent; color: inherit; font: inherit; font-size: 13px; cursor: pointer; }
+.scit-zadnje button:hover, .scit-zadnje button:focus-visible { background: var(--kartica-poudarek); }
+.scit-naprej select, .scit-naprej input { padding: 2px 8px; border-radius: 8px; border: 1px solid var(--rob); background: var(--vnos); color: inherit; font: inherit; font-size: 13px; }
+.scit-naprej input { min-width: 260px; }
+.scit-naprej span { width: 100%; }
 .zvok-jbl { margin-top: 10px; max-width: 1100px; }
 .zvok-jbl .stikalo { width: 100%; }
 .vrstica .znacka.tece { animation: utrip 1.6s ease-in-out infinite; }

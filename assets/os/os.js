@@ -216,6 +216,16 @@
     it: { namizjeRazlog_sesutja: "Il desktop di Safeer OS si è bloccato più volte di seguito all’avvio, quindi è rimasto il normale desktop di Windows. Puoi riattivarlo qui.", namizjeRazlog_nalaganje: "Non è stato possibile caricare il desktop di Safeer OS, quindi è rimasto il normale desktop di Windows. Puoi riattivarlo qui.", namizjeRazlog_bliznjica: "Hai disattivato il desktop di Safeer OS con Ctrl+Alt+Maiusc+W. Puoi riattivarlo qui.", bliznjicaVrataNi: "La scorciatoia Ctrl+Alt+Maiusc+W ora non funziona (la usa un altro programma). Puoi raggiungere il desktop di Windows qui o nel menu del desktop." }
   };
   Object.keys(BESEDILA_VRATA).forEach(function (koda) { Object.assign(BESEDILA_WINDOWS[koda], BESEDILA_VRATA[koda]); });
+  // Scit kot na Linuxu (4. 11. 2026): izbira streznika naprej, izjeme, napake prestrezanja na Windows.
+  var BESEDILA_SCIT = {
+    sl: {"scitIzbiraNaslov":"Kam naj Ščit pošilja dovoljena imena?","scitIzbiraOpis":"Krajevni DNS (usmerjevalnik ali omrežje) je prednastavljen: nič ne gre k tujemu strežniku. Šifriran DoH (Cloudflare, Quad9 …) skrije imena pred ponudnikom interneta, vidi pa jih izbrani ponudnik. Izbiro lahko kadarkoli spremeniš spodaj.","scitIzbiraKrajevni":"Ostani pri krajevnem DNS","scitIzbiraDrug":"Izberi drug strežnik","scitNaprej":"Strežnik naprej","scitNaprej_router":"DNS usmerjevalnika (privzeto) – nič v oblak","scitNaprej_cloudflare":"Cloudflare 1.1.1.1 (šifrirano)","scitNaprej_quad9":"Quad9 9.9.9.9 (šifrirano)","scitNaprej_google":"Google 8.8.8.8 (šifrirano)","scitNaprej_adguard":"AdGuard 94.140.14.14 (šifrirano)","scitNaprej_opendns":"Cisco OpenDNS 208.67.222.222 (šifrirano)","scitNaprej_custom":"Po meri (DoH ali IP, npr. Pi-hole)","scitNaprejNamig":"https://dns.primer.si/dns-query ali 192.168.1.2","scitNaprejShrani":"Shrani","scitNapaka_naprej":"Tega ne prepoznam kot naslov DoH (https://…) ali IP strežnika DNS.","scitNapaka_naprej_zanka":"Ta naslov bi poizvedbe vrnil Ščitu samemu (zanka). Izberi drug strežnik DNS.","scitKdo_ponudnik":"Dovoljena imena vidi {ime} (šifrirano – ponudnik interneta jih ne vidi). Če ne odgovori, Ščit vpraša usmerjevalnik.","scitKdo_router":"Dovoljena imena vidi usmerjevalnik in običajno ponudnik interneta (nešifrirano).","scitKdo_custom":"Dovoljena imena vidi tvoj strežnik. Navaden IP ni šifriran.","scitDovoli":"Dovoli","scitDovoljeno":"{ime} je dovoljena.","scitIzjeme":"Dovoljene domene","scitBlokirajSpet":"Blokiraj spet","scitNapaka_vrata":"Vrata DNS 53 na tem računalniku uporablja drug program, zato Ščit ne filtrira. Zapri ta program (npr. drug strežnik DNS) in Ščit vklopi znova.","scitNapaka_ipv6":"Ščit filtrira, a strežniki IPv6 DNS omrežja gredo še mimo njega. Ščit to poskuša popraviti sam.","scitNapaka_ni_krajevnega":"Omrežje ni dalo strežnika DNS, zato se imena ne razrešijo. Spodaj izberi strežnik, kamor naj Ščit pošilja dovoljena imena.","br_dnsSistem":"Sistemski DNS (Ščit, ko je vklopljen)"},
+    en: {"scitIzbiraNaslov":"Where should the Shield send allowed names?","scitIzbiraOpis":"Local DNS (your router or network) is preselected: nothing goes to an outside server. Encrypted DoH (Cloudflare, Quad9 …) hides names from your internet provider, but the chosen provider sees them. You can change this any time below.","scitIzbiraKrajevni":"Keep local DNS","scitIzbiraDrug":"Choose another server","scitNaprej":"Forward to","scitNaprej_router":"Router DNS (default) – nothing to the cloud","scitNaprej_cloudflare":"Cloudflare 1.1.1.1 (encrypted)","scitNaprej_quad9":"Quad9 9.9.9.9 (encrypted)","scitNaprej_google":"Google 8.8.8.8 (encrypted)","scitNaprej_adguard":"AdGuard 94.140.14.14 (encrypted)","scitNaprej_opendns":"Cisco OpenDNS 208.67.222.222 (encrypted)","scitNaprej_custom":"Custom (DoH or IP, e.g. Pi-hole)","scitNaprejNamig":"https://dns.example.com/dns-query or 192.168.1.2","scitNaprejShrani":"Save","scitNapaka_naprej":"This is not a DoH address (https://…) or a DNS server IP.","scitNapaka_naprej_zanka":"This address would send queries back to the Shield itself (a loop). Choose another DNS server.","scitKdo_ponudnik":"Allowed names are seen by {ime} (encrypted – your internet provider does not see them). If it does not answer, Shield asks your router.","scitKdo_router":"Allowed names are seen by your router and usually your internet provider (unencrypted).","scitKdo_custom":"Allowed names are seen by your server. A plain IP is unencrypted.","scitDovoli":"Allow","scitDovoljeno":"{ime} is allowed.","scitIzjeme":"Allowed domains","scitBlokirajSpet":"Block again","scitNapaka_vrata":"Another program on this computer is using DNS port 53, so the Shield is not filtering. Close that program (e.g. another DNS server) and turn the Shield on again.","scitNapaka_ipv6":"The Shield is filtering, but the network's IPv6 DNS servers still bypass it. The Shield keeps trying to fix this.","scitNapaka_ni_krajevnega":"The network did not provide a DNS server, so names do not resolve. Choose below where the Shield should send allowed names.","br_dnsSistem":"System DNS (the Shield when it is on)"},
+    de: {"scitIzbiraNaslov":"Wohin soll der Schild erlaubte Namen senden?","scitIzbiraOpis":"Lokales DNS (Router oder Netzwerk) ist vorausgewählt: nichts geht an einen fremden Server. Verschlüsseltes DoH (Cloudflare, Quad9 …) verbirgt Namen vor deinem Internetanbieter, der gewählte Anbieter sieht sie aber. Du kannst das unten jederzeit ändern.","scitIzbiraKrajevni":"Beim lokalen DNS bleiben","scitIzbiraDrug":"Anderen Server wählen","scitNaprej":"Weiterleiten an","scitNaprej_router":"DNS des Routers (Standard) – nichts in die Cloud","scitNaprej_cloudflare":"Cloudflare 1.1.1.1 (verschlüsselt)","scitNaprej_quad9":"Quad9 9.9.9.9 (verschlüsselt)","scitNaprej_google":"Google 8.8.8.8 (verschlüsselt)","scitNaprej_adguard":"AdGuard 94.140.14.14 (verschlüsselt)","scitNaprej_opendns":"Cisco OpenDNS 208.67.222.222 (verschlüsselt)","scitNaprej_custom":"Eigener (DoH oder IP, z. B. Pi-hole)","scitNaprejNamig":"https://dns.example.com/dns-query oder 192.168.1.2","scitNaprejShrani":"Speichern","scitNapaka_naprej":"Das ist keine DoH-Adresse (https://…) und keine IP eines DNS-Servers.","scitNapaka_naprej_zanka":"Diese Adresse würde Anfragen an den Schild selbst zurückschicken (Schleife). Wähle einen anderen DNS-Server.","scitKdo_ponudnik":"Erlaubte Namen sieht {ime} (verschlüsselt – dein Internetanbieter sieht sie nicht). Antwortet er nicht, fragt der Schild den Router.","scitKdo_router":"Erlaubte Namen sieht dein Router und meist dein Internetanbieter (unverschlüsselt).","scitKdo_custom":"Erlaubte Namen sieht dein Server. Eine einfache IP ist unverschlüsselt.","scitDovoli":"Erlauben","scitDovoljeno":"{ime} ist erlaubt.","scitIzjeme":"Erlaubte Domains","scitBlokirajSpet":"Wieder blockieren","scitNapaka_vrata":"Ein anderes Programm auf diesem Computer belegt den DNS-Port 53, daher filtert der Schild nicht. Schließe dieses Programm (z. B. einen anderen DNS-Server) und schalte den Schild erneut ein.","scitNapaka_ipv6":"Der Schild filtert, aber die IPv6-DNS-Server des Netzwerks umgehen ihn noch. Der Schild versucht das selbst zu beheben.","scitNapaka_ni_krajevnega":"Das Netzwerk hat keinen DNS-Server geliefert, daher werden Namen nicht aufgelöst. Wähle unten, wohin der Schild erlaubte Namen senden soll.","br_dnsSistem":"System-DNS (der Schild, wenn er an ist)"},
+    es: {"scitIzbiraNaslov":"¿Adónde debe enviar el Escudo los nombres permitidos?","scitIzbiraOpis":"El DNS local (tu router o red) está preseleccionado: nada va a un servidor externo. El DoH cifrado (Cloudflare, Quad9…) oculta los nombres a tu proveedor de internet, pero los ve el proveedor elegido. Puedes cambiarlo cuando quieras abajo.","scitIzbiraKrajevni":"Seguir con el DNS local","scitIzbiraDrug":"Elegir otro servidor","scitNaprej":"Reenviar a","scitNaprej_router":"DNS del router (predeterminado) – nada a la nube","scitNaprej_cloudflare":"Cloudflare 1.1.1.1 (cifrado)","scitNaprej_quad9":"Quad9 9.9.9.9 (cifrado)","scitNaprej_google":"Google 8.8.8.8 (cifrado)","scitNaprej_adguard":"AdGuard 94.140.14.14 (cifrado)","scitNaprej_opendns":"Cisco OpenDNS 208.67.222.222 (cifrado)","scitNaprej_custom":"Personalizado (DoH o IP, p. ej. Pi-hole)","scitNaprejNamig":"https://dns.example.com/dns-query o 192.168.1.2","scitNaprejShrani":"Guardar","scitNapaka_naprej":"No es una dirección DoH (https://…) ni la IP de un servidor DNS.","scitNapaka_naprej_zanka":"Esta dirección devolvería las consultas al propio Escudo (un bucle). Elige otro servidor DNS.","scitKdo_ponudnik":"Los nombres permitidos los ve {ime} (cifrado: tu proveedor de internet no los ve). Si no responde, el Escudo pregunta al router.","scitKdo_router":"Los nombres permitidos los ve tu router y normalmente tu proveedor de internet (sin cifrar).","scitKdo_custom":"Los nombres permitidos los ve tu servidor. Una IP normal no está cifrada.","scitDovoli":"Permitir","scitDovoljeno":"{ime} está permitido.","scitIzjeme":"Dominios permitidos","scitBlokirajSpet":"Bloquear de nuevo","scitNapaka_vrata":"Otro programa de este ordenador usa el puerto DNS 53, así que el Escudo no filtra. Cierra ese programa (p. ej., otro servidor DNS) y vuelve a activar el Escudo.","scitNapaka_ipv6":"El Escudo filtra, pero los servidores DNS IPv6 de la red aún lo evitan. El Escudo sigue intentando corregirlo.","scitNapaka_ni_krajevnega":"La red no ha dado ningún servidor DNS, así que los nombres no se resuelven. Elige abajo adónde debe enviar el Escudo los nombres permitidos.","br_dnsSistem":"DNS del sistema (el Escudo si está activado)"},
+    fr: {"scitIzbiraNaslov":"Où le Bouclier doit-il envoyer les noms autorisés ?","scitIzbiraOpis":"Le DNS local (votre routeur ou réseau) est présélectionné : rien ne part vers un serveur extérieur. Le DoH chiffré (Cloudflare, Quad9…) cache les noms à votre fournisseur d'accès, mais le fournisseur choisi les voit. Vous pouvez changer cela à tout moment ci-dessous.","scitIzbiraKrajevni":"Garder le DNS local","scitIzbiraDrug":"Choisir un autre serveur","scitNaprej":"Transmettre à","scitNaprej_router":"DNS du routeur (par défaut) – rien vers le cloud","scitNaprej_cloudflare":"Cloudflare 1.1.1.1 (chiffré)","scitNaprej_quad9":"Quad9 9.9.9.9 (chiffré)","scitNaprej_google":"Google 8.8.8.8 (chiffré)","scitNaprej_adguard":"AdGuard 94.140.14.14 (chiffré)","scitNaprej_opendns":"Cisco OpenDNS 208.67.222.222 (chiffré)","scitNaprej_custom":"Personnalisé (DoH ou IP, ex. Pi-hole)","scitNaprejNamig":"https://dns.example.com/dns-query ou 192.168.1.2","scitNaprejShrani":"Enregistrer","scitNapaka_naprej":"Ce n'est ni une adresse DoH (https://…) ni l'IP d'un serveur DNS.","scitNapaka_naprej_zanka":"Cette adresse renverrait les requêtes au Bouclier lui-même (une boucle). Choisissez un autre serveur DNS.","scitKdo_ponudnik":"Les noms autorisés sont vus par {ime} (chiffré – votre fournisseur d'accès ne les voit pas). S'il ne répond pas, le Bouclier interroge le routeur.","scitKdo_router":"Les noms autorisés sont vus par votre routeur et généralement votre fournisseur d'accès (non chiffré).","scitKdo_custom":"Les noms autorisés sont vus par votre serveur. Une IP simple n'est pas chiffrée.","scitDovoli":"Autoriser","scitDovoljeno":"{ime} est autorisé.","scitIzjeme":"Domaines autorisés","scitBlokirajSpet":"Bloquer à nouveau","scitNapaka_vrata":"Un autre programme de cet ordinateur utilise le port DNS 53 : le Bouclier ne filtre pas. Fermez ce programme (p. ex. un autre serveur DNS) et réactivez le Bouclier.","scitNapaka_ipv6":"Le Bouclier filtre, mais les serveurs DNS IPv6 du réseau le contournent encore. Le Bouclier continue d'essayer de corriger cela.","scitNapaka_ni_krajevnega":"Le réseau n'a fourni aucun serveur DNS : les noms ne se résolvent pas. Choisissez ci-dessous où le Bouclier doit envoyer les noms autorisés.","br_dnsSistem":"DNS du système (le Bouclier s'il est activé)"},
+    it: {"scitIzbiraNaslov":"Dove deve inviare lo Scudo i nomi consentiti?","scitIzbiraOpis":"Il DNS locale (router o rete) è preselezionato: nulla va a un server esterno. Il DoH cifrato (Cloudflare, Quad9…) nasconde i nomi al provider internet, ma li vede il provider scelto. Puoi cambiarlo quando vuoi qui sotto.","scitIzbiraKrajevni":"Resta sul DNS locale","scitIzbiraDrug":"Scegli un altro server","scitNaprej":"Inoltra a","scitNaprej_router":"DNS del router (predefinito) – niente nel cloud","scitNaprej_cloudflare":"Cloudflare 1.1.1.1 (cifrato)","scitNaprej_quad9":"Quad9 9.9.9.9 (cifrato)","scitNaprej_google":"Google 8.8.8.8 (cifrato)","scitNaprej_adguard":"AdGuard 94.140.14.14 (cifrato)","scitNaprej_opendns":"Cisco OpenDNS 208.67.222.222 (cifrato)","scitNaprej_custom":"Personalizzato (DoH o IP, es. Pi-hole)","scitNaprejNamig":"https://dns.example.com/dns-query o 192.168.1.2","scitNaprejShrani":"Salva","scitNapaka_naprej":"Non è un indirizzo DoH (https://…) né l'IP di un server DNS.","scitNapaka_naprej_zanka":"Questo indirizzo rimanderebbe le richieste allo Scudo stesso (un ciclo). Scegli un altro server DNS.","scitKdo_ponudnik":"I nomi consentiti li vede {ime} (cifrato: il provider internet non li vede). Se non risponde, lo Scudo chiede al router.","scitKdo_router":"I nomi consentiti li vede il router e di solito il provider internet (non cifrato).","scitKdo_custom":"I nomi consentiti li vede il tuo server. Un IP semplice non è cifrato.","scitDovoli":"Consenti","scitDovoljeno":"{ime} è consentito.","scitIzjeme":"Domini consentiti","scitBlokirajSpet":"Blocca di nuovo","scitNapaka_vrata":"Un altro programma su questo computer usa la porta DNS 53, quindi lo Scudo non filtra. Chiudi quel programma (ad es. un altro server DNS) e riattiva lo Scudo.","scitNapaka_ipv6":"Lo Scudo filtra, ma i server DNS IPv6 della rete lo aggirano ancora. Lo Scudo continua a provare a correggerlo.","scitNapaka_ni_krajevnega":"La rete non ha fornito un server DNS, quindi i nomi non vengono risolti. Scegli qui sotto dove lo Scudo deve inviare i nomi consentiti.","br_dnsSistem":"DNS di sistema (lo Scudo se attivo)"}
+  };
+  Object.keys(BESEDILA_SCIT).forEach(function (koda) { Object.assign(BESEDILA_WINDOWS[koda], BESEDILA_SCIT[koda]); });
   var BESEDILA_MEDIA = {
     sl: { mediaPredaja:"Nadaljuj z druge naprave",mediaPredajaOpis:"Kaj predvaja ali je nazadnje gledala druga naprava – nadaljuj tukaj pri isti sekundi.",mediaPredajaVprasam:"Sprašujem naprave …",mediaPredajaNic:"Nobena naprava v Safeer Linku zdaj ničesar ne predvaja.",mediaPredajaIgra:"igra",mediaPredajaNazadnje:"nazadnje",mediaPredajaTukaj:"Nadaljuj tukaj",mediaPredajaTukajUstavi:"Nadaljuj tukaj in ustavi tam",mediaPredajaNapaka:"Naprav ni bilo mogoče vprašati.",mediaOpis:"Filmi, serije in glasba iz vseh tvojih virov v enem katalogu.",mediaOsvezi:"Osveži vire",mediaNastavitve:"Nastavitve",mediaNastavitveNaslov:"Nastavitve Safeer Media",mediaNastavitveOpis:"Uvoz in izvoz JSON knjižnic, neposreden vnos kode ter upravljanje virov.",mediaUvozDatoteke:"Naloži izvoženo JSON datoteko",mediaUvozDatotekeOpis:"Izberite .json datoteko kataloga ali virov, ki ste jo izvozili prej ali prejeli iz druge naprave.",mediaIzberiDatoteko:"Izberi .json datoteko",mediaNobenaDatoteka:"Nobena datoteka ni izbrana",mediaUvoziDatoteko:"Uvozi datoteko",mediaVnosJson:"Vnesi svojo JSON kodo",mediaVnosJsonOpis:"Prilepite JSON seznam medijev, prilagojeno konfiguracijo ali vir s tokovi.",mediaJsonImePh:"Ime zbirke ali vira (neobvezno)",mediaUvoziKodo:"Uvozi JSON kodo",mediaVstaviPrimer:"Primer kode (Code Example)",mediaPocisti:"Počisti",mediaPrimerVstavljen:"Primer JSON kode je bil uspešno vstavljen.",mediaIzvozJson:"Izvozi vsebine v JSON",mediaIzvozJsonOpis:"Prenesite celotno zbirko vaših virov in nastavitev v datoteko za varnostno kopijo ali prenos.",mediaPrenesiIzvoz:"Prenesi izvoženi JSON",mediaUvozUspesen:"Uspešno uvoženo: {n} vsebin v vir '{vir}'.",mediaUvozVirovUspesen:"Uspešno posodobljenih/dodanih virov: {n}.",mediaUvozNapaka:"Napaka pri uvozu JSON.",mediaVnesiteJson:"Prosimo, vnesite ali izberite veljavno JSON kodo.",mediaPredvaja:"PREDVAJA SE V SAFEER OS",mediaNapaka:"Tega toka ni mogoče predvajati. Poskusi drugo različico.",mediaIsci:"Išči filme, serije, videe, glasbo in radio",mediaVse:"Vse",mediaFilmi:"Filmi",mediaSerije:"Serije",mediaGlasba:"Glasba",mediaPrazno:"Ni zadetkov. Dodaj vir ali spremeni iskanje.",mediaViri:"Tvoji viri",mediaViriOpis:"Spletno stran, javni API, RSS ali M3U dodaš samo enkrat.",mediaVirIme:"Ime vira (neobvezno)",mediaVirUrl:"https://tilvids.com",mediaDodaj:"Dodaj vir",mediaZadetkov:"{n} enotnih vsebin",mediaRazlicic:"{n} različic",mediaVirDodan:"Vir je dodan in katalog združen.",mediaVirPodvojen:"Ta vir je že dodan.",mediaVirNapaka:"Vira ni bilo mogoče prebrati.",mediaOsvezeno:"Viri so osveženi.",mediaBrezVirov:"Dodaj prvi spletni vir; lokalne mape so vključene samodejno.",mediaVirElementov:"{n} vsebin",zvocnikNa:"Na zvočnik",zvocnikIscem:"Iščem zvočnike v omrežju …",zvocnikNiNajdenih:"Ni najdenih zvočnikov. Zvočnik mora biti prižgan in v istem omrežju (DLNA).",zvocnikIgra:"Zdaj igra na: {ime}",zvocnikZaseden:"{ime} igra {vir} – pritisni še enkrat za preklop",zvocnikNaslov:"Na zvočniku: {ime}",zvocnikPremor:"Premor / nadaljuj",zvocnikNazaj:"Nazaj na računalnik",zvocnikNiVir:"Te vsebine zvočnik ne more predvajati."},
     en: { mediaPredaja:"Continue from another device",mediaPredajaOpis:"What another device is playing or last watched – continue here at the same second.",mediaPredajaVprasam:"Asking devices …",mediaPredajaNic:"No device in Safeer Link is playing anything right now.",mediaPredajaIgra:"playing",mediaPredajaNazadnje:"last",mediaPredajaTukaj:"Continue here",mediaPredajaTukajUstavi:"Continue here and stop there",mediaPredajaNapaka:"Could not ask the devices.",mediaOpis:"Movies, series and music from all your sources in one catalogue.",mediaOsvezi:"Refresh sources",mediaNastavitve:"Settings",mediaNastavitveNaslov:"Safeer Media Settings",mediaNastavitveOpis:"Import and export JSON libraries, enter custom code, and manage sources.",mediaUvozDatoteke:"Upload exported JSON file",mediaUvozDatotekeOpis:"Select a .json file of catalogue or sources previously exported or shared.",mediaIzberiDatoteko:"Choose .json file",mediaNobenaDatoteka:"No file selected",mediaUvoziDatoteko:"Import file",mediaVnosJson:"Add your own JSON code",mediaVnosJsonOpis:"Paste a JSON list of media, custom configuration, or streams.",mediaJsonImePh:"Collection or source name (optional)",mediaUvoziKodo:"Import JSON code",mediaVstaviPrimer:"Code Example",mediaPocisti:"Clear",mediaPrimerVstavljen:"JSON code example successfully inserted.",mediaIzvozJson:"Export catalogue to JSON",mediaIzvozJsonOpis:"Download the full collection of your sources and settings for backup or sharing.",mediaPrenesiIzvoz:"Download exported JSON",mediaUvozUspesen:"Successfully imported: {n} items into '{vir}'.",mediaUvozVirovUspesen:"Successfully updated/added sources: {n}.",mediaUvozNapaka:"Error importing JSON.",mediaVnesiteJson:"Please enter or select valid JSON code.",mediaPredvaja:"PLAYING IN SAFEER OS",mediaNapaka:"This stream cannot be played. Try another version.",mediaIsci:"Search movies, series and music",mediaVse:"All",mediaFilmi:"Movies",mediaSerije:"Series",mediaGlasba:"Music",mediaPrazno:"No results. Add a source or change the search.",mediaViri:"Your sources",mediaViriOpis:"Add a website, public API, RSS or M3U only once.",mediaVirIme:"Source name (optional)",mediaVirUrl:"https://example.com/catalogue.json",mediaDodaj:"Add source",mediaZadetkov:"{n} unique titles",mediaRazlicic:"{n} versions",mediaVirDodan:"Source added and catalogue merged.",mediaVirPodvojen:"This source has already been added.",mediaVirNapaka:"The source could not be read.",mediaOsvezeno:"Sources refreshed.",mediaBrezVirov:"Add your first web source; local folders are included automatically.",mediaVirElementov:"{n} titles",zvocnikNa:"To speaker",zvocnikIscem:"Searching for speakers in your network…",zvocnikNiNajdenih:"No speakers found. The speaker must be on and in the same network (DLNA).",zvocnikIgra:"Now playing on {ime}",zvocnikZaseden:"{ime} is playing {vir} – press again to switch",zvocnikNaslov:"On speaker: {ime}",zvocnikPremor:"Pause / resume",zvocnikNazaj:"Back to this computer",zvocnikNiVir:"The speaker cannot play this item."},
@@ -2278,8 +2288,54 @@
     clearInterval(scitCas);
     scitCas = setInterval(function () {
       if (S.razdelek !== "nastavitve") { clearInterval(scitCas); return; }
-      if (!scitZaposleno) nalozScit();
+      // Med izbiro streznika ali vnosom naslova ne risemo znova: uporabniku bi vzeli fokus in vneseno besedilo.
+      var blok = $("blokScit");
+      if (!scitZaposleno && !(blok && blok.contains(document.activeElement))) nalozScit();
     }, 5000);
+  }
+  function poScitu(r) {
+    if (r) scitStanje = r;
+    narisiScit();
+  }
+  // Streznik naprej (kot na Linuxu): kam Scit poslje dovoljena imena - privzeto krajevni DNS - in kdo jih vidi.
+  var SCIT_NAPREJ = ["router", "cloudflare", "quad9", "google", "adguard", "opendns", "custom"];
+  var SCIT_IMENA = { cloudflare: "Cloudflare", quad9: "Quad9", google: "Google", adguard: "AdGuard", opendns: "Cisco OpenDNS" };
+  function scitNaprej(s) {
+    var izbrano = SCIT_NAPREJ.indexOf(s.naprej) >= 0 ? s.naprej : "router";
+    var o = el("div", "scit-zadnje scit-naprej", "<b>" + ubezi(t("scitNaprej")) + "</b>");
+    var izbor = el("select");
+    izbor.setAttribute("aria-label", t("scitNaprej"));
+    SCIT_NAPREJ.forEach(function (k) {
+      var op = el("option", "", ubezi(t("scitNaprej_" + k)));
+      op.value = k;
+      if (k === izbrano) op.selected = true;
+      izbor.appendChild(op);
+    });
+    var vnos = el("input");
+    vnos.type = "text";
+    vnos.placeholder = t("scitNaprejNamig");
+    vnos.value = s.naprejPoMeri || "";
+    vnos.setAttribute("aria-label", t("scitNaprej_custom"));
+    var shrani = el("button", "", ubezi(t("scitNaprejShrani")));
+    shrani.type = "button";
+    var kdo = el("span", "");
+    function osvezi() {
+      var k = izbor.value;
+      vnos.hidden = shrani.hidden = k !== "custom";
+      kdo.textContent = SCIT_IMENA[k] ? t("scitKdo_ponudnik", { ime: SCIT_IMENA[k] }) : t("scitKdo_" + k);
+    }
+    function poslji() {
+      klic("scitNaprej", [izbor.value, vnos.value]).then(function (r) {
+        if (r && r.napaka) obvesti(t("scitNapaka_" + r.napaka));
+        poScitu(r);
+      }, function () {});
+    }
+    izbor.addEventListener("change", function () { osvezi(); if (izbor.value !== "custom") poslji(); });
+    shrani.addEventListener("click", poslji);
+    vnos.addEventListener("keydown", function (e) { if (e.key === "Enter") poslji(); });
+    o.appendChild(izbor); o.appendChild(vnos); o.appendChild(shrani); o.appendChild(kdo);
+    osvezi();
+    return o;
   }
   function narisiScit() {
     var c = $("blokScit");
@@ -2306,12 +2362,54 @@
     }, pod);
     if (!s.mozno) st.classList.add("onemogoceno");
     c.appendChild(st);
+    // Prvi vklop (4. 11. 2026, kot Linux): uporabnik sam izbere, kam gredo dovoljena imena; dokler ne izbere, velja
+    // krajevni DNS.
+    if (s.mozno && s.vklop && s.naprejIzbran === false) {
+      var iz0 = el("div", "scit-zadnje scit-izbira", "<b>" + ubezi(t("scitIzbiraNaslov")) + "</b> " + ubezi(t("scitIzbiraOpis")) + " ");
+      iz0.setAttribute("role", "group");
+      iz0.setAttribute("aria-label", t("scitIzbiraNaslov"));
+      var gk = el("button", "", ubezi(t("scitIzbiraKrajevni")));
+      gk.type = "button";
+      gk.addEventListener("click", function () { klic("scitNaprej", ["router", ""]).then(poScitu, function () {}); });
+      var gdr = el("button", "", ubezi(t("scitIzbiraDrug")));
+      gdr.type = "button";
+      gdr.addEventListener("click", function () { var sel = c.querySelector(".scit-naprej select"); if (sel) sel.focus(); });
+      iz0.appendChild(gk); iz0.appendChild(gdr);
+      c.appendChild(iz0);
+    }
+    if (s.mozno) c.appendChild(scitNaprej(s));
     if (s.vklop && s.tece && s.zadnje && s.zadnje.length) {
       var z = el("div", "scit-zadnje", "<b>" + ubezi(t("scitZadnje")) + "</b>");
       s.zadnje.slice(0, 6).forEach(function (x) {
-        z.appendChild(el("span", "", ubezi(x.ime) + " <i>" + ubezi(t("scitKat_" + x.kategorija)) + "</i>"));
+        var vr = el("span", "", ubezi(x.ime) + " <i>" + ubezi(t("scitKat_" + x.kategorija)) + "</i> ");
+        // Dovoli: izjema 30 dni za NATANKO to ime. Groznje (lazna stran, zlonamerna koda ...) se ne spustijo
+        // nikoli - zanje gumba ni (kot Scit na Linuxu in TV).
+        if (x.kategorija === "oglasi") {
+          var gd = el("button", "", ubezi(t("scitDovoli")));
+          gd.type = "button";
+          gd.addEventListener("click", function () {
+            klic("scitDovoli", [x.ime, true]).then(function (r) {
+              if (r && (r.izjeme || []).indexOf(x.ime) >= 0) obvesti(t("scitDovoljeno", { ime: x.ime }));
+              poScitu(r);
+            }, function () {});
+          });
+          vr.appendChild(gd);
+        }
+        z.appendChild(vr);
       });
       c.appendChild(z);
+    }
+    if (s.izjeme && s.izjeme.length) {
+      var izj = el("div", "scit-zadnje", "<b>" + ubezi(t("scitIzjeme")) + "</b>");
+      s.izjeme.forEach(function (d) {
+        var vi = el("span", "", ubezi(d) + " ");
+        var go = el("button", "", ubezi(t("scitBlokirajSpet")));
+        go.type = "button";
+        go.addEventListener("click", function () { klic("scitDovoli", [d, false]).then(poScitu, function () {}); });
+        vi.appendChild(go);
+        izj.appendChild(vi);
+      });
+      c.appendChild(izj);
     }
   }
   function nalozZvok() {
@@ -2551,7 +2649,7 @@
       selectCard("startup", "br_zagon", [{ value: "home", label: t("br_domov") }, { value: "restore", label: t("br_obnovi") }]) +
       '<div class="browser-settings-card"><span class="browser-setting-title">' + ubezi(t("br_zascita")) + '</span>' +
       [["adblock_enabled", "br_oglasi"], ["adguard_protection_enabled", "br_adguard"], ["tracking_protection_enabled", "br_sledenje"], ["gpc_dnt_enabled", "br_gpc"], ["block_third_party_cookies", "br_piskotki"]].map(function (x) { return '<button type="button" class="stikalo" role="switch" aria-checked="' + (data[x[0]] ? 'true' : 'false') + '" data-browser-setting="' + x[0] + '"><span>' + ubezi(t(x[1])) + '</span><i></i></button>'; }).join("") + '</div>' +
-      selectCard("doh_provider", "br_dns", [{ value: "cloudflare", label: "Cloudflare" }, { value: "quad9", label: "Quad9" }, { value: "google", label: "Google" }, { value: "custom", label: t("br_customDns") }], "br_dnsPo") +
+      selectCard("doh_provider", "br_dns", [{ value: "off", label: t("br_dnsSistem") }, { value: "cloudflare", label: "Cloudflare" }, { value: "quad9", label: "Quad9" }, { value: "google", label: "Google" }, { value: "custom", label: t("br_customDns") }], "br_dnsPo") +
       (data.doh_provider === "custom" ? '<div class="browser-settings-card"><label for="br-custom-doh-url">' + ubezi(t("br_customDns")) + '</label><input id="br-custom-doh-url" type="url" inputmode="url" autocomplete="url" placeholder="https://dns.example/dns-query" value="' + ubezi(data.custom_doh_url || "") + '" data-browser-setting="custom_doh_url"><small>' + ubezi(t("br_https")) + '</small></div>' : '') +
       toggleCard("force_dark_mode", "br_temno") +
       toggleCard("hardware_acceleration", "br_pospesevanje", "br_restart") +

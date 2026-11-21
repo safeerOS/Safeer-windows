@@ -27,6 +27,7 @@ import time
 import urllib.parse
 import uuid
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from . import zapis_atomski
 
 APP_NAME = "Safeer Browser"
 APP_ID = "SafeerBrowser"
@@ -160,8 +161,12 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "tracking_protection_enabled": True,
     "gpc_dnt_enabled": True,
     "block_third_party_cookies": True,
-    "doh_provider": "cloudflare",
+    # Privzeto sistemski DNS (lastnik 4. 11. 2026): ko Scit tece, gredo imena brskalnika skozi Scit in krajevni DNS;
+    # prej Cloudflare DoH naravnost - mimo Scita. Uporabnikova izrecna izbira DoH ostane (dns_izbira_uporabnika).
+    "doh_provider": "off",
     "custom_doh_url": "",
+    "dns_izbira_uporabnika": False,
+    "dns_krajevni_selitev": True,
     "force_dark_mode": False,
     "hardware_acceleration": True,
     "ask_download_location": False,
@@ -216,6 +221,7 @@ class SettingsStore:
         self.load()
 
     def load(self) -> None:
+        stored: Any = {}
         try:
             with open(self.path, encoding="utf-8") as handle:
                 stored = json.load(handle)
@@ -223,6 +229,7 @@ class SettingsStore:
                 self.values.update(stored)
         except (OSError, ValueError):
             pass
+        preseli_dns_na_sistemski(self.values, stored if isinstance(stored, dict) else {})
         if not isinstance(self.values.get("custom_portals"), list):
             self.values["custom_portals"] = copy.deepcopy(DEFAULT_PORTALS)
         if self.values.get("search_engine") not in search_engines():
@@ -230,11 +237,7 @@ class SettingsStore:
 
     def save(self) -> bool:
         try:
-            os.makedirs(os.path.dirname(self.path), exist_ok=True)
-            temporary = self.path + ".tmp"
-            with open(temporary, "w", encoding="utf-8") as handle:
-                json.dump(self.values, handle, indent=2, ensure_ascii=False)
-            os.replace(temporary, self.path)
+            zapis_atomski.zapisi_json(self.path, self.values, indent=2)
             return True
         except OSError:
             return False
@@ -272,6 +275,24 @@ def home_language(setting: str) -> str:
     if setting in ("sl", "en", "de", "es", "fr", "it"):
         return setting
     return ui_language(setting)
+
+
+def preseli_dns_na_sistemski(values: Dict[str, Any], stored: Dict[str, Any]) -> bool:
+    """Enkratna selitev (lastnik 4. 11. 2026, kot preseli_dns_na_krajevni v Safeer-linux): kdor DNS ni izbral sam, preide
+    s Cloudflare DoH na sistemski DNS - torej na Scit, ko tece. settings.json hrani tudi privzete vrednosti, zato
+    shranjen »cloudflare« brez oznake izbire ni uporabnikova izbira. Nove namestitve oznako ze imajo."""
+    if not stored or stored.get("dns_krajevni_selitev"):
+        return False
+    values["dns_krajevni_selitev"] = True
+    if not stored.get("dns_izbira_uporabnika"):
+        values["doh_provider"] = "off"
+    return True
+
+
+def oznaci_izbiro_dns(settings: "SettingsStore", provider: Any, custom_url: Any = None) -> None:
+    """Uporabnik je DNS izbral sam: prihodnje spremembe privzetega je ne povozijo."""
+    if provider != settings.get("doh_provider") or (custom_url is not None and custom_url != settings.get("custom_doh_url")):
+        settings.set("dns_izbira_uporabnika", True, save=False)
 
 
 def doh_template(settings: SettingsStore) -> Optional[str]:
@@ -393,6 +414,54 @@ def resolve_input(text: str, engine: str = "duckduckgo", tracking_protection: bo
     return "url", url
 
 
+_DRIVE_PATH = re.compile(r"^[a-zA-Z]:[\\/]")
+_DVOJNA_POSEVNICA = re.compile(r"^[\\/]{2}")
+
+
+def resolve_external_input(text: str, engine: str = "duckduckgo", tracking_protection: bool = True) -> Tuple[str, str]:
+    """Naslov, ki pride OD ZUNAJ (argv, drugi zagon prek QLocalServer, privzeti brskalnik): (kind, url).
+
+    Druga aplikacija lahko poda povezavo, ki jo uporabnik ni vpisal. Pot \\\\streznik\\deljeno, //streznik ali
+    file://streznik/... bi Windows odprl prek SMB in strezniku poslal NTLM uporabnika (revizija 4. 11. 2026). Od zunaj
+    zato velja samo http(s), naslov ali iskanje in krajevna pot na pogonu s crko; vse drugo je kind "denied".
+    Vpis v naslovno vrstico ostane resolve_input (uporabnik ve, kaj je vpisal).
+    """
+    value = (text or "").strip()
+    if not value:
+        return "empty", ""
+    if _DVOJNA_POSEVNICA.match(value):
+        return "denied", ""
+    if _DRIVE_PATH.match(value):
+        return resolve_input(value, engine, tracking_protection)
+    scheme_match = _SCHEME.match(value)
+    if scheme_match and scheme_match.group(1).lower() == "file":
+        parts = urllib.parse.urlsplit(value)
+        if (parts.netloc or "").lower() not in ("", "localhost"):
+            return "denied", ""
+        path = urllib.parse.unquote(parts.path or "")
+        if not path.startswith("/") or _DVOJNA_POSEVNICA.match(path[1:]) or not _DRIVE_PATH.match(path[1:]):
+            return "denied", ""
+        return resolve_input(path[1:], engine, tracking_protection)
+    kind, url = resolve_input(value, engine, tracking_protection)
+    if kind == "url" and not url.startswith(("http://", "https://")) and url != "about:blank":
+        return "denied", ""
+    return kind, url
+
+
+#: Najdaljse cakanje zunanjega naslova na podpisani seznam grozenj ob zagonu (s). Paket se preveri v cistem Pythonu,
+#: ~1-2 s na PC z 2 jedroma (core/threat_intel._run); po roku se naslov odpre z vgrajenim seznamom, da okno ne caka.
+ROK_VIRA_GROZENJ = 2.0
+
+
+def vir_grozenj_pripravljen(storitev: Any) -> bool:
+    """True, ko je podpisani seznam grozenj nalozen ali ga ni (izklopljen, ni zagnan - npr. smoke)."""
+    if storitev is None or not getattr(storitev, "enabled", False):
+        return True
+    if getattr(storitev, "_thread", None) is None:
+        return True
+    return storitev.loaded.is_set()
+
+
 def display_url(url: str) -> str:
     if not url or url.startswith(HOME_URL.rstrip("/")) and "blocked" not in url:
         return ""
@@ -443,11 +512,19 @@ GOOGLE_AUTH_HOSTS = (
 WINDOWS_AUTH_FIREFOX_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0"
 
 
+#: accounts.google.<drzava> (accounts.google.si, .co.uk, .com.au) - samo koncnica drzave, ne poljubna domena za piko.
+_GOOGLE_ACCOUNTS_CC = re.compile(r"^accounts\.google\.(?:com|[a-z]{2}|co\.[a-z]{2}|com\.[a-z]{2})$")
+
+
 def is_google_auth_url(url: str) -> bool:
     try:
         parsed = urllib.parse.urlparse(url)
-        host = (parsed.netloc or "").lower().split(":")[0]
-        if any(host == h or host.endswith("." + h) or host.startswith("accounts.google.") for h in GOOGLE_AUTH_HOSTS):
+        # hostname brez userinfo in vrat: netloc "accounts.google.com@zlo.com" je gostitelj zlo.com; startswith
+        # "accounts.google." je sprejel tudi accounts.google.zlo.com (revizija 4. 11. 2026).
+        host = (parsed.hostname or "").lower().rstrip(".")
+        if not host:
+            return False
+        if any(host == h or host.endswith("." + h) for h in GOOGLE_AUTH_HOSTS) or _GOOGLE_ACCOUNTS_CC.match(host):
             return True
         if host in ("google.com", "www.google.com", "google.si", "www.google.si"):
             path = (parsed.path or "").lower()
