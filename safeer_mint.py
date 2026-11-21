@@ -1126,7 +1126,7 @@ class SafeerMintBrowser(Gtk.Window):
                         else:
                             settings.set_sans_serif_font_family(font_name)
                     except Exception as e:
-                        logger.debug(f"apply_font_family error: {e}")
+                        print(f"[Font] Opozorilo pri nastavitvi pisave: {e}")
         self.apply_css()
 
     def apply_brave_mode(self, enabled=None):
