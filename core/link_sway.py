@@ -458,6 +458,10 @@ class SwayVnos:
                 self.drugi.fokus.tocka = (float(sredina[0]), float(sredina[1]))
             ok = True
         elif vrsta == "klik":
+            # Stran je lahko pod kazalec premaknila drug cilj (tuj okvir, prekrivalo): OK klikne samo to, kar kaze
+            # okvir na televizorju. Sicer ne klikne, link_zaslon takoj pokaze, kaj je zdaj tam (core/link_fokus).
+            if not self.drugi.fokus.pred_klikom():
+                return True
             # Izbire tu ne pozabimo: link_zaslon po kliku preveri, ali je gumb se tam (okvir ostane).
             self.drugi.fokus.pozabi()
             gumb = GUMBI_EVDEV.get(str(dogodek.get("gumb", "levi") or "levi").strip().lower())

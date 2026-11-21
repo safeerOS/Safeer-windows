@@ -26,6 +26,7 @@ import io
 import re
 import signal
 import json
+import logging
 import os
 import sys
 import threading
@@ -68,6 +69,37 @@ def zapisi(ime_programa: str, besedilo: str) -> None:
             d.write("%s %s\n" % (datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), cisto(str(besedilo))))
     except Exception:  # noqa: BLE001
         pass
+
+
+class VDnevnik(logging.Handler):
+    """Sporocila loggerja (npr. safeer.kljuci_sinh) v dnevnik programa prek zapisi(): ista datoteka, ista meja velikosti
+    (_obrezi) in isto ciscenje skrivnosti (cisto). Izmerjeno 10. 11. 2026 na testnem PC: logger na Linuxu ni pisal
+    nikamor (dnevnik.log samo varuh, journal nic). Sled izjeme (exc_info) ne gre v dnevnik - v njej so lahko vrednosti."""
+
+    def __init__(self, ime_programa: str, raven: int = logging.INFO) -> None:
+        super().__init__(raven)
+        self.ime_programa = ime_programa
+
+    def emit(self, zapis: logging.LogRecord) -> None:
+        try:
+            besedilo = zapis.getMessage()
+        except Exception:  # noqa: BLE001 - napacna oblika sporocila ne sme podreti klicatelja
+            besedilo = str(zapis.msg)
+        zapisi(self.ime_programa, "%s %s: %s" % (zapis.levelname, zapis.name, besedilo))
+
+
+def v_dnevnik(ime_programa: str, ime_loggerja: str, raven: int = logging.INFO) -> logging.Handler:
+    """Logger [ime_loggerja] (raven in vec) pise v dnevnik programa. Veckratni klic (Safeer OS in Control v istem
+    procesu) ne doda drugega zapisovalca."""
+    logger = logging.getLogger(ime_loggerja)
+    for h in logger.handlers:
+        if isinstance(h, VDnevnik):
+            return h
+    h = VDnevnik(ime_programa, raven)
+    logger.addHandler(h)
+    if logger.level == logging.NOTSET or logger.level > raven:
+        logger.setLevel(raven)
+    return h
 
 
 def _stanje_pot(ime_programa: str) -> str:

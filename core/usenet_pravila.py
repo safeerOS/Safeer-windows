@@ -209,6 +209,9 @@ class Zadetek:
     naslov: str
     povezava: str
     velikost: int
+    #: Atribut Newznab »password« (0 = ne, 1 = arhiv z geslom, 2 = arhiv v arhivu); None = indeksator ne pove. Filter vira
+    #: (core/filter_vira_pravila) take izdaje ne steje - kot Android UsenetPravila.Zadetek.geslo.
+    geslo: Optional[bool] = None
 
 
 def _ni_javni(gost: str) -> bool:
@@ -283,7 +286,7 @@ def zadetki(xml: str, osn: str) -> list:
     for el in koren.iter():
         if _lokalno(el.tag) != "item":
             continue
-        naslov, povezava, velikost, dolzina = "", "", 0, 0
+        naslov, povezava, velikost, dolzina, geslo = "", "", 0, 0, None
         for o in el:
             ime = _lokalno(o.tag)
             if ime == "title":
@@ -301,6 +304,8 @@ def zadetki(xml: str, osn: str) -> list:
                     velikost = int(o.get("value") or 0)
                 except ValueError:
                     velikost = 0
+            elif ime == "attr" and o.get("name") == "password":
+                geslo = {"0": False, "1": True, "2": True}.get((o.get("value") or "").strip())
         if not naslov or not _dovoljena_povezava(povezava, gost_ix) or povezava in videne:
             continue
         videne.add(povezava)
@@ -309,7 +314,7 @@ def zadetki(xml: str, osn: str) -> list:
         if kljuc_izdaje in videne:
             continue
         videne.add(kljuc_izdaje)
-        izid.append(Zadetek(naslov, povezava, velikost))
+        izid.append(Zadetek(naslov, povezava, velikost, geslo))
         if len(izid) >= NAJVEC_ZADETKOV:
             break
     return izid
@@ -428,3 +433,51 @@ def vecdelni_obrazec(polja: Sequence[tuple], datoteka: tuple, meja: str) -> byte
     deli.append(bytes(vsebina))
     deli.append(("\r\n--%s--\r\n" % meja).encode("utf-8"))
     return b"".join(deli)
+
+
+# ---------------------------------------------------------------------- pomoc drugi napravi (zakon solidarnosti)
+# Lastnik 5. 11. 2026: TV pokaze naslov pod filtrom »Usenet« tudi, kadar kodeka ne zna sam, ce ga zna pretvoriti
+# naprava v Linku. Najsibkejsa naprava naj dela najmanj: pomocnik Usenet bere SAM s svojim racunom, TV mu pove samo,
+# katero izdajo zeli (guid izdaje pri indeksatorju + ime + odtis indeksatorja) - nikoli kljuca ali povezave NZB.
+# Isto pravilo kot Android-tv UsenetPravila.guid / odtisIzdaj (skupni primeri v obeh preizkusih).
+
+_GUID = re.compile(r"[A-Za-z0-9_-]{6,64}")
+
+
+def guid(vnos: object) -> Optional[str]:
+    """Guid izdaje Newznab (atribut »guid« ali element <guid>, ki je lahko povezava .../details/<guid>): samo zadnji
+    del poti, 6-64 znakov A-Z a-z 0-9 _ -. Drugo (presledki, '&', '=' ...) bi lahko podaljsalo zahtevo t=get."""
+    v = str(vnos or "").strip().split("#", 1)[0].split("?", 1)[0].rstrip("/")
+    zadnji = v.rsplit("/", 1)[-1]
+    return zadnji if _GUID.fullmatch(zadnji) else None
+
+
+def odtis_izdaj(osn: object) -> Optional[str]:
+    """Odtis indeksatorja za identiteto izdaje: shema + gostitelj (male crke, brez »www.« in koncne pike) + vrata, ce niso
+    privzeta. BREZ kljuca - guid velja za indeksator, ne za racun; pomocnik izdajo prenese s SVOJIM kljucem."""
+    try:
+        u = urllib.parse.urlsplit(str(osn or ""))
+        vrata = u.port
+    except ValueError:
+        return None
+    shema = (u.scheme or "").lower()
+    gost = (u.hostname or "").lower().rstrip(".")
+    if shema not in ("https", "http") or not gost:
+        return None
+    if gost.startswith("www."):
+        gost = gost[4:]
+    del_vrat = "" if vrata is None or vrata == {"https": 443, "http": 80}[shema] else ":%d" % vrata
+    return hashlib.sha256(("safeer-usenet-izdaje|%s://%s%s" % (shema, gost, del_vrat)).encode("utf-8")).hexdigest()[:16]
+
+
+def kljuc_nzb_guid(osn: str, g: str) -> str:
+    """Kljuc predpomnilnika NZB po guidu: guid velja samo pri indeksatorju z odtisom odtis_izdaj(osn)."""
+    return "guid:%s:%s" % (odtis_izdaj(osn) or "", g)
+
+
+def naslov_nzb_guid(osn: str, kljuc: str, g: str) -> Optional[str]:
+    """Newznab `t=get&id=<guid>`: NZB izdaje s kljucem TE naprave. POZOR: vsebuje kljuc - nikoli v dnevnik."""
+    g = guid(g)
+    if not g or not osn or not kljuc:
+        return None
+    return "%s/api?t=get&id=%s&apikey=%s" % (osn, g, urllib.parse.quote(kljuc, safe=""))

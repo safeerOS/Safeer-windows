@@ -808,14 +808,25 @@ class Varuh:
         if besedilo == self._zapisano:
             return
         self._zapisano = besedilo
-        zacasna = self.pot_stanja + ".tmp"
+        # Varuh je samostojen (zagon kot skripta, brez drugih modulov Safeerja), zato edinstveno zacasno ime sam
+        # (mkstemp: 0600, ne deduje se v otroke) - pregled 4. 11. 2026: prej stalni <pot>.tmp.
+        zacasna = ""
         try:
-            fd = os.open(zacasna, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_CLOEXEC, 0o600)
+            import tempfile
+            fd, zacasna = tempfile.mkstemp(prefix="." + os.path.basename(self.pot_stanja) + ".", suffix=".tmp",
+                                           dir=os.path.dirname(self.pot_stanja) or ".")
             with os.fdopen(fd, "w", encoding="utf-8") as d:
                 d.write(besedilo)
             os.replace(zacasna, self.pot_stanja)
+            zacasna = ""
         except OSError:
             pass
+        finally:
+            if zacasna:
+                try:
+                    os.unlink(zacasna)
+                except OSError:
+                    pass
 
     def tek(self) -> int:
         """Glavna zanka do konca seje. Vrne 0 (konec) ali KODA_ZNOVA (nova razlicica)."""
@@ -826,7 +837,13 @@ class Varuh:
                     self.ustavi_vse()
                     return izid
                 try:
-                    select.select([self.vtic, self._budilka_r], [], [], self.do_roka())
+                    # poll namesto select: select() pri opisniku >= 1024 vrze ValueError (poln tek preizkusov z
+                    # dvignjeno mejo, 4. 11. 2026); varuh ostane samostojen (brez core/os_deskriptorji). Zaokrozimo
+                    # navzgor, da se zanka pred rokom ne vrti.
+                    cakaj = select.poll()
+                    cakaj.register(self.vtic, select.POLLIN)
+                    cakaj.register(self._budilka_r, select.POLLIN)
+                    cakaj.poll(int(-(-min(max(0.0, self.do_roka()), 3600.0) * 1000 // 1)))
                 except InterruptedError:
                     pass
                 try:

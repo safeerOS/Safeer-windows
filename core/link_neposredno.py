@@ -38,7 +38,9 @@ Vsaka povezava nanje gre najprej neposredno (rok povezave ROK_POVEZAVE_S), ob ne
 neuspehu neposredne poti jo do konca premora (ali do spremembe omrezja) preskocimo - uporabnik caka kvecjemu enkrat.
 Zadnja delujoca pot za vsako sredisce se zapomni (global-link-poti.json).
 
-Nastavitev "Neposredna povezava od zunaj" je privzeto IZKLOPLJENA (global-link-neposredno.json ob nastavitvah Linka).
+Nastavitev "Neposredna povezava od zunaj" je privzeto VKLOPLJENA (lastnik, 13. 11. 2026: neposredna pot je hitrejsa, hitrost pa je
+pri upravljanju naprav pomembna; rele je samo rezerva). Brez preusmerjenih vrat sredisce ne objavi preverjenega naslova in vse
+steče prek releja kot prej. Izklop: global-link-neposredno.json ali SAFEER_NEPOSREDNO=0.
 """
 from __future__ import annotations
 
@@ -194,7 +196,7 @@ def _cas(vrednost) -> float:
 
 
 def nastavitve(pot: Optional[str] = None) -> dict:
-    """{"vklopljeno": bool, "vrata": int}. Privzeto izklopljeno. SAFEER_NEPOSREDNO=0 izklopi ne glede na nastavitev."""
+    """{"vklopljeno": bool, "vrata": int}. Privzeto vklopljeno (13. 11. 2026). SAFEER_NEPOSREDNO=0 izklopi ne glede na nastavitev."""
     s = _beri_json(pot or _pot_nastavitev())
     vrata = s.get("vrata", PRIVZETA_VRATA)
     try:
@@ -203,7 +205,7 @@ def nastavitve(pot: Optional[str] = None) -> dict:
         vrata = PRIVZETA_VRATA
     if not 1024 <= vrata <= 65535:
         vrata = PRIVZETA_VRATA
-    vklop = bool(s.get("vklopljeno", False)) and os.environ.get("SAFEER_NEPOSREDNO", "1").strip() != "0"
+    vklop = bool(s.get("vklopljeno", True)) and os.environ.get("SAFEER_NEPOSREDNO", "1").strip() != "0"
     return {"vklopljeno": vklop, "vrata": vrata}
 
 

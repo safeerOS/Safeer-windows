@@ -17,6 +17,7 @@ from __future__ import annotations
 import collections
 import errno
 import os
+import selectors
 import socket
 import threading
 import time
@@ -346,6 +347,38 @@ def prehodna_napaka_accept(napaka: BaseException) -> bool:
     Ob 1024 deskriptorjih (16./17. 10. 2026) so poslusalci, ki so ob vsaki OSError koncali, ostali mrtvi tudi,
     ko so se deskriptorji sprostili."""
     return isinstance(napaka, OSError) and getattr(napaka, "errno", None) in PREHODNE_NAPAKE_ACCEPT
+
+
+# ---------------------------------------------------------------------------- cakanje brez meje 1024
+
+def berljivi(objekti, cas: Optional[float]) -> list:
+    """Kot ``select.select(objekti, [], [], cas)[0]``, a brez meje FD_SETSIZE: select() pri opisniku >= 1024 vrze
+    ValueError (»filedescriptor out of range in select()«). Safeer OS ima mejo deskriptorjev dvignjeno
+    (os_stabilnost.dvigni_mejo_datotek) in en proces z WebKitom - poln tek preizkusov je 4. 11. 2026 presegel 1024
+    in deljenje zaslona, varuh in posredniki so obstali. epoll/poll (selectors) meje nima. Zaprt ali neveljaven
+    opisnik da ValueError/OSError kot prej; prekinitev s signalom selectors ponovi sam (PEP 475). Napaka ali konec
+    povezave (HUP) je berljiv dogodek - recv() nato vrne b"" ali napako, kot pri select()."""
+    return pripravljeni(objekti, (), cas)[0]
+
+
+def pripravljeni(bralni, pisalni, cas: Optional[float]):
+    """Kot ``select.select(bralni, pisalni, [], cas)[:2]`` brez meje 1024 (glej `berljivi`): (berljivi, pisljivi)."""
+    sel = selectors.DefaultSelector()
+    try:
+        dogodki: dict = {}
+        for o in bralni:
+            dogodki[o] = dogodki.get(o, 0) | selectors.EVENT_READ
+        for o in pisalni:
+            dogodki[o] = dogodki.get(o, 0) | selectors.EVENT_WRITE
+        for o, d in dogodki.items():
+            sel.register(o, d)
+        izid = sel.select(None if cas is None else max(0.0, float(cas)))
+        # CodeRabbit 9. 11. 2026: brez ponovnega »in bralni/pisalni« - generator je po registraciji prazen in bi
+        # vrnil nic; selectors sam vrne samo dogodke, ki smo jih za objekt registrirali (d & key.events).
+        return ([k.fileobj for k, d in izid if d & selectors.EVENT_READ],
+                [k.fileobj for k, d in izid if d & selectors.EVENT_WRITE])
+    finally:
+        sel.close()
 
 
 # ---------------------------------------------------------------------------- rok cakanja na zahtevo

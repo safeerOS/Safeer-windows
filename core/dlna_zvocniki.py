@@ -10,7 +10,6 @@ import mimetypes
 import os
 import re
 import secrets
-import select
 import socket
 import threading
 import time
@@ -41,10 +40,22 @@ def _xml_text(element: ET.Element, name: str) -> str:
     return (found.text or "").strip() if found is not None else ""
 
 
+_PRIVZETA_VRATA = {"http": 80, "https": 443}
+
+
 def _lokalni_url(base: str, control: str) -> str:
+    """Kontrolni URL mora ostati na isti napravi. Izpuscena vrata so privzeta vrata sheme: naprava, ki enkrat pise
+    http://h/ in drugic http://h:80/, je ista (pregled 4. 11. 2026 - prej zavrnjen svoj kontrolni naslov)."""
     result = urllib.parse.urljoin(base, control)
     a, b = urllib.parse.urlsplit(base), urllib.parse.urlsplit(result)
-    if a.scheme not in ("http", "https") or b.scheme != a.scheme or b.hostname != a.hostname or b.port != a.port:
+    shema = (a.scheme or "").lower()
+    try:
+        vrata_a = a.port if a.port is not None else _PRIVZETA_VRATA.get(shema)
+        vrata_b = b.port if b.port is not None else _PRIVZETA_VRATA.get((b.scheme or "").lower())
+    except ValueError:               # neveljavna vrata v naslovu
+        raise DlnaNapaka("Kontrolni URL je zunaj gostitelja naprave") from None
+    if (shema not in _PRIVZETA_VRATA or (b.scheme or "").lower() != shema
+            or not a.hostname or (b.hostname or "").lower() != a.hostname.lower() or vrata_b != vrata_a):
         raise DlnaNapaka("Kontrolni URL je zunaj gostitelja naprave")
     return result
 
@@ -264,7 +275,7 @@ def najdi(cas: float = 3.0, vmesnik: str | None = None) -> list[Zvocnik]:
         deadline = time.monotonic() + max(0.0, cas)
         locations: set[tuple[str, str]] = set()
         while socks and time.monotonic() < deadline:
-            pripravljeni, _, _ = select.select(socks, [], [], 0.2)
+            pripravljeni = os_deskriptorji.berljivi(socks, 0.2)     # brez meje 1024 (select)
             for sock in pripravljeni:
                 try:
                     data, addr = sock.recvfrom(65535)

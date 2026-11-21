@@ -51,6 +51,9 @@ KONTEKST_BETA = b"safeer-razlicice-beta-v1\n"
 NAJVEC_SEZNAM = 256 * 1024
 NAJVEC_PODPIS = 8 * 1024
 _SHA256 = re.compile(r"[0-9a-f]{64}")
+#: Najvec bajtov paketa posodobitve, ce podpisani seznam ne pove velikosti (D2, pregled 5. 11. 2026). Enako kot meja
+#: kopije, ki jo naredi root (NAMESTI_DEB_KOT_ROOT: dd count=2048 x 1 MiB); najvecji paket 1.0.131 (AppImage) ima 366 MB.
+NAJVEC_PAKETA = 2048 * 1024 * 1024
 _CAS = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")   # RFC3339 UTC (kot core/signed_feed)
 # Samo preizkusi: navaden http do tega racunalnika (127.0.0.1, localhost, ::1). V izdaji vedno False - samo https.
 _LOKALNI_HTTP = False
@@ -454,6 +457,8 @@ def prenesi(url: str, cilj: str, sha256: str, velikost: int = 0, napredek: Optio
     """Prenese datoteko v `cilj` (prek zacasne), sproti racuna SHA-256 in jo ob neujemanju zavrze. Vrne pot.
 
     SHA-256 je obvezen (iz podpisanega seznama); brez veljavnega se prenos sploh ne zacne. Samo https, tudi po preusmeritvi.
+    `velikost` (bajti iz podpisanega seznama) je tudi meja prenosa: streznik, ki poslje vec, prenos prekine, preden napolni
+    disk (prej je brala do konca in sele SHA-256 je paket zavrnil). Brez velikosti velja NAJVEC_PAKETA.
     """
     if not isinstance(sha256, str) or _SHA256.fullmatch(sha256.lower()) is None:
         raise ValueError("SHA-256 paketa manjka ali ni veljaven")
@@ -463,15 +468,24 @@ def prenesi(url: str, cilj: str, sha256: str, velikost: int = 0, napredek: Optio
     zacasna = cilj + ".del"
     h = hashlib.sha256()
     try:
+        meja = min(int(velikost), NAJVEC_PAKETA) if isinstance(velikost, int) and velikost > 0 else NAJVEC_PAKETA
         with _odpri(url, {"User-Agent": agent}, 30) as o, open(zacasna, "wb") as f:
-            skupaj = velikost or int(o.headers.get("Content-Length") or 0)
+            try:
+                napovedano = int(o.headers.get("Content-Length") or 0)
+            except (TypeError, ValueError):
+                napovedano = 0
+            if napovedano > meja:
+                raise ValueError("paket je vecji od podpisane velikosti")
+            skupaj = velikost or napovedano
             prebrano = 0
             while True:
                 if prekini is not None and prekini():
                     raise InterruptedError("prekinjeno")
-                kos = o.read(1 << 16)
+                kos = o.read(min(1 << 16, meja + 1 - prebrano))
                 if not kos:
                     break
+                if prebrano + len(kos) > meja:
+                    raise ValueError("paket je vecji od podpisane velikosti")
                 f.write(kos)
                 h.update(kos)
                 prebrano += len(kos)

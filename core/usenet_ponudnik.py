@@ -392,6 +392,10 @@ def shrani_ponudnika(ponudnik: Ponudnik, geslo: str, pot_nastavitev: str) -> boo
     Vsak izrecni vpis (tudi istega gesla, npr. po podaljsanju narocnine) odklene zapah racuna za en nov poskus
     (lastnik 28. 10. 2026). Omejitev 1/min ponastavi samo sprememba gesla ali racuna.
     Ime in stevilo povezav brez gesla: posodobi_nastavitve."""
+    return _shrani(ponudnik, geslo, pot_nastavitev, vpis_uporabnika=True)
+
+
+def _shrani(ponudnik: Ponudnik, geslo: str, pot_nastavitev: str, vpis_uporabnika: bool) -> bool:
     if not isinstance(ponudnik, Ponudnik):
         raise ValueError("usenet ponudnik: pricakovan Ponudnik")
     if not nntp.varna_poverilnica(geslo):
@@ -420,7 +424,9 @@ def shrani_ponudnika(ponudnik: Ponudnik, geslo: str, pot_nastavitev: str) -> boo
             _pisi_kljuce(pot_nastavitev, ostali | {nov_kljuc})
         except OSError as e:
             _log.info("usenet ponudnik: seznama kljucev ni mogoce shraniti (%s)", type(e).__name__)
-        _odkleni_racun(ponudnik, geslo, pot_nastavitev)
+        if vpis_uporabnika:
+            # Prejem z druge naprave (shrani_prejetega) ni uporabnikov vpis: zapaha ne odklene (kot Android, naloga 42 G).
+            _odkleni_racun(ponudnik, geslo, pot_nastavitev)
         if spremenjen:
             with _PREVERBE_ZAKLEP:
                 _PREVERBE.pop(_kljuc_racuna(ponudnik), None)  # novo geslo sme takoj na »Preveri«
@@ -475,8 +481,8 @@ def shrani_iz_kroga(ponudnik: Ponudnik, pot_nastavitev: str) -> bool:
     ni ponudnika. Vrne True, ce je zapisan.
 
     Ne prepise lokalnega ponudnika (ta ima svoje geslo, zapah in izid preverbe), ne odklene zapaha in ne ponastavi
-    omejitve 1/min - prejem ni uporabnikov vpis. Geslo vpise uporabnik na tej napravi (shrani_ponudnika), ker namizje
-    nima sifriranega usklajevanja skrivnosti (secrets.sync); do takrat stanje pove NI_GESLA. Brez TLS ne sprejmemo:
+    omejitve 1/min - prejem ni uporabnikov vpis. Geslo pride po secrets.sync (shrani_prejetega, od 4. 11. 2026) ali ga
+    vpise uporabnik na tej napravi (shrani_ponudnika); do takrat stanje pove NI_GESLA. Brez TLS ne sprejmemo:
     izjema »samo doma« velja za omrezje naprave, ki jo je vpisala, ne za to."""
     if not isinstance(ponudnik, Ponudnik):
         raise ValueError("usenet ponudnik: pricakovan Ponudnik")
@@ -491,6 +497,63 @@ def shrani_iz_kroga(ponudnik: Ponudnik, pot_nastavitev: str) -> bool:
         _pisi_json(pot_nastavitev, {"verzija": _VERZIJA, "ponudnik": ponudnik.v_slovar(), "preverba": None,
                                     "iz_kroga": True})
     return True
+
+
+# ------------------------------------------------------------------ secrets.sync (sifrirano, samo ozji krog)
+#: Lastnik 4. 11. 2026: »API kljuc, ki ga vnesem na eni napravi, velja za vse naprave« - tudi ponudnik Usenet z geslom.
+#: Vrednost je ista kot na Androidu (UskladitevKljucev.kt, naloga 42 G): JSON {"ponudnik": {...}, "geslo": "..."}.
+USKLADITEV_VREDNOST, USKLADITEV_NEZNAN, USKLADITEV_BREZ = "VREDNOST", "NEZNAN", "BREZ"
+
+
+def za_uskladitev(pot_nastavitev: str) -> tuple:
+    """(stanje, vrednost) za secrets.sync. VREDNOST: ponudnik s TLS in berljivim geslom. NEZNAN (brez vrednosti in brez
+    groba, drugim napravam nic ne izbrise): geslo ni berljivo (zbirka zaklenjena, ponudnik iz kroga brez gesla),
+    ponudnik brez TLS (izjema »samo doma« velja za omrezje te naprave) ali pokvarjena datoteka. BREZ: ponudnika ni."""
+    if not os.path.exists(pot_nastavitev):
+        return USKLADITEV_BREZ, None
+    p = preberi_ponudnika(pot_nastavitev)
+    if p is None or not p.tls:
+        return USKLADITEV_NEZNAN, None
+    from . import viri_sink
+    if not viri_sink.javni_gostitelj_usenet(p.gostitelj):
+        # Streznik v domacem omrezju: prejemnik ga zavrne (iz_uskladitve, pregled 118 S1) - gesla ne posiljamo zaman
+        # in drugim napravam nic ne izbrisemo (CodeRabbit, 4. 11. 2026).
+        return USKLADITEV_NEZNAN, None
+    geslo = _preberi_geslo(p.kljuc_gesla)
+    if geslo is None:
+        return USKLADITEV_NEZNAN, None
+    return USKLADITEV_VREDNOST, json.dumps({"ponudnik": p.v_slovar(), "geslo": geslo}, separators=(",", ":"),
+                                           ensure_ascii=False)
+
+
+def iz_uskladitve(vrednost: object) -> Optional[tuple]:
+    """(Ponudnik, geslo) iz prejete vrednosti ali None. Ista pravila kot vnos in prejem iz kroga: tocno znana polja,
+    samo TLS in samo javni internet (pregled 118 S1: vdrta naprava v krogu ne doloci naslova v domacem omrezju)."""
+    from . import viri_sink
+    try:
+        d = json.loads(vrednost) if isinstance(vrednost, str) else None
+    except (ValueError, RecursionError):
+        return None
+    if not isinstance(d, dict) or set(d) != {"ponudnik", "geslo"}:
+        return None
+    geslo = d.get("geslo")
+    if not isinstance(geslo, str) or not nntp.varna_poverilnica(geslo):
+        return None
+    try:
+        p = Ponudnik.iz_slovarja(d.get("ponudnik"))
+    except ValueError:
+        return None
+    if not p.tls or not viri_sink.javni_gostitelj_usenet(p.gostitelj):
+        return None
+    return p, geslo
+
+
+def shrani_prejetega(ponudnik: Ponudnik, geslo: str, pot_nastavitev: str) -> bool:
+    """Ponudnik z geslom iz secrets.sync (posiljatelj je ze preverjen: ozji krog, E2E, potrjena naprava). Shrani kot
+    vpis (geslo samo v sistemsko zbirko), a brez prijave in brez odklepa zapaha. Vrne True, ce je geslo v zbirki."""
+    if not ponudnik.tls:
+        raise ValueError("usenet ponudnik: brez TLS samo z nevarno_brez_tls=True")
+    return _shrani(ponudnik, geslo, pot_nastavitev, vpis_uporabnika=False)
 
 
 def je_iz_kroga(pot_nastavitev: str) -> bool:

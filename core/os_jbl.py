@@ -71,10 +71,9 @@ def nastavitve() -> dict:
 
 def _shrani(n: dict) -> None:
     os.makedirs(mapa(), mode=0o700, exist_ok=True)
-    zacasna = _nastavitve_pot() + ".tmp"
-    with open(zacasna, "w", encoding="utf-8") as f:
+    from core import shramba_json
+    with shramba_json.atomsko_odpri(_nastavitve_pot()) as f:
         json.dump(n, f)
-    os.replace(zacasna, _nastavitve_pot())
 
 
 def ima_potrdilo() -> bool:

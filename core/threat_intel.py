@@ -17,6 +17,7 @@ import sys
 import threading
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
 # Public keys trusted to sign feed manifests: key_id -> base64 Ed25519 public key.
 # Without a trusted key the signed feed stays disabled and only the built-in protection is used.
@@ -39,6 +40,24 @@ def _feed_paths():
     bundle = getattr(sys, "_MEIPASS", None)
     if bundle:
         yield Path(bundle) / "shared" / "core" / "signed_feed.py"
+
+
+def _scit_gostitelji():
+    """core/scit_gostitelji.py, nalozen po poti: skupne datoteke Windows (shared/core) se uvazajo po poti, ne kot paket."""
+    module = sys.modules.get("safeer_scit_gostitelji")
+    if module is not None:
+        return module
+    poti = [os.path.join(os.path.dirname(os.path.abspath(__file__)), "scit_gostitelji.py")]
+    if getattr(sys, "_MEIPASS", None):
+        poti.append(os.path.join(sys._MEIPASS, "shared", "core", "scit_gostitelji.py"))
+    pot = next((p for p in poti if os.path.isfile(p)), None)
+    if pot is None:
+        raise ImportError("scit_gostitelji.py ni ob %s" % os.path.basename(__file__))
+    spec = importlib.util.spec_from_file_location("safeer_scit_gostitelji", pot)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    sys.modules["safeer_scit_gostitelji"] = module
+    return module
 
 
 def _load_feed_module():
@@ -95,6 +114,10 @@ class ThreatIntelService:
         self._thread = None
         self.last_check = 0.0
         self.loaded = threading.Event()  # set once the stored bundle has been loaded (or found missing)
+        self._popravilo_kljuc = threading.Lock()
+        self._popravilo_nit = None
+        self._popravilo_zadnje = None
+        self.popravil = 0
 
     @property
     def enabled(self) -> bool:
@@ -147,18 +170,90 @@ class ThreatIntelService:
             if self._stop.wait(delay * random.uniform(0.9, 1.1)):  # jitter spreads load, nothing more
                 return
 
+    #: Najmanj sekund med dvema popravili (lastnik, 13. 11. 2026): pokvarjen seznam ne sme pognati zanke prenosov.
+    POPRAVILO_RAZMIK = 300.0
+
+    def popravi(self, razlog: str = "") -> bool:
+        """Samopopravilo (lastnik, 13. 11. 2026: »ko zaznam, da je seznam poskodovan, ga popravimo«): zaznana poskodba
+        (iskanje vrze izjemo, shranjen paket se ne nalozi) ne ustavi brskanja in ne blokira vsega - iskanje ostane
+        brez zadetka (fail-open), popravilo pa tece v ozadju: kazalo se zgradi znova iz preverjenega paketa, ce tudi
+        paket ni berljiv, se prenese nov (podpis in SHA-256 se preverita kot pri vsaki posodobitvi). Ena nit naenkrat,
+        najvec enkrat na POPRAVILO_RAZMIK. Vrne True, ce je popravilo steklo ta klic."""
+        if not self.enabled:
+            return False
+        with self._popravilo_kljuc:
+            sedaj = time.monotonic()
+            if self._popravilo_nit is not None and self._popravilo_nit.is_alive():
+                return False
+            if self._popravilo_zadnje is not None and sedaj - self._popravilo_zadnje < self.POPRAVILO_RAZMIK:
+                return False
+            self._popravilo_zadnje = sedaj
+            self.popravil += 1
+            self.store.last_error = ("poskodovan seznam: %s" % razlog).strip(": ")
+            self._popravilo_nit = threading.Thread(target=self._popravilo_tek, name="safeer-threat-intel-popravilo", daemon=True)
+            self._popravilo_nit.start()
+            return True
+
+    def _popravilo_tek(self) -> None:
+        try:
+            ok = False
+            try:
+                ver = self.store.installed_version()
+                if ver >= 1:
+                    try:
+                        self.store._index_path(ver).unlink()    # kazalo je izpeljano: zgradi se znova iz paketa
+                    except OSError:
+                        pass
+                ok = bool(self.store.load())
+            except Exception:  # noqa: BLE001 - popravilo se ne sme sesuti
+                ok = False
+            if not ok:
+                self.update_now()                               # paket ni berljiv: prenesi nov, preverjen
+            if ok:
+                self.store.last_error = ""
+        except Exception:  # noqa: BLE001
+            pass
+
     def match(self, url_or_host: str):
         """Returns the security category (botnet_c2, malware, phishing, scam) for a URL or host, or None."""
         if not self.enabled or not url_or_host:
             return None
         try:
-            if "://" in url_or_host:
-                category = self.store.match_url(url_or_host)
-            else:
-                category = self.store.match_host(url_or_host.split("/", 1)[0].split(":", 1)[0])
-        except Exception:  # noqa: BLE001 - matching must never break navigation
+            category = self._match(url_or_host)
+        except Exception as exc:  # noqa: BLE001 - matching must never break navigation (fail-open + popravilo)
+            self.popravi(exc.__class__.__name__)
             return None
         return category if category in SECURITY_CATEGORIES else None  # ads and trackers are not threats
+
+    def _match(self, url_or_host: str):
+        """Googlovi gostitelji (core/scit_gostitelji.py, 5. 11. 2026): koren nikoli; na skupnem gostitelju samo pravilo
+        za tocen naslov z vsaj dvema deloma poti ali pravilo projekta; nikjer pravilo za koren, skupni gostitelj ali
+        celotno platformo - en podtaknjen vnos ne sme vzeti iskanja ali prijave vsem uporabnikom."""
+        try:
+            g = _scit_gostitelji()
+        except Exception:  # noqa: BLE001 - brez razvrstitve kot prej (vir ostane vklopljen)
+            if "://" in url_or_host:
+                return self.store.match_url(url_or_host)
+            return self.store.match_host(url_or_host.split("/", 1)[0].split(":", 1)[0])
+        if "://" in url_or_host:
+            try:
+                host = (urlsplit(url_or_host.replace("\\", "/")).hostname or "").lower().rstrip(".")
+            except ValueError:
+                return None
+            url = url_or_host
+        else:
+            host = url_or_host.split("/", 1)[0].split(":", 1)[0].lower().rstrip(".")
+            url = ""
+        vrsta = g.vrsta(host)
+        if vrsta == g.KOREN:
+            return None
+        naslov = self.store.match_url_rule(url) if url and (vrsta == g.NAVADEN or g.sme_pot(url, host)) else None
+        if vrsta == g.NAVADEN or g.je_najemnik(host):
+            gostitelj = self.store.match_host(host, g.sme_gostitelj)
+        else:
+            gostitelj = None
+        kategorije = [k for k in (naslov, gostitelj) if k]
+        return next((k for k in kategorije if k in ("botnet_c2", "malware")), kategorije[0] if kategorije else None)
 
     def status(self) -> dict:
         bundle = self.store.bundle

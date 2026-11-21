@@ -214,7 +214,9 @@ def za_povabilo(zapisi: Sequence[Zapis]) -> List[Zapis]:
 
 
 def vrednosti_za(stanje: Optional[str]) -> bool:
-    return stanje == POTRJENA
+    # Lastnik 9. 11. 2026 (kot Android): naprava v ozjem krogu TE naprave je ze potrjena - dodal jo je uporabnik sam; kar dovoli
+    # na eni svoji napravi, velja na vseh brez ponovne potrditve (27. 10. 2026). Samo zavrnjena ne dobi vrednosti.
+    return stanje != ZAVRNJENA
 
 
 def izvor_posiljatelja(izvor_naprava: str, od_naprava: str) -> bool:
@@ -258,17 +260,16 @@ def zamenjave(meta: Dict[str, Meta], uporabljeni: Sequence[Zapis]) -> List[Zapis
 def sprejem(vklopljeno: bool, v_krogu: bool, stanje: Optional[str]) -> str:
     if not vklopljeno or not v_krogu:
         return ZAVRNI
-    if stanje == POTRJENA:
-        return SPREJMI
     if stanje == ZAVRNJENA:
         return ZAVRNI
-    return VPRASAJ
+    # Lastnik 9. 11. 2026: ozji krog je potrditev; prejsnji »potrdi tukaj« (CAKA) velja kot potrjen.
+    return SPREJMI
 
 
 def sme_poslati(vklopljeno: bool, v_krogu: bool, zascita: bool, povezan: bool, zmoznost: bool,
                 stanje: Optional[str]) -> bool:
     return (vklopljeno and v_krogu and zascita and povezan and zmoznost
-            and stanje != ZAVRNJENA and stanje != CAKA)
+            and stanje != ZAVRNJENA)
 
 
 # ------------------------------------------------------------------ sporocilo (JSON kot na Androidu)
@@ -306,3 +307,86 @@ def iz_json(a) -> List[Zapis]:
         izid.append(Zapis(str(o.get("k") or ""), _int(o.get("c")), str(o.get("i") or ""), izbrisan,
                           "" if izbrisan else str(o.get("v") or ""), samo_ime_gostitelja(str(o.get("g") or ""))))
     return izid
+
+
+# ------------------------------------------------------------------ dnevnik in razlog za vmesnik
+def kratek_id(ident: str) -> str:
+    """ID naprave za dnevnik: prva 2 in zadnji 4 znaki (kot core/link_dostop.py, »naprava %s…%s«). Kratek ID se ne
+    pokaze cel - tudi deloma bi bil cel ID, zato samo »…«."""
+    s = str(ident or "")
+    return s[:2] + "…" + s[-4:] if len(s) > 8 else "…"
+
+
+#: Izid zadnje izmenjave z napravo v ozjem krogu (samo v pomnilniku; vir za razlog_brez_kljucev).
+IZID_SPREJETO, IZID_ZAVRNJENO, IZID_CAKA, IZID_NEDOSEGLJIVO, IZID_STARA = (
+    "sprejeto", "zavrnjeno", "caka", "nedosegljivo", "stara")
+
+RAZLOG_NI_NAPRAV, RAZLOG_NEDOSEGLJIVE, RAZLOG_BREZ_KLJUCEV, RAZLOG_CAKA, RAZLOG_V_REDU = (
+    "ni_naprav_v_krogu", "naprave_niso_dosegljive", "naprave_nimajo_kljucev", "caka_potrditev", "v_redu")
+RAZLOGI = (RAZLOG_NI_NAPRAV, RAZLOG_NEDOSEGLJIVE, RAZLOG_BREZ_KLJUCEV, RAZLOG_CAKA, RAZLOG_V_REDU)
+
+#: Besedila za vmesnik (vse jezike, ki jih ima Safeer OS); kratko, brez tehnicnih izrazov. Izrazi za ozji krog so isti
+#: kot v core/link_dostop.py (»ozji krog«, »engen Kreis«, »círculo de confianza«, »cercle de confiance«, »cerchia ristretta«).
+BESEDILA_RAZLOGA: Dict[str, Dict[str, str]] = {
+    RAZLOG_NI_NAPRAV: {
+        "sl": "V ožjem krogu ni nobene druge naprave.",
+        "en": "There is no other device in your inner circle.",
+        "de": "In deinem engen Kreis ist kein anderes Gerät.",
+        "es": "No hay ningún otro dispositivo en tu círculo de confianza.",
+        "fr": "Aucun autre appareil dans ton cercle de confiance.",
+        "it": "Nella tua cerchia ristretta non c'è nessun altro dispositivo.",
+    },
+    RAZLOG_NEDOSEGLJIVE: {
+        "sl": "Naprave v ožjem krogu trenutno niso dosegljive.",
+        "en": "The devices in your inner circle can't be reached right now.",
+        "de": "Die Geräte in deinem engen Kreis sind gerade nicht erreichbar.",
+        "es": "Los dispositivos de tu círculo de confianza no están disponibles ahora.",
+        "fr": "Les appareils de ton cercle de confiance sont injoignables pour le moment.",
+        "it": "I dispositivi della tua cerchia ristretta non sono raggiungibili ora.",
+    },
+    RAZLOG_BREZ_KLJUCEV: {
+        "sl": "Nobena naprava v ožjem krogu nima ključev.",
+        "en": "No device in your inner circle has keys.",
+        "de": "Kein Gerät in deinem engen Kreis hat Schlüssel.",
+        "es": "Ningún dispositivo de tu círculo de confianza tiene claves.",
+        "fr": "Aucun appareil de ton cercle de confiance n'a de clés.",
+        "it": "Nessun dispositivo della tua cerchia ristretta ha chiavi.",
+    },
+    RAZLOG_CAKA: {
+        "sl": "Uskladitev ključev čaka na potrditev.",
+        "en": "Key sync is waiting for confirmation.",
+        "de": "Der Schlüsselabgleich wartet auf Bestätigung.",
+        "es": "La sincronización de claves espera una confirmación.",
+        "fr": "La synchronisation des clés attend une confirmation.",
+        "it": "La sincronizzazione delle chiavi attende una conferma.",
+    },
+    RAZLOG_V_REDU: {
+        "sl": "Ključi so usklajeni.",
+        "en": "Keys are in sync.",
+        "de": "Die Schlüssel sind abgeglichen.",
+        "es": "Las claves están sincronizadas.",
+        "fr": "Les clés sont synchronisées.",
+        "it": "Le chiavi sono sincronizzate.",
+    },
+}
+
+
+def razlog_brez_kljucev(v_krogu: int, potrdile: int, zapisov: int, zadnji_izid: str) -> Tuple[str, Dict[str, str]]:
+    """Zakaj (ni) kljucev z drugih naprav - koda in besedila. Izmerjeno 10. 11. 2026 na testnem PC: naprave s kljuci
+    niso bile v ozjem krogu, vmesnik pa je bil prazen in brez razlage.
+
+    Vhod so samo podatki o napravah v ozjem krogu TE naprave (klicatelj steje samo te; core/link_dostop odloca o krogu):
+    naprava zunaj kroga ne spremeni razloga, zato iz njega ni mogoce sklepati, katere naprave so zunaj.
+    `v_krogu`: druge naprave v ozjem krogu; `potrdile`: koliko jih je izmenjavo sprejelo; `zapisov`: koliko zapisov je
+    prislo z njih; `zadnji_izid`: IZID_* zadnje izmenjave ("" = se je ni bilo)."""
+    if int(v_krogu or 0) <= 0:
+        koda = RAZLOG_NI_NAPRAV
+    elif zadnji_izid == IZID_CAKA:
+        koda = RAZLOG_CAKA
+    elif int(potrdile or 0) <= 0:
+        koda = RAZLOG_NEDOSEGLJIVE
+    elif int(zapisov or 0) <= 0:
+        koda = RAZLOG_BREZ_KLJUCEV
+    else:
+        koda = RAZLOG_V_REDU
+    return koda, dict(BESEDILA_RAZLOGA[koda])

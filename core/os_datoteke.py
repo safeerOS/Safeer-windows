@@ -1199,21 +1199,17 @@ def slicica(pot: str) -> str:
         from PIL import Image, ImageOps
         Image.MAX_IMAGE_PIXELS = 120_000_000
         os.makedirs(os.path.dirname(cilj), exist_ok=True)
-        with Image.open(pot) as s:
+        from core import shramba_json
+        with Image.open(pot) as s, shramba_json.atomska_pot(cilj) as zacasna:   # ob napaki zacasna ne ostane
             s = ImageOps.exif_transpose(s)
             s.thumbnail((SLICICA_VELIKOST, SLICICA_VELIKOST))
             if s.mode not in ("RGB", "L"):
                 ozadje = Image.new("RGB", s.size, (16, 26, 43))
                 ozadje.paste(s.convert("RGBA"), mask=s.convert("RGBA").split()[3])
                 s = ozadje
-            s.save(cilj + ".tmp", "JPEG", quality=82)
-        os.replace(cilj + ".tmp", cilj)
+            s.save(zacasna, "JPEG", quality=82)
         return cilj
     except Exception:  # noqa: BLE001 - poskodovana slika ali brez Pillow: brez slicice
-        try:
-            os.remove(cilj + ".tmp")
-        except OSError:
-            pass
         return ""
 
 

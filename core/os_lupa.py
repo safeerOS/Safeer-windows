@@ -41,10 +41,9 @@ class Ucenje:
 
     def _shrani(self) -> None:
         os.makedirs(os.path.dirname(self.pot), exist_ok=True)
-        zacasna = self.pot + ".tmp"
-        with open(zacasna, "w", encoding="utf-8") as f:
+        from core import shramba_json
+        with shramba_json.atomsko_odpri(self.pot) as f:
             json.dump({"izbire": self.izbire}, f, ensure_ascii=False)
-        os.replace(zacasna, self.pot)
 
     def zapomni(self, niz, kljuc, prvi=False) -> bool:
         niz = " ".join(str(niz or "").split())[:NAJDALJSI_NIZ]

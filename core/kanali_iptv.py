@@ -799,9 +799,8 @@ class PreverbaKanalov:
         besedilo = json.dumps({"razlicica": 1, "meta": self._meta, "kanali": izidi}, separators=(",", ":"))
         try:
             self._pot.parent.mkdir(parents=True, exist_ok=True)
-            zacasna = self._pot.with_suffix(".tmp")
-            zacasna.write_text(besedilo, encoding="utf-8")
-            os.replace(zacasna, self._pot)
+            from core import shramba_json
+            shramba_json.zapisi_besedilo_atomsko(str(self._pot), besedilo)
         except OSError:
             pass
 

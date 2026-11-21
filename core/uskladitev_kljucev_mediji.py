@@ -3,9 +3,11 @@
 VirMedijev - vrednosti te naprave iz Medijskega centra (core/os_media.MediaCenter):
   - debrid kljuci (TorBox, Real-Debrid, AllDebrid): z vrednostjo samo kljuc, ki ga je storitev potrdila;
   - indeksator Usenet ({"url", "key"}): enako;
-  - dodatki Stremio s poverilnico (`dodatek:<odtis>`, pravi naslov iz zbirke skrivnosti).
-  Ponudnik Usenet (NNTP z geslom), viri IPTV z racunom in zaupanje zaslona se na namizju (se) ne usklajujejo: zapisi s
-  temi kljuci se prezrejo, nicesar ne posljemo in ne izbrisemo.
+  - dodatki Stremio s poverilnico (`dodatek:<odtis>`, pravi naslov iz zbirke skrivnosti);
+  - ponudnik Usenet z geslom (`usenet_ponudnik`, od 4. 11. 2026 - lastnik: »API kljuc, ki ga vnesem na eni napravi,
+    velja za vse naprave«), ce je podana pot nastavitev ponudnika (`pot_usenet`); oblika kot na Androidu.
+  Viri IPTV z racunom in zaupanje zaslona se na namizju (se) ne usklajujejo: zapisi s temi kljuci se prezrejo,
+  nicesar ne posljemo in ne izbrisemo.
   Prejeti debrid kljuc in indeksator se pred uporabo preverita pri storitvi s TE naprave (zavrnjen ne prepise
   veljavnega); dodatek se doda kot ob rocnem vnosu (preverba manifesta).
 
@@ -25,8 +27,10 @@ _log = logging.getLogger("safeer.kljuci_sinh")
 
 
 class VirMedijev:
-    def __init__(self, dobi_mc: Callable[[], object]):
+    def __init__(self, dobi_mc: Callable[[], object], pot_usenet: Optional[str] = None):
         self._mc = dobi_mc
+        # Nastavitve ponudnika Usenet (core/usenet_vezava.IME_DATOTEKE v mapi Medijskega centra); None = ne usklajujemo.
+        self._pot_usenet = pot_usenet
 
     # -- pomocniki
     def _dbr(self):
@@ -102,7 +106,23 @@ class VirMedijev:
                 vrednosti[k] = pravi
             else:
                 neznani.add(k)
+        if self._pot_usenet:
+            try:
+                from core import usenet_ponudnik as UPN
+                stanje, v = UPN.za_uskladitev(self._pot_usenet)
+            except Exception:  # noqa: BLE001 - zbirka ali datoteka nedosegljiva: neznan, brez groba
+                stanje, v = P.NEZNAN, None
+            if stanje == P.VREDNOST and v:
+                vrednosti[P.KLJUC_USENET_PONUDNIK] = v
+            elif stanje != P.BREZ:
+                neznani.add(P.KLJUC_USENET_PONUDNIK)
         return vrednosti, neznani
+
+    def _usenet_iz(self, v: str):
+        if not self._pot_usenet:
+            return None
+        from core import usenet_ponudnik as UPN
+        return UPN.iz_uskladitve(v)
 
     def veljavna_vrednost(self, k: str, v: str) -> bool:
         if k.startswith(P.PREDPONA_DEBRID):
@@ -119,7 +139,9 @@ class VirMedijev:
             predpona = skrivni_dodatki.skrivna_predpona_dodatka(v)
             return (skrivni_dodatki.veljaven_skrivni_dodatek(v) and predpona is not None
                     and skrivni_dodatki.odtis(predpona) == k[len(P.PREDPONA_DODATKA):])
-        return False                    # usenet_ponudnik, iptv, zaupanje: namizje jih se ne usklajuje
+        if k == P.KLJUC_USENET_PONUDNIK:
+            return self._usenet_iz(v) is not None
+        return False                    # iptv, zaupanje: namizje jih se ne usklajuje
 
     def pripravi(self, z) -> Optional[Callable[[], bool]]:
         """Brez zaklepa storitve (omrezje): preverba prejetega kljuca s te naprave; vrne shranjevanje ali None."""
@@ -147,6 +169,17 @@ class VirMedijev:
             if z.izbrisan:
                 return lambda: self._odstrani_dodatek(odtis)
             return lambda: self._dodaj_dodatek(z.vrednost)
+        if z.kljuc == P.KLJUC_USENET_PONUDNIK and self._pot_usenet:
+            from core import usenet_ponudnik as UPN
+            pot = self._pot_usenet
+            if z.izbrisan:
+                return lambda: (UPN.pozabi_ponudnika(pot), True)[1]
+            pg = self._usenet_iz(z.vrednost)
+            if pg is None:
+                return None
+            # Brez prijave (vsaka prijava steje povezave racuna; kot Android): stanje »nepreverjen« do »Preveri«.
+            # Izid shranjevanja (zbirka gesel lahko zavrne): False = metapodatki se ne potrdijo, poskus pride znova.
+            return lambda: bool(UPN.shrani_prejetega(pg[0], pg[1], pot))
         return None
 
     def _odstrani_dodatek(self, odtis: str) -> bool:
@@ -177,6 +210,13 @@ class VirMedijev:
             return bool(dbr.nastavi_indeksator(str(d.get("url") or ""), str(d.get("key") or "")))
         if k.startswith(P.PREDPONA_DODATKA):
             return self._odstrani_dodatek(k[len(P.PREDPONA_DODATKA):]) if v is None else self._dodaj_dodatek(v)
+        if k == P.KLJUC_USENET_PONUDNIK and self._pot_usenet:
+            from core import usenet_ponudnik as UPN
+            if v is None:
+                UPN.pozabi_ponudnika(self._pot_usenet)
+                return True
+            pg = self._usenet_iz(v)
+            return pg is not None and bool(UPN.shrani_prejetega(pg[0], pg[1], self._pot_usenet))
         return False
 
     def preveri_nepreverjene(self) -> None:
@@ -199,6 +239,9 @@ class VirMedijev:
             return "Usenet"
         if k.startswith(P.PREDPONA_DODATKA):
             return "Dodatek " + P.prikaz_gostitelja(v or "", g, self.gostitelj(v or ""))
+        if k == P.KLJUC_USENET_PONUDNIK:
+            pg = self._usenet_iz(v) if v else None
+            return "Usenet NNTP" + (" (%s)" % pg[0].gostitelj if pg else "")
         return ""
 
 

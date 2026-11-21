@@ -1182,6 +1182,60 @@ def stremio_prva_epizoda_drugje(koreni: list[str], imdb: str) -> str:
     return ""
 
 
+class PrazenOdgovor(ValueError):
+    """Dodatek je odgovoril brez seznama tokov (prazno telo, ne JSON objekt, brez `streams`): to ni odgovor »tega
+    nimam« (`{"streams": []}`), ampak okvara dodatka - steje v zdravje dodatka in ne skrije naslova."""
+
+
+class ZdravjeDodatkov:
+    """Zaporedni neuspehi po dodatku (napaka, cas, prazen odgovor) v pomnilniku procesa - nic na disk.
+
+    Lastnik 5. 11. 2026 (viri tokov): po PRAG zaporednih neuspehih dodatek ZACETEK_S (10 min) ne zadrzi rezultatov,
+    vsak nadaljnji neuspeh kazen podvoji do NAJDLJE_S (1 h); uspeh vse ponastavi. Dodatek brez kljuca med kazen
+    vprasamo, a nanj ne cakamo; dodatek s kljucem (debrid, Usenet, osebni zeton) med kazen preskocimo - ponavljanje
+    neuspelih zahtev z uporabnikovim kljucem lahko racun zaklene. Po izteku kazni gre ena poskusna zahteva."""
+
+    PRAG = 3
+    ZACETEK_S = 600.0
+    NAJDLJE_S = 3600.0
+
+    def __init__(self, ura=time.monotonic):
+        self._ura = ura
+        self._lock = threading.Lock()
+        self._stanje: dict[str, tuple[int, float]] = {}     # koren -> (zaporedni neuspehi, kazen do)
+
+    def neuspeh(self, koren: str) -> None:
+        with self._lock:
+            n = self._stanje.get(koren, (0, 0.0))[0] + 1
+            do = 0.0
+            if n >= self.PRAG:
+                do = self._ura() + min(self.NAJDLJE_S, self.ZACETEK_S * (2 ** min(n - self.PRAG, 8)))
+            self._stanje[koren] = (n, do)
+
+    def uspeh(self, koren: str) -> None:
+        with self._lock:
+            self._stanje.pop(koren, None)
+
+    def zadrzan(self, koren: str) -> bool:
+        """Dodatek je v kazni: na njegov odgovor ne cakamo."""
+        with self._lock:
+            return self._stanje.get(koren, (0, 0.0))[1] > self._ura()
+
+    def preskoci(self, koren: str, s_kljucem: bool) -> bool:
+        """Dodatka sploh ne vprasamo: v kazni in z uporabnikovim kljucem."""
+        return bool(s_kljucem) and self.zadrzan(koren)
+
+    def zaporedni(self, koren: str) -> int:
+        with self._lock:
+            return self._stanje.get(koren, (0, 0.0))[0]
+
+
+def stremio_dodatek_s_kljucem(koren: str) -> bool:
+    """Dodatek nosi uporabnikov kljuc ali zeton (nadomestek skritega dodatka ali kljuc se v naslovu, npr. Torrentio z
+    debrid kljucem): ob okvari ga raje preskocimo kot ponavljamo (ZdravjeDodatkov)."""
+    return skrivni_dodatki.je_nadomestek(koren) or skrivni_dodatki.je_skriven_naslov(koren)
+
+
 def stremio_tokovi(koren: str, tip: str, ident: str) -> list[dict]:
     """Predvajalne povezave dodatka: samo neposredni tokovi HTTP(S). Zunanjih povezav (`externalUrl`) in obvestil
     dodatka (donacije, Discord, "No streams found") ni med njimi. Tok `infoHash` (torrent) vrnemo z vsem, kar
@@ -1193,8 +1247,18 @@ def stremio_tokovi(koren: str, tip: str, ident: str) -> list[dict]:
         if not videi:
             return []
         ident = str(sorted(videi, key=lambda v: (int(v.get("season") or 0) or 999, int(v.get("episode") or 0)))[0]["id"])
-    data = json.loads(_request(koren + "/stream/%s/%s.json" % (tip, urllib.parse.quote(ident, safe=":"))))
-    surovi = data.get("streams") or []
+    telo = _request(koren + "/stream/%s/%s.json" % (tip, urllib.parse.quote(ident, safe=":")))
+    try:
+        data = json.loads(telo) if telo and telo.strip() else None
+    except ValueError:
+        data = None
+    if not isinstance(data, dict) or "streams" not in data:
+        raise PrazenOdgovor("dodatek ni vrnil seznama tokov")
+    surovi = data["streams"]
+    # Samo seznam je odgovor: {"streams": []} pomeni "tega nimam", null/false/{}/niz pa je okvara dodatka (zdravje
+    # dodatka, naslov ostane) - prej je `or []` pokvarjen odgovor stel kot uspeh (CodeRabbit, 5. 11. 2026).
+    if not isinstance(surovi, list):
+        raise PrazenOdgovor("dodatek ni vrnil seznama tokov")
     if not surovi and stremio_vrsta(tip) in ("glasba", "video"):
         # Album, seznam ali kanal z videi: tokove ima posnetek (videos), ne enota sama - vzamemo prvega.
         try:

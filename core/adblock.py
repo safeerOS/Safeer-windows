@@ -5,6 +5,9 @@ Complete YouTube ad patch, JSON/XHR strip, mute-only fallback for ads that slip 
 ambient blur removal, background audio engine, and the signed threat shield.
 """
 
+import importlib.util
+import os
+import sys
 import urllib.parse
 
 #: Dogodek DOM, s katerim skripti glavnega sveta (YOUTUBE_ADBLOCK_SCRIPT, ADGUARD_PROTECTION_SCRIPT - spreminjata JS
@@ -1308,17 +1311,19 @@ class ReverseDomainTrie:
         else:
             node["_term_"] = True
 
-    def is_blocked(self, host: str) -> bool:
+    def is_blocked(self, host: str, sme=None) -> bool:
+        """[sme] (domena -> bool): upostevaj samo pravila za domene, ki jih Scit sme blokirati (core/scit_gostitelji.py)."""
         if not host:
             return False
         labels = [l for l in ascii_gostitelj(host).split(".") if l]
         node = self.root
-        for label in reversed(labels):
+        for i, label in enumerate(reversed(labels)):
             node = node.get(label)
             if node is None:
                 return False
             if "_term_" in node or "_wildcard_" in node:
-                return True
+                if sme is None or sme(".".join(labels[len(labels) - 1 - i:])):
+                    return True
         return False
 
 
@@ -1380,6 +1385,24 @@ def is_passthrough_host(url: str) -> bool:
 
 
 _extra_threat_matchers = []
+
+
+def _scit_gostitelji():
+    """core/scit_gostitelji.py, nalozen po poti: skupne datoteke Windows (shared/core) se uvazajo po poti, ne kot paket."""
+    module = sys.modules.get("safeer_scit_gostitelji")
+    if module is not None:
+        return module
+    poti = [os.path.join(os.path.dirname(os.path.abspath(__file__)), "scit_gostitelji.py")]
+    if getattr(sys, "_MEIPASS", None):
+        poti.append(os.path.join(sys._MEIPASS, "shared", "core", "scit_gostitelji.py"))
+    pot = next((p for p in poti if os.path.isfile(p)), None)
+    if pot is None:
+        raise ImportError("scit_gostitelji.py ni ob %s" % os.path.basename(__file__))
+    spec = importlib.util.spec_from_file_location("safeer_scit_gostitelji", pot)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    sys.modules["safeer_scit_gostitelji"] = module
+    return module
 
 # Categories that block even on a real bank's host (a compromised server); anything else never does.
 CRITICAL_THREAT_CATEGORIES = frozenset({"botnet_c2", "malware"})
@@ -1598,8 +1621,21 @@ def register_threat_matcher(matcher) -> None:
 def is_threat_domain(url: str) -> bool:
     if is_passthrough_host(url):
         return False
+    # Googlovi gostitelji (5. 11. 2026): koren (iskanje, prijava) nikoli; skupni gostitelj z uporabnisko vsebino samo
+    # po tocnem naslovu iz podpisanega vira (core/threat_intel.py), vnos gostitelja velja le za projekt (zlo.web.app).
+    try:
+        g = _scit_gostitelji()
+    except Exception:  # noqa: BLE001 - manjkajoca razvrstitev ne sme ustaviti navigacije ne izklopiti zascite
+        g = None
+    host = _url_host(url)
+    vrsta = g.vrsta(host) if g else "navaden"
+    if g and vrsta == g.KOREN:
+        return False
     real_bank = is_real_bank_host(url)
-    if not real_bank and _threat_trie.is_blocked(_url_host(url)):
+    if g is None:
+        if not real_bank and _threat_trie.is_blocked(host):
+            return True
+    elif not real_bank and (vrsta == g.NAVADEN or g.je_najemnik(host)) and _threat_trie.is_blocked(host, g.sme_gostitelj):
         return True
     for matcher in _extra_threat_matchers:
         try:

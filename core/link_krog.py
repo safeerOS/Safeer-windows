@@ -233,10 +233,9 @@ class Krog:
             if self.pot and zdaj - self._stiki_zapisani >= STIKI_ZAPIS_S:
                 self._stiki_zapisani = zdaj
                 try:
-                    zacasna = self._pot_stikov() + ".tmp"
-                    with open(zacasna, "w", encoding="utf-8") as d:
+                    from core import shramba_json
+                    with shramba_json.atomsko_odpri(self._pot_stikov()) as d:
                         json.dump(self.stiki, d)
-                    os.replace(zacasna, self._pot_stikov())
                 except Exception:
                     pass
 
@@ -280,6 +279,26 @@ class Krog:
         with self._zaklep:
             c = self.clani.get(device_id)
             return dict(c) if c and self._veljaven(c) else None
+
+    def vnos_z_podpisom(self, device_id: str) -> Optional[Tuple[str, bool]]:
+        """Isto kot KrogZaupanja.vnosZPodpisom: (dodal, podpisan) za veljavnega clana ali None, ce clana ni ali je umaknjen.
+
+        `podpisan` = vnos je res podpisal clan `dodal` (ki je v krogu in ni umaknjen); preveri se samo podpis, ki ga
+        preveri kljuc porocevalca. Za »porocitev« polnega dostopa (link_dostop.poroceno)."""
+        with self._zaklep:
+            c = self.clan_za_id(device_id)
+            if not c:
+                return None
+            dodal = str(c.get("dodal") or "")
+            podpis = str(c.get("podpis") or "")
+            if not podpis or not dodal:
+                return dodal, False
+            porocevalec = self.clan_za_id(dodal)
+            if not porocevalec:
+                return dodal, False
+            ok = preveri_podpis(str(porocevalec.get("kljuc") or ""),
+                                podatki_clana(c["id"], c["kljuc"], c.get("platforma", ""), float(c["dodano"]), dodal), podpis)
+            return dodal, ok
 
     def je_clan(self, device_id: str) -> bool:
         return self.clan(device_id) is not None
@@ -419,7 +438,29 @@ class Krog:
         vnos = {"kljuc": kljuc, "ime": ime, "platforma": platforma, "dodano": dodano, "dodal": dodal}
         if podpis:
             vnos["podpis"] = podpis
-        return self.zdruzi({"clani": {device_id: vnos}})
+        # Vpis naredi ta naprava sama (hub po preverjenem zetonu seznanitve): zanj ne velja preverba prejetih krogov.
+        return self.zdruzi({"clani": {device_id: vnos}}, lokalno=True)
+
+    def podpisi_lastne(self) -> list:
+        """Podpise vnose, ki jih je dodala ta naprava, a so shranjeni brez podpisa (kot KrogZaupanja.podpisiLastne na
+        Androidu). Brez podpisa jih sosedje v mesh zavrnejo: naprava, ki krog dobi na novo (ponovna namestitev, nova
+        identiteta), takega clana ne spozna. Izmerjeno 21. 11. 2026: vnos glavnega id-ja tega racunalnika je bil brez
+        podpisa - televizor z novo identiteto racunalnika ni videl, racunalnik pa je televizor videl. Vrne podpisane id-je."""
+        podpisani = []
+        with self._zaklep:
+            for device_id, c in list(self.clani.items()):
+                if c.get("podpis") or not self._smo_mi(str(c.get("dodal") or "")):
+                    continue
+                try:
+                    podpis = podpisi(podatki_clana(device_id, c["kljuc"], c.get("platforma", ""), c["dodano"], c["dodal"]))
+                except Exception:  # noqa: BLE001 - brez kljuca ali z nepopolnim vnosom ostane, kot je
+                    continue
+                if podpis:
+                    c["podpis"] = podpis
+                    podpisani.append(device_id)
+            if podpisani:
+                self._shrani()
+        return podpisani
 
     def _smo_mi(self, device_id: str) -> bool:
         """Ali je ta id nasa naprava (isti kljuc)? Samo zase lahko podpisujemo."""
@@ -507,12 +548,40 @@ class Krog:
                     break
         return str((c or {}).get("kljuc") or "")
 
-    def zdruzi(self, tuj, shrani: bool = True, preveri_podpise: bool = False) -> bool:
+    def _kljuc_podpisnika(self, device_id: str) -> str:
+        """Javni kljuc VELJAVNEGA clana (ne umaknjenega), ki sme podpisati vnos ali umik; prazno sicer. Pregled TV
+        10. 11. 2026: umaknjena naprava s svojim kljucem ne sme podpisati vrnitve sebe ali drugih."""
+        c = self.clani.get(device_id)
+        if c is not None and not self._veljaven(c):
+            return ""
+        if c is None and je_id_iz_kljuca(device_id):
+            jedro = device_id[:DOLZINA_ID_IZ_KLJUCA]
+            c = next((d for d in self.clani.values() if self._veljaven(d) and id_iz_kljuca(d["kljuc"]) == jedro), None)
+        return str((c or {}).get("kljuc") or "")
+
+    def _podpis_vnosa_velja(self, nov: dict, ne_sam: bool = False) -> bool:
+        """Podpis vnosa clana s kljucem veljavnega clana, ki ga je dodal. [ne_sam]: podpisnik ni naprava sama -
+        umaknjena naprava se ne more vrniti s svojim podpisom."""
+        kljuc = self._kljuc_podpisnika(nov["dodal"])
+        try:
+            if not kljuc or (ne_sam and id_iz_kljuca(kljuc) == id_iz_kljuca(nov["kljuc"])):
+                return False
+        except Exception:  # noqa: BLE001 - pokvarjen kljuc: ni podpisa
+            return False
+        return preveri_podpis(kljuc, podatki_clana(nov["id"], nov["kljuc"], nov["platforma"], nov["dodano"], nov["dodal"]),
+                              str(nov.get("podpis") or ""))
+
+    def zdruzi(self, tuj, shrani: bool = True, preveri_podpise: bool = False, lokalno: bool = False) -> bool:
         """Zdruzi tuj krog (dict ali JSON niz). Vrne True, ce se je nas krog spremenil.
 
         `preveri_podpise` velja za kroge, ki NE pridejo od nasega huba (naprava, rele, internet):
         nov ali spremenjen clan in umik morata biti podpisana s kljucem tistega, ki ju je dodal, in
         ta mora biti ze v nasem krogu. Tako tuja naprava ne more podtakniti svojega kljuca.
+
+        Vedno (tudi krog od huba, trust.update; pregled TV 10. 11. 2026): vnos, ki bi UMAKNJENO napravo vrnil (novejsi
+        `dodano` od umika), in vnos z drugim kljucem znanega clana veljata samo s podpisom veljavnega clana, ki ni
+        naprava sama; vnos s podpisom, ki ga znan podpisnik ni dal, ne velja. Nepodpisan nov clan od huba ostane
+        mogoc (prva seznanitev: kroga se ne poznamo). [lokalno]: vpis te naprave same (Krog.dodaj), ne prejet krog.
         """
         if isinstance(tuj, str):
             try:
@@ -537,7 +606,7 @@ class Krog:
                     continue
                 umaknil = str(u.get("umaknil") or "")
                 podpis = str(u.get("podpis") or "")
-                if preveri_podpise and not preveri_podpis(self._kljuc_clana(umaknil), podatki_umika(i, ob, umaknil), podpis):
+                if preveri_podpise and not preveri_podpis(self._kljuc_podpisnika(umaknil), podatki_umika(i, ob, umaknil), podpis):
                     continue
                 obstojeci = self.umiki.get(i)
                 zdaj_clan = self.clani.get(i)
@@ -568,12 +637,23 @@ class Krog:
                 if c.get("podpis"):
                     nov["podpis"] = str(c["podpis"])
                 obstojeci = self.clani.get(i)
+                umik = self.umiki.get(i)
+                vrnitev = umik is not None and dodano > float(umik["umaknjeno"])
+                drug_kljuc = obstojeci is not None and obstojeci["kljuc"] != nov["kljuc"] and self._veljaven(obstojeci)
                 if preveri_podpise and (obstojeci is None or obstojeci["kljuc"] != nov["kljuc"]):
                     # Nov clan ali drug kljuc: samo s podpisom clana, ki ga je dodal in ga ze poznamo.
-                    if not preveri_podpis(self._kljuc_clana(nov["dodal"]),
-                                          podatki_clana(i, nov["kljuc"], nov["platforma"], dodano, nov["dodal"]),
-                                          str(nov.get("podpis") or "")):
+                    if not self._podpis_vnosa_velja(nov):
                         continue
+                elif lokalno:
+                    pass
+                elif vrnitev or drug_kljuc:
+                    # Umaknjena naprava se vraca ali znan clan dobi drug kljuc: tudi od huba samo s podpisom (prej je
+                    # novejsi nepodpisan vnos izbrisal umik in naprava je bila spet v krogu).
+                    if not self._podpis_vnosa_velja(nov, ne_sam=vrnitev):
+                        continue
+                elif nov.get("podpis") and self._kljuc_podpisnika(nov["dodal"]) and not self._podpis_vnosa_velja(nov):
+                    # Podpis je, podpisnika poznamo, a ga ni dal on: vnos je ponarejen ali pokvarjen.
+                    continue
                 if (obstojeci is None or obstojeci["dodano"] < dodano
                         or (obstojeci["dodano"] == dodano and obstojeci["kljuc"] != nov["kljuc"]
                             and obstojeci["kljuc"] < nov["kljuc"])):
@@ -620,11 +700,9 @@ class Krog:
             return
         try:
             os.makedirs(os.path.dirname(self.pot), exist_ok=True)
-            zacasna = self.pot + ".tmp"
-            with open(zacasna, "w", encoding="utf-8") as d:
+            from core import shramba_json
+            with shramba_json.atomsko_odpri(self.pot) as d:
                 json.dump(self.json(), d, ensure_ascii=False, indent=1)
-            os.chmod(zacasna, 0o600)
-            os.replace(zacasna, self.pot)
         except Exception:
             pass
 

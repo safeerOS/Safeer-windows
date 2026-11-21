@@ -60,11 +60,9 @@ class Shramba:
     def _pisi(self, d: dict) -> None:
         mapa = os.path.dirname(self.pot) or "."
         os.makedirs(mapa, exist_ok=True)
-        zacasna = "%s.%d.tmp" % (self.pot, threading.get_ident())
-        fd = os.open(zacasna, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
+        from core import shramba_json   # edinstveno ime tudi med procesi (prej samo med nitmi)
+        with shramba_json.atomsko_odpri(self.pot) as f:
             json.dump(d, f, ensure_ascii=False)
-        os.replace(zacasna, self.pot)
 
     def _posodobi(self, fn: Callable[[dict], None]) -> None:
         d = self._beri()
@@ -161,6 +159,9 @@ class Uskladitev:
         #: Klic ob napravi, ki caka na potrditev (okno ali obvestilo) in ob zamenjavi z druge naprave.
         self.ob_vprasanju: Optional[Callable[[Cakajoca], None]] = None
         self.ob_spremembi: Optional[Callable[[Sprememba], None]] = None
+        #: Zadnja izmenjava po jedru naprave: (P.IZID_*, prejetih zapisov z vrednostjo, ura) - samo v pomnilniku, za
+        #: razlog v vmesniku (izmerjeno 10. 11. 2026: prazen Medijski center brez razlage).
+        self._izidi: Dict[str, Tuple[str, int, int]] = {}
 
     # -- nastavitve
     def vklopljeno(self) -> bool:
@@ -183,6 +184,38 @@ class Uskladitev:
             return bool(ident) and bool(self.link.v_krogu(ident))
         except Exception:  # noqa: BLE001 - »ne vem« ni »da«
             return False
+
+    def _zabelezi_izid(self, ident: str, izid: str, zapisov: int = 0) -> None:
+        """Izid izmenjave z napravo; klice se samo za napravo v ozjem krogu (razlog ne sme razkriti naprav zunaj)."""
+        with self._zaklep:
+            self._izidi[self._jedro(ident)] = (izid, max(0, int(zapisov)), self._ura())
+        _log.info("izmenjava z %s: %s, zapisov %d", P.kratek_id(ident), izid, max(0, int(zapisov)))
+
+    def razlog(self) -> Optional[dict]:
+        """Za vmesnik (Medijski center): {"koda", "besedilo": {jezik: ...}} ali None, ce je usklajevanje izklopljeno.
+        Steje samo naprave, ki so ZDAJ v ozjem krogu te naprave (core/link_dostop)."""
+        if not self.vklopljeno():
+            return None
+        jaz = self._jaz()
+        v_krogu: Set[str] = set()
+        try:
+            naprave = list(self.link.naprave())
+        except Exception:  # noqa: BLE001 - brez seznama naprav je odgovor »ni naprav«, ne napaka
+            naprave = []
+        for n in naprave:
+            ident = str(n.get("id") or "")
+            if ident and ident != jaz and self._v_krogu(ident):
+                v_krogu.add(self._jedro(ident))
+        with self._zaklep:
+            izidi = {k: v for k, v in self._izidi.items() if k in v_krogu}
+            caka = any(k in v_krogu for k in self._cakajoce)
+        potrdile = sum(1 for i, _n, _t in izidi.values() if i == P.IZID_SPREJETO)
+        zapisov = sum(n for i, n, _t in izidi.values() if i == P.IZID_SPREJETO)
+        zadnji = max(izidi.values(), key=lambda v: v[2])[0] if izidi else ""
+        if caka:
+            zadnji = P.IZID_CAKA
+        koda, besedilo = P.razlog_brez_kljucev(len(v_krogu), potrdile, zapisov, zadnji)
+        return {"koda": koda, "besedilo": besedilo}
 
     def _jaz(self) -> str:
         try:
@@ -444,17 +477,24 @@ class Uskladitev:
         koda = str(izid.get("koda") or izid.get("code") or "")
         if izid.get("ok") and data.get("accepted") is True:
             prejeti = P.iz_json(data.get("items"))
-            if self.stanje_naprave(ident) == P.POTRJENA:
+            self._zabelezi_izid(ident, P.IZID_SPREJETO, sum(1 for z in prejeti if not z.izbrisan))
+            # Lastnik 9. 11. 2026: naprava v ozjem krogu je potrjena (P.sprejem); samo zavrnjena ne.
+            if P.sprejem(True, True, self.stanje_naprave(ident)) == P.SPREJMI:
                 self._zapomni(ident, ime, P.POTRJENA, True)
                 self._prejmi_zapise(ident, ime, prejeti)
             else:
                 self._vprasaj(ident, ime, prejeti)       # U1: tudi pobudnik potrdi enkrat
         elif data.get("pending") is True:
-            pass                                         # caka na potrditev tam
+            self._zabelezi_izid(ident, P.IZID_CAKA)       # caka na potrditev tam
         elif data.get("reason") == "zavrnjeno":
             self._zapomni(ident, ime, P.ZAVRNJENA, False)
+            self._zabelezi_izid(ident, P.IZID_ZAVRNJENO)
         elif koda == "neznano_dejanje":
             self._zapomni(ident, ime, P.STARA, False)
+            self._zabelezi_izid(ident, P.IZID_STARA)
+        else:
+            # Ni odgovora (rok, naprava ni povezana) ali zavrnitev z drugim razlogom: samo koda, nikoli vsebina odgovora.
+            self._zabelezi_izid(ident, P.IZID_ZAVRNJENO if data.get("reason") else P.IZID_NEDOSEGLJIVO)
 
     # -- prejem (dejanje secrets.sync)
     def _vprasaj(self, od: str, ime: str, zapisi: Sequence[Zapis]) -> None:
@@ -478,6 +518,7 @@ class Uskladitev:
         except Exception:  # noqa: BLE001
             ujema = False
         if not ujema:
+            _log.info("prejem od %s: zavrnjeno (zascita)", P.kratek_id(od))
             return {"accepted": False, "reason": "zascita"}
         ime = ime or self._ime_naprave(od)
         v_krogu = self._v_krogu(od)
@@ -487,11 +528,14 @@ class Uskladitev:
         odziv = P.sprejem(self.vklopljeno(), v_krogu, self.stanje_naprave(od))
         if odziv == P.ZAVRNI:
             razlog = "izklopljeno" if not self.vklopljeno() else ("ni_krog" if not v_krogu else "zavrnjeno")
+            _log.info("prejem od %s: zavrnjeno (%s), zapisov %d", P.kratek_id(od), razlog, len(zapisi))
             return {"accepted": False, "reason": razlog}
         if odziv == P.VPRASAJ:
             self._vprasaj(od, ime, zapisi)
+            self._zabelezi_izid(od, P.IZID_CAKA)
             return {"accepted": False, "pending": True}
         self._zapomni(od, ime, P.POTRJENA, True)
+        self._zabelezi_izid(od, P.IZID_SPREJETO, sum(1 for z in zapisi if not z.izbrisan))
 
         def delo() -> None:
             try:
@@ -586,3 +630,15 @@ def nastavi(storitev: Optional[Uskladitev]) -> None:
 
 def storitev() -> Optional[Uskladitev]:
     return _STORITEV
+
+
+def razlog_za_vmesnik() -> Optional[dict]:
+    """Razlog za Medijski center (core/debrid.most, polje »uskladitev«); None brez storitve v tem procesu ali ob napaki."""
+    s = _STORITEV
+    if s is None:
+        return None
+    try:
+        return s.razlog()
+    except Exception as e:  # noqa: BLE001 - stanje kljucev v vmesniku ne sme pasti zaradi razloga
+        _log.info("razlog: %s", type(e).__name__)
+        return None

@@ -142,24 +142,17 @@ class Nastavitve:
     naloži = nalozi  # staro ime s sumnikom; jedro uporablja ASCII
 
     def shrani(self) -> None:
-        # Zeton Huba in zetoni seznanitev: datoteka 0600 ze ob nastanku (prej po umask 0644, chmod sele po zapisu) in
-        # mapa 0700; ob napaki zacasna datoteka ne ostane (neodvisni pregled, 19. 10. 2026).
-        zacasna = self.pot + ".tmp"
+        # Zeton Huba in zetoni seznanitev: datoteka 0600 ze ob nastanku in mapa 0700; ob napaki zacasna datoteka ne
+        # ostane (neodvisni pregled, 19. 10. 2026). Zacasna je nova (mkstemp, O_EXCL): podtaknjena povezava ali stara
+        # zacasna z drugimi pravicami ne pride v postev (prej O_NOFOLLOW in fchmod na stalnem <pot>.tmp). Deluje tudi
+        # na Windows (modul je skupen).
+        from core import shramba_json
         try:
             os.makedirs(os.path.dirname(self.pot), mode=0o700, exist_ok=True)
-            # Modul je skupen z Windows: tam O_NOFOLLOW ni, os.fchmod pa pred Pythonom 3.13 tudi ne. AttributeError je
-            # prej tiho koncal shranjevanje in link.json se ni nikoli zapisal - seznanitev se je izgubila.
-            fd = os.open(zacasna, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0), 0o600)
-            with open(fd, "w", encoding="utf-8") as d:
-                if hasattr(os, "fchmod"):
-                    os.fchmod(d.fileno(), 0o600)   # zacasna, ki je ostala od prej, je imela lahko druge pravice
+            with shramba_json.atomsko_odpri(self.pot) as d:
                 json.dump(self.podatki, d, ensure_ascii=False, indent=2)
-            os.replace(zacasna, self.pot)
         except Exception:
-            try:
-                os.unlink(zacasna)
-            except OSError:
-                pass
+            pass
 
     def get(self, kljuc: str, privzeto=None):
         return self.podatki.get(kljuc, privzeto)

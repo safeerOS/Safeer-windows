@@ -227,9 +227,9 @@ def _ikona(p, xid: int, mapa: str) -> str:
         from gi.repository import GdkPixbuf, GLib
         pb = GdkPixbuf.Pixbuf.new_from_bytes(GLib.Bytes.new(bytes(rgba)), GdkPixbuf.Colorspace.RGB, True, 8, s, v, s * 4)
         os.makedirs(mapa, exist_ok=True)
-        zacasna = pot + ".tmp"
-        pb.savev(zacasna, "png", [], [])
-        os.replace(zacasna, pot)
+        from core import shramba_json
+        with shramba_json.atomska_pot(pot) as zacasna:
+            pb.savev(zacasna, "png", [], [])
         return "file://" + pot
     except Exception:  # noqa: BLE001
         return ""

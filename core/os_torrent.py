@@ -534,10 +534,9 @@ class Torrenti:
     def _shrani_nastavitve(self) -> None:
         try:
             os.makedirs(os.path.dirname(self._pot_nastavitev), exist_ok=True)
-            zacasna = self._pot_nastavitev + ".tmp"
-            with open(zacasna, "w", encoding="utf-8") as d:
+            from core import shramba_json
+            with shramba_json.atomsko_odpri(self._pot_nastavitev) as d:
                 json.dump({"deli_naprej": sorted(self._deli_naprej)}, d)
-            os.replace(zacasna, self._pot_nastavitev)
         except OSError:
             pass
 

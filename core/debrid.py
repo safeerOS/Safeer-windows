@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from typing import Callable, Optional, Sequence
 
 from . import debrid_pravila as P
+from . import tok_izbira
 from . import usenet_pravila as U
 
 _log = logging.getLogger("safeer.debrid")
@@ -655,13 +656,32 @@ def _javi(ob_izidu: Optional[Callable[[str, bool], None]], napaka: str, uspeh: b
         _log.info("stanje kljuca: %s", type(e).__name__)
 
 
+class IzidIskanja:
+    """Izid iskanja Usenet za filter vira (kot Android Usenet.IzidIskanja): [izdaje] None = indeksator ni odgovoril
+    (napaka, rok, HTTP) - to ni »0 izdaj«; [meja] = indeksator omejuje (429, Newznab 500/501); [razlog] kratek niz za
+    dnevnik brez kljuca in naslova."""
+
+    __slots__ = ("izdaje", "meja", "razlog")
+
+    def __init__(self, izdaje: Optional[list], meja: bool = False, razlog: str = "") -> None:
+        self.izdaje = izdaje
+        self.meja = bool(meja)
+        self.razlog = razlog
+
+
 def usenet_isci(osn: str, kljuc_ix: str, ident: str, rok: float = 8.0,
                 ob_izidu: Optional[Callable[[str, bool], None]] = None) -> list:
     """Zadetki indeksatorja za id Stremio (film tt… ali epizoda tt…:S:E); ob napaki prazno. Naslov (s kljucem) ne gre v
     dnevnik in ne sledi preusmeritvi (kot preverba ob vnosu)."""
+    return usenet_iskanje(osn, kljuc_ix, ident, rok, ob_izidu).izdaje or []
+
+
+def usenet_iskanje(osn: str, kljuc_ix: str, ident: str, rok: float = 8.0,
+                   ob_izidu: Optional[Callable[[str, bool], None]] = None) -> IzidIskanja:
+    """Kot usenet_isci, a loci »0 izdaj« od »ni odgovora« in meje (filter vira, core/usenet_filter)."""
     naslov = U.naslov_iskanja(osn, kljuc_ix, ident)
     if not naslov:
-        return []
+        return IzidIskanja(None, False, "ni_imdb")
     try:
         zahteva = urllib.request.Request(naslov, headers={"Accept": "application/rss+xml, application/xml, text/xml",
                                                           "User-Agent": "SafeerOS/1.0"})
@@ -678,17 +698,17 @@ def usenet_isci(osn: str, kljuc_ix: str, ident: str, rok: float = 8.0,
               izid == P.PREVERBA_VELJAVEN)
         if not 200 <= koda < 300:
             _log.info("usenet iskanje: HTTP %d", koda)
-            return []
+            return IzidIskanja(None, koda == 429, "meja" if koda == 429 else "http_%d" % koda)
         n = U.napaka(besedilo)
         if n:
             _log.info("usenet iskanje: napaka indeksatorja (%s)", n)
-            return []
+            return IzidIskanja(None, n == P.NAPAKA_MEJA, "meja" if n == P.NAPAKA_MEJA else "napaka_indeksatorja")
         z = U.zadetki(besedilo, osn)
         _log.info("usenet iskanje: %d zadetkov", len(z))
-        return z
+        return IzidIskanja(z)
     except Exception as e:  # noqa: BLE001 - brez Useneta, ostali viri delajo naprej
         _log.warning("usenet iskanje: %s", type(e).__name__)
-        return []
+        return IzidIskanja(None, False, "rok" if isinstance(e, TimeoutError) else "omrezje_" + type(e).__name__)
 
 
 def _isti_gostitelj(a: str, b: str) -> bool:
@@ -867,8 +887,11 @@ class Debrid:
         if enc not in self._kljuci:
             try:
                 self._kljuci[enc] = self._desifriraj(enc)
-            except Exception:  # noqa: BLE001 - kljuca ni mogoce prebrati: kot da ga ni
-                self._kljuci[enc] = ""
+            except Exception:  # noqa: BLE001 - kljuca ZDAJ ni mogoce prebrati: kot da ga ni, a neuspeha si NE zapomnimo
+                # 21. 11. 2026: Safeer OS se zazene ob prijavi, se preden je zbirka skrivnosti odklenjena. Prej se je
+                # neuspeh shranil kot prazen kljuc do konca seje - Medijski center je kazal »Dodaj debrid«, filmi in
+                # serije pa niso delali, ceprav je kljuc shranjen. Naslednji klic poskusi znova (indeksator ze tako dela).
+                return None
         return P.ocisti_kljuc(self._kljuci[enc])
 
     def z_kljucem(self) -> list:
@@ -1364,8 +1387,26 @@ class Debrid:
         ix = self.indeksator()
         if not ix or not self.usenet_na_voljo() or not U.iscemo(ident):
             return []
+        return self._tokovi_usenet(usenet_isci(ix[0], ix[1], ident,
+                                               ob_izidu=lambda n, u: self.ob_izidu(P.INDEKSATOR, n, u, vezava)), vezava)
+
+    def usenet_iskanje_tokov(self, ident: str) -> tuple:
+        """(tokovi ali None, IzidIskanja): kot usenet_isci, a pove, ali je indeksator res odgovoril (None = ne) - za
+        predvajanje »samo Usenet« (pozabi zapis filtra samo ob pravih 0 izdajah)."""
+        vezava = self._vezava(P.INDEKSATOR)
+        ix = self.indeksator()
+        if not ix or not self.usenet_na_voljo() or not U.iscemo(ident):
+            return None, IzidIskanja(None, False, "ni_indeksatorja" if not ix else "ni_racuna")
+        izid = usenet_iskanje(ix[0], ix[1], ident, ob_izidu=lambda n, u: self.ob_izidu(P.INDEKSATOR, n, u, vezava))
+        return (self._tokovi_usenet(izid.izdaje, vezava) if izid.izdaje is not None else None), izid
+
+    def _tokovi_usenet(self, zadetki: list, vezava: object) -> list:
+        """Zadetki indeksatorja kot tokovi. 3D izdaj ne ponudimo (lastnik 10. 11. 2026, tok_izbira.je_3d): Usenet gre
+        mimo tok_izbira.zdruzi_dvojnike, zato jih izlocimo tu - za vse poti (samodejno, samo Usenet, TorBox Usenet)."""
         tokovi = []
-        for z in usenet_isci(ix[0], ix[1], ident, ob_izidu=lambda n, u: self.ob_izidu(P.INDEKSATOR, n, u, vezava)):
+        for z in zadetki:
+            if tok_izbira.je_3d(z.naslov):
+                continue
             idt = U.id_toka(z.povezava)
             with self._zaklep:
                 self._povezave_nzb[idt] = (z.povezava, vezava)
@@ -1374,6 +1415,65 @@ class Debrid:
             tokovi.append({"url": idt, "opis": U.opis(z), "naslov": z.naslov, "gb": z.velikost / 1073741824.0,
                            "vir": "Usenet", "usenet": True})
         return tokovi
+
+    # ---- filter vira Usenet (lastnik 10. 11. 2026: kot TV, izbira »⚡ Usenet« filtrira mrezo)
+    def filter_racun(self) -> bool:
+        """Indeksator je vpisan in ga smemo klicati (kot Android Usenet.jeNaVoljo) - preverba filtra sme vprasati."""
+        return self.indeksator() is not None and self.sme_klicati(P.INDEKSATOR)
+
+    def filter_iskanje(self, ident: str, rok: float = 8.0) -> IzidIskanja:
+        """Iskanje za preverbo filtra: brez povezav NZB v pomnilniku (preverba ne predvaja). Kljuc ne zapusti funkcije."""
+        vezava = self._vezava(P.INDEKSATOR)
+        ix = self.indeksator()
+        if not ix or not self.sme_klicati(P.INDEKSATOR):
+            return IzidIskanja(None, False, "ni_indeksatorja")
+        return usenet_iskanje(ix[0], ix[1], ident, rok, ob_izidu=lambda n, u: self.ob_izidu(P.INDEKSATOR, n, u, vezava))
+
+    def odtis_racuna(self) -> str:
+        """Kratek odtis indeksatorja za kljuc zapisa filtra (zamenjan indeksator ali kljuc = nove preverbe); nikoli kljuc."""
+        ix = self.indeksator()
+        if not ix:
+            return ""
+        import hashlib
+        return hashlib.sha256(("safeer-filter|%s|%s" % (ix[0], ix[1])).encode("utf-8")).hexdigest()[:12]
+
+    def usenet_izbran(self) -> bool:
+        """Uporabnik je v izbirniku virov izbral »⚡ Usenet« ali »⚡ Vsi viri« (kot Android UsenetLastni.izbran)."""
+        return bool(self._nastavitve().get("usenet_izbran", False))
+
+    def nastavi_izbiro(self, izbira: str) -> bool:
+        """Izbira v izbirniku virov, natanko kot TV (GlasbaActivity, izbira »debrid«): storitev -> ta storitev, brez
+        Useneta; »usenet« -> samo Usenet (debrid izklopljen); »vsi« -> Usenet in prednostna storitev; "" -> brez.
+        False = neznana izbira (nic se ne spremeni)."""
+        z = self.z_kljucem()
+        if izbira in P.VSI:
+            if izbira not in z:
+                return False
+            p, usenet = izbira, False
+        elif izbira == "usenet":
+            p, usenet = None, True
+        elif izbira == "vsi":
+            if not z:
+                return False
+            p, usenet = (self.aktivna() or z[0]), True
+        elif izbira == "":
+            p, usenet = None, False
+        else:
+            return False
+
+        def f(d: dict) -> None:
+            d["izklopljeno"] = p is None
+            if p in P.VSI:
+                d["prednostna"] = p
+            d["usenet_izbran"] = usenet
+        self._spremeni(f)
+        return True
+
+    def samo_usenet(self) -> bool:
+        """Filter vira Usenet velja (OsPravila.samoUsenetIzbran): izbran Usenet, lasten ponudnik, debrid ni aktiven."""
+        from core import filter_vira_pravila as FV
+        return FV.samo_usenet_izbran(self.usenet_izbran() and self.lastni_usenet_na_voljo(), self.aktivna() is not None,
+                                     False)
 
     #: Predpomnilnik NZB: najvec toliko izdaj, bajtov skupaj in sekund (NZB filma je obicajno 1-5 MB).
     NZB_NAJVEC = 3
@@ -1478,6 +1578,36 @@ class Debrid:
             self._zapomni_nzb(id_toka, nzb)
         return nzb, None
 
+    def nzb_po_guid(self, guid: str) -> tuple:
+        """Lastnik 5. 11. 2026 (pomoc napravi v Linku, core/link_usenet_pomoc): NZB izdaje [guid] s kljucem TEGA
+        racunalnika (Newznab t=get) - (bajti, "") ali (None, napaka). Ista pravila kot _nzb_toka: zavrnjen ali zaklenjen
+        kljuc ne gre ven, stanje kljuca sledi uporabi, predpomnjen NZB (isti guid, U.NZB_VELJA_S) ne gre znova k indeksatorju
+        (previjanje TV na istem filmu ne porabi kvote). Naslov s kljucem ne gre v dnevnik."""
+        g = U.guid(guid)
+        # CodeRabbit 9. 11. 2026: vezava pred kljucem kot v usenet_isci (Grok 36, D2) - sicer 401 starega kljuca
+        # oznaci »ne velja« kljuc, ki ga je uporabnik vpisal med obema branjema.
+        vezava = self._vezava(P.INDEKSATOR)
+        ix = self.indeksator()
+        if not g or not ix:
+            return None, U.NAPAKA_INDEKSATOR
+        if not self.sme_klicati(P.INDEKSATOR):
+            return None, self._napaka_stanja(P.INDEKSATOR)
+        # CodeRabbit 6. 11. 2026: guid velja za indeksator - kljuc predpomnilnika vkljuci njegov odtis (zamenjan
+        # indeksator z istim guidom ne vrne izdaje prejsnjega).
+        kljuc = U.kljuc_nzb_guid(ix[0], g)
+        nzb = self._nzb_zapomnjen(kljuc)
+        if nzb is not None:
+            return nzb, ""
+        naslov = U.naslov_nzb_guid(ix[0], ix[1], g)
+        if not naslov:
+            return None, U.NAPAKA_INDEKSATOR
+        nzb, napaka = usenet_nzb(naslov)
+        _javi(lambda n, u: self.ob_izidu(P.INDEKSATOR, n, u, vezava), napaka, nzb is not None)
+        if nzb is None:
+            return None, napaka or U.NAPAKA_INDEKSATOR
+        self._zapomni_nzb(kljuc, nzb)
+        return nzb, ""
+
     def usenet_takoj(self, tokovi: Sequence[dict], rok: float = U.TAKOJ_ROK_S) -> Optional[tuple]:
         """Lastnik 25. 10. 2026: Usenet, ki ga ima TorBox ze pripravljenega, gre pred vse druge vire. Prve U.TAKOJ_IZDAJ izdaj
         [tokovi] (po kakovosti, najboljsa prva) preverimo hkrati (add_only_if_cached) z rokom [rok]; zmaga najboljsa
@@ -1551,6 +1681,8 @@ class Debrid:
         tb = self.paket(P.TORBOX) if self.kljuc(P.TORBOX) else None
         gost = self.gostitelj_indeksatorja()
         return {"storitve": storitve, "aktivna": self.aktivna() or "", "samo_takoj": self.samo_takoj(),
+                # Izbirnik virov kot TV: »⚡ Usenet« in »⚡ Vsi viri« (lasten ponudnik NNTP vpisan).
+                "usenet_izbran": self.usenet_izbran(), "usenet_lastni": self.lastni_usenet_na_voljo(),
                 "oznaka": P.OZNAKA_PREDPOMNJEN,
                 # torbox_pro: None = paketa ne poznamo (kljuc ni bil preverjen) - Usenet ima samo Pro.
                 "usenet": {"gostitelj": gost, "torbox": bool(self.kljuc(P.TORBOX)),
@@ -1672,7 +1804,16 @@ def most(dbr: Debrid, a: list) -> dict:
     izid: dict = {"ok": True}
     if ukaz == "aktivna":
         p = str(a[1]) if len(a) > 1 else ""
-        dbr.nastavi_aktivno(p if p in P.VSI else None)
+        # Samo "" je »Brez debrida«; neznana izbira (npr. »usenet« iz izbirnika strani, ki ni storitev debrida) ne
+        # izklopi debrida - prej je tiho delovala kot »Brez debrida« (Windows os.js, pregled 6. 11. 2026).
+        if p == "" or p in P.VSI:
+            dbr.nastavi_aktivno(p or None)
+        else:
+            izid = {"ok": False, "preverba": P.PREVERBA_OBLIKA}
+    elif ukaz == "izbira":
+        # Izbirnik virov kot TV (lastnik 10. 11. 2026): storitev, »usenet«, »vsi« ali "" (brez).
+        if not dbr.nastavi_izbiro(str(a[1]) if len(a) > 1 else ""):
+            izid = {"ok": False, "preverba": P.PREVERBA_OBLIKA}
     elif ukaz == "kljuc":
         # Preverba ob vnosu (TorBox user/me, Real-Debrid in AllDebrid /user): vmesnik dobi samo izid in ime paketa -
         # nikoli kljuca, uporabniskega imena ali e-naslova.
@@ -1692,5 +1833,12 @@ def most(dbr: Debrid, a: list) -> dict:
         izid = dbr.preveri_izrecno(p) if p in P.VSI + (P.INDEKSATOR,) else {"ok": False, "preverba": P.PREVERBA_OBLIKA}
     elif ukaz == "preveri":
         dbr.preveri_nepreverjene()
-    return dict(dbr.stanje(), ok=bool(izid.get("ok")), preverba=str(izid.get("preverba") or ""),
-                paket=str(izid.get("paket") or ""), cez_s=int(izid.get("cez_s") or 0))
+    odgovor = dict(dbr.stanje(), ok=bool(izid.get("ok")), preverba=str(izid.get("preverba") or ""),
+                   paket=str(izid.get("paket") or ""), cez_s=int(izid.get("cez_s") or 0))
+    # Zakaj ni kljucev z drugih naprav (izmerjeno 10. 11. 2026: vmesnik je molcal). Novo polje, prikaz naredi vmesnik;
+    # brez storitve usklajevanja v tem procesu (Windows, Control loceno) polja ni.
+    from core import uskladitev_kljucev
+    razlog = uskladitev_kljucev.razlog_za_vmesnik()
+    if razlog is not None:
+        odgovor["uskladitev"] = razlog
+    return odgovor

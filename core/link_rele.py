@@ -10,10 +10,10 @@ from __future__ import annotations
 
 import atexit
 import base64
+import contextlib
 import hashlib
 import json
 import os
-import select
 import socket
 import ssl
 import struct
@@ -29,6 +29,11 @@ from core import os_deskriptorji
 GOSTITELJ = "link.safeer.si"
 OBJAVA_VSAKIH_S = 60
 PING_VSAKIH_S = 30
+#: Rele na "ping" odgovori "pong". Brez odgovora toliko casa je poslusalec mrtev (izmerjeno 9. 11. 2026: prenosnik in
+#: testni PC sta bila ure "dosegljiva", rele pa klicev ni vec dostavil - Global Link na Linux ni sel).
+MRTEV_PO_S = 2 * PING_VSAKIH_S + 15
+#: Poslusalca obnovimo tudi, ce pong prihaja: rele je klice dostavil le svezemu poslusalcu (9. 11. 2026, testni PC).
+OBNOVI_POSLUSALCA_S = 10 * 60
 KOS = 16 * 1024
 #: Najvecje sporocilo releja (okvir in vsi nadaljevalni okvirji skupaj); prej 4 MiB samo na okvir.
 NAJVECJE_SPOROCILO = 4 * 1024 * 1024
@@ -259,7 +264,7 @@ def _mirna(s) -> bool:
     Berljiva je lahko tudi samo zaradi notranjih zapisov TLS 1.3 (vstopnica seje po rokovanju): te prebere
     recv brez cakanja in javi SSLWantReadError - povezava je ziva."""
     try:
-        berljiva, _, _ = select.select([s], [], [], 0)
+        berljiva = os_deskriptorji.berljivi([s], 0)      # brez meje 1024 (select)
         if not berljiva and not s.pending():
             return True
         rok = s.gettimeout()
@@ -377,7 +382,7 @@ class TopleTls:
         """Do `cas` sekund ali do zbujanja ali do berljive `s` (rele jo je zaprl)."""
         bralni = [self._budilka[0]] + ([s] if s is not None else [])
         try:
-            select.select(bralni, [], [], cas)
+            os_deskriptorji.berljivi(bralni, cas)
         except (OSError, ValueError):
             time.sleep(min(cas, 0.05))      # `s` je med tem vzel in zaprl nekdo drug
         try:
@@ -560,6 +565,26 @@ def cev(ws: WsOdjemalec, tcp: socket.socket) -> None:
 
 # ------------------------------------------------------------------ agent huba
 
+#: Pregled TV 10. 11. 2026: najvec socasnih kanalov releja (vsak je nit in povezava): v obe smeri - kanali od zunaj
+#: (AgentHuba, poslje jih rele) in krajevni (LokalniRele). Vec ne sprejmemo, dokler se kateri ne konca.
+NAJVEC_KANALOV = 32
+
+
+def _zacni_kanal(mesta: threading.BoundedSemaphore, delo: Callable[[], None], ob_zavrnitvi: Callable[[], None]) -> bool:
+    """Nit za en kanal, ce je mesto; mesto se sprosti, ko se kanal konca (tudi z napako)."""
+    if not mesta.acquire(blocking=False):
+        ob_zavrnitvi()
+        return False
+
+    def tece() -> None:
+        try:
+            delo()
+        finally:
+            mesta.release()
+    threading.Thread(target=tece, name="safeer-rele-kanal", daemon=True).start()
+    return True
+
+
 class AgentHuba:
     """Drzi hub dosegljiv prek link.safeer.si, dokler je `vrata()` > 0 in je Global Link vklopljen."""
 
@@ -571,7 +596,12 @@ class AgentHuba:
         self.namigi = namigi
         self._nit: Optional[threading.Thread] = None
         self._ws: Optional[WsOdjemalec] = None
+        self._mesta = threading.BoundedSemaphore(NAJVEC_KANALOV)
         self.stanje = "izklopljen"
+        #: Cas zadnjega okvirja releja (pong ali klic) na trenutnem poslusalcu; postavi ga _zanka.
+        self.zadnji_okvir = 0.0
+        #: _vzdrzuj je poslusalca zaprl namenoma ("mrtev" ali "star"): _zanka se prijavi takoj.
+        self._obnovi = ""
 
     def zazeni(self) -> None:
         if self._nit is None:
@@ -614,8 +644,11 @@ class AgentHuba:
             ws.zapri()
             raise
 
-    def _vzdrzuj(self, ws: WsOdjemalec) -> None:
-        """Ping in ponovna objava; ob izklopu ali ustavitvi huba zapre povezavo (glavna zanka se vrne)."""
+    def _vzdrzuj(self, ws: WsOdjemalec, zacetek: Optional[float] = None) -> None:
+        """Ping in ponovna objava; ob izklopu ali ustavitvi huba, brez odgovora releja ali po OBNOVI_POSLUSALCA_S zapre
+        povezavo (glavna zanka se vrne in poslusa znova)."""
+        # Roki poslusalca na monotoni uri (CodeRabbit 9. 11. 2026): premik sistemske ure nazaj jih ne sme podaljsati.
+        zacetek = time.monotonic() if zacetek is None else zacetek
         zadnja_objava = time.time()
         while self._ws is ws:
             time.sleep(PING_VSAKIH_S)
@@ -623,6 +656,13 @@ class AgentHuba:
                 return
             try:
                 if not (self.vklopljen() and self.vrata() > 0):
+                    ws.zapri()
+                    return
+                zdaj = time.monotonic()
+                mrtev = zdaj - self.zadnji_okvir > MRTEV_PO_S
+                if mrtev or zdaj - zacetek > OBNOVI_POSLUSALCA_S:
+                    # Takojsnja nova prijava (brez cakanja v _zanka): hub je brez poslusalca le za eno rokovanje.
+                    self._obnovi = "mrtev" if mrtev else "star"
                     ws.zapri()
                     return
                 ws.besedilo("ping")
@@ -635,6 +675,7 @@ class AgentHuba:
 
     def _zanka(self) -> None:
         cakaj = 5
+        obnova = False
         while True:
             if not (self.vklopljen() and self.vrata() > 0):
                 self.stanje = "izklopljen"
@@ -646,20 +687,31 @@ class AgentHuba:
                 # Toplo povezavo hub drzi le TOPLA_ZELJA_S po zadnjem kanalu (odpri_kanal -> vzemi): prvi kanal po
                 # mirovanju je hladen, naslednji (npr. zaslon po povezavi v mrezo) gredo brez TCP in TLS.
                 self._ws, self.stanje, cakaj = ws, "povezan", 5
-                self.dnevnik("[Global Link] hub je dosegljiv prek link.safeer.si")
+                self.zadnji_okvir = time.monotonic()
+                if not obnova:
+                    self.dnevnik("[Global Link] hub je dosegljiv prek link.safeer.si")
+                obnova = False
                 threading.Thread(target=self._vzdrzuj, args=(ws,), name="safeer-global-link-ping", daemon=True).start()
                 try:
                     while True:
                         op, podatki = ws.prejmi()
+                        self.zadnji_okvir = time.monotonic()
                         if op == 0x1 and podatki.startswith(b"{"):
                             s = json.loads(podatki)
                             if s.get("type") == "incoming" and len(str(s.get("kanal", ""))) == 32:
-                                threading.Thread(target=self._kanal, args=(str(s["kanal"]),), daemon=True).start()
+                                kanal = str(s["kanal"])
+                                _zacni_kanal(self._mesta, lambda k=kanal: self._kanal(k),
+                                             lambda: self.dnevnik("[Global Link] prevec kanalov hkrati - kanal zavrnjen"))
                 finally:
                     self._ws = None
                     ws.zapri()
             except Exception as e:
-                self.stanje = "napaka"
+                if self._obnovi:
+                    if self._obnovi == "mrtev":     # redna obnova (star) ne pise v dnevnik vsakih 10 min
+                        self.dnevnik("[Global Link] rele ne odgovarja; poslusalca obnavljam")
+                    self._obnovi, obnova = "", True
+                    continue
+                self.stanje, obnova = "napaka", False
                 self.dnevnik(f"[Global Link] {e}; znova cez {cakaj} s")
                 time.sleep(cakaj)
                 cakaj = min(cakaj * 2, 300)
@@ -704,6 +756,7 @@ class LokalniRele:
         self.streznik = None
         self.vrata = 0
         self._tece = True
+        self._mesta = threading.BoundedSemaphore(NAJVEC_KANALOV)
         if poslusaj:
             self.streznik = socket.create_server(("127.0.0.1", 0))
             self.vrata = self.streznik.getsockname()[1]
@@ -730,7 +783,12 @@ class LokalniRele:
                     pass
                 continue
             oddaja = gneca.vzemi_oddajo(naslov[1]) if isinstance(naslov, tuple) and len(naslov) > 1 else False
-            threading.Thread(target=self._kanal, args=(tcp, oddaja), daemon=True).start()
+
+            def zavrni(t=tcp) -> None:
+                self.zadnja_napaka = "prevec_kanalov"
+                with contextlib.suppress(OSError):
+                    t.close()
+            _zacni_kanal(self._mesta, lambda t=tcp, o=oddaja: self._kanal(t, o), zavrni)
 
     def _nas_proces(self, naslov) -> bool:
         """Na Linuxu sprejmemo samo povezave procesov istega uporabnika (uid). Drugje (Windows) ali kadar
@@ -814,7 +872,10 @@ def najdi_hub_prek_releja(krog_json: dict, nas_id: str, prednost: Optional[List[
         if zdaj - _ODSOTNI.get(cilj, 0.0) < PREMOR_ODSOTNEGA_S:
             continue
         rele = LokalniRele(cilj, kljuc=kljuc, podpisi=podpisi)
-        odtis, javni = link_tls.potrdilo_huba("wss://127.0.0.1:%d/" % rele.vrata, timeout=rok_s)
+        try:
+            odtis, javni = link_tls.potrdilo_huba("wss://127.0.0.1:%d/" % rele.vrata, timeout=rok_s)
+        except Exception:  # noqa: BLE001 - CodeRabbit 9. 11. 2026: vrata releja ne smejo ostati odprta, naprej na naslednjega
+            odtis, javni = "", ""
         if odtis and link_tls.isti(javni, kljuci.get(cilj)):
             _ODSOTNI.pop(cilj, None)
             return cilj, rele, odtis

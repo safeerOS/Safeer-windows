@@ -871,13 +871,50 @@ def je_ta_naprava(device_id: str) -> bool:
         return False
 
 
+def poroceno(jedro_naprave: str, porocevalec: Optional[str], podpisan: bool, umaknjena: bool,
+             polna_jedra: Iterable[str]) -> bool:
+    """»Porocitev« polnega dostopa (isto kot DostopPravila.poroceno na TV; lastnik 21. 11. 2026): naprava, ki jo je v ozji krog
+    vpisala (podpisan vnos) naprava s polnim dostopom na TEM racunalniku, ima polni dostop tudi sama. Ena stopnja: porocena
+    naprava ne porocuje naprej (`polna_jedra` so samo zapisana dovoljenja). Brez podpisa, umaknjena, dvom = ne."""
+    if not jedro_naprave or not porocevalec:
+        return False
+    if not podpisan or umaknjena or porocevalec == jedro_naprave:
+        return False
+    return porocevalec in set(polna_jedra)
+
+
+def _poroceno(jedro_naprave: str) -> bool:
+    try:
+        k = _krog()
+        vnos = k.vnos_z_podpisom(jedro_naprave)
+        if vnos is None:
+            with k._zaklep:
+                id_ji = [c["id"] for c in k.clani.values() if k._veljaven(c) and _id_iz_kljuca(c["kljuc"]) == jedro_naprave]
+            vnos = k.vnos_z_podpisom(id_ji[0]) if id_ji else None
+        if vnos is None:
+            return False
+        porocevalec = jedro(vnos[0])
+        polna = [j for j, z in _nalozen().items() if set(VSE_ZMOZNOSTI) <= set(z)]
+        return poroceno(jedro_naprave, porocevalec or None, vnos[1], k.je_umaknjen(jedro_naprave), polna)
+    except Exception:  # noqa: BLE001 - dvom ni »da«
+        return False
+
+
+def _zmoznosti_za_jedro(jedro_naprave: str) -> Set[str]:
+    """Zapisano za jedro, ali vse, ce je napravo porocila naprava s polnim dostopom (skupno za zmoznosti in zmoznosti_jedra)."""
+    dano = set(_nalozen().get(jedro_naprave) or ())
+    if set(VSE_ZMOZNOSTI) <= dano:
+        return dano
+    return set(VSE_ZMOZNOSTI) if _poroceno(jedro_naprave) else dano
+
+
 def zmoznosti(device_id: str) -> Set[str]:
     """Kaj je napravi na tem racunalniku odprto."""
     if not device_id:
         return set()
     if je_ta_naprava(device_id):
         return set(VSE_ZMOZNOSTI)
-    return set(_nalozen().get(jedro(device_id)) or ())
+    return _zmoznosti_za_jedro(jedro(device_id))
 
 
 def v_ozjem_krogu(device_id: str) -> bool:
@@ -918,7 +955,7 @@ def zmoznosti_jedra(jedro_naprave: str) -> Set[str]:
         return set()
     if jedro_naprave == lastno_jedro():
         return set(VSE_ZMOZNOSTI)
-    return set(_nalozen().get(jedro_naprave) or ())
+    return _zmoznosti_za_jedro(jedro_naprave)
 
 
 def zna_zascito(jedro_naprave: str) -> bool:

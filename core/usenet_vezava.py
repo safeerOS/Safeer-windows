@@ -260,6 +260,11 @@ class Vezava:
         with self._zaklep:
             return len(self._strezniki)
 
+    def odprt(self, url: str) -> bool:
+        """Ali tece streznik z naslovom [url] (pomoc napravi v Linku: previjanje istega filma ne odpre novega bazena)."""
+        with self._zaklep:
+            return any(s.url == url and not s.zaprt for s in self._strezniki)
+
     def ustavi_predvajanje(self) -> None:
         with self._zaklep:
             tecejo = list(self._strezniki)

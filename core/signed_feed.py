@@ -530,16 +530,52 @@ class ThreatIndex:
             return self._KATEGORIJE[c] if c < len(self._KATEGORIJE) else None
         return None
 
-    def match_host(self, host: str):
-        """Considers every rule covering the host; the most severe category wins."""
+    def match_host(self, host: str, sme=None):
+        """Considers every rule covering the host; the most severe category wins. [sme] (ime -> bool) omeji pravila na
+        gostitelje/domene, ki jih Scit sme blokirati (core/scit_gostitelji.py): resnejsi vnos za celotno google.com ali
+        web.app sicer zakrije pravilo projekta ali gostitelja pod njim (5. 11. 2026)."""
         host = _normalize_host(host)
         if not host:
             return None
-        best = self._najdi("h", host)
+        best = self._najdi("h", host) if sme is None or sme(host) else None
         oznake = host.split(".")
         for i in range(len(oznake)):
-            best = _more_severe(best, self._najdi("d", ".".join(oznake[i:])))
+            domena = ".".join(oznake[i:])
+            if sme is None or sme(domena):
+                best = _more_severe(best, self._najdi("d", domena))
         return best
+
+    def match_url_rule(self, url: str):
+        """Samo pravilo za tocen naslov (vrsta "url"), brez pravil gostitelja: na gostiteljih z uporabnisko vsebino
+        (sites.google.com ...) sme Scit blokirati stran, ne pa celotnega skupnega gostitelja."""
+        if not self._ima_url:
+            return None
+        key = self._url_key(url)
+        return self._najdi("u", key) if key else None
+
+    @staticmethod
+    def _url_key(url: str):
+        """Normaliziran naslov kot v paketu (shema://gostitelj[:vrata]/pot[?poizvedba]); None, ce ni http(s)."""
+        if not isinstance(url, str) or "://" not in url:
+            return None
+        scheme_end = url.index("://")
+        if url[:scheme_end].lower() in ("http", "https"):
+            url = url[:scheme_end + 3] + url[scheme_end + 3:].replace("\\", "/")  # like browsers do
+        try:
+            parts = urlsplit(url)
+            host = parts.hostname or ""
+            port = parts.port
+        except ValueError:
+            return None
+        if parts.scheme not in ("http", "https"):
+            return None
+        normalized = _normalize_host(host)
+        if not normalized:
+            return None
+        netloc = f"[{normalized}]" if ":" in normalized else normalized
+        if port is not None and not ((parts.scheme == "http" and port == 80) or (parts.scheme == "https" and port == 443)):
+            netloc = f"{netloc}:{port}"
+        return f"{parts.scheme}://{netloc}{parts.path or '/'}" + (f"?{parts.query}" if parts.query else "")
 
     def match_url(self, url: str):
         """Considers host rules and the exact URL rule; the most severe category wins."""
@@ -761,5 +797,8 @@ class SignedFeedStore:
     def match_url(self, url: str):
         return self.index.match_url(url)
 
-    def match_host(self, host: str):
-        return self.index.match_host(host)
+    def match_host(self, host: str, sme=None):
+        return self.index.match_host(host, sme)
+
+    def match_url_rule(self, url: str):
+        return self.index.match_url_rule(url)

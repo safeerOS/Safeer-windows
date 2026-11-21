@@ -255,9 +255,8 @@ def pripravi(uri: str, ime: str = "", mapa: str = "") -> str:
         if koncnica == ".srt":
             # GStreamer (1.24) SRT z vrsticami LF ne prepozna kot podnapisov, s CRLF pa ga - preverjeno 29. 9. 2026.
             besedilo = besedilo.replace("\r\n", "\n").replace("\n", "\r\n")
-        with open(cilj + ".tmp", "w", encoding="utf-8", newline="") as d:
-            d.write(besedilo)
-        os.replace(cilj + ".tmp", cilj)
+        from core import shramba_json
+        shramba_json.zapisi_besedilo_atomsko(cilj, besedilo, newline="")
         return "file://" + urllib.request.pathname2url(cilj)
     except Exception as e:  # noqa: BLE001 - brez popravka predvajalnik prebere izvirnik
         print("[SafeerOS] podnapis ni pripravljen:", os.path.basename(ime or uri), type(e).__name__, e, flush=True)
@@ -364,9 +363,9 @@ def shrani_nastavitve(n: dict) -> None:
     pot = _pot_nastavitev()
     try:
         os.makedirs(os.path.dirname(pot), exist_ok=True)
-        with open(pot + ".tmp", "w", encoding="utf-8") as d:
+        from core import shramba_json
+        with shramba_json.atomsko_odpri(pot) as d:
             json.dump({"izklop": n.get("izklop"), "jezik": str(n.get("jezik") or "")[:8]}, d)
-        os.replace(pot + ".tmp", pot)
     except OSError:
         pass
 
