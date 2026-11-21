@@ -7,6 +7,9 @@ Kaj je v seznamu:
     stran neposredno, jo dobi.
   - ``telemetrija``: gostitelji, ki jih storitev uporablja SAMO za lastno telemetrijo (WhatsApp »dit«, Twitch »spade«) -
     blokirani povsod.
+  - ``oglasni_strezniki``: podseznam sledilcev, ki jih clovek NIKOLI ne odpre neposredno (cisti oglasni in merilni
+    strezniki brez uporabniske strani, npr. doubleclick.net). Scit jih ustavi tudi v DNS za ves racunalnik (lastnik
+    5. 11. 2026); ostali sledilci (analytics.google.com, hotjar.com ...) ostanejo samo v filtru WebKit.
   - ``poti``: zacetek poti, ki nosi samo telemetrijo ali sledenje oglasov na gostitelju, ki ga storitev sicer potrebuje
     (youtube.com/api/stats/qoe, youtube.com/youtubei/v1/log_event ...).
   - ``spotify``: oglasi brezplacnega racuna v Safeer DRM (gostitelji, poti, izbirniki CSS) - prej adblock.SPOTIFY_OGLASI.
@@ -59,7 +62,7 @@ _CSS = re.compile(r"""^[A-Za-z0-9 _\-\[\]="'*^$|~:.,#()>+/]{1,300}$""")
 
 # ---------------------------------------------------------------------------------------------------- vgrajeni seznam
 #: Verzija vgrajenega seznama (kot verzije streznika: LLLLMMDDUUMM). Podpisan seznam z visjo verzijo ga zamenja.
-VGRAJENA_VERZIJA = 202610181200
+VGRAJENA_VERZIJA = 202611051200
 
 VGRAJENA: Dict[str, object] = {
     "sledilci": [
@@ -106,6 +109,30 @@ VGRAJENA: Dict[str, object] = {
         # Spotify: oglasno sledenje in piksel (vec v »spotify«)
         "adeventtracker.spotify.com", "pixel.spotify.com", "pixel-static.spotify.com",
         # Discord: analitika (»science«) gre na isti gostitelj kot API - glej poti
+    ],
+    # Lastnik 5. 11. 2026: izmerjeno, da zivi Scit na Windows in TV spusti doubleclick.net, ker DNS sledilcev ne ustavlja.
+    # Tu so samo sledilci brez uporabniske strani (nadzorne plosce so drugje: ads.google.com, adsense.google.com,
+    # admanager.google.com, analytics.google.com, console.firebase.google.com, advertising.amazon.com ...), zato jih DNS
+    # ustavi za ves racunalnik. Ce ima domena stran za ljudi ali dvomimo, je NI tu (googletagmanager.com - razhroscevanje
+    # oznak, google-analytics.com - lastnik strani preverja svoje meritve (Tag Assistant), analytics.twitter.com -
+    # nadzorna plosca, hotjar/mixpanel/amplitude/segment, demdex/omtrdc - Adobe Target
+    # skrije stran do odgovora, Sentry/Datadog/New Relic/Bugsnag - napake programov razvijalca). Vsaka je tudi v
+    # »sledilci« (filter WebKit ostane enak). Klik na sponzoriran zadetek Google (googleadservices.com/pagead/aclk) se
+    # ustavi - uporabnik lahko doda izjemo.
+    "oglasni_strezniki": [
+        # Google: oglasi (DoubleClick, AdSense, Ad Manager, Ads) in zbiranje meritev aplikacij (Firebase)
+        "doubleclick.net", "googlesyndication.com", "googleadservices.com", "googletagservices.com",
+        "adservice.google.com", "app-measurement.com", "firebaselogging-pa.googleapis.com",
+        # Oglasne borze in povezovanje identitet (Amazon, The Trade Desk, LiveRamp, Neustar, Krux, Adobe)
+        "amazon-adsystem.com", "adsrvr.org", "rlcdn.com", "agkn.com", "krxd.net", "cdn.krxd.net", "2o7.net",
+        "everesttech.net",
+        # Piksli za oglase in konverzije (stran za oglasevalce je na drugi domeni)
+        "pixel.facebook.com", "an.facebook.com", "analytics.tiktok.com", "analytics-sg.tiktok.com",
+        "tr.snapchat.com", "ct.pinterest.com", "px.ads.linkedin.com", "snap.licdn.com", "static.ads-twitter.com",
+        "ads-twitter.com", "bat.bing.com", "clarity.ms", "c.clarity.ms", "alb.reddit.com", "pixel.reddit.com",
+        # Zbiralniki merjenja obcinstva (podjetja imajo strani na drugih domenah: comscore.com, nielsen.com ...)
+        "scorecardresearch.com", "sb.scorecardresearch.com", "imrworldwide.com", "hit.gemius.pl", "quantserve.com",
+        "quantcount.com", "mc.yandex.ru", "mc.yandex.com",
     ],
     "poti": [
         # YouTube in youtube-nocookie (vgradni predvajalnik Medijskega centra): kakovost izkusnje, dnevnik dogodkov,
@@ -216,10 +243,12 @@ def _zadene_nujno_pot(gostitelj: str, pot: str) -> bool:
 class Pravila:
     """Preverjen, nespremenljiv seznam (Python tuples) - zamenja se v celoti."""
 
-    __slots__ = ("sledilci", "telemetrija", "poti", "spotify_gostitelji", "spotify_poti", "spotify_css", "verzija", "vir")
+    __slots__ = ("sledilci", "telemetrija", "poti", "spotify_gostitelji", "spotify_poti", "spotify_css", "verzija", "vir",
+                 "oglasni_strezniki")
 
     def __init__(self, sledilci, telemetrija, poti, spotify_gostitelji, spotify_poti, spotify_css, verzija: int,
-                 vir: str) -> None:
+                 vir: str, oglasni_strezniki=()) -> None:
+        self.oglasni_strezniki: Tuple[str, ...] = tuple(oglasni_strezniki)
         self.sledilci: Tuple[str, ...] = tuple(sledilci)
         self.telemetrija: Tuple[str, ...] = tuple(telemetrija)
         self.poti: Tuple[Tuple[str, str], ...] = tuple(poti)
@@ -352,11 +381,18 @@ def preveri_pravila(d, verzija: int, vir: str) -> Pravila:
         if not isinstance(s, str) or not _CSS.match(s) or "url(" in s.lower():
             raise FeedVerificationError("invalid CSS selector")
         css.append(s)
+    # Seznam brez kljuca »oglasni_strezniki« (starejsi streznik ali rocno sestavljen seznam) ne sme tiho ugasniti
+    # ustavljanja v DNS: takrat velja vgrajeni podseznam (5. 11. 2026). Prazen seznam s streznika je namerna odlocitev.
+    # V rule_count (_stevilo_pravil) ga ni: starejsi odjemalec bi sicer zavrnil vsak nov podpisan seznam.
+    oglasni = d.get("oglasni_strezniki")
+    if oglasni is None:
+        oglasni = VGRAJENA["oglasni_strezniki"]
     # Oglasni gostitelji Spotify so lahko poddomene varovanih domen (imasdk.googleapis.com, adstudio-assets.scdn.co),
     # ne pa varovani gostitelji sami.
     return Pravila(_gostitelji(d.get("sledilci"), "sledilci"), _gostitelji(d.get("telemetrija"), "telemetrija"),
                    _poti(d.get("poti"), "poti"), _gostitelji(sp.get("gostitelji"), "spotify.gostitelji", 500),
-                   _poti(sp.get("poti"), "spotify.poti", 200), css, verzija, vir)
+                   _poti(sp.get("poti"), "spotify.poti", 200), css, verzija, vir,
+                   _gostitelji(oglasni, "oglasni_strezniki", 500))
 
 
 def vgrajena() -> Pravila:
