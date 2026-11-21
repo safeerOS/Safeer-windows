@@ -432,7 +432,7 @@ class LibmpvVPaketu(unittest.TestCase):
             with open(os.path.join(app, "_internal", "PySide6", "MSVCP140.dll"), "rb") as f:
                 self.assertEqual(f.read(), b"novi")
 
-    def test_x3_druzina_brez_vira_je_opozorilo(self):
+    def test_x3_druzina_brez_vira_je_obvestilo_brez_opozorila(self):
         import contextlib
         import io
         import tempfile
@@ -442,7 +442,10 @@ class LibmpvVPaketu(unittest.TestCase):
             with contextlib.redirect_stdout(izpis):
                 self.assertEqual(len(self.b.zamenjaj_msvc_runtime(app, vendor, podpis=_podpisano,
                                                                   razlicica=_razlicica)), 3)
-        self.assertIn("::warning::", izpis.getvalue())
+        # cc024eb2: to ni vec opozorilo (laziven alarm v CI 41461886218) - clane poenoti VC_redist, mesana druzina
+        # ustavi gradnjo. Izpis clane se vedno nasteje, a brez oznake ::warning::.
+        self.assertNotIn("::warning::", izpis.getvalue())
+        self.assertIn("poenoti VC_redist", izpis.getvalue())
         self.assertIn("msvcp140_1.dll", izpis.getvalue())
 
     def test_x3_samostojni_predvajalnik_isto_preverjanje(self):
