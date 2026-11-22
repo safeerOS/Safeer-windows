@@ -447,9 +447,16 @@ class Krog:
         identiteta), takega clana ne spozna. Izmerjeno 21. 11. 2026: vnos glavnega id-ja tega racunalnika je bil brez
         podpisa - televizor z novo identiteto racunalnika ni videl, racunalnik pa je televizor videl. Vrne podpisane id-je."""
         podpisani = []
+        try:
+            nas = javni_kljuc_b64()
+        except Exception:  # noqa: BLE001 - brez kljuca ne podpisemo nicesar
+            return podpisani
         with self._zaklep:
             for device_id, c in list(self.clani.items()):
-                if c.get("podpis") or not self._smo_mi(str(c.get("dodal") or "")):
+                # Samo vnos z NASIM kljucem (izmerjeni primer: glavni id tega racunalnika). Polje »dodal« pride lahko od
+                # huba ali soseda in ga ne preverimo: tujo napravo z »dodal« = nas id bi sicer podpisali z nasim kljucem
+                # in sosedje bi jo sprejeli kot nas vnos (slepi pregled 22. 11. 2026, najdba 1).
+                if c.get("podpis") or c.get("kljuc") != nas or not self._smo_mi(str(c.get("dodal") or "")):
                     continue
                 try:
                     podpis = podpisi(podatki_clana(device_id, c["kljuc"], c.get("platforma", ""), c["dodano"], c["dodal"]))

@@ -832,6 +832,7 @@ class Debrid:
         self._pozabi_skrivnost = pozabi or (lambda _enc: None)
         self._zaklep = threading.Lock()
         self._kljuci: dict = {}          # predpomnilnik desifriranih kljucev (samo v pomnilniku)
+        self._neuspeh: dict = {}         # sifriran zapis -> cas zadnjega neuspelega branja (time.monotonic)
         self._povezave_nzb: dict = {}    # id toka »usenet:…« -> povezava NZB s kljucem (samo v pomnilniku)
         # Naloga 114: lasten pogon (usenet_vezava.Vezava: na_voljo(), predvajaj(nzb, ime)); None = samo TorBox.
         # Nastavi ga os_katalog na Linuxu; Windows in preizkusi brez njega delajo kot prej.
@@ -879,18 +880,30 @@ class Debrid:
             fn(d)
             self._pisi(d)
 
+    #: Po neuspelem branju kljuca (zaklenjena zbirka) znova sele cez toliko sekund: en poziv za odklep, ne poziv ob
+    #: vsakem klicu; po odklenitvi kljuc dela najkasneje v tem casu.
+    PONOVNO_PO_S = 60
+
     # ---- kljuci
     def kljuc(self, p: str) -> Optional[str]:
         enc = str((self._nastavitve().get("kljuci") or {}).get(p) or "")
         if not enc:
             return None
         if enc not in self._kljuci:
+            # Zaklenjena zbirka: branje sprozi sistemski poziv za odklep in blokira nit. Po neuspehu ne poskusamo znova
+            # PONOVNO_PO_S sekund - sicer bi vsako odprtje okna Viri in vsaka storitev odprla nov poziv (slepi pregled
+            # 22. 11. 2026, najdba 3). Za stalno pa si neuspeha ne zapomnimo (21. 11.: kljuc po odklenitvi mora delati).
+            zadnji = self._neuspeh.get(enc)
+            if zadnji is not None and time.monotonic() - zadnji < self.PONOVNO_PO_S:
+                return None
             try:
                 self._kljuci[enc] = self._desifriraj(enc)
+                self._neuspeh.pop(enc, None)
             except Exception:  # noqa: BLE001 - kljuca ZDAJ ni mogoce prebrati: kot da ga ni, a neuspeha si NE zapomnimo
                 # 21. 11. 2026: Safeer OS se zazene ob prijavi, se preden je zbirka skrivnosti odklenjena. Prej se je
                 # neuspeh shranil kot prazen kljuc do konca seje - Medijski center je kazal »Dodaj debrid«, filmi in
-                # serije pa niso delali, ceprav je kljuc shranjen. Naslednji klic poskusi znova (indeksator ze tako dela).
+                # serije pa niso delali, ceprav je kljuc shranjen. Naslednji klic po PONOVNO_PO_S poskusi znova.
+                self._neuspeh[enc] = time.monotonic()
                 return None
         return P.ocisti_kljuc(self._kljuci[enc])
 

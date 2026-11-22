@@ -902,8 +902,11 @@ def _poroceno(jedro_naprave: str) -> bool:
 
 def _zmoznosti_za_jedro(jedro_naprave: str) -> Set[str]:
     """Zapisano za jedro, ali vse, ce je napravo porocila naprava s polnim dostopom (skupno za zmoznosti in zmoznosti_jedra)."""
-    dano = set(_nalozen().get(jedro_naprave) or ())
-    if set(VSE_ZMOZNOSTI) <= dano:
+    zapis = _nalozen()
+    dano = set(zapis.get(jedro_naprave) or ())
+    # Porostvo velja samo za napravo, za katero ta racunalnik se nima nobenega zapisa: izrecna odlocitev uporabnika tu
+    # (izklop v oknu Link, delen nabor, umik iz kroga - prazen zapis) ima prednost (slepi pregled 22. 11. 2026, najdba 2).
+    if jedro_naprave in zapis:
         return dano
     return set(VSE_ZMOZNOSTI) if _poroceno(jedro_naprave) else dano
 

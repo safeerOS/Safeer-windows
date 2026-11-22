@@ -51,5 +51,19 @@ class PodpisiLastne(unittest.TestCase):
         self.assertTrue(sosed.je_clan(self.id))
 
 
+    def test_tuj_kljuc_z_nasim_dodal_ne_podpise(self):
+        """Slepi pregled 22. 11. 2026, najdba 1: hub ali sosed poslje nepodpisan vnos s TUJIM kljucem in »dodal« = nas id
+        (ali id z nasim jedrom). Prej ga je racunalnik ob zagonu Huba podpisal z nasim kljucem."""
+        import base64
+        tuj = base64.b64encode(bytes(range(1, 33))).decode()
+        k = link_krog.Krog(os.path.join(self.mapa, "krog.json"))
+        k.clani["n-napadalec"] = {"kljuc": tuj, "ime": "X", "platforma": "tv", "dodano": 102.0, "dodal": self.id}
+        k.clani["n-napadalec2"] = {"kljuc": tuj, "ime": "Y", "platforma": "tv", "dodano": 103.0,
+                                   "dodal": self.id + "-karkoli"}
+        self.assertEqual(k.podpisi_lastne(), [])
+        self.assertNotIn("podpis", k.clani["n-napadalec"])
+        self.assertNotIn("podpis", k.clani["n-napadalec2"])
+
+
 if __name__ == "__main__":
     unittest.main()
