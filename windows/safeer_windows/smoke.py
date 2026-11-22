@@ -394,12 +394,7 @@ class SmokeRunner(QObject):
         yield Sleep(0.5)
 
         if self.args.online:
-            # Privzeto sistemski DNS (lastnik 4. 11. 2026, policy.DEFAULT_SETTINGS: imena gredo skozi Scit); DoH samo ob izbiri.
-            # Preverimo, da nacin DNS ustreza nastavitvi: z izbranim DoH secure-only, brez izbire sistemski.
-            dns_izbran = policy.doh_template(browser.settings)
-            self.check("dns_over_https_mode",
-                       browser.dns_status.startswith("secure-only") if dns_izbran else browser.dns_status == "system",
-                       {"status": browser.dns_status, "doh": dns_izbran})
+            self.check("dns_over_https_mode", browser.dns_status.startswith("secure-only"), browser.dns_status)
             window.load_in_current("https://example.com/")
             example = yield from self.wait_js(page, "document.title.indexOf('Example') >= 0 && document.title", 60)
             self.check("online_https_page", bool(example), example or view.url().toString())

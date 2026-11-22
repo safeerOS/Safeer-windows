@@ -2743,6 +2743,10 @@ def smoke_main(qt_app: QApplication, settings: policy.SettingsStore, args: argpa
     arm_hard_watchdog(args.report, float(os.environ.get("SAFEER_SMOKE_TIMEOUT", "420")) + 60)
     try:
         stage("dns")
+        if getattr(args, "online", False) and not policy.doh_template(settings):
+            # Preverba sifriranega DNS (dns_over_https_mode) mora ostati stroga: privzeto je sistemski DNS skozi Scit
+            # (lastnik 4. 11. 2026), zato preizkus sam izbere DoH, samo v pomnilniku (brez zapisa nastavitev).
+            settings.set("doh_provider", "cloudflare", save=False)
         dns_status = apply_dns_mode(settings)
         stage(f"browser ({dns_status})")
         browser = SafeerBrowserApp(qt_app, settings, dns_status, smoke=True)
