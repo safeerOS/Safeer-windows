@@ -224,7 +224,7 @@ class TestOsWindows(unittest.TestCase):
             b'{"shows":[{"name":"Oddaja","type":"series","season":1,"episode":2,"streams":[{"url":"https://cdn.test/e2-1080p.mp4"}]}]}',
             "application/json", "https://api.test/catalog")
         m3u = os_media.parse_payload(
-            b'#EXTM3U\n#EXTINF:-1 group-title="Music",Pesem\nhttps://cdn.test/song.mp3\n',
+            b'#EXTM3U\n#EXTINF:215 group-title="Music",Pesem\nhttps://cdn.test/song.mp3\n',
             "audio/x-mpegurl", "https://api.test/list.m3u")
         html = os_media.parse_payload(
             b'<script type="application/ld+json">{"name":"Film","contentUrl":"/film-4k.mp4","@type":"Movie"}</script>',
@@ -1546,7 +1546,7 @@ class TestControlBackendDohodniNadzor(unittest.TestCase):
         playlist = (
             '#EXTM3U\n'
             '#EXTINF:-1 group-title="TV",Kanal 1\nhttps://tv.example/live/channel.m3u8\n'
-            '#EXTINF:-1 group-title="Music",Skladba\nhttps://audio.example/song.mp3\n'
+            '#EXTINF:215 group-title="Music",Skladba\nhttps://audio.example/song.mp3\n'
         ).encode()
         items = os_media.parse_payload(playlist, "audio/x-mpegurl", "https://list.example/live.m3u")
         self.assertEqual([item["vrsta"] for item in items], ["tv-v-zivo", "glasba"])

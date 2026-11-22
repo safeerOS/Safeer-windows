@@ -95,7 +95,7 @@ class NepredvajljiviViriTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             center = os_media.MediaCenter(td, roots=[])
             center._izmeri_ping = lambda url: None
-            center.refresh_source = lambda sid: {"ok": False, "napaka": "Vira ni bilo mogoče prebrati.", "vir": {"stevilo": 0}}
+            center.refresh_source = lambda sid, **_kw: {"ok": False, "napaka": "Vira ni bilo mogoče prebrati.", "vir": {"stevilo": 0}}
             rez = center.add_source("https://primer.si/samo-torrenti.xml")
             self.assertFalse(rez["ok"])
             self.assertTrue(rez["nepredvajljiv"])

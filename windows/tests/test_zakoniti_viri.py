@@ -234,7 +234,7 @@ class TestIskanjeInPredvajanje(unittest.TestCase):
         zadetki = [video("prvi.test", "aaaaaaaa-1111"), video("drugi.test", "bbbbbbbb-2222")]
 
         class LazniViri:
-            def get(self, query="", configured_hosts=None):
+            def get(self, query="", configured_hosts=None, *_a, **_kw):
                 return [dict(z) for z in zadetki] if query == "Sintel" else []
 
             def resolve_video(self, item, configured_hosts=None):
