@@ -13,6 +13,7 @@ Vnos gre z ``SendInput`` (ctypes), z enakimi imeni dogodkov in tipk kot core/lin
 from __future__ import annotations
 
 import ctypes
+import math
 import sys
 import threading
 import time
@@ -29,6 +30,11 @@ POLNITEV_S = 0.1
 NAJVEC_SIRINA, NAJVEC_VISINA = 1920, 1080
 NAJVEC_PREMIK = 400
 NAJVEC_BESEDILA = 200
+
+
+def ura_ms() -> float:
+    """Skupna ura zigov zajema za sliko in zvok: monotona ura procesa v ms (ista nit-varna ura za oba vira)."""
+    return time.monotonic() * 1000.0
 
 
 def kodirnik_na_voljo() -> Optional[str]:
@@ -54,9 +60,38 @@ def kodirnik_na_voljo() -> Optional[str]:
 KODIRNIKI = ("h264_nvenc", "h264_qsv", "h264_amf", "h264_mf", "libx264")
 
 
+#: Moznosti, s katerimi kodirnik sliko z oznako I (pict_type) naredi kot IDR in ne le kot vmesno I-sliko.
+#: libx264 to naredi sam (zaprta skupina slik); h264_mf in h264_amf takih moznosti nimata (NEPREVERJENO,
+#: zato izid vedno preverimo v toku, glej H264Zajem._je_idr).
+_MOZNOSTI_IDR = {"h264_nvenc": {"forced-idr": "1"}, "h264_qsv": {"forced_idr": "1"},
+                 # HEVC: isti imeni moznosti kot pri H.264 istega proizvajalca (NEPREVERJENO na testnem PC, ukaz W3).
+                 "hevc_nvenc": {"forced-idr": "1"}, "hevc_qsv": {"forced_idr": "1"}}
+
+#: Strojni kodirniki HEVC (H.265) v PyAV na Windows, v istem vrstnem redu kot za H.264. Programskega libx265
+#: in hevc_mf namenoma ni: hitrost libx265 ni izmerjena, hevc_mf pa potrebuje razsiritev HEVC iz trgovine.
+KODIRNIKI_HEVC = ("hevc_nvenc", "hevc_qsv", "hevc_amf")
+#: Najvecja slika s HEVC (4K); vec kot 1920x1080 samo s HEVC in samo ob izjavi televizorja.
+NAJVEC_HEVC = (3840, 2160)
+
+#: Ce kodirnik izsiljene slike v tem stevilu paketov ne vrne kot IDR, ga zamenjamo z novim kontekstom
+#: (nov kontekst vedno zacne s SPS, PPS in IDR - enako kot nov ffmpeg na Linuxu, a brez procesa).
+KLJUCNI_PAKETOV = 3
+
+#: Najvec zigov, ki cakajo na paket kodirnika. Kodirnik, ki ne vraca pts, jih nikoli ne pobere: nad mejo
+#: zavrzemo najstarejse (600 je 10 s pri 60 slikah/s, dalec nad zakasnitvijo kateregakoli kodirnika).
+NAJVEC_ZIGOV = 600
+
+
 def _moznosti(ime: str) -> dict:
     if ime == "libx264":
         return {"preset": "veryfast", "tune": "zerolatency", "profile": "high"}
+    if ime == "hevc_nvenc":
+        return {"preset": "p1", "tune": "ll", "zerolatency": "1", "rc": "cbr"}
+    if ime == "hevc_qsv":
+        # look_ahead ima samo h264_qsv: neznane moznosti ne posljemo.
+        return {"preset": "veryfast", "async_depth": "1"}
+    if ime == "hevc_amf":
+        return {"usage": "ultralowlatency", "rc": "cbr"}
     if ime == "h264_mf":
         return {"rate_control": "cbr", "scenario": "display_remoting"}
     if ime == "h264_qsv":
@@ -178,20 +213,138 @@ def zvok_na_voljo() -> bool:
         return False
 
 
+#: Ce stetje vzorcev zaostaja za uro branja za vec kot toliko, zig kosa ni znan (None). Poravnamo ga sele, ko
+#: zaostanek traja ZVOK_OKNO_MS (vrzel: WASAPI je izpustil podatke ali ura kartice tece pocasneje). Krajsi zaostanek
+#: je zastoj bralca (pisanje na TV, razporejevalnik) in zig ne premakne. Enako nacelo kot Linux (link_zaslon).
+ZVOK_PORAVNAJ_MS, ZVOK_OKNO_MS = 40.0, 200.0
+#: Ce kos premakne zacetek nazaj za vec kot toliko (sunek po zastoju, sunek ob zagonu), zig tega kosa ni znan.
+ZVOK_TOCNOST_MS = 1.0
+
+
+class ZigiZvoka:
+    """Zig zajema prvega vzorca kosa iz stetja vzorcev, s spodnjo ovojnico casa branja.
+
+    ``po_branju`` (cas branja minus dolzina kosa) je zgornja meja casa zajema: kos je lahko cakal v medpomnilniku
+    WASAPI. Zacetek zato premikamo samo nazaj (spodnja ovojnica); naprej (vrzel) samo po ZVOK_OKNO_MS
+    neprekinjenega zaostanka, za najmanjsi zaostanek v oknu. Med zaostankom zig ni znan, ker iz (dolzina, cas)
+    vrzeli ne locimo od zastoja. Zig po zaokrozitvi v cele ms nikoli ne gre nazaj.
+    NEPREVERJENO: stalna zakasnitev WASAPI (od predvajanja do branja) ni odsteta, ker ni izmerjena.
+    """
+
+    def __init__(self, hz: int = ZVOK_HZ, poravnaj_ms: float = ZVOK_PORAVNAJ_MS, okno_ms: float = ZVOK_OKNO_MS,
+                 tocnost_ms: float = ZVOK_TOCNOST_MS):
+        self._na_ms = hz / 1000.0
+        self._poravnaj_ms, self._okno_ms, self._tocnost_ms = poravnaj_ms, okno_ms, tocnost_ms
+        self._zacetek: Optional[float] = None
+        self._vzorcev = 0                      # vzorcev (na kanal) od prvega kosa, tudi izpuscenih tihih
+        self._nad_min: Optional[float] = None  # najmanjsi zaostanek od zacetka tekocega zaostanka
+        self._nad_od = 0                       # stevec vzorcev ob zacetku tekocega zaostanka
+        self.poravnav = 0
+        #: Velikost zadnje poravnave (ms), za dnevnik.
+        self.zadnja_poravnava_ms = 0.0
+        #: Zadnji vrnjeni zig v celih ms (kot gre na TV): nov zig ne sme biti manjsi.
+        self._zadnji_ms: Optional[int] = None
+        #: Po poravnavi naprej: do tega stevca vzorcev premik zacetka nazaj pomeni, da poravnava ni bila vrzel,
+        #: ampak zaloga po zastoju bralca, ki se pocasi prazni.
+        self._preizkus_do: Optional[int] = None
+        #: Do tega stevca vzorcev zig ni znan (zacetek se po napacni poravnavi se vraca nazaj).
+        self._dvom_do: Optional[int] = None
+
+    def zig(self, vzorcev: int, prebrano_ms: float) -> Optional[float]:
+        """Zig kosa z ``vzorcev`` vzorci (na kanal), prebranega ob ``prebrano_ms``; None, ce ni znan."""
+        if vzorcev <= 0 or not math.isfinite(prebrano_ms):
+            return None
+        po_branju = prebrano_ms - vzorcev / self._na_ms
+        if self._zacetek is None:
+            # Prvi kos: brez primerjave ne vemo, ali je cakal v medpomnilniku (sunek ob zagonu).
+            self._zacetek = po_branju
+            self._vzorcev = vzorcev
+            return None
+        zig = self._zacetek + self._vzorcev / self._na_ms
+        self._vzorcev += vzorcev
+        zaostanek = po_branju - zig
+        znan = True
+        if zaostanek < 0:
+            # Kos je prebran prej, kot pravi stetje: zacetek je bil prepozen, premaknemo ga nazaj.
+            self._zacetek += zaostanek
+            zig = po_branju
+            self._nad_min = None
+            if -zaostanek > self._tocnost_ms:
+                znan = False
+            if self._preizkus_do is not None and self._vzorcev <= self._preizkus_do:
+                # Zacetek gre nazaj kmalu po poravnavi naprej: to je bila zaloga, ne vrzel. Ziga ni, dokler
+                # se zacetek ne umiri za cel ZVOK_OKNO_MS (sicer bi sli znani, a za zalogo prepozni zigi).
+                self._dvom_do = self._vzorcev + int(round(self._okno_ms * self._na_ms))
+                self._preizkus_do = self._dvom_do
+        elif zaostanek <= self._poravnaj_ms:
+            self._nad_min = None
+        else:
+            # Stetje zaostaja: vrzel ali zastoj bralca. Ne locimo ju, zato zig tega kosa ni znan.
+            znan = False
+            if self._nad_min is None:
+                self._nad_min, self._nad_od = zaostanek, self._vzorcev - vzorcev
+            else:
+                self._nad_min = min(self._nad_min, zaostanek)
+            if (self._vzorcev - self._nad_od) / self._na_ms >= self._okno_ms:
+                # Vrzel: od tu naprej stejemo od novega zacetka; zig gre samo naprej.
+                self._zacetek += self._nad_min
+                self.zadnja_poravnava_ms = self._nad_min
+                self._nad_min = None
+                self.poravnav += 1
+                self._preizkus_do = self._vzorcev + int(round(self._okno_ms * self._na_ms))
+        if self._dvom_do is not None:
+            if self._vzorcev < self._dvom_do:
+                znan = False
+            else:
+                self._dvom_do = None
+        if not znan:
+            return None
+        zig_ms = int(round(zig))
+        if self._zadnji_ms is not None and zig_ms < self._zadnji_ms:
+            return None
+        self._zadnji_ms = zig_ms
+        return zig
+
+
+def _dnevnik_poravnave(zigi: "ZigiZvoka") -> None:
+    """Poravnava je lahko tudi trajna zakasnitev: velikost v dnevnik (kot Linux _cas("zvok_poravnava"))."""
+    print("safeer zvok: dogodek=zvok_poravnava ms=%d stevilo=%d" % (int(round(zigi.zadnja_poravnava_ms)),
+          zigi.poravnav), file=sys.stderr, flush=True)
+
+
 def kosi_zvoka(tece) -> Iterator[bytes]:
     """Kar racunalnik predvaja (privzeti zvocnik), v koscih po 10 ms kot s16le, dokler ``tece()`` vraca True.
 
     Popolna tisina po kratkem repu ne gre v tok (tako kot na Linuxu). Napaka naprave (zvocnik izkljucen, zamenjan)
-    zajem konca - slika tece naprej brez zvoka."""
+    zajem konca - slika tece naprej brez zvoka. Brez zigov (za stare klicatelje); glej ``kosi_zvoka_z_zigi``."""
+    for _zig, pcm in kosi_zvoka_z_zigi(tece):
+        yield pcm
+
+
+def kosi_zvoka_z_zigi(tece) -> Iterator[Tuple[Optional[float], bytes]]:
+    """Kot ``kosi_zvoka``, a vsak kos pride z zigom zajema prvega vzorca (``ura_ms``) ali None, ce ni znan.
+
+    Zig racunamo iz stetja vzorcev (ZigiZvoka), ne iz casa branja: ``record`` se vrne v ritmu medpomnilnika WASAPI
+    in z tresenjem razporejevalnika, po zastoju bralca pa v sunku. Generator nima svoje niti: ``record`` tece samo,
+    ko klicatelj zahteva naslednji kos, zato zastoj klicatelja (npr. pisanje na TV) zadrzi branje. Steti moramo
+    tudi izpuscene tihe koscke, sicer zig po tisini zaostane."""
     import soundcard as sc   # vrne polja numpy (numpy pride s soundcard); posebej ga ne uvazamo
     zvocnik = sc.default_speaker()
     mikrofon = sc.get_microphone(id=str(zvocnik.name), include_loopback=True)
     tihih = 0
+    zigi = ZigiZvoka()
+    poravnav_prej = 0
     with mikrofon.recorder(samplerate=ZVOK_HZ, channels=ZVOK_KANALI, blocksize=ZVOK_KOS) as zapis:
         while tece():
             podatki = zapis.record(numframes=ZVOK_KOS)
             if podatki.size == 0:
                 continue
+            prebrano_ms = ura_ms()
+            # Stejemo vsak kos, tudi tihega, ki ga spodaj izpustimo.
+            zig = zigi.zig(int(podatki.shape[0]), prebrano_ms)
+            if zigi.poravnav != poravnav_prej:
+                poravnav_prej = zigi.poravnav
+                _dnevnik_poravnave(zigi)
             pcm = (podatki.clip(-1.0, 1.0) * 32767.0).astype("<i2").tobytes()
             if not podatki.any():
                 tihih += 1
@@ -199,7 +352,7 @@ def kosi_zvoka(tece) -> Iterator[bytes]:
                     continue
             else:
                 tihih = 0
-            yield pcm
+            yield zig, pcm
 
 
 def _velikost_zaslona() -> Tuple[int, int]:
@@ -209,26 +362,258 @@ def _velikost_zaslona() -> Tuple[int, int]:
     return int(u.GetSystemMetrics(0)), int(u.GetSystemMetrics(1))
 
 
-def velikost_slike(izvor: Optional[Tuple[int, int]] = None) -> Tuple[int, int]:
-    """Velikost poslane slike: izvor, pomanjsan v 1920x1080, sodi mere (H.264 zahteva sode)."""
+def velikost_slike(izvor: Optional[Tuple[int, int]] = None,
+                   meja: Tuple[int, int] = (NAJVEC_SIRINA, NAJVEC_VISINA)) -> Tuple[int, int]:
+    """Velikost poslane slike: izvor, pomanjsan v `meja` (privzeto 1920x1080), sodi mere (H.264 zahteva sode).
+    Slike ne povecamo."""
     sw, sv = izvor or _velikost_zaslona()
-    faktor = min(1.0, NAJVEC_SIRINA / max(1, sw), NAJVEC_VISINA / max(1, sv))
+    faktor = min(1.0, meja[0] / max(1, sw), meja[1] / max(1, sv))
     w, h = int(sw * faktor) // 2 * 2, int(sv * faktor) // 2 * 2
     return max(2, w), max(2, h)
 
 
-class H264Zajem:
-    """Zajema glavni zaslon in vraca kose H.264 (Annex-B), primerne za televizor."""
+# ------------------------------------------------------------------ HEVC: cisti del (se ni vezan v sejo)
 
-    def __init__(self, fps: int = 30, bitrate: int = 6_000_000, kodirnik: Optional[str] = None):
+#: Vrste NAL: IDR in nastavitve za vsak kodek. H.264: IDR 5, SPS 7, PPS 8. H.265: IDR_W_RADL 19, IDR_N_LP 20,
+#: VPS 32, SPS 33, PPS 34 (H.265 tabela 7-1; specifikacija ni v prilogi, NEPREVERJENO na pravem toku, ukaz W4).
+_NAL_IDR = {"h264": frozenset((5,)), "hevc": frozenset((19, 20))}
+_NAL_NASTAVITVE = {"h264": frozenset((7, 8)), "hevc": frozenset((32, 33, 34))}
+
+
+def vrsta_nal(podatki: bytes, i: int, kodek: str = "h264") -> int:
+    """Vrsta enote NAL za zacetno kodo 00 00 01 na `i`; -1, ce glave ni (konec podatkov).
+
+    H.264 ima 1-bajtno glavo (vrsta = b & 0x1F), H.265 2-bajtno (vrsta = (b >> 1) & 0x3F). Pri H.265 bi
+    maska H.264 brala narobe: IDR_N_LP 20 (bajt 0x28) bi bil "PPS" 8, SPS 33 (0x42) pa "rezina" 2."""
+    if i < 0 or i + 3 >= len(podatki):
+        return -1
+    b = podatki[i + 3]
+    return (b >> 1) & 0x3F if kodek == "hevc" else b & 0x1F
+
+
+def je_idr(podatki: bytes, kodek: str = "h264") -> bool:
+    """Ali paket Annex-B vsebuje rezino IDR (H.264: 5; H.265: 19 ali 20). Za H.264 enako H264Zajem._je_idr."""
+    idr = _NAL_IDR[kodek]
+    i = podatki.find(b"\x00\x00\x01")
+    while i >= 0:
+        if vrsta_nal(podatki, i, kodek) in idr:
+            return True
+        i = podatki.find(b"\x00\x00\x01", i + 3)
+    return False
+
+
+def nastavitve(podatki: bytes, kodek: str = "h264", najvec: int = 1024) -> bytes:
+    """Nastavitve (H.264 SPS/PPS; H.265 VPS/SPS/PPS) iz paketa, s 4-bajtno zacetno kodo, v istem vrstnem redu.
+    Za H.264 enako H264Zajem._nastavitve (isti postopek, druga mnozica vrst)."""
+    vrste = _NAL_NASTAVITVE[kodek]
+    ven = b""
+    i = podatki.find(b"\x00\x00\x01", 0, najvec + 2)
+    prejsnja = False
+    while 0 <= i and i + 3 < len(podatki):
+        nastavitev = vrsta_nal(podatki, i, kodek) in vrste
+        if i >= najvec and not (prejsnja and nastavitev):
+            break
+        if nastavitev:
+            naslednji = podatki.find(b"\x00\x00\x01", i + 3)
+            konec = naslednji if naslednji >= 0 else len(podatki)
+            ven += b"\x00\x00\x00\x01" + podatki[i + 3:konec].rstrip(b"\x00")
+        else:
+            naslednji = podatki.find(b"\x00\x00\x01", i + 3, najvec + 2)
+        prejsnja, i = nastavitev, naslednji
+    return ven
+
+
+#: Isto kot nastavitve; ime za H264Zajem.okvirji_z_zigi, kjer je `nastavitve` lokalna spremenljivka.
+_nal_nastavitve = nastavitve
+
+
+def ima_nastavitve_spredaj(podatki: bytes, kodek: str = "h264") -> bool:
+    """Ali so nastavitve ze na zacetku paketa (prvih 256 B). H.264 natanko kot H264Zajem._z_nastavitvami
+    (SPS z bajtom 0x67); H.265 po VPS (glava 0x40 0x01: vrsta 32, plast 0, tid 1)."""
+    glava = b"\x40\x01" if kodek == "hevc" else b"\x67"
+    zacetek = podatki[:256]
+    return b"\x00\x00\x00\x01" + glava in zacetek or b"\x00\x00\x01" + glava in zacetek
+
+
+def kodirniki_hevc(av) -> list:
+    """Strojni kodirniki HEVC, ki jih ima ta PyAV (av.codecs_available), v vrstnem redu KODIRNIKI_HEVC."""
+    na_voljo = getattr(av, "codecs_available", ()) or ()
+    return [k for k in KODIRNIKI_HEVC if k in na_voljo]
+
+
+#: Izid preizkusa kodiranja HEVC po (ime, sirina, visina): odpiranje samo ne pove, ali gonilnik zmore velikost.
+_HEVC_PREIZKUS: dict = {}
+
+
+def preizkusi_hevc(av, ime: str, sirina: int, visina: int, fps: int = 60, bitrate: int = 24_000_000) -> bool:
+    """Ali kodirnik `ime` res kodira sliko velikosti seje: odpre kontekst, kodira eno crno sliko nv12 in izprazni.
+    Uspeh samo, ce pride vsaj en paket in je v njem IDR (19/20). Izid si zapomnimo (kot Linux hevc_vaapi_mozen)."""
+    kljuc = (ime, int(sirina), int(visina))
+    if kljuc in _HEVC_PREIZKUS:
+        return _HEVC_PREIZKUS[kljuc]
+    izid = False
+    c = None
+    try:
+        c = av.CodecContext.create(ime, "w")
+        c.width, c.height = int(sirina), int(visina)
+        c.pix_fmt = "nv12"
+        c.framerate = Fraction(int(fps), 1)
+        c.time_base = Fraction(1, int(fps))
+        c.gop_size = int(fps)
+        c.max_b_frames = 0
+        c.bit_rate = int(bitrate)
+        c.options = _moznosti(ime)
+        c.open()
+        okvir = av.VideoFrame(int(sirina), int(visina), "nv12")
+        okvir.pts = 0
+        paketi = [bytes(p) for p in c.encode(okvir)] + [bytes(p) for p in c.encode(None)]
+        izid = any(je_idr(p, "hevc") for p in paketi)
+    except Exception:  # noqa: BLE001 - brez uspesnega preizkusa ostanemo pri H.264
+        izid = False
+    finally:
+        zapri = getattr(c, "close", None)
+        if zapri is not None:
+            try:
+                zapri()
+            except Exception:
+                pass
+    _HEVC_PREIZKUS[kljuc] = izid
+    return izid
+
+
+def _velikost_izjave(najvecja, kodek: str) -> Optional[Tuple[int, int]]:
+    """(sirina, visina) iz izjave televizorja {"hevc": [w, h]}; None za vse, kar ni dvoje pozitivnih celih stevil."""
+    if not isinstance(najvecja, dict):
+        return None
+    v = najvecja.get(kodek)
+    if not isinstance(v, (list, tuple)) or len(v) != 2:
+        return None
+    if not all(isinstance(x, int) and not isinstance(x, bool) and 0 < x <= 16384 for x in v):
+        return None
+    return int(v[0]), int(v[1])
+
+
+def izberi_tok(kodeki, najvecja, izvor: Tuple[int, int], hevc_mozen, polna: bool = True) -> Tuple[str, int, int]:
+    """(kodek, sirina, visina) seje, po istem pravilu kot Linux (link_zaslon.izberi_tok).
+
+    HEVC samo, ce ga televizor izrecno navede v `kodeki` (codecs iz screen.start) pred "h264" IN ga racunalnik
+    res kodira (hevc_mozen(sirina, visina)). Vec kot 1920x1080 samo s HEVC, samo ob izjavi `najvecja`
+    {"hevc": [w, h]} in samo pri polni kakovosti; najvec NAJVEC_HEVC. Sicer H.264 kot doslej (velikost_slike)."""
+    privzeto = ("h264",) + tuple(velikost_slike(izvor))
+    if not isinstance(kodeki, (list, tuple)):
+        return privzeto
+    hoce = False
+    for k in list(kodeki)[:8]:
+        k = k.strip().lower() if isinstance(k, str) else ""
+        if k == "hevc":
+            hoce = True
+            break
+        if k == "h264":
+            break
+    if not hoce:
+        return privzeto
+    meja = (NAJVEC_SIRINA, NAJVEC_VISINA)
+    izjava = _velikost_izjave(najvecja, "hevc")
+    if izjava is not None:
+        if izjava[0] < meja[0] or izjava[1] < meja[1]:
+            # Dekoder HEVC ne zmore niti osnovne velikosti: raje H.264 kot manjsa slika.
+            return privzeto
+        if polna:
+            meja = (min(izjava[0], NAJVEC_HEVC[0]), min(izjava[1], NAJVEC_HEVC[1]))
+    sirina, visina = velikost_slike(izvor, meja)
+    if not hevc_mozen(sirina, visina):
+        return privzeto
+    return "hevc", sirina, visina
+
+
+def izberi_kodek(kodeki, najvecja, kodirniki_hevc_preizkus, izvor: Optional[Tuple[int, int]] = None,
+                 polna: bool = True) -> Tuple[str, Tuple[int, int]]:
+    """(kodek, (sirina, visina)) seje iz izrecnih zmoznosti televizorja (screen.start "codecs", "maxsize").
+
+    HEVC samo, ce je "hevc" v `kodeki` (pred "h264", kot Linux izberi_tok) IN `kodirniki_hevc_preizkus(w, h)`
+    vrne True za zeljeno velikost (vsaj en kodirnik je presel preizkusi_hevc). Meja iz najvecja["hevc"] velja
+    samo za HEVC; sicer velikost_slike (zaslon v 1920x1080). Ob kakrsnikoli napaki H.264 kot doslej."""
+    try:
+        kodek, sirina, visina = izberi_tok(kodeki, najvecja, izvor, kodirniki_hevc_preizkus, polna)
+    except Exception:  # noqa: BLE001 - neznano ali pokvarjeno: H.264 kot prej
+        return "h264", tuple(velikost_slike(izvor))
+    if kodek != "hevc":
+        return "h264", tuple(velikost_slike(izvor))
+    return "hevc", (int(sirina), int(visina))
+
+
+def hevc_preizkus(sirina: int, visina: int) -> bool:
+    """Ali ta racunalnik kodira HEVC v velikosti seje: vsaj en strojni kodirnik je presel preizkusi_hevc.
+    Brez PyAV False. Izid preizkusa je shranjen po (ime, sirina, visina), zato je drugi klic hiter."""
+    try:
+        import av
+    except Exception:  # noqa: BLE001 - brez PyAV ni HEVC
+        return False
+    return any(preizkusi_hevc(av, k, sirina, visina) for k in kodirniki_hevc(av))
+
+
+def glava_toka(sirina: int, visina: int, fps: int, zvok: bool, zig: dict, kodek: str = "h264") -> dict:
+    """Glava toka po pozdravu. Za H.264 enaka kot prej (isti kljuci v istem vrstnem redu, json.dumps bajt za
+    bajtom); za HEVC dodatno "kodek": "hevc" (TV bere glava.optString("kodek") == "hevc")."""
+    glava = {
+        "v": 2, "w": sirina, "h": visina, "fps": fps,
+        # Zvok racunalnika (WASAPI loopback), ce ga lahko zajamemo; sicer slika brez zvoka kot prej.
+        "zvok": ({"hz": ZVOK_HZ, "kanali": ZVOK_KANALI, "oblika": "s16le"} if zvok else None),
+        "vnos": True, "plosek": False,
+        # Vsak okvir slike je cela slika (en paket kodirnika): sprejemnik jo sme takoj dati dekoderju,
+        # ne da caka na zacetek naslednje (Android ZaslonOdjemalec, od Safeer OS 0.5.75). Za HEVC ga TV prezre.
+        "au": True,
+        # Zigi zajema (okvir 4 pred sliko/zvokom). Stari gledalec kljuc prezre (JSONObject.opt*).
+        "zig": dict(zig),
+    }
+    if kodek == "hevc":
+        glava["kodek"] = "hevc"
+    return glava
+
+
+def _v_vrsto(vrsta, element) -> None:
+    """Postavi element v vrsto brez cakanja. Ce je polna, zavrzemo NAJSTAREJSI element in obdrzimo novega:
+    kodirnik vedno dobi zadnjo sliko, zamik zaradi vrste pa ni vec kot ena slika cakanja (prej: zajem je cakal
+    na prostor in slika je v vrsti zastarela do dveh intervalov). Slike v vrsti so nekodirane, zato zavrzena slika
+    ne pokvari toka H.264. Vrsto polni samo ena nit (zajem), zato je po odvzemu prostor zagotovo prost."""
+    import queue
+    while True:
+        try:
+            vrsta.put_nowait(element)
+            return
+        except queue.Full:
+            try:
+                vrsta.get_nowait()
+            except queue.Empty:
+                pass
+
+
+class H264Zajem:
+    """Zajema glavni zaslon in vraca kose H.264 (Annex-B), primerne za televizor.
+    Z `kodek="hevc"` (samo po izberi_kodek) kose H.265 s strojnim kodirnikom, ki je presel preizkusi_hevc."""
+
+    def __init__(self, fps: int = 30, bitrate: int = 6_000_000, kodirnik: Optional[str] = None,
+                 kodek: str = "h264", velikost: Optional[Tuple[int, int]] = None):
         import av
         from PIL import ImageGrab  # noqa: F401  (preverimo zgodaj, da napaka pride ob zagonu)
 
         self._av = av
+        self.kodek = "hevc" if kodek == "hevc" else "h264"
         self.izvor = _velikost_zaslona()
-        self.sirina, self.visina = velikost_slike(self.izvor)
+        if velikost is not None:
+            # Velikost seje iz izberi_kodek (pri HEVC lahko do NAJVEC_HEVC); sode mere.
+            self.sirina, self.visina = max(2, int(velikost[0]) // 2 * 2), max(2, int(velikost[1]) // 2 * 2)
+        else:
+            self.sirina, self.visina = velikost_slike(self.izvor)
         self.fps = max(5, min(60, int(fps)))
-        kandidati = [kodirnik] if kodirnik else [k for k in KODIRNIKI if k in getattr(av, "codecs_available", ())]
+        if self.kodek == "hevc":
+            # Samo strojni kodirniki, ki so v tej velikosti zares kodirali (izid je shranjen); nikoli libx265.
+            kandidati = [kodirnik] if kodirnik else [
+                k for k in kodirniki_hevc(av) if preizkusi_hevc(av, k, self.sirina, self.visina)]
+            if not kandidati:
+                raise RuntimeError("Na tem racunalniku ni kodirnika HEVC")
+        else:
+            kandidati = [kodirnik] if kodirnik else [k for k in KODIRNIKI if k in getattr(av, "codecs_available", ())]
         if not kandidati:
             raise RuntimeError("Na tem racunalniku ni kodirnika H.264")
         napaka = None
@@ -241,8 +626,20 @@ class H264Zajem:
             except Exception as e:  # kodirnik je v PyAV, kartica pa ga nima
                 napaka = e
         if self._c is None:
-            raise RuntimeError(f"Kodirnika H.264 ni mogoce odpreti: {napaka}")
+            raise RuntimeError(f"Kodirnika {'HEVC' if self.kodek == 'hevc' else 'H.264'} ni mogoce odpreti: {napaka}")
+        #: Oblika slike za kodirnik. Nit zajema bere to in ne self._c, ker nit kodiranja self._c zamenja in
+        #: zapre (_obnovi_kodirnik); nov kontekst istega kodirnika ima isto obliko (_odpri).
+        self._pix_fmt = self._c.pix_fmt
+        self._bitrate = int(bitrate)
         self._st = 0
+        #: Zahteva televizorja po kljucnem okvirju: postavi jo nit vnosa (zahtevaj_kljucni), porabi nit kodiranja.
+        self._kljucni_zahtevan = threading.Event()
+        #: Stevci za dnevnik: izsiljenih IDR in zamenjav konteksta kodirnika.
+        self.kljucnih = 0
+        self.obnov_kodirnika = 0
+        #: pts slike -> zig zajema (ura_ms); kodirnik vrne paket z istim pts (brez B-slik je vrstni red enak).
+        #: Pise in bere ga samo nit kodiranja (okvirji_z_zigi); zajem poslje zig skupaj s sliko skozi vrsto.
+        self._zigi: dict = {}
         try:
             self._dxgi: Optional[_DxgiZajem] = _DxgiZajem() if sys.platform == "win32" else None
         except Exception:
@@ -259,9 +656,102 @@ class H264Zajem:
         c.gop_size = self.fps
         c.max_b_frames = 0
         c.bit_rate = int(bitrate)
-        c.options = _moznosti(ime)
-        c.open()
+        c.options = dict(_moznosti(ime), **_MOZNOSTI_IDR.get(ime, {}))
+        try:
+            c.open()
+        except Exception as e:
+            if ime not in _MOZNOSTI_IDR:
+                raise
+            # Prvi vzrok zapisemo: ce pade tudi odpiranje brez moznosti, bi ga njegova napaka skrila.
+            print(f"[Zaslon] {ime}: odpiranje z IDR moznostjo ni uspelo ({type(e).__name__}: {e}); brez nje",
+                  flush=True)
+            # Starejsi gonilnik ali ffmpeg moznosti morda ne pozna: brez nje odpremo kot prej, IDR pa preveri tok.
+            c = self._av.CodecContext.create(ime, "w")
+            c.width, c.height = self.sirina, self.visina
+            c.pix_fmt = "yuv420p" if ime == "libx264" else "nv12"
+            c.framerate = Fraction(self.fps, 1)
+            c.time_base = Fraction(1, self.fps)
+            c.gop_size = self.fps
+            c.max_b_frames = 0
+            c.bit_rate = int(bitrate)
+            c.options = _moznosti(ime)
+            c.open()
         return c
+
+    def zahtevaj_kljucni(self) -> None:
+        """Televizor prosi za kljucni okvir. Varno iz katerekoli niti: samo postavi zastavico, IDR naredi nit
+        kodiranja na naslednji sliki. Po koncu seje (kodiranje ne tece) klic nima ucinka."""
+        self._kljucni_zahtevan.set()
+
+    def _oznaci_kljucni(self, okvir) -> bool:
+        """Oznaci sliko kot I (kodirnik jo naredi kot IDR). PyAV >= 11 ima PictureType, starejsi niz."""
+        try:
+            from av.video.frame import PictureType
+            okvir.pict_type = PictureType.I
+            return True
+        except Exception:
+            pass
+        try:
+            okvir.pict_type = "I"
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
+    def _je_idr(podatki: bytes) -> bool:
+        """Ali paket Annex-B vsebuje rezino IDR (vrsta NAL 5)."""
+        i = podatki.find(b"\x00\x00\x01")
+        while i >= 0:
+            if i + 3 < len(podatki) and (podatki[i + 3] & 0x1F) == 5:
+                return True
+            i = podatki.find(b"\x00\x00\x01", i + 3)
+        return False
+
+    @staticmethod
+    def _nastavitve(podatki: bytes, najvec: int = 1024) -> bytes:
+        """SPS in PPS (vrsti NAL 7 in 8) iz paketa, z zacetno kodo, v istem vrstnem redu; prazno, ce jih ni."""
+        # Zacetke enot iscemo samo v prvih `najvec` bajtih (vroca pot). Enoto SPS/PPS pa beremo do njenega
+        # pravega konca v celem paketu, za njo pa tudi SPS/PPS, ki ji neposredno sledi: enota, ki se zacne pred
+        # mejo in konca za njo (ali PPS takoj za takim SPS), ne sme biti odrezana ali izgubljena.
+        ven = b""
+        i = podatki.find(b"\x00\x00\x01", 0, najvec + 2)
+        prejsnja = False                     # prejsnja enota je bila SPS/PPS
+        while 0 <= i and i + 3 < len(podatki):
+            nastavitev = (podatki[i + 3] & 0x1F) in (7, 8)
+            if i >= najvec and not (prejsnja and nastavitev):
+                break
+            if nastavitev:
+                naslednji = podatki.find(b"\x00\x00\x01", i + 3)
+                konec = naslednji if naslednji >= 0 else len(podatki)
+                ven += b"\x00\x00\x00\x01" + podatki[i + 3:konec].rstrip(b"\x00")
+            else:
+                naslednji = podatki.find(b"\x00\x00\x01", i + 3, najvec + 2)
+            prejsnja, i = nastavitev, naslednji
+        return ven
+
+    def _obnovi_kodirnik(self) -> bool:
+        """Zamenja kontekst kodirnika z novim istega imena (zacne z IDR). Stari se izprazni in zapre; njegovi
+        zadnji paketi se zavrzejo (niso bili poslani, zato stevec "bajt" ostane pravilen). Ce nov ne odpre,
+        ostane stari in tok tece naprej (redni kljucni okvir vsako sekundo, gop_size)."""
+        try:
+            nov = self._odpri(self.kodirnik, getattr(self, "_bitrate", 6_000_000))
+        except Exception as e:
+            print(f"[Zaslon] kljucni: nov kodirnik ni odprl ({type(e).__name__})", flush=True)
+            return False
+        star, self._c = self._c, nov
+        try:
+            for _ in star.encode(None):
+                pass
+        except Exception:
+            pass
+        zapri = getattr(star, "close", None)
+        if zapri is not None:
+            try:
+                zapri()
+            except Exception:
+                pass
+        self.obnov_kodirnika = getattr(self, "obnov_kodirnika", 0) + 1
+        return True
 
     def _iz_bgra(self, surova):
         """Slika DXGI (BGRA) -> okvir za kodirnik. Kopija v obstojeci okvir (~0,4 ms) namesto novega okvirja
@@ -277,9 +767,15 @@ class H264Zajem:
         except Exception:
             okvir = self._av.VideoFrame.from_ndarray(surova, format="bgra")
         try:
-            return okvir.reformat(width=self.sirina, height=self.visina, format=self._c.pix_fmt, threads=4)
+            return okvir.reformat(width=self.sirina, height=self.visina, format=self._oblika(), threads=4)
         except TypeError:  # starejsi PyAV brez niti
-            return okvir.reformat(width=self.sirina, height=self.visina, format=self._c.pix_fmt)
+            return okvir.reformat(width=self.sirina, height=self.visina, format=self._oblika())
+
+    def _oblika(self) -> str:
+        """Oblika slike za kodirnik, nastavljena v __init__ (klice jo nit zajema). Rezerva self._c velja samo za
+        predmet brez __init__ (preizkusi z object.__new__); v pravem zajemu se ne uporabi."""
+        oblika = getattr(self, "_pix_fmt", None)
+        return oblika if oblika is not None else self._c.pix_fmt
 
     def _slika(self):
         if self._dxgi is not None:
@@ -293,19 +789,26 @@ class H264Zajem:
         slika = ImageGrab.grab()
         if slika.size != (self.sirina, self.visina):
             slika = slika.resize((self.sirina, self.visina))
-        okvir = self._av.VideoFrame.from_image(slika).reformat(format=self._c.pix_fmt)
+        okvir = self._av.VideoFrame.from_image(slika).reformat(format=self._oblika())
         okvir.pts = self._st
         self._st += 1
         return okvir
 
     def okvirji(self, tece) -> Iterator[bytes]:
-        """Kosi H.264, dokler ``tece()`` vraca True. Hitrost omeji fps (zajem je lahko pocasnejsi).
+        """Kosi H.264, dokler ``tece()`` vraca True. Brez zigov (za stare klicatelje); glej ``okvirji_z_zigi``."""
+        for _zig, podatki in self.okvirji_z_zigi(tece):
+            yield podatki
+
+    def okvirji_z_zigi(self, tece) -> Iterator[Tuple[Optional[float], bytes]]:
+        """Kosi H.264 z zigom zajema slike (``ura_ms``; None, ce ga kodirnik ne vrne z znanim pts).
+        Hitrost omeji fps (zajem je lahko pocasnejsi).
 
         Zajem in pretvorba barv (~10 ms) tečeta v svoji niti, kodiranje in posiljanje v tej: tako se casa ne
         sestevata (izmerjeno 9. 10. 2026: zaporedno ~50 slik/s v pravi seji, cilj 60).
         """
         import queue
         interval = 1.0 / self.fps
+        # Najvec 2 sliki; ce je polna, zavrzemo najstarejso (glej _v_vrsto), ne cakamo.
         vrsta: "queue.Queue" = queue.Queue(maxsize=2)
         konec = threading.Event()
 
@@ -325,6 +828,7 @@ class H264Zajem:
                             time.sleep(0.001)
                             continue
                         surova, nova = self._dxgi.slika_nova()
+                        zig = ura_ms()     # slika je bila na zaslonu najkasneje zdaj
                         if surova is not None:
                             if not nova and zdaj - zadnji < POLNITEV_S:
                                 time.sleep(0.001)
@@ -336,20 +840,25 @@ class H264Zajem:
                         if zdaj - zadnji < interval:
                             time.sleep(interval - (zdaj - zadnji))
                             continue
+                        zig = ura_ms()     # GDI: zajem se zacne zdaj in traja ~34 ms (glej _DxgiZajem)
                         okvir = self._slika()
                     zadnji = time.monotonic()
-                    while not konec.is_set():
-                        try:
-                            vrsta.put(okvir, timeout=0.2)
-                            break
-                        except queue.Full:
-                            continue
+                    _v_vrsto(vrsta, (zig, okvir))
             except Exception as e:  # zajem ne sme obtiči tiho: kodirnik dobi napako in seja se konca
-                vrsta.put(e)
+                _v_vrsto(vrsta, e)
 
         nit = threading.Thread(target=zajemaj, name="safeer-zajem-zaslona", daemon=True)
         nit.start()
         prvi = True
+        pts = 0
+        # Izsiljen kljucni okvir: None = ne cakamo; sicer stevilo paketov, ki jih se cakamo na IDR.
+        caka_idr: Optional[int] = None
+        # pts oznacene slike: paketi starejsih slik (zakasnitev kodirnika) se v caka_idr ne stejejo.
+        idr_od_pts = 0
+        nastavitve = b""
+        zahteva = getattr(self, "_kljucni_zahtevan", None)
+        # Vrste NAL po kodeku (H.264: IDR 5, SPS/PPS 7/8; HEVC: IDR 19/20, VPS/SPS/PPS 32-34).
+        kodek = getattr(self, "kodek", "h264")
         try:
             while tece():
                 try:
@@ -358,20 +867,60 @@ class H264Zajem:
                     continue
                 if isinstance(okvir, Exception):
                     raise okvir
+                zig, okvir = okvir
+                # pts dodelimo sele tu, zaporedno: zavrzena slika (glej _v_vrsto) ne pusti luknje v pts,
+                # kodirnik dobi enak tok kot prej. Slovar pise in bere samo ta nit (brez zaklepa).
+                okvir.pts = pts
+                self._zigi[pts] = zig
+                while len(self._zigi) > NAJVEC_ZIGOV:
+                    # Kodirnik brez pts zigov ne pobira: zavrzemo najstarejsega (pts narasca, vrstni red slovarja).
+                    del self._zigi[next(iter(self._zigi))]
+                pts += 1
+                if zahteva is not None and zahteva.is_set():
+                    zahteva.clear()
+                    if self._oznaci_kljucni(okvir):
+                        caka_idr, idr_od_pts = KLJUCNI_PAKETOV, okvir.pts
+                    elif self._obnovi_kodirnik():
+                        # PyAV oznake ne zna: nov kontekst sam zacne z IDR.
+                        prvi, nastavitve = True, b""
+                        self.kljucnih = getattr(self, "kljucnih", 0) + 1
                 for paket in self._c.encode(okvir):
                     podatki = bytes(paket)
+                    zig = self._zigi.pop(paket.pts, None) if paket.pts is not None else None
+                    if paket.pts is not None:
+                        for star in [p for p in self._zigi if p < paket.pts]:   # izpusceni pri kodiranju
+                            del self._zigi[star]
                     if prvi:
                         prvi = False
                         podatki = self._z_nastavitvami(podatki)
+                    if not nastavitve and podatki:
+                        # SPS/PPS (HEVC: VPS/SPS/PPS) so na zacetku paketa; dalje ne iscemo (vroca pot).
+                        nastavitve = _nal_nastavitve(podatki, kodek)
+                    if caka_idr is not None and podatki:
+                        if je_idr(podatki, kodek):
+                            caka_idr = None
+                            self.kljucnih = getattr(self, "kljucnih", 0) + 1
+                            # Televizor je po napaki dekodirnik morda ponastavil: nastavitve morajo biti pred IDR.
+                            if nastavitve and not _nal_nastavitve(podatki, kodek):
+                                podatki = nastavitve + podatki
+                        elif paket.pts is None or paket.pts >= idr_od_pts:
+                            caka_idr -= 1
                     if podatki:
-                        yield podatki
+                        yield zig, podatki
+                if caka_idr is not None and caka_idr <= 0:
+                    # Kodirnik oznake I ni upostevel (NEPREVERJENO za h264_mf/h264_amf): nov kontekst.
+                    caka_idr = None
+                    if self._obnovi_kodirnik():
+                        prvi, nastavitve = True, b""
+                        self.kljucnih = getattr(self, "kljucnih", 0) + 1
         finally:
             konec.set()
             nit.join(timeout=2.0)
 
     def _z_nastavitvami(self, podatki: bytes) -> bytes:
-        """Televizor mora dobiti SPS/PPS pred prvo sliko; nekateri kodirniki jih dajo le v extradata."""
-        if b"\x00\x00\x00\x01\x67" in podatki[:256] or b"\x00\x00\x01\x67" in podatki[:256]:
+        """Televizor mora dobiti SPS/PPS (HEVC: VPS/SPS/PPS) pred prvo sliko; nekateri kodirniki jih dajo le
+        v extradata. Za H.264 isto preverjanje kot prej (SPS z bajtom 0x67)."""
+        if ima_nastavitve_spredaj(podatki, getattr(self, "kodek", "h264")):
             return podatki
         dodatno = bytes(self._c.extradata or b"")
         if dodatno.startswith(b"\x00\x00\x00\x01") or dodatno.startswith(b"\x00\x00\x01"):
@@ -384,6 +933,13 @@ class H264Zajem:
                 pass
         except Exception:
             pass
+        # Kontekst zapremo izrecno (strojni kodirnik drzi sejo gonilnika); starejsi PyAV close nima.
+        zapri = getattr(self._c, "close", None)
+        if zapri is not None:
+            try:
+                zapri()
+            except Exception:
+                pass
         if getattr(self, "_dxgi", None) is not None:
             self._dxgi.zapri()
 

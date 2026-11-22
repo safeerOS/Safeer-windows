@@ -20,7 +20,7 @@ import ssl
 import sys
 import threading
 import time
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 
 PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
 CORE_DIR = os.path.abspath(os.path.join(PACKAGE_DIR, "..", ".."))
@@ -48,6 +48,19 @@ PRIVZETA_KAKOVOST = "najvisja"
 OKVIR_SLIKA = 1
 OKVIR_ZVOK = 2
 OKVIR_OBVESTILO = 3
+#: Zig zajema za naslednji okvir slike ali zvoka (JSON {"vrsta", "zig_ms", "bajt"}), poslan v ISTEM sendall tik
+#: pred njim. Stari gledalec okvir neznane vrste preskoci (ZaslonOdjemalec: ``if (vrsta != OKVIR_SLIKA) continue``).
+OKVIR_ZIG = 4
+#: Ura zigov v glavi: zajem_zaslona.ura_ms (time.monotonic v ms), ista za sliko in zvok.
+ZIG_GLAVA = {"okvir": OKVIR_ZIG, "ura": "monotonic_ms"}
+
+#: Zahteva televizorja po kljucnem okvirju (IDR, {"vrsta":"kljucni"}): najvec KLJUCNI_NAJVEC v KLJUCNI_OKNO_S
+#: sekundah (drsece okno), enako kot Linux (core/link_zaslon.py: presodi_kljucni). Omejitev je na racunalniku,
+#: ker televizorju (staremu, tujemu ali pokvarjenemu) ne zaupamo.
+KLJUCNI_OKNO_S, KLJUCNI_NAJVEC = 2.0, 1
+#: Najdaljsa vrstica vnosa in najvecji neprebran ostanek brez nove vrstice (prej neomejeno).
+NAJVEC_VRSTICA = 4096
+NAJVEC_OSTANEK = 64 * 1024
 
 #: Kolikor casa cakamo, da se naprava javi, preden sejo zavrzemo.
 CAKANJE_S = 30.0
@@ -56,6 +69,75 @@ ROKOVANJE_S = 10.0
 #: Najdlje sme pisanje enega okvirja cakati na napravo. Televizor sam po 10 s tisine sejo konca; kdor dvakrat
 #: toliko ne vzame nobenega bajta, ga ni vec. Brez te omejitve je seja (in zajem zaslona) visela v nedogled.
 ROK_PISANJA_S = 20.0
+
+
+def _okvir(vrsta: int, vsebina: bytes) -> bytes:
+    """[vrsta 1 B][dolzina 4 B, big-endian][vsebina] (kot core/link_zaslon._okvir)."""
+    return bytes([vrsta]) + len(vsebina).to_bytes(4, "big") + vsebina
+
+
+def _okvir_z_zigom(vrsta: int, zig: Optional[float], bajt: int, vsebina: bytes) -> bytes:
+    """Okvir slike ali zvoka; ce zig poznamo, pred njim okvir OKVIR_ZIG. Oboje kot EN niz bajtov za en sendall:
+    sliko, zvok in kazalec pisejo tri niti, VarnaTls drzi skupaj le en sendall - locena klica bi lahko razdvojila
+    zig in njegov okvir. ``bajt``: koliko bajtov vsebine te vrste je slo pred tem okvirjem."""
+    if zig is None:
+        return _okvir(vrsta, vsebina)
+    zig_json = json.dumps({"vrsta": vrsta, "zig_ms": int(round(zig)), "bajt": int(bajt)},
+                          separators=(",", ":")).encode("utf-8")
+    return _okvir(OKVIR_ZIG, zig_json) + _okvir(vrsta, vsebina)
+
+
+def _z_zigi(vir, ime: str, tece):
+    """(zig, kos) iz ``vir.<ime>_z_zigi``; ce ga vir nima (starejsi ali lazni zajem), iz ``vir.<ime>`` z zigom None -
+    takrat gre tok brez okvirjev OKVIR_ZIG, natanko kot prej."""
+    z_zigi = getattr(vir, ime + "_z_zigi", None)
+    if z_zigi is not None:
+        return z_zigi(tece)
+    return ((None, kos) for kos in getattr(vir, ime)(tece))
+
+
+def presodi_kljucni(sprejeti: Tuple[float, ...], zdaj: float, okno_s: float = KLJUCNI_OKNO_S,
+                    najvec: int = KLJUCNI_NAJVEC) -> Tuple[bool, Tuple[float, ...]]:
+    """Cisto pravilo omejitve (enako kot na Linuxu): (dovoljeno, novi casi sprejetih zahtev).
+
+    Steje se samo sprejeta zahteva; zavrnjena okna ne podaljsa. Cas nazaj se steje kot zadnji sprejeti cas,
+    neveljaven cas (NaN, neskoncno, ne-stevilo) zavrnemo, da ne pokvari okna."""
+    import math
+    if isinstance(zdaj, bool) or not isinstance(zdaj, (int, float)) or not math.isfinite(zdaj):
+        return False, tuple(sprejeti)
+    if sprejeti and zdaj < sprejeti[-1]:
+        zdaj = sprejeti[-1]
+    ostali = tuple(t for t in sprejeti if zdaj - t < okno_s)
+    if len(ostali) >= najvec:
+        return False, ostali
+    return True, ostali + (float(zdaj),)
+
+
+class OmejevalnikKljucnih:
+    """Stanje omejitve za eno sejo in stevca za dnevnik. Varen za vec niti."""
+
+    def __init__(self, okno_s: float = KLJUCNI_OKNO_S, najvec: int = KLJUCNI_NAJVEC,
+                 ura: Callable[[], float] = time.monotonic) -> None:
+        self._okno_s = okno_s
+        self._najvec = najvec
+        self._ura = ura
+        self._sprejeti: Tuple[float, ...] = ()
+        self._kljuc = threading.Lock()
+        self.sprejetih = 0
+        self.zavrnjenih = 0
+
+    def dovoli(self) -> bool:
+        with self._kljuc:
+            dovoljeno, self._sprejeti = presodi_kljucni(self._sprejeti, self._ura(), self._okno_s, self._najvec)
+            if dovoljeno:
+                self.sprejetih += 1
+            else:
+                self.zavrnjenih += 1
+            return dovoljeno
+
+
+def _je_zahteva_kljucni(dogodek) -> bool:
+    return isinstance(dogodek, dict) and dogodek.get("vrsta") == "kljucni"
 
 
 def _zapri(s) -> None:
@@ -640,8 +722,11 @@ class NavidezniZaslon:
         )
 
     # ------------------------------------------------------------------ Pretočna seja (Screen Stream)
-    def zacni_sejo(self, posiljatelj: str, kakovost: str = PRIVZETA_KAKOVOST) -> dict:
-        """Začne visoko kakovosten pretočni strežnik za navidezni ločeni zaslon (skladno s core/link_zaslon.py)."""
+    def zacni_sejo(self, posiljatelj: str, kakovost: str = PRIVZETA_KAKOVOST, kodeki=None, najvecja=None) -> dict:
+        """Začne visoko kakovosten pretočni strežnik za navidezni ločeni zaslon (skladno s core/link_zaslon.py).
+
+        `kodeki` ("codecs" iz screen.start) in `najvecja` ("maxsize") sta izrecni zmoznosti televizorja
+        (kot Linux Zaslon.zacni). Brez njiju H.264 do 1080p, odgovor in glava kot prej."""
         with self._kljuc:
             # Zaslon gleda ena naprava. Ce ga zahteva druga, ga dobi ona (uporabnik ga je ravno odprl), prejsnja pa
             # izve, zakaj se je koncal, in se NE poveze znova. Prej sta se dve napravi izmenjevali vsako sekundo:
@@ -681,9 +766,18 @@ class NavidezniZaslon:
             fps = int(k.get("fps", 30))
             if not zajem_zaslona.dxgi_na_voljo():
                 fps = min(30, fps)
-            self._slika_seje = zajem_zaslona.velikost_slike()
+            kodek = "h264"
+            if kodeki is None and najvecja is None:
+                self._slika_seje = zajem_zaslona.velikost_slike()
+            else:
+                # HEVC samo ob izrecni izjavi TV in uspesnem preizkusu kodirnika; 4K samo s HEVC in polno kakovostjo.
+                polna = (kakovost if kakovost in KAKOVOSTI else PRIVZETA_KAKOVOST) == PRIVZETA_KAKOVOST
+                kodek, self._slika_seje = zajem_zaslona.izberi_kodek(
+                    kodeki, najvecja, zajem_zaslona.hevc_preizkus, None, polna)
+            # Za H.264 isti argumenti niti kot prej; HEVC doda kodek in velikost seje.
+            dodatno = (kodek, tuple(self._slika_seje)) if kodek == "hevc" else ()
 
-            self._seja_nit = threading.Thread(target=self._streci_sejo, args=(posluh, ctx, fps, seja),
+            self._seja_nit = threading.Thread(target=self._streci_sejo, args=(posluh, ctx, fps, seja) + dodatno,
                                               name="safeer-navidezni-zaslon-streznik", daemon=True)
             self._seja_nit.start()
 
@@ -692,7 +786,7 @@ class NavidezniZaslon:
                 "fp": self.odtis,
                 "token": self._zeton,
                 "v": 2,
-                "codec": "h264",
+                "codec": kodek,
                 "width": self._slika_seje[0],
                 "height": self._slika_seje[1],
                 "fps": fps,
@@ -740,7 +834,8 @@ class NavidezniZaslon:
             _zapri(odjemalec if odjemalec is not None else surov)
         return None
 
-    def _streci_sejo(self, posluh: socket.socket, ctx: ssl.SSLContext, fps: int = 60, seja: int = 0) -> None:
+    def _streci_sejo(self, posluh: socket.socket, ctx: ssl.SSLContext, fps: int = 60, seja: int = 0,
+                     kodek: str = "h264", velikost: Optional[Tuple[int, int]] = None) -> None:
         odjemalec = None
         try:
             odjemalec = self._sprejmi(posluh, ctx)
@@ -748,7 +843,10 @@ class NavidezniZaslon:
                 return
 
             try:
-                zajem = zajem_zaslona.H264Zajem(fps=fps)
+                if kodek == "hevc":
+                    zajem = zajem_zaslona.H264Zajem(fps=fps, kodek="hevc", velikost=velikost)
+                else:
+                    zajem = zajem_zaslona.H264Zajem(fps=fps)
             except Exception as e:  # ni PyAV ali kodirnika: televizorju povemo, zakaj slike ni
                 print(f"[NavidezniZaslon] Zajema zaslona ni mogoce zaceti: {e}")
                 glava = {"v": 2, "w": 2, "h": 2, "fps": fps, "zvok": None, "vnos": False, "plosek": False}
@@ -759,16 +857,9 @@ class NavidezniZaslon:
                 return
 
             zvok = zajem_zaslona.zvok_na_voljo()
-            glava = {
-                "v": 2, "w": zajem.sirina, "h": zajem.visina, "fps": zajem.fps,
-                # Zvok racunalnika (WASAPI loopback), ce ga lahko zajamemo; sicer slika brez zvoka kot prej.
-                "zvok": ({"hz": zajem_zaslona.ZVOK_HZ, "kanali": zajem_zaslona.ZVOK_KANALI, "oblika": "s16le"}
-                         if zvok else None),
-                "vnos": True, "plosek": False,
-                # Vsak okvir slike je cela slika (en paket kodirnika): sprejemnik jo sme takoj dati dekoderju,
-                # ne da caka na zacetek naslednje (Android ZaslonOdjemalec, od Safeer OS 0.5.75).
-                "au": True,
-            }
+            # Glava je za H.264 bajt za bajtom enaka kot prej (preizkus test_glava_h264_bajt_za_bajtom).
+            glava = zajem_zaslona.glava_toka(zajem.sirina, zajem.visina, zajem.fps, zvok, ZIG_GLAVA,
+                                             getattr(zajem, "kodek", "h264"))
             odjemalec.sendall((json.dumps(glava) + "\n").encode("utf-8"))
             odjemalec.settimeout(None)
             # Sliko pise ta nit, vnos bere druga: vticnica TLS dveh niti sama ne prenese (core/link_vticnik.py).
@@ -784,8 +875,10 @@ class NavidezniZaslon:
                 self._odjemalec = odjemalec
                 self._vnos_windows = vnos
 
-            # Nit za branje povratnega vnosa iz naprave (TV daljinec, telefon)
-            nit_vnos = threading.Thread(target=self._beri_povratni_vnos, args=(odjemalec, vnos, seja),
+            # Nit za branje povratnega vnosa iz naprave (TV daljinec, telefon). Omejevalnik kljucnih je nov za vsako
+            # sejo: zahteve stare seje ne porabijo okna nove.
+            kljucni = OmejevalnikKljucnih()
+            nit_vnos = threading.Thread(target=self._beri_povratni_vnos, args=(odjemalec, vnos, seja, zajem, kljucni),
                                         name="safeer-navidezni-zaslon-vnos", daemon=True)
             nit_vnos.start()
             # Kazalca v sliki ni (DXGI/GDI ga ne zajameta): polozaj in obliko posiljamo posebej, ko se spremenita.
@@ -797,9 +890,17 @@ class NavidezniZaslon:
                 threading.Thread(target=self._posiljaj_zvok, args=(odjemalec, seja), name="safeer-navidezni-zaslon-zvok",
                                  daemon=True).start()
             print(f"[NavidezniZaslon] Zaslon {zajem.sirina}x{zajem.visina} @ {zajem.fps} ({zajem.kodirnik})", flush=True)
+            # HEVC: zig slike None (kot Linux zakasnitev_slike za hevc: ni izmerjen); zvok ima svoje zige.
+            brez_ziga_slike = getattr(zajem, "kodek", "h264") == "hevc"
             try:
-                for kos in zajem.okvirji(lambda: self._tece and seja == self._seja_st and nit_vnos.is_alive()):
-                    odjemalec.sendall(bytes([1]) + len(kos).to_bytes(4, "big") + kos)
+                poslano = 0
+                for zig, kos in _z_zigi(zajem, "okvirji",
+                                        lambda: self._tece and seja == self._seja_st and nit_vnos.is_alive()):
+                    odjemalec.sendall(_okvir_z_zigom(OKVIR_SLIKA, None if brez_ziga_slike else zig, poslano, kos))
+                    poslano += len(kos)
+                print("[NavidezniZaslon] kljucni ob koncu seje: sprejetih %d, zavrnjenih %d, izsiljenih %d, obnov %d" % (
+                    kljucni.sprejetih, kljucni.zavrnjenih, getattr(zajem, "kljucnih", 0),
+                    getattr(zajem, "obnov_kodirnika", 0)), flush=True)
                 prevzel = self._prevzete.pop(seja, None)
                 if prevzel is not None:
                     obvestilo = json.dumps({"konec": "prevzeto", "naprava": prevzel,
@@ -826,8 +927,10 @@ class NavidezniZaslon:
     def _posiljaj_zvok(self, odjemalec, seja: int) -> None:
         """Zvok, ki ga racunalnik predvaja, kot okvirje 2 (surov PCM). Napaka zvoka ne konca seje: slika tece naprej."""
         try:
-            for kos in zajem_zaslona.kosi_zvoka(lambda: self._tece and seja == self._seja_st):
-                odjemalec.sendall(bytes([2]) + len(kos).to_bytes(4, "big") + kos)
+            poslano = 0
+            for zig, kos in _z_zigi(zajem_zaslona, "kosi_zvoka", lambda: self._tece and seja == self._seja_st):
+                odjemalec.sendall(_okvir_z_zigom(OKVIR_ZVOK, zig, poslano, kos))
+                poslano += len(kos)
         except Exception as e:
             if self._tece and seja == self._seja_st:
                 print(f"[NavidezniZaslon] Zvok ustavljen: {e}", flush=True)
@@ -860,8 +963,25 @@ class NavidezniZaslon:
                     return
             time.sleep(0.008)
 
-    def _beri_povratni_vnos(self, odjemalec, vnos=None, seja: Optional[int] = None) -> None:
+    def _zahteva_kljucni(self, zajem, kljucni: "OmejevalnikKljucnih", seja: Optional[int]) -> bool:
+        """Televizor prosi za kljucni okvir (dekodirnik ponastavljen ali slika pokvarjena). Zajem ga izsili na
+        naslednji sliki v isti seji: povezava, zvok in okvir 4 (stevec "bajt") tecejo naprej brez prekinitve."""
+        if not self._tece or (seja is not None and seja != self._seja_st):
+            return False                     # seja je koncana ali jo je zamenjala nova
+        dovoljeno = kljucni.dovoli()
+        zahtevaj = getattr(zajem, "zahtevaj_kljucni", None)
+        if dovoljeno and zahtevaj is not None:
+            zahtevaj()
+        st = kljucni.sprejetih if dovoljeno else kljucni.zavrnjenih
+        if st in (1, 10, 100) or st % 500 == 0:
+            print("[NavidezniZaslon] kljucni %s: sprejetih %d, zavrnjenih %d" % (
+                "zahtevan" if dovoljeno else "zavrnjen", kljucni.sprejetih, kljucni.zavrnjenih), flush=True)
+        return bool(dovoljeno and zahtevaj is not None)
+
+    def _beri_povratni_vnos(self, odjemalec, vnos=None, seja: Optional[int] = None, zajem=None,
+                            kljucni: Optional["OmejevalnikKljucnih"] = None) -> None:
         ostanek = b""
+        preskoci = False                         # smo v repu predolge (zavrzene) vrstice
         if vnos is None:
             vnos = self._vnos_windows
         try:
@@ -869,13 +989,26 @@ class NavidezniZaslon:
                 kos = odjemalec.recv(4096)
                 if not kos:
                     break
+                if preskoci:
+                    # Rep predolge vrstice zavrzemo do njene nove vrstice: ni samostojen dogodek.
+                    i = kos.find(b"\n")
+                    if i < 0:
+                        continue
+                    kos, preskoci = kos[i + 1:], False
                 ostanek += kos
+                if b"\n" not in ostanek and len(ostanek) > NAJVEC_OSTANEK:
+                    ostanek, preskoci = b"", True  # brez nove vrstice raste brez meje: zavrzemo vso vrstico
                 while b"\n" in ostanek:
                     vrstica, ostanek = ostanek.split(b"\n", 1)
-                    if not vrstica:
+                    if not vrstica or len(vrstica) > NAJVEC_VRSTICA:
                         continue
                     try:
                         dogodek = json.loads(vrstica.decode("utf-8", "replace"))
+                        if _je_zahteva_kljucni(dogodek):
+                            # Prej je dogodek pripadel obdelaj_vnosni_dogodek, ki neznano vrsto tiho sprejme.
+                            if zajem is not None and kljucni is not None:
+                                self._zahteva_kljucni(zajem, kljucni, seja)
+                            continue
                         # Pravi zaslon: dogodek gre na pravo misko/tipkovnico; ce ga ne pozna, ga
                         # obdela se navidezni kontekst (glasnost, stanje programov).
                         if not (vnos is not None and vnos.izvedi(dogodek)):

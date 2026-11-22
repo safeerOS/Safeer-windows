@@ -1653,7 +1653,11 @@ class SafeerControlBackend:
 
             elif akcija == "screen.start":
                 kakovost = str(params.get("quality") or "najvisja")
-                seja = dict(self.navidezni_zaslon.zacni_sejo(posiljatelj, kakovost=kakovost))
+                # Zmoznosti televizorja (codecs, maxsize) z enako validacijo kot core/link_daljinec.py;
+                # brez teh kljucev je klic zacni_sejo enak kot doslej.
+                from safeer_windows import zmoznosti_zaslona
+                seja = dict(zmoznosti_zaslona.zacni_sejo_s_parametri(
+                    self.navidezni_zaslon, posiljatelj, kakovost, params))
                 # Nasi naslovi: gledalec jih poskusi poleg naslova iz seznama naprav (docs/LINK-MESH.md, pravilo 8).
                 seja["hosts"] = self._lastni_naslovi()
                 izid = {"ok": True, "message": "Navidezni zaslon se deli", "data": seja}
