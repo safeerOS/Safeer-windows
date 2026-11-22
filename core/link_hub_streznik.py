@@ -3054,6 +3054,14 @@ class HubStreznik:
                            pot_varovalke=os.path.join(link_krog._mapa_nastavitev(), "hub-varovalka.json"))
             self.hub.ob_kodi = _obvestilo_kode
             self.hub.ob_zapori_kode = self._ob_zapori_kode
+            try:
+                # Starejsi vnosi brez podpisa: sosedje jih zavrnejo in nova naprava tega racunalnika ne spozna
+                # (iz Linuxa a452b7dd, 21. 11. 2026: racunalnik je videl televizor, televizor racunalnika ne).
+                podpisani = link_krog.krog().podpisi_lastne()
+                if podpisani:
+                    logging.getLogger("safeer.link").info("Krog: podpisani starejsi vnosi tega racunalnika: %d", len(podpisani))
+            except Exception:  # noqa: BLE001 - podpis ni pogoj za zagon Huba
+                pass
             streznik = None
             # Privzeta vrata naprave poznajo tudi brez mDNS; ce so zasedena, vzamemo katerakoli.
             for vrata in (PRIVZETA_VRATA, 0):
